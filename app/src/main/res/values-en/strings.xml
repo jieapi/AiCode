@@ -697,6 +697,21 @@
     <!-- Permissions Settings -->
     <string name="perm_whitelist_short">Read-only commands like ls, pwd, cat are auto-approved without dialogs</string>
     <string name="perm_rules_short">Choosing "Always Allow" in chat creates remembered rules matched by command or path</string>
+    <string name="perm_approval_switches_title">Tool Approval Switches</string>
+    <string name="perm_approval_switches_desc">Turn off to auto-approve the tool without prompts; DENY rules still apply</string>
+    <string name="perm_tool_bash">Bash (Run Commands)</string>
+    <string name="perm_tool_terminal">terminal (Terminal)</string>
+    <string name="perm_tool_writefile">writeFile (Write Files)</string>
+    <string name="perm_tool_editfile">editFile (Edit Files)</string>
+    <string name="perm_tool_task">task (Subagent)</string>
+    <string name="perm_tool_mcp">MCP Tools (All)</string>
+    <string name="perm_approval_git_title">Git Command Approval</string>
+    <string name="perm_approval_git_desc">Git read-only commands (status/log/diff etc.) are auto-approved; write commands are grouped by category, turn off to auto-approve</string>
+    <string name="perm_tool_git_commit">git commit</string>
+    <string name="perm_tool_git_push">git push</string>
+    <string name="perm_tool_git_pull">git pull</string>
+    <string name="perm_tool_git_branch">git branch/tag/checkout</string>
+    <string name="perm_tool_git_other">git other write operations</string>
     <string name="perm_current_project">Current project: %1$s</string>
     <string name="perm_current_project_none">Current project (not selected)</string>
     <string name="perm_no_project_rules">No rules for this project</string>
