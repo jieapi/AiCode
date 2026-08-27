@@ -746,6 +746,8 @@
     <!-- Provider Logo -->
     <string name="provider_brand_doubao">豆包</string>
     <string name="provider_brand_zhipu">智谱</string>    <string name="provider_brand_tongyi_qianwen">通义千问</string>
+    <string name="provider_brand_hunyuan">混元</string>
+    <string name="provider_brand_siliconflow">硅基流动</string>
     <string name="provider_model_icon">模型图标</string>
 
     <!-- Providers & Log -->

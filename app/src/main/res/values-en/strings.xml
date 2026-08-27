@@ -746,6 +746,8 @@
     <!-- Provider Logo -->
     <string name="provider_brand_doubao">Doubao</string>
     <string name="provider_brand_zhipu">Zhipu</string>    <string name="provider_brand_tongyi_qianwen">Tongyi Qianwen</string>
+    <string name="provider_brand_hunyuan">Hunyuan</string>
+    <string name="provider_brand_siliconflow">SiliconFlow</string>
     <string name="provider_model_icon">Model icon</string>
 
     <!-- Providers & Log -->

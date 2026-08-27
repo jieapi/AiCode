@@ -58,8 +58,17 @@ fun modelBrandKey(modelName: String): String {
         target.contains("qwen") || target.contains("通义") -> "qwen"
         target.contains("deepseek") || target.contains("deep-seek") -> "deepseek"
         target.contains("grok") || target.contains("xai") -> "grok"
+        target.contains("groq") -> "groq"
         target.contains("claude") || target.contains("anthropic") -> "anthropic"
         target.contains("gemini") || target.contains("gemma") -> "gemini"
+        target.contains("hunyuan") || target.contains("混元") || target.contains("tencent") -> "hunyuan"
+        target.contains("openrouter") -> "openrouter"
+        target.contains("perplexity") -> "perplexity"
+        target.contains("siliconflow") || target.contains("硅基") -> "siliconflow"
+        // ollama 必须在 meta 之前：ollama 名称含 "llama"，否则会被 meta 规则误匹配
+        target.contains("ollama") -> "ollama"
+        target.contains("meta") || target.contains("llama") -> "meta"
+        target.contains("mistral") -> "mistral"
         target.contains("gpt") || target.contains("o1") || target.contains("o3") || target.contains("o4") || target.contains("openai") || target.contains("chatgpt") || target.contains("dall-e") -> "openai"
         else -> "other"
     }
@@ -74,8 +83,16 @@ fun brandDisplayName(context: Context, key: String): String = when (key) {
     "qwen" -> context.getString(R.string.provider_brand_tongyi_qianwen)
     "deepseek" -> "DeepSeek"
     "grok" -> "Grok"
+    "groq" -> "Groq"
     "anthropic" -> "Anthropic"
     "gemini" -> "Gemini"
+    "hunyuan" -> context.getString(R.string.provider_brand_hunyuan)
+    "openrouter" -> "OpenRouter"
+    "perplexity" -> "Perplexity"
+    "siliconflow" -> context.getString(R.string.provider_brand_siliconflow)
+    "ollama" -> "Ollama"
+    "meta" -> "Meta"
+    "mistral" -> "Mistral"
     "openai" -> "OpenAI"
     "other" -> context.getString(R.string.common_other)
     else -> key.replaceFirstChar { it.uppercase() }
@@ -90,13 +107,24 @@ fun brandLogoRes(key: String): Int? = when (key) {
     "qwen" -> R.drawable.logo_qwen
     "deepseek" -> R.drawable.logo_deepseek
     "grok" -> R.drawable.logo_grok
+    "groq" -> R.drawable.logo_groq
     "anthropic" -> R.drawable.logo_anthropic
     "gemini" -> R.drawable.logo_gemini
+    "hunyuan" -> R.drawable.logo_hunyuan
+    "openrouter" -> R.drawable.logo_openrouter
+    "perplexity" -> R.drawable.logo_perplexity
+    "siliconflow" -> R.drawable.logo_siliconflow
+    "ollama" -> R.drawable.logo_ollama
+    "meta" -> R.drawable.logo_meta
+    "mistral" -> R.drawable.logo_mistral
     "openai" -> R.drawable.logo_openai
     else -> null
 }
 
-private fun shouldTintModelLogo(key: String): Boolean = key == "grok" || key == "moonshot" || key == "openai"
+private fun shouldTintModelLogo(key: String): Boolean =
+    key == "grok" || key == "groq" || key == "moonshot" || key == "openai" ||
+        key == "hunyuan" || key == "openrouter" || key == "perplexity" ||
+        key == "siliconflow" || key == "ollama" || key == "meta" || key == "mistral"
 
 @Composable
 private fun modelLogoTint(): Color {
