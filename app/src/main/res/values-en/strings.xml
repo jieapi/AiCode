@@ -575,9 +575,10 @@
     <string name="git_files_changed">%1$s files changed</string>
     <string name="git_no_files_changed">No files changed in this commit</string>
     <string name="git_loading_files">Loading changed files...</string>
-    <string name="git_not_a_repo">Current workspace is not a Git repository</string>
-    <string name="git_init_desc">Initialization will create .git here, after which you can stage, commit, and link remotes.</string>
-    <string name="git_init_repo">Initialize Git Repository</string>
+    <string name="git_not_a_repo">Current workspace is not a Git repository yet</string>
+    <string name="git_init_desc_primary">Initialize a new repository here to start version control</string>
+    <string name="git_init_desc_secondary">Or pick an existing repository from a subdirectory</string>
+    <string name="git_init_repo">Initialize New Repository</string>
     <string name="git_commit_dialog_title">Commit Changes</string>
     <string name="git_commit_message">Commit message</string>
     <string name="git_tracking_branch">Tracking %1$s</string>
@@ -592,6 +593,12 @@
     <string name="git_unstage_all_confirm">All files will be unstaged, but their contents will not be deleted. Continue?</string>
     <string name="git_pull_dirty_confirm">The working tree has uncommitted changes. Pulling may cause conflicts. Commit or stage them first if possible. Continue pulling?</string>
     <string name="git_pull_continue">Continue Pull</string>
+    <string name="git_switch_repo">Switch repository</string>
+    <string name="git_pick_existing_repo">Pick Existing Repository</string>
+    <string name="git_repo_selector_title">Select Repository</string>
+    <string name="git_repo_badge">Git</string>
+    <string name="git_repo_current">Current repository</string>
+    <string name="git_pick_repo_empty">No subdirectories available in the current workspace</string>
 
     <!-- Git Toast Messages -->
     <string name="git_toast_load_branches_failed">Failed to load branches: %1$s</string>
@@ -604,6 +611,8 @@
     <string name="git_toast_action_failed">%1$s failed: %2$s</string>
     <string name="git_toast_checkout_success">Switched to %1$s</string>
     <string name="git_toast_checkout_failed">Switch failed: %1$s</string>
+    <string name="git_toast_not_repo">This directory is not a Git repository</string>
+    <string name="git_toast_switch_repo_failed">Switch repository failed: %1$s</string>
     <string name="git_toast_diff_failed">Failed to load diff</string>
     <string name="git_action_stage_all">Stage all</string>
     <string name="git_action_unstage_all">Unstage all</string>
