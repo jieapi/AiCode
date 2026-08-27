@@ -49,6 +49,7 @@ import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.settings.data.repository.ExecutionModeRepository
 import com.aicode.feature.settings.data.repository.AgentSoundSettingsRepository
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
+import com.aicode.feature.settings.data.repository.ToolApprovalSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicode.feature.settings.data.repository.LogSettingsRepository
 import com.aicode.feature.settings.data.repository.ThemeSettingsRepository
@@ -234,13 +235,27 @@ class SettingsViewModel @Inject constructor(
     private val updateCheckSettingsRepository: UpdateCheckSettingsRepository,
     private val updateCheckService: UpdateCheckService,
     private val providerBalanceRunner: ProviderBalanceRunner,
-    private val terminalSettingsRepository: TerminalSettingsRepository
+    private val terminalSettingsRepository: TerminalSettingsRepository,
+    private val toolApprovalSettingsRepository: ToolApprovalSettingsRepository
 ) : ViewModel() {
     private companion object {
         const val MAX_LOG_LINES = 1200
         const val CALLS_PAGE_SIZE = 10
         /** 缓存读价缺失时按输入价的折扣估算。 */
         const val CACHE_READ_DISCOUNT = 0.1
+        /** 需要审批的工具（permissionPolicy=ASK）的开关 key 列表；MCP 工具用统一 key "mcp"，git 写命令按子命令分组。 */
+        val APPROVAL_TOOLS = listOf(
+            "Bash", "terminal", "writeFile", "editFile", "task", "mcp",
+            "git_commit", "git_push", "git_pull", "git_branch", "git_other"
+        )
+    }
+
+    /** 各工具审批开关状态（key=工具名/mcp，value=是否开启审批）。 */
+    private val _approvalSwitches = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val approvalSwitches: StateFlow<Map<String, Boolean>> = _approvalSwitches.asStateFlow()
+
+    fun setApprovalEnabled(toolName: String, enabled: Boolean) {
+        viewModelScope.launch { toolApprovalSettingsRepository.setApprovalEnabled(toolName, enabled) }
     }
 
     /** 终端个性化配置。 */
@@ -434,6 +449,14 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     init {
+        // 各工具审批开关状态
+        APPROVAL_TOOLS.forEach { tool ->
+            viewModelScope.launch {
+                toolApprovalSettingsRepository.isApprovalEnabled(tool).collect { enabled ->
+                    _approvalSwitches.value = _approvalSwitches.value + (tool to enabled)
+                }
+            }
+        }
         _imageCatalog.value = containerImageCatalog.load()
         _imageSourceOptions.value = containerImageCatalog.sourceIds
         _selectedImageSource.value = containerImageCatalog.sourceIds.firstOrNull { it == "official" }

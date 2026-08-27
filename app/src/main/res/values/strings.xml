@@ -697,6 +697,21 @@
     <!-- Permissions Settings -->
     <string name="perm_whitelist_short">系统预设 ls、pwd、cat 等只读命令免弹窗放行</string>
     <string name="perm_rules_short">对话中选「始终允许」会按命令或路径生成记忆规则</string>
+    <string name="perm_approval_switches_title">工具审批开关</string>
+    <string name="perm_approval_switches_desc">关闭后该工具自动放行，不再弹窗审批；DENY 规则仍生效</string>
+    <string name="perm_tool_bash">Bash（执行命令）</string>
+    <string name="perm_tool_terminal">terminal（终端）</string>
+    <string name="perm_tool_writefile">writeFile（写文件）</string>
+    <string name="perm_tool_editfile">editFile（编辑文件）</string>
+    <string name="perm_tool_task">task（子代理）</string>
+    <string name="perm_tool_mcp">MCP 工具（全部）</string>
+    <string name="perm_approval_git_title">git 命令审批</string>
+    <string name="perm_approval_git_desc">git 只读命令（status/log/diff 等）自动放行；写命令按类别开关，关闭则自动放行</string>
+    <string name="perm_tool_git_commit">git commit（提交）</string>
+    <string name="perm_tool_git_push">git push（推送）</string>
+    <string name="perm_tool_git_pull">git pull（拉取）</string>
+    <string name="perm_tool_git_branch">git 分支/标签/切换</string>
+    <string name="perm_tool_git_other">git 其它写操作</string>
     <string name="perm_current_project">当前项目：%1$s</string>
     <string name="perm_current_project_none">当前项目（未选择）</string>
     <string name="perm_no_project_rules">本项目暂无规则</string>

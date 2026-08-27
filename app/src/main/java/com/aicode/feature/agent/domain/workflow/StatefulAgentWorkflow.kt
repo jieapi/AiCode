@@ -31,6 +31,7 @@ import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aicode.feature.settings.data.repository.TitleModelSettingsRepository
+import com.aicode.feature.settings.data.repository.ToolApprovalSettingsRepository
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicode.feature.agent.data.remote.gemini.GeminiApi
@@ -48,6 +49,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -83,7 +85,8 @@ class StatefulAgentWorkflow @Inject constructor(
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
-    private val llmCallRecordDao: LlmCallRecordDao
+    private val llmCallRecordDao: LlmCallRecordDao,
+    private val approvalSettings: ToolApprovalSettingsRepository
 ) : AgentWorkflow {
 
     private companion object {
@@ -918,6 +921,18 @@ class StatefulAgentWorkflow @Inject constructor(
         }
 
         if (tool.permissionPolicy == ToolPermissionPolicy.AUTO_APPROVE) {
+            return PermissionCheckResult(true)
+        }
+
+        // 工具审批开关：用户可在设置里关闭某工具的审批 → 自动放行（DENY 规则仍生效）。
+        // Bash 按命令前缀细分（git 写命令按子命令分组），MCP 工具统一用 "mcp" key（repository 内处理）。
+        val switchKey = if (tool.name == "Bash") {
+            val command = (arguments["command"] as? JsonPrimitive)?.content ?: ""
+            approvalSettings.bashSwitchKey(command)
+        } else {
+            tool.name
+        }
+        if (!approvalSettings.isApprovalEnabled(switchKey).first()) {
             return PermissionCheckResult(true)
         }
 

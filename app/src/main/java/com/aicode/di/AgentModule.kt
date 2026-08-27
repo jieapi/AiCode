@@ -82,6 +82,7 @@ import com.aicode.feature.agent.domain.workflow.StatefulAgentWorkflow
 import com.aicode.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aicode.feature.settings.data.repository.TitleModelSettingsRepository
+import com.aicode.feature.settings.data.repository.ToolApprovalSettingsRepository
 import com.aicode.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 
@@ -306,7 +307,8 @@ object AgentModule {
         sessionUseCase: SessionUseCase,
         messagePersistenceUseCase: MessagePersistenceUseCase,
         checkpointManager: CheckpointManager,
-        llmCallRecordDao: LlmCallRecordDao
+        llmCallRecordDao: LlmCallRecordDao,
+        approvalSettings: ToolApprovalSettingsRepository
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
             toolRegistry,
@@ -327,7 +329,8 @@ object AgentModule {
             sessionUseCase,
             messagePersistenceUseCase,
             checkpointManager,
-            llmCallRecordDao
+            llmCallRecordDao,
+            approvalSettings
         )
     }
 }

@@ -135,6 +135,7 @@ fun SettingsScreen(
     val globalRules by viewModel.globalRules.collectAsStateWithLifecycle()
     val projectRules by viewModel.projectRules.collectAsStateWithLifecycle()
     val currentProjectName by viewModel.currentProjectName.collectAsStateWithLifecycle()
+    val approvalSwitches by viewModel.approvalSwitches.collectAsStateWithLifecycle()
     val keepaliveEnabled by viewModel.keepaliveEnabled.collectAsStateWithLifecycle()
     val agentSoundEnabled by viewModel.agentSoundEnabled.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -477,6 +478,8 @@ fun SettingsScreen(
                     projectName = currentProjectName,
                     projectRules = projectRules,
                     globalRules = globalRules,
+                    approvalSwitches = approvalSwitches,
+                    onToggleApproval = { tool, enabled -> viewModel.setApprovalEnabled(tool, enabled) },
                     onDeleteProject = { viewModel.deleteProjectRule(it) },
                     onPromote = { viewModel.promoteRuleToGlobal(it) },
                     onDeleteGlobal = { viewModel.deleteGlobalRule(it) }

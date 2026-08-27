@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
+import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.agent.domain.permission.PermissionDecision
 import com.aicode.feature.agent.domain.permission.PermissionRule
@@ -51,6 +52,8 @@ internal fun PermissionsSection(
     projectName: String?,
     projectRules: List<PermissionRule>,
     globalRules: List<PermissionRule>,
+    approvalSwitches: Map<String, Boolean>,
+    onToggleApproval: (String, Boolean) -> Unit,
     onDeleteProject: (PermissionRule) -> Unit,
     onPromote: (PermissionRule) -> Unit,
     onDeleteGlobal: (PermissionRule) -> Unit
@@ -66,6 +69,36 @@ internal fun PermissionsSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        SettingsGroupHeader(text = stringResource(R.string.perm_approval_switches_title))
+        SettingsGroup {
+            ApprovalSwitchRow("Bash", R.string.perm_tool_bash, approvalSwitches["Bash"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("terminal", R.string.perm_tool_terminal, approvalSwitches["terminal"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("writeFile", R.string.perm_tool_writefile, approvalSwitches["writeFile"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("editFile", R.string.perm_tool_editfile, approvalSwitches["editFile"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("task", R.string.perm_tool_task, approvalSwitches["task"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("mcp", R.string.perm_tool_mcp, approvalSwitches["mcp"] ?: true, onToggleApproval)
+        }
+        FooterNote(stringResource(R.string.perm_approval_switches_desc))
+
+        SettingsGroupHeader(text = stringResource(R.string.perm_approval_git_title))
+        SettingsGroup {
+            ApprovalSwitchRow("git_commit", R.string.perm_tool_git_commit, approvalSwitches["git_commit"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("git_push", R.string.perm_tool_git_push, approvalSwitches["git_push"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("git_pull", R.string.perm_tool_git_pull, approvalSwitches["git_pull"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("git_branch", R.string.perm_tool_git_branch, approvalSwitches["git_branch"] ?: true, onToggleApproval)
+            SettingsDivider()
+            ApprovalSwitchRow("git_other", R.string.perm_tool_git_other, approvalSwitches["git_other"] ?: true, onToggleApproval)
+        }
+        FooterNote(stringResource(R.string.perm_approval_git_desc))
+
         CollapsibleGroupHeader(
             text = if (projectName != null) {
                 stringResource(R.string.perm_current_project, projectName)
@@ -117,6 +150,25 @@ internal fun PermissionsSection(
         FooterNote(stringResource(R.string.perm_whitelist_short))
         FooterNote(stringResource(R.string.perm_rules_short))
     }
+}
+
+/** 单条工具审批开关行：标题 + 右侧 AppSwitch。 */
+@Composable
+private fun ApprovalSwitchRow(
+    toolKey: String,
+    titleRes: Int,
+    checked: Boolean,
+    onToggle: (String, Boolean) -> Unit
+) {
+    SettingsRow(
+        title = stringResource(titleRes),
+        trailing = {
+            AppSwitch(
+                checked = checked,
+                onCheckedChange = { enabled -> onToggle(toolKey, enabled) }
+            )
+        }
+    )
 }
 
 /**
