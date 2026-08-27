@@ -277,7 +277,8 @@ internal fun ChatInputBar(
                         )
                     },
                     enabled = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                    singleLine = false,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
