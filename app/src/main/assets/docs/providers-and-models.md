@@ -2,6 +2,8 @@
 
 进入“设置” -> “AI 提供商”，可添加或修改大模型 API 配置。列表页每行与 MCP 列表同款：左侧品牌 logo，第一行提供商名称，第二行协议类型（OpenAI / Anthropic / Gemini）与模型数量 tag，右侧启用/停用状态 tag + 箭头。点击行进入编辑页，**左滑该行**露出红色「删除」按钮可删除提供商。
 
+点击右上角 **+** 添加提供商时，会先弹出「常用提供商」预设列表（OpenAI、Anthropic、Gemini、DeepSeek、Moonshot (Kimi)、通义千问、智谱 GLM、豆包、MiniMax、Grok (xAI)、OpenRouter、Groq、Mistral），选中后自动预填名称、类型与 Base URL，只需填入 API Key 并拉取/添加模型即可使用；也可在列表底部选择「手动配置」进入空表单自行填写。
+
 提供商编辑页底部悬浮胶囊 tab 栏分两个标签页：**配置** 与 **模型**。
 
 ## 1. 配置 Tab 字段

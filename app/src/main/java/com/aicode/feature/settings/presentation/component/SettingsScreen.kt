@@ -66,6 +66,7 @@ import com.aicode.feature.backup.presentation.BackupSection
 import com.aicode.feature.settings.data.repository.AppThemeMode
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aicode.feature.settings.domain.model.AIProviderConfig
+import com.aicode.feature.settings.domain.model.ProviderPreset
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.presentation.SettingsViewModel
 import com.aicode.feature.settings.presentation.SkillUiEntry
@@ -191,6 +192,7 @@ fun SettingsScreen(
     var showThemeSheet by remember { mutableStateOf(false) }
     var showBackgroundSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
+    var showPresetSheet by remember { mutableStateOf(false) }
     var showResetTokenStats by remember { mutableStateOf(false) }
 
     // 处于二级页时，系统返回键先回到上一层；首页时交还给上层导航。
@@ -269,8 +271,7 @@ fun SettingsScreen(
                 actions = {
                     when (section) {
                         SettingsSection.Providers -> IconButton(onClick = {
-                            editingProvider = null
-                            section = SettingsSection.ProviderEditor
+                            showPresetSheet = true
                         }) {
                             Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.settings_add_provider))
                         }
@@ -566,6 +567,27 @@ fun SettingsScreen(
             currentTag = languageTag,
             onSelect = { viewModel.setLanguage(it) },
             onDismiss = { showLanguageSheet = false }
+        )
+    }
+
+    if (showPresetSheet) {
+        ProviderPresetSelectionSheet(
+            onSelect = { preset ->
+                editingProvider = AIProviderConfig(
+                    id = System.currentTimeMillis().toString(),
+                    name = context.getString(preset.nameRes),
+                    type = preset.type,
+                    apiKey = "",
+                    baseUrl = preset.baseUrl,
+                    defaultModel = ""
+                )
+                section = SettingsSection.ProviderEditor
+            },
+            onManual = {
+                editingProvider = null
+                section = SettingsSection.ProviderEditor
+            },
+            onDismiss = { showPresetSheet = false }
         )
     }
 
