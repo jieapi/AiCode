@@ -34,6 +34,6 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun llmCallRecordDao(): LlmCallRecordDao
 
     companion object {
-        const val SCHEMA_VERSION = 41
+        const val SCHEMA_VERSION = 42
     }
 }

@@ -23,7 +23,9 @@ data class AIProviderConfig(
     /** 套餐余量自动刷新间隔（分钟），0 表示仅进入时/手动刷新，支持 1, 3, 5, 10 等。默认 5 分钟。 */
     val balanceRefreshInterval: Int = 5,
     /** 自定义请求头 User-Agent；留空使用默认。 */
-    val userAgent: String = ""
+    val userAgent: String = "",
+    /** 提供商列表排序序号，越小越靠前；-1 表示未分配（保存时取 max+1 排到末尾）。 */
+    val sortOrder: Int = -1
 ) {
     /** 实际生效的模型：优先 selectedModel，其次 defaultModel。 */
     val effectiveModel: String

@@ -28,5 +28,7 @@ data class AIProviderEntity(
     /** 套餐余量自动刷新间隔（分钟）。默认 5 分钟。 */
     val balanceRefreshInterval: Int = 5,
     /** 自定义请求头 User-Agent；留空使用默认。 */
-    val userAgent: String = ""
+    val userAgent: String = "",
+    /** 提供商列表排序序号，越小越靠前；新建时分配 max+1。 */
+    val sortOrder: Int = 0
 )

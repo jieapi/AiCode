@@ -10,11 +10,14 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AIProviderDao {
-    @Query("SELECT * FROM ai_providers ORDER BY id")
+    @Query("SELECT * FROM ai_providers ORDER BY sortOrder ASC, id ASC")
     fun getAllProviders(): Flow<List<AIProviderEntity>>
 
-    @Query("SELECT * FROM ai_providers ORDER BY id")
+    @Query("SELECT * FROM ai_providers ORDER BY sortOrder ASC, id ASC")
     suspend fun getAllProvidersOnce(): List<AIProviderEntity>
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) FROM ai_providers")
+    suspend fun getMaxSortOrder(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllProviders(providers: List<AIProviderEntity>)

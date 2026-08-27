@@ -750,6 +750,7 @@
 
     <!-- Providers & Log -->
     <string name="providers_empty">No providers yet, tap + to add one</string>
+    <string name="provider_sort_drag_handle">Long press to reorder</string>
     <string name="log_level">Log Level</string>
     <string name="log_level_desc">Logs below this level will be ignored. Use VERBOSE during development (log all); NONE to disable logging.</string>
     <string name="log_file_location">Log files are located at Android/data/&lt;package&gt;/files/logs/.</string>

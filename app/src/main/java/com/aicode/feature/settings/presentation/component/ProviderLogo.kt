@@ -22,16 +22,25 @@ import android.content.Context
 import androidx.compose.ui.res.stringResource
 
 /**
- * 根据 provider 的协议类型匹配对应的品牌 logo drawable 资源。
+ * 提供商最终命中的品牌 key：优先按提供商名称识别品牌名，未命中再按协议类型兜底。
+ * 与 [modelBrandKey] 的匹配优先级一致；返回 null 表示无任何 logo 可显示。
  */
-fun providerLogoRes(provider: AIProviderConfig?): Int? {
+fun providerBrandKey(provider: AIProviderConfig?): String? {
     if (provider == null) return null
+    val nameKey = modelBrandKey(provider.name)
+    if (brandLogoRes(nameKey) != null) return nameKey
     return when (provider.type) {
-        com.aicode.feature.settings.domain.model.ProviderType.OPENAI -> R.drawable.logo_openai
-        com.aicode.feature.settings.domain.model.ProviderType.ANTHROPIC -> R.drawable.logo_anthropic
-        com.aicode.feature.settings.domain.model.ProviderType.GEMINI -> R.drawable.logo_gemini
+        com.aicode.feature.settings.domain.model.ProviderType.OPENAI -> "openai"
+        com.aicode.feature.settings.domain.model.ProviderType.ANTHROPIC -> "anthropic"
+        com.aicode.feature.settings.domain.model.ProviderType.GEMINI -> "gemini"
     }
 }
+
+/**
+ * 根据提供商的品牌 key（名称识别优先，协议类型兜底）匹配对应的品牌 logo drawable 资源。
+ */
+fun providerLogoRes(provider: AIProviderConfig?): Int? =
+    providerBrandKey(provider)?.let { brandLogoRes(it) }
 
 /**
  * 根据模型名称推断所属品牌分类 key（小写英文标识）。
@@ -106,12 +115,7 @@ fun ProviderLogoIcon(
 ) {
     val res = providerLogoRes(provider)
     if (res != null) {
-        val brandKey = when (provider?.type) {
-            com.aicode.feature.settings.domain.model.ProviderType.OPENAI -> "openai"
-            com.aicode.feature.settings.domain.model.ProviderType.ANTHROPIC -> "anthropic"
-            com.aicode.feature.settings.domain.model.ProviderType.GEMINI -> "gemini"
-            else -> null
-        }
+        val brandKey = providerBrandKey(provider)
         Image(
             painter = painterResource(res),
             contentDescription = provider?.name ?: "AI Provider",

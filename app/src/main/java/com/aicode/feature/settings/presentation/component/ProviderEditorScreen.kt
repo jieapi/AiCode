@@ -229,7 +229,8 @@ fun ProviderEditorScreen(
         openaiChatCacheKey = openaiChatCacheKey,
         balanceScriptPath = balanceScriptPath,
         balanceRefreshInterval = balanceRefreshInterval,
-        userAgent = userAgent
+        userAgent = userAgent,
+        sortOrder = initialProvider?.sortOrder ?: -1
     )
 
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型。

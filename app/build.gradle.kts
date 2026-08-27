@@ -297,6 +297,9 @@ dependencies {
     // Lucide Icons
     implementation("br.com.devsrsouza.compose.icons:feather:1.1.1")
 
+    // 可拖拽排序列表（长按拖拽手势，提供商排序用）
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
+
     // Markdown Renderer
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.41.0")
     // Markdown Renderer — Code Syntax Highlighting

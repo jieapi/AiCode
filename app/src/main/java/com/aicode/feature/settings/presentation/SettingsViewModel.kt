@@ -1251,6 +1251,20 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** 提供商列表长按拖拽排序：同步更新内存顺序（reorderable 库要求 onMove 返回前列表已更新，否则拖拽项闪烁），再异步持久化 sortOrder。 */
+    fun reorderProviders(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val current = _providers.value
+        if (fromIndex !in current.indices || toIndex !in current.indices) return
+        val reordered = current.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+        _providers.value = reordered
+        viewModelScope.launch {
+            repository.reorderProviders(reordered)
+        }
+    }
+
     fun fetchModels(provider: AIProviderConfig) {
         viewModelScope.launch {
             _fetchState.value = FetchState.Loading

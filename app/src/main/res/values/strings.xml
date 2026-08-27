@@ -750,6 +750,7 @@
 
     <!-- Providers & Log -->
     <string name="providers_empty">还没有提供商，点右上角 + 添加</string>
+    <string name="provider_sort_drag_handle">长按拖动排序</string>
     <string name="log_level">日志等级</string>
     <string name="log_level_desc">记录低于该等级的日志将被忽略。开发期建议 VERBOSE（全部记录）；NONE 关闭日志。</string>
     <string name="log_file_location">日志文件位于 Android/data/&lt;包名&gt;/files/logs/。</string>

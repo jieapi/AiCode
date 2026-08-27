@@ -613,12 +613,13 @@ class BackupManagerImpl @Inject constructor(
 
     private fun AIProviderEntity.toDto() = ProviderDto(
         id, name, type, apiKey, baseUrl, defaultModel, models, selectedModel, isEnabled, useFullUrl, useResponseApi,
-        anthropicCacheBreakpoints, openaiChatCacheKey, balanceScriptPath, balanceRefreshInterval
+        anthropicCacheBreakpoints, openaiChatCacheKey, balanceScriptPath, balanceRefreshInterval, sortOrder
     )
 
     private fun ProviderDto.toEntity() = AIProviderEntity(
         id, name, type, apiKey, baseUrl, defaultModel, models, selectedModel, isEnabled, useFullUrl, useResponseApi,
-        anthropicCacheBreakpoints ?: true, openaiChatCacheKey ?: false, balanceScriptPath ?: "", balanceRefreshInterval ?: 5
+        anthropicCacheBreakpoints ?: true, openaiChatCacheKey ?: false, balanceScriptPath ?: "", balanceRefreshInterval ?: 5,
+        sortOrder = sortOrder ?: 0
     )
 
     private fun RemoteConnectionEntity.toDto() = RemoteConnectionDto(

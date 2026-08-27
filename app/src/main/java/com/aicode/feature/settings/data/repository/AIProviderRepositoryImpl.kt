@@ -31,8 +31,15 @@ class AIProviderRepositoryImpl @Inject constructor(
     }
 
     override suspend fun saveProvider(provider: AIProviderConfig) {
-        FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name}")
-        aiProviderDao.insertProvider(provider.toEntity())
+        val sortOrder = if (provider.sortOrder >= 0) provider.sortOrder else aiProviderDao.getMaxSortOrder() + 1
+        FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
+        aiProviderDao.insertProvider(provider.copy(sortOrder = sortOrder).toEntity())
+    }
+
+    override suspend fun reorderProviders(providers: List<AIProviderConfig>) {
+        val entities = providers.mapIndexed { index, p -> p.copy(sortOrder = index).toEntity() }
+        FileLogger.d(TAG, "重排提供商 共 ${entities.size} 个")
+        aiProviderDao.insertAllProviders(entities)
     }
 
     override suspend fun deleteProvider(id: String) {
@@ -73,7 +80,8 @@ class AIProviderRepositoryImpl @Inject constructor(
             openaiChatCacheKey = openaiChatCacheKey,
             balanceScriptPath = balanceScriptPath,
             balanceRefreshInterval = balanceRefreshInterval,
-            userAgent = userAgent
+            userAgent = userAgent,
+            sortOrder = sortOrder
         )
     }
 
@@ -94,7 +102,8 @@ class AIProviderRepositoryImpl @Inject constructor(
             openaiChatCacheKey = openaiChatCacheKey,
             balanceScriptPath = balanceScriptPath,
             balanceRefreshInterval = balanceRefreshInterval,
-            userAgent = userAgent
+            userAgent = userAgent,
+            sortOrder = sortOrder
         )
     }
 }
