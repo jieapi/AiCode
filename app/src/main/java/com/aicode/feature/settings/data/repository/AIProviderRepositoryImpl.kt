@@ -30,16 +30,24 @@ class AIProviderRepositoryImpl @Inject constructor(
         return aiProviderDao.getProviderById(id)?.toDomainModel()
     }
 
+    /**
+     * 保存提供商。排序值以数据库当前值为准（重排可能异步持久化，UI 传入的
+     * sortOrder 可能陈旧，直接使用会撤销刚完成的排序）；新提供商取最大排序 +1。
+     */
     override suspend fun saveProvider(provider: AIProviderConfig) {
-        val sortOrder = if (provider.sortOrder >= 0) provider.sortOrder else aiProviderDao.getMaxSortOrder() + 1
+        val current = aiProviderDao.getProviderById(provider.id)
+        val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
         FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
         aiProviderDao.insertProvider(provider.copy(sortOrder = sortOrder).toEntity())
     }
 
+    /**
+     * 按传入顺序重排提供商。只写 id + sortOrder 两列，
+     * 避免整行 REPLACE 覆盖并发修改的其它字段（如 apiKey/模型列表）。
+     */
     override suspend fun reorderProviders(providers: List<AIProviderConfig>) {
-        val entities = providers.mapIndexed { index, p -> p.copy(sortOrder = index).toEntity() }
-        FileLogger.d(TAG, "重排提供商 共 ${entities.size} 个")
-        aiProviderDao.insertAllProviders(entities)
+        FileLogger.d(TAG, "重排提供商 共 ${providers.size} 个")
+        providers.forEachIndexed { index, p -> aiProviderDao.updateSortOrder(p.id, index) }
     }
 
     override suspend fun deleteProvider(id: String) {

@@ -121,10 +121,11 @@ fun brandLogoRes(key: String): Int? = when (key) {
     else -> null
 }
 
+/** 是否给 logo 施加主题色 tint；保留原色的品牌（如 hunyuan/siliconflow 多色 logo）不在此列。 */
 private fun shouldTintModelLogo(key: String): Boolean =
     key == "grok" || key == "groq" || key == "moonshot" || key == "openai" ||
-        key == "hunyuan" || key == "openrouter" || key == "perplexity" ||
-        key == "siliconflow" || key == "ollama" || key == "meta" || key == "mistral"
+        key == "openrouter" || key == "perplexity" ||
+        key == "ollama" || key == "meta" || key == "mistral"
 
 @Composable
 private fun modelLogoTint(): Color {
