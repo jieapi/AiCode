@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.aicode.feature.settings.data.local.entity.AIProviderEntity
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +22,11 @@ interface AIProviderDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllProviders(providers: List<AIProviderEntity>)
+
+    @Transaction
+    suspend fun reorderProviders(providers: List<AIProviderEntity>) {
+        providers.forEachIndexed { index, p -> updateSortOrder(p.id, index) }
+    }
 
     /** 仅更新排序值，避免整行 REPLACE 覆盖并发修改的其它字段。 */
     @Query("UPDATE ai_providers SET sortOrder = :sortOrder WHERE id = :id")

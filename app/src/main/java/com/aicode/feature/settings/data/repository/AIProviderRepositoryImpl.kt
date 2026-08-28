@@ -34,6 +34,7 @@ class AIProviderRepositoryImpl @Inject constructor(
      * 保存提供商。排序值以数据库当前值为准（重排可能异步持久化，UI 传入的
      * sortOrder 可能陈旧，直接使用会撤销刚完成的排序）；新提供商取最大排序 +1。
      */
+    @androidx.room.Transaction
     override suspend fun saveProvider(provider: AIProviderConfig) {
         val current = aiProviderDao.getProviderById(provider.id)
         val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
