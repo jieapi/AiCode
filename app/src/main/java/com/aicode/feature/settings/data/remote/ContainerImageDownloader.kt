@@ -27,7 +27,11 @@ import javax.inject.Singleton
 class ContainerImageDownloader @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
-    private val client by lazy { OkHttpClient.Builder().build() }
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .proxyAuthenticator(com.aicode.core.net.AppProxy.okHttpAuthenticator)
+            .build()
+    }
 
     suspend fun download(
         url: String,

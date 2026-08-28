@@ -13,6 +13,8 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -337,8 +339,64 @@ class ContainerInstaller @Inject constructor(
         }
         configureResolvConf(dest)
         prootTmpDir.mkdirs()
+        repairRootfsCompatibility(dest)
         customInstalledMarker(profile).writeText("custom")
         FileLogger.i(TAG, "自定义容器 rootfs 安装完成：${profile.id}")
+    }
+
+    /**
+     * rootfs 兼容性巡检（幂等，失败静默）：修复已知的 Ubuntu 25.10+ 布局问题。
+     * 所有容器统一调用，作用面由内部存在性检测收敛——非命中容器零改动。
+     */
+    fun repairRootfsCompatibility(rootfs: File) {
+        fixCoreutilsPermissions(rootfs)
+        fixNodeGlobEntry(rootfs)
+    }
+
+    private fun fixCoreutilsPermissions(rootfs: File) {
+        val coreutilsDir = File(rootfs, "usr/lib/cargo/bin/coreutils")
+        if (!coreutilsDir.isDirectory) return
+        val target = PosixFilePermissions.fromString("rwxr-xr-x")
+        var fixed = 0
+        fun fix(path: File) {
+            runCatching {
+                val p = path.toPath()
+                if (Files.getPosixFilePermissions(p) != target) {
+                    Files.setPosixFilePermissions(p, target)
+                    fixed++
+                }
+            }.onFailure { FileLogger.w(TAG, "修复 coreutils 权限失败: ${path.absolutePath}", it) }
+        }
+        fix(File(rootfs, "usr/lib/cargo"))
+        fix(File(rootfs, "usr/lib/cargo/bin"))
+        fix(coreutilsDir)
+        coreutilsDir.listFiles()?.forEach { fix(it) }
+        if (fixed > 0) {
+            FileLogger.i(TAG, "已修复容器 coreutils 权限: $fixed 个文件（${coreutilsDir.absolutePath}）")
+        }
+    }
+
+    /**
+     * 修复 Ubuntu 26.04 仓库打包 bug：node-glob 10.3.6 用 `dist/cjs/src -> .` 自引用软链做打包
+     * 拍平，node 22+ 的 realpath 判定 ELOOP，npm 启动即报 MODULE_NOT_FOUND（与 PRoot 无关，
+     * 原生 Ubuntu 26.04 同样中招）。真机布局下的修复：把 package.json 入口从 dist/cjs/src/
+     * 改指真实打平文件所在 dist/cjs/。幂等：入口已正常则不动。
+     */
+    private fun fixNodeGlobEntry(rootfs: File) {
+        val candidates = listOf(
+            File(rootfs, "usr/share/nodejs/glob/package.json"),
+            File(rootfs, "usr/share/node_modules/glob/package.json")
+        )
+        for (f in candidates) {
+            if (!f.isFile) continue
+            runCatching {
+                val text = f.readText()
+                if (text.contains("dist/cjs/src/")) {
+                    f.writeText(text.replace("dist/cjs/src/", "dist/cjs/"))
+                    FileLogger.i(TAG, "已修复 node-glob 入口: ${f.absolutePath}")
+                }
+            }.onFailure { FileLogger.w(TAG, "修复 node-glob 入口失败: ${f.absolutePath}", it) }
+        }
     }
 
     /** 删除自定义 profile 的 rootfs 目录（删 profile 时调用）。内置 rootfs 不可删，远程 SSH 无 rootfs 可删。 */

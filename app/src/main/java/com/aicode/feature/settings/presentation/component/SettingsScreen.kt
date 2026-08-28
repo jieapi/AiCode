@@ -109,6 +109,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SkillDetail(R.string.settings_skills),
     Container(R.string.settings_container),
     ContainerDownloads(R.string.container_download_image),
+    Proxy(R.string.proxy_title),
     Log(R.string.settings_log),
     Permissions(R.string.settings_permissions),
     AppPermissions(R.string.settings_app_permissions),
@@ -165,6 +166,8 @@ fun SettingsScreen(
     val downloadedImages by viewModel.downloadedImages.collectAsStateWithLifecycle()
     val sourceUnavailableIds by viewModel.sourceUnavailableIds.collectAsStateWithLifecycle()
     val terminalSettings by viewModel.terminalSettings.collectAsStateWithLifecycle()
+    val proxyConfig by viewModel.proxyConfig.collectAsStateWithLifecycle()
+    val proxyTestState by viewModel.proxyTestState.collectAsStateWithLifecycle()
     var showTerminalSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -468,6 +471,18 @@ fun SettingsScreen(
                     onImport = { entryId, fileUri -> viewModel.importDownloadedImage(entryId, fileUri) },
                     onDelete = { entryId -> viewModel.deleteDownloadedImage(entryId) }
                 )
+                SettingsSection.Proxy -> ProxySection(
+                    config = proxyConfig,
+                    testState = proxyTestState,
+                    onTestProxy = viewModel::testProxy,
+                    onSetEnabled = viewModel::setProxyEnabled,
+                    onSetType = viewModel::setProxyType,
+                    onSetHost = viewModel::setProxyHost,
+                    onSetPort = viewModel::setProxyPort,
+                    onSetUsername = viewModel::setProxyUsername,
+                    onSetPassword = viewModel::setProxyPassword,
+                    onSetNoProxy = viewModel::setProxyNoProxy
+                )
                 SettingsSection.Log -> LogSection(
                     current = logLevel,
                     onSelect = { viewModel.setLogLevel(it) },
@@ -739,6 +754,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.HardDrive,
                 title = stringResource(SettingsSection.Container.titleRes),
                 onClick = { onOpen(SettingsSection.Container) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Globe,
+                title = stringResource(SettingsSection.Proxy.titleRes),
+                onClick = { onOpen(SettingsSection.Proxy) }
             )
             SettingsDivider()
             SettingsRow(

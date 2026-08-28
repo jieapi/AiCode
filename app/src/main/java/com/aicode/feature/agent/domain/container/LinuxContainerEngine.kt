@@ -510,6 +510,8 @@ class LinuxContainerEngine @Inject constructor(
         // 每次进入终端页前确保提取最新的内置文档
         containerInstaller.extractDocs()
         if (containerInstaller.isInstalledFor(profile)) {
+            // 旧 rootfs（如已导入的 Ubuntu 26.04）不会重新解压，这里兜底巡检修复已知兼容性问题
+            containerInstaller.repairRootfsCompatibility(containerInstaller.rootfsDirFor(profile))
             _initProgress.value = ContainerInitState.Ready
             refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
@@ -711,7 +713,9 @@ class LinuxContainerEngine @Inject constructor(
             "GIT_CONFIG_GLOBAL" to "/root/.aicode/.gitconfig",
             "TERM" to "xterm-256color",
             "LANG" to "C.UTF-8"
-        )
+            // 全局 HTTP 代理：开启时注入 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY，
+            // 容器内 curl/git/npm/pip 等一律走代理；关闭或配置不完整时为空 map 不影响直连。
+        ) + com.aicode.core.net.AppProxy.proxyEnv(context)
     }
 
     private fun buildProcessBuilder(invocation: ProotInvocation): ProcessBuilder {

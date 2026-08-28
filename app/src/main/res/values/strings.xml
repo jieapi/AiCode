@@ -994,4 +994,37 @@
     <!-- 远程服务器删除确认 -->
     <string name="remote_delete_connection_confirm">确定删除连接「%1$s」吗？使用该连接的同步配置将不可用。</string>
     <string name="remote_delete_mount_confirm">确定删除工作区映射「%1$s」吗？本地与远程文件不会被删除。</string>
+
+    <!-- 代理设置 -->
+    <string name="proxy_title">网络代理</string>
+    <string name="proxy_enable">启用代理</string>
+    <string name="proxy_enable_subtitle">开启后 App 网络请求与容器内命令统一走代理</string>
+    <string name="proxy_type">代理类型</string>
+    <string name="proxy_type_http">HTTP</string>
+    <string name="proxy_type_socks5">SOCKS5</string>
+    <string name="proxy_test_title">连通性测试</string>
+    <string name="proxy_test">测试代理</string>
+    <string name="proxy_testing">测试中…</string>
+    <string name="proxy_test_ok">代理可用（HTTP %1$d）</string>
+    <string name="proxy_test_http_error">代理返回异常状态 HTTP %1$d：%2$s</string>
+    <string name="proxy_test_connect_failed">连接代理失败：%1$s</string>
+    <string name="proxy_test_invalid_config">请先填写有效的服务器地址与端口（1-65535）</string>
+    <string name="provider_proxy_off">未启用</string>
+    <string name="proxy_test_url_label">测试地址</string>
+    <string name="proxy_test_url_placeholder">https://www.google.com</string>
+    <string name="proxy_server">代理服务器</string>
+    <string name="proxy_host">服务器地址</string>
+    <string name="proxy_host_placeholder">如 127.0.0.1</string>
+    <string name="proxy_port">端口</string>
+    <string name="proxy_port_placeholder">如 7890</string>
+    <string name="proxy_auth">认证（可选）</string>
+    <string name="proxy_username">账号（可选）</string>
+    <string name="proxy_password">密码（可选）</string>
+    <string name="proxy_no_proxy">不走代理的地址</string>
+    <string name="proxy_no_proxy_hint">逗号分隔；支持通配符 *、host:port、CIDR 网段</string>
+
+    <!-- 提供商编辑：代理（可选） -->
+    <string name="provider_proxy_section">代理（可选）</string>
+    <string name="provider_proxy_enable">为该提供商单独配置代理</string>
+    <string name="provider_proxy_enable_desc">开启后该提供商的请求走专属代理；关闭则跟随全局代理</string>
 </resources>

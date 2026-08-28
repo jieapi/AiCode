@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aicode.core.net.AppProxy
 import com.aicode.core.util.FileLogger
 import com.aicode.core.util.LogLevel
 import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
@@ -51,6 +52,8 @@ import com.aicode.feature.settings.data.repository.AgentSoundSettingsRepository
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicode.feature.settings.data.repository.LogSettingsRepository
+import com.aicode.feature.settings.data.repository.ProxyConfig
+import com.aicode.feature.settings.data.repository.ProxySettingsRepository
 import com.aicode.feature.settings.data.repository.ThemeSettingsRepository
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aicode.feature.settings.data.repository.VisionModelSettingsRepository
@@ -63,6 +66,7 @@ import com.aicode.feature.settings.domain.model.ProviderBalanceResult
 import com.aicode.feature.settings.domain.model.ProviderBalanceState
 import com.aicode.feature.settings.domain.service.ProviderBalanceRunner
 import com.aicode.feature.settings.domain.model.ProviderType
+import com.aicode.feature.settings.domain.model.ProxyType
 import com.aicode.R
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
 import com.aicode.feature.terminal.data.repository.TerminalSettings
@@ -234,7 +238,8 @@ class SettingsViewModel @Inject constructor(
     private val updateCheckSettingsRepository: UpdateCheckSettingsRepository,
     private val updateCheckService: UpdateCheckService,
     private val providerBalanceRunner: ProviderBalanceRunner,
-    private val terminalSettingsRepository: TerminalSettingsRepository
+    private val terminalSettingsRepository: TerminalSettingsRepository,
+    private val proxySettingsRepository: ProxySettingsRepository
 ) : ViewModel() {
     private companion object {
         const val MAX_LOG_LINES = 1200
@@ -257,6 +262,46 @@ class SettingsViewModel @Inject constructor(
 
     fun setTerminalCursorStyle(style: Int) {
         viewModelScope.launch { terminalSettingsRepository.setCursorStyle(style) }
+    }
+
+    // ── 全局代理 ──
+
+    /** 全局代理配置快照（SharedPreferences 即时读写，改即对新连接生效）。 */
+    val proxyConfig: StateFlow<ProxyConfig> = proxySettingsRepository.config
+
+    /** 代理连通性测试状态。 */
+    sealed interface ProxyTestUiState {
+        data object Idle : ProxyTestUiState
+        data object Testing : ProxyTestUiState
+        data class Success(val message: String) : ProxyTestUiState
+        data class Error(val message: String) : ProxyTestUiState
+    }
+
+    private val _proxyTestState = MutableStateFlow<ProxyTestUiState>(ProxyTestUiState.Idle)
+    val proxyTestState: StateFlow<ProxyTestUiState> = _proxyTestState.asStateFlow()
+
+    fun setProxyEnabled(enabled: Boolean) = proxySettingsRepository.setEnabled(enabled)
+    fun setProxyType(type: ProxyType) = proxySettingsRepository.setType(type)
+    fun setProxyHost(host: String) = proxySettingsRepository.setHost(host)
+    fun setProxyPort(port: Int) = proxySettingsRepository.setPort(port)
+    fun setProxyUsername(username: String) = proxySettingsRepository.setUsername(username)
+    fun setProxyPassword(password: String) = proxySettingsRepository.setPassword(password)
+    fun setProxyNoProxy(noProxy: String) = proxySettingsRepository.setNoProxy(noProxy)
+
+    fun testProxy(probeUrl: String) = testProxy(proxySettingsRepository.config.value, probeUrl)
+
+    /** 测任意一份代理配置（供提供商代理独立页复用表单态配置）。 */
+    fun testProxy(cfg: ProxyConfig, probeUrl: String) {
+        if (_proxyTestState.value is ProxyTestUiState.Testing) return
+        _proxyTestState.value = ProxyTestUiState.Testing
+        viewModelScope.launch {
+            val result = AppProxy.testProxy(context, cfg, probeUrl)
+            _proxyTestState.value = if (result.ok) {
+                ProxyTestUiState.Success(result.message)
+            } else {
+                ProxyTestUiState.Error(result.message)
+            }
+        }
     }
 
     private val _providers = MutableStateFlow<List<AIProviderConfig>>(emptyList())

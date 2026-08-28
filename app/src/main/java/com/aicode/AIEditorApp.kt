@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Process
 import androidx.work.Configuration
 import androidx.hilt.work.HiltWorkerFactory
+import com.aicode.core.net.AppProxy
 import com.aicode.core.util.AILogger
 import com.aicode.core.util.FileLogger
 import net.schmizz.sshj.common.SecurityUtils
@@ -59,6 +60,10 @@ class AIEditorApp : Application(), Configuration.Provider {
         FileLogger.init(base)
         AILogger.init(base)
         installCrashHandler()
+        // 全局代理入口：必须在任何 Hilt 注入 / OkHttpClient 构建之前设置，
+        // 使 App 侧全部 HTTP 链路（对话、MCP、更新检查等）按需走全局/提供商代理。
+        // 用 base 而非下文才定义的局部 context：attachBaseContext 阶段 base 即合法 Context。
+        AppProxy.applyGlobal(base)
         val tag = base.getSharedPreferences(LANG_PREFS, android.content.Context.MODE_PRIVATE)
             .getString(LANG_KEY, null)
         val context = if (tag.isNullOrBlank()) {
@@ -136,11 +141,18 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var modelMetadataService: ModelMetadataService
 
+    /** 提供商级代理注册表：启动即构建 provider→代理 索引，供 AppProxy 按 target host 分派。 */
+    @Inject
+    lateinit var providerProxyRegistry: com.aicode.feature.settings.data.repository.ProviderProxyRegistry
+
     /** 长驻作用域：持续把持久化的日志等级同步到 FileLogger。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
+        // 把提供商级代理注册表挂到 AppProxy（applyGlobal 已在 attachBaseContext 完成），
+        // 此后按目标 host 分派 provider 专属代理；无 provider 配置时回退全局代理。
+        AppProxy.registerProviderProxyRegistry(providerProxyRegistry)
         registerBouncyCastle()
         createNotificationChannels()
         // 主线程启动凭据请求监听（FileObserver 必须主线程创建与 startWatching），

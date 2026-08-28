@@ -49,6 +49,7 @@ class ModelMetadataService @Inject constructor(
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
+        .proxyAuthenticator(com.aicode.core.net.AppProxy.okHttpAuthenticator)
         .build()
 
     suspend fun resolve(providerId: String, type: ProviderType, modelId: String): ModelMetadata =

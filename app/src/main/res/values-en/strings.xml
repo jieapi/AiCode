@@ -995,4 +995,37 @@
     <!-- Remote server delete confirmation -->
     <string name="remote_delete_connection_confirm">Delete connection “%1$s”? Sync configurations using it will become unavailable.</string>
     <string name="remote_delete_mount_confirm">Delete workspace mapping “%1$s”? Local and remote files will not be deleted.</string>
+
+    <!-- Proxy settings -->
+    <string name="proxy_title">Network Proxy</string>
+    <string name="proxy_enable">Enable proxy</string>
+    <string name="proxy_enable_subtitle">Route App network requests and container commands through the proxy</string>
+    <string name="proxy_type">Proxy type</string>
+    <string name="proxy_type_http">HTTP</string>
+    <string name="proxy_type_socks5">SOCKS5</string>
+    <string name="proxy_test_title">Connectivity test</string>
+    <string name="proxy_test">Test proxy</string>
+    <string name="proxy_testing">Testing…</string>
+    <string name="proxy_test_ok">Proxy works (HTTP %1$d)</string>
+    <string name="proxy_test_http_error">Proxy returned unexpected status HTTP %1$d: %2$s</string>
+    <string name="proxy_test_connect_failed">Failed to connect to proxy: %1$s</string>
+    <string name="proxy_test_invalid_config">Enter a valid server address and port (1-65535) first</string>
+    <string name="provider_proxy_off">Off</string>
+    <string name="proxy_test_url_label">Test URL</string>
+    <string name="proxy_test_url_placeholder">https://www.google.com</string>
+    <string name="proxy_server">Proxy server</string>
+    <string name="proxy_host">Server address</string>
+    <string name="proxy_host_placeholder">e.g. 127.0.0.1</string>
+    <string name="proxy_port">Port</string>
+    <string name="proxy_port_placeholder">e.g. 7890</string>
+    <string name="proxy_auth">Authentication (optional)</string>
+    <string name="proxy_username">Account (optional)</string>
+    <string name="proxy_password">Password (optional)</string>
+    <string name="proxy_no_proxy">No-proxy addresses</string>
+    <string name="proxy_no_proxy_hint">Comma-separated; supports wildcards, host:port and CIDR ranges</string>
+
+    <!-- Provider editor: proxy (optional) -->
+    <string name="provider_proxy_section">Proxy (optional)</string>
+    <string name="provider_proxy_enable">Configure a dedicated proxy for this provider</string>
+    <string name="provider_proxy_enable_desc">When enabled, requests to this provider use its own proxy; otherwise the global proxy applies</string>
 </resources>

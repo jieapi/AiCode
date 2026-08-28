@@ -1098,7 +1098,9 @@ private fun buildProfile(
                 rootfsSource = rootfsSource,
                 shellPath = shellPath.ifBlank { null },
                 extraBindings = bindings,
-                extraArgs = args,
+                // 与下载导入一致：本地导入默认带 --link2symlink（Android 宿主不支持硬链接时
+                // PRoot 用符号链接模拟，Debian/Ubuntu 系镜像的 apt/dpkg 依赖它，否则安装即失败）
+                extraArgs = if (args.isEmpty() && rootfsSource is RootfsSource.LocalFile) listOf("--link2symlink") else args,
                 env = env,
                 isBuiltin = rootfsSource is RootfsSource.Asset,
                 mode = ExecutionMode.LOCAL_PROOT

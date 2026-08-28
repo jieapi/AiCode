@@ -108,6 +108,8 @@ import com.aicode.feature.settings.data.remote.ModelTestResult
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.domain.model.ProviderType
+import com.aicode.feature.settings.data.repository.ProxyConfig
+import com.aicode.feature.settings.domain.model.ProxyType
 import com.aicode.feature.settings.domain.model.mergeModelMetadata
 import com.aicode.feature.settings.presentation.FetchState
 import com.aicode.feature.settings.presentation.SettingsViewModel
@@ -162,6 +164,12 @@ fun ProviderEditorScreen(
     var balanceScriptPath by remember { mutableStateOf(initialProvider?.balanceScriptPath ?: "") }
     var balanceRefreshInterval by remember { mutableIntStateOf(initialProvider?.balanceRefreshInterval ?: 5) }
     var userAgent by remember { mutableStateOf(initialProvider?.userAgent ?: "") }
+    var proxyEnabled by remember { mutableStateOf(initialProvider?.proxyEnabled ?: false) }
+    var proxyType by remember { mutableStateOf(initialProvider?.proxyType ?: ProxyType.HTTP) }
+    var proxyHost by remember { mutableStateOf(initialProvider?.proxyHost ?: "") }
+    var proxyPort by remember { mutableIntStateOf(initialProvider?.proxyPort ?: 0) }
+    var proxyUsername by remember { mutableStateOf(initialProvider?.proxyUsername ?: "") }
+    var proxyPassword by remember { mutableStateOf(initialProvider?.proxyPassword ?: "") }
     var isEnabled by remember { mutableStateOf(initialProvider?.isEnabled ?: true) }
     var type by remember { mutableStateOf(initialProvider?.type ?: ProviderType.OPENAI) }
     val providerId = remember { initialProvider?.id ?: System.currentTimeMillis().toString() }
@@ -176,6 +184,7 @@ fun ProviderEditorScreen(
     var showFetchDialog by remember { mutableStateOf(false) }
     var showScriptPickerSheet by remember { mutableStateOf(false) }
     var showIntervalSheet by remember { mutableStateOf(false) }
+    var showProxyPage by remember { mutableStateOf(false) }
     var fetchDialogKey by remember { mutableIntStateOf(0) }
 
     // 两个 tab 的滚动状态提升到页面层，聚合出「是否正在滚动」供底部 tab栏滚动弱化（同 Git 页面）。
@@ -190,6 +199,7 @@ fun ProviderEditorScreen(
     val fetchState by viewModel.fetchState.collectAsStateWithLifecycle()
     val testResults by viewModel.testResults.collectAsStateWithLifecycle()
     val testing by viewModel.testing.collectAsStateWithLifecycle()
+    val proxyTestState by viewModel.proxyTestState.collectAsStateWithLifecycle()
     val balanceTestState by viewModel.balanceTestState.collectAsStateWithLifecycle()
     val modelMetadata by viewModel.modelMetadata.collectAsStateWithLifecycle()
     val modelSnapshot = models.toList()
@@ -230,7 +240,13 @@ fun ProviderEditorScreen(
         balanceScriptPath = balanceScriptPath,
         balanceRefreshInterval = balanceRefreshInterval,
         userAgent = userAgent,
-        sortOrder = initialProvider?.sortOrder ?: -1
+        sortOrder = initialProvider?.sortOrder ?: -1,
+        proxyEnabled = proxyEnabled,
+        proxyType = proxyType,
+        proxyHost = proxyHost,
+        proxyPort = proxyPort,
+        proxyUsername = proxyUsername,
+        proxyPassword = proxyPassword
     )
 
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型。
@@ -253,8 +269,10 @@ fun ProviderEditorScreen(
         onNavigateBack()
     }
 
-    BackHandler {
-        saveAndNavigateBack()
+    if (showProxyPage) {
+        BackHandler { showProxyPage = false }
+    } else {
+        BackHandler { saveAndNavigateBack() }
     }
 
     Scaffold(
@@ -398,6 +416,23 @@ fun ProviderEditorScreen(
                             value = userAgent,
                             onValueChange = { userAgent = it },
                             placeholder = stringResource(R.string.provider_user_agent_hint)
+                        )
+                        SettingsDivider()
+                        SettingsRow(
+                            icon = null,
+                            title = stringResource(R.string.proxy_title),
+                            onClick = { showProxyPage = true },
+                            trailing = {
+                                Text(
+                                    text = if (proxyEnabled) {
+                                        "${proxyTypeLabel(proxyType)} ${proxyHost}:${proxyPort}"
+                                    } else {
+                                        stringResource(R.string.provider_proxy_off)
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         )
                     }
 
@@ -601,6 +636,40 @@ fun ProviderEditorScreen(
             selected = type,
             onSelected = { type = it },
             onDismiss = { showTypeSheet = false }
+        )
+    }
+
+    if (showProxyPage) {
+        ProviderProxyPage(
+            config = ProxyConfig(
+                enabled = proxyEnabled,
+                type = proxyType,
+                host = proxyHost,
+                port = proxyPort,
+                username = proxyUsername,
+                password = proxyPassword
+            ),
+            testState = proxyTestState,
+            onBack = { showProxyPage = false },
+            onSetEnabled = { proxyEnabled = it },
+            onSetType = { proxyType = it },
+            onSetHost = { proxyHost = it },
+            onSetPort = { proxyPort = it },
+            onSetUsername = { proxyUsername = it },
+            onSetPassword = { proxyPassword = it },
+            onTestProxy = { url ->
+                viewModel.testProxy(
+                    ProxyConfig(
+                        enabled = true,
+                        type = proxyType,
+                        host = proxyHost,
+                        port = proxyPort,
+                        username = proxyUsername,
+                        password = proxyPassword
+                    ),
+                    url
+                )
+            }
         )
     }
 
@@ -1253,6 +1322,54 @@ private fun ProviderSwitchRow(
 /** 提供商类型选择底部弹窗，样式与主题选择弹窗一致。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun ProviderProxyPage(
+    config: ProxyConfig,
+    testState: SettingsViewModel.ProxyTestUiState,
+    onBack: () -> Unit,
+    onSetEnabled: (Boolean) -> Unit,
+    onSetType: (ProxyType) -> Unit,
+    onSetHost: (String) -> Unit,
+    onSetPort: (Int) -> Unit,
+    onSetUsername: (String) -> Unit,
+    onSetPassword: (String) -> Unit,
+    onTestProxy: (String) -> Unit
+) {
+    Scaffold(
+        containerColor = settingsPageBackground(),
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.proxy_title)) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = settingsPageBackground(),
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
+                ),
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        ProxySection(
+            config = config,
+            testState = testState,
+            onTestProxy = onTestProxy,
+            onSetEnabled = onSetEnabled,
+            onSetType = onSetType,
+            onSetHost = onSetHost,
+            onSetPort = onSetPort,
+            onSetUsername = onSetUsername,
+            onSetPassword = onSetPassword,
+            onSetNoProxy = {},
+            showNoProxy = false,
+            modifier = Modifier.padding(padding)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun ProviderTypeSelectionSheet(
     selected: ProviderType,
     onSelected: (ProviderType) -> Unit,
@@ -1671,10 +1788,10 @@ private fun BalanceTestResultBox(
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.error
                                 )
-                                if (lastError!!.isNotBlank()) {
+                                lastError?.takeIf { it.isNotBlank() }?.let { message ->
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        text = lastError!!,
+                                        text = message,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )

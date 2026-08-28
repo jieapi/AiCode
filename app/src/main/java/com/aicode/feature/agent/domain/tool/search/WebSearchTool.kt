@@ -17,9 +17,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 class WebSearchTool @Inject constructor() : AgentTool() {
@@ -28,6 +30,16 @@ class WebSearchTool @Inject constructor() : AgentTool() {
         const val TAG = "WebSearchTool"
         // 使用与 opencode 一致的 Parallel AI 公开 MCP 接口
         const val PARALLEL_MCP_URL = "https://search.parallel.ai/mcp"
+
+        // 走全局/提供商代理链路（AppProxy 的全局 ProxySelector + 按 host 分派的认证），
+        // 与对话等其它 HTTP 请求保持一致；lazy 确保 client 在 applyGlobal 之后首次构建。
+        val client by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .proxyAuthenticator(com.aicode.core.net.AppProxy.okHttpAuthenticator)
+                .build()
+        }
     }
 
     override val name = "websearch"
@@ -71,38 +83,32 @@ class WebSearchTool @Inject constructor() : AgentTool() {
 
                 FileLogger.i(TAG, "发起 WebSearch 请求: $query")
 
-                val url = URL(PARALLEL_MCP_URL)
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("Accept", "application/json, text/event-stream")
-                connection.setRequestProperty("User-Agent", "aicode/1.0")
-                connection.doOutput = true
-                connection.connectTimeout = 15000
-                connection.readTimeout = 30000
+                val request = Request.Builder()
+                    .url(PARALLEL_MCP_URL)
+                    .header("Accept", "application/json, text/event-stream")
+                    .header("User-Agent", "aicode/1.0")
+                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .build()
 
-                OutputStreamWriter(connection.outputStream).use { writer ->
-                    writer.write(requestBody)
-                    writer.flush()
-                }
+                client.newCall(request).execute().use { resp ->
+                    val responseCode = resp.code
+                    if (responseCode !in 200..299) {
+                        val errorStr = resp.body?.string()
+                        FileLogger.e(TAG, "WebSearch 失败: HTTP $responseCode, $errorStr")
+                        return@withContext ToolResult.Error("网络搜索失败 (HTTP $responseCode)")
+                    }
 
-                val responseCode = connection.responseCode
-                if (responseCode !in 200..299) {
-                    val errorStr = connection.errorStream?.bufferedReader()?.use { it.readText() }
-                    FileLogger.e(TAG, "WebSearch 失败: HTTP $responseCode, $errorStr")
-                    return@withContext ToolResult.Error("网络搜索失败 (HTTP $responseCode)")
-                }
+                    // 尝试直接读取普通 JSON 或解析 Event-Stream (SSE) 格式
+                    val responseBody = resp.body?.string().orEmpty()
 
-                // 尝试直接读取普通 JSON 或解析 Event-Stream (SSE) 格式
-                val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                
-                // 解析 MCP 返回体
-                val rawResultText = parseMcpResponse(responseBody)
-                
-                if (rawResultText.isNullOrBlank()) {
-                    ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("未能找到关于 '$query' 的搜索结果，请换个关键词重试。"))
-                } else {
-                    ToolResult.Success(parseSearchResultPayload(rawResultText) ?: JsonPrimitive(rawResultText))
+                    // 解析 MCP 返回体
+                    val rawResultText = parseMcpResponse(responseBody)
+
+                    if (rawResultText.isNullOrBlank()) {
+                        ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("未能找到关于 '$query' 的搜索结果，请换个关键词重试。"))
+                    } else {
+                        ToolResult.Success(parseSearchResultPayload(rawResultText) ?: JsonPrimitive(rawResultText))
+                    }
                 }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "WebSearch 发生异常", e)

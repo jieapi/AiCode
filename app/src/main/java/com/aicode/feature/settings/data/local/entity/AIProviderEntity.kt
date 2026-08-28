@@ -30,5 +30,12 @@ data class AIProviderEntity(
     /** 自定义请求头 User-Agent；留空使用默认。 */
     val userAgent: String = "",
     /** 提供商列表排序序号，越小越靠前；新建时分配 max+1。 */
-    val sortOrder: Int = 0
+    val sortOrder: Int = 0,
+    /** 单独为该提供商配置代理（关闭时跟随全局代理设置）。 */
+    val proxyEnabled: Boolean = false,
+    val proxyType: String = "HTTP",
+    val proxyHost: String = "",
+    val proxyPort: Int = 0,
+    val proxyUsername: String = "",
+    val proxyPassword: String = ""
 )
