@@ -53,7 +53,9 @@ class AIProviderRepositoryImpl @Inject constructor(
      */
     override suspend fun reorderProviders(providers: List<AIProviderConfig>) {
         FileLogger.d(TAG, "重排提供商 共 ${providers.size} 个")
-        providers.forEachIndexed { index, p -> aiProviderDao.updateSortOrder(p.id, index) }
+        agentDatabase.withTransaction {
+            providers.forEachIndexed { index, p -> aiProviderDao.updateSortOrder(p.id, index) }
+        }
     }
 
     override suspend fun deleteProvider(id: String) {
