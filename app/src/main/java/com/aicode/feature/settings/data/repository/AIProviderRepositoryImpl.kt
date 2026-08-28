@@ -1,11 +1,13 @@
 package com.aicode.feature.settings.data.repository
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.data.local.database.AgentDatabase
 import com.aicode.feature.settings.data.local.dao.AIProviderDao
 import com.aicode.feature.settings.data.local.entity.AIProviderEntity
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -13,7 +15,8 @@ import javax.inject.Singleton
 
 @Singleton
 class AIProviderRepositoryImpl @Inject constructor(
-    private val aiProviderDao: AIProviderDao
+    private val aiProviderDao: AIProviderDao,
+    private val agentDatabase: AgentDatabase
 ) : AIProviderRepository {
 
     private companion object {
@@ -34,12 +37,13 @@ class AIProviderRepositoryImpl @Inject constructor(
      * 保存提供商。排序值以数据库当前值为准（重排可能异步持久化，UI 传入的
      * sortOrder 可能陈旧，直接使用会撤销刚完成的排序）；新提供商取最大排序 +1。
      */
-    @androidx.room.Transaction
     override suspend fun saveProvider(provider: AIProviderConfig) {
-        val current = aiProviderDao.getProviderById(provider.id)
-        val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
-        FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
-        aiProviderDao.insertProvider(provider.copy(sortOrder = sortOrder).toEntity())
+        agentDatabase.withTransaction {
+            val current = aiProviderDao.getProviderById(provider.id)
+            val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
+            FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
+            aiProviderDao.insertProvider(provider.copy(sortOrder = sortOrder).toEntity())
+        }
     }
 
     /**
