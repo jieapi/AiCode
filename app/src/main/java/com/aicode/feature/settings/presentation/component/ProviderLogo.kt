@@ -162,6 +162,34 @@ fun ProviderLogoIcon(
 }
 
 /**
+ * 根据品牌 key 渲染品牌 logo 图标（与 [ModelLogoIcon] 同款 tint 规则）；
+ * 无匹配 logoKey 时显示默认 Cloud 图标。供预设提供商选择等按品牌 key 展示的场景使用。
+ */
+@Composable
+fun BrandLogoIcon(
+    logoKey: String?,
+    modifier: Modifier = Modifier,
+    size: Dp = 22.dp
+) {
+    val res = logoKey?.let { brandLogoRes(it) }
+    if (res != null) {
+        Image(
+            painter = painterResource(res),
+            contentDescription = null,
+            colorFilter = if (shouldTintModelLogo(logoKey)) ColorFilter.tint(modelLogoTint()) else null,
+            modifier = modifier.size(size)
+        )
+    } else {
+        Icon(
+            imageVector = FeatherIcons.Cloud,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier.size(size)
+        )
+    }
+}
+
+/**
  * 根据模型名称渲染品牌 logo 图标；若未匹配则显示默认 Cpu 图标。
  */
 @Composable

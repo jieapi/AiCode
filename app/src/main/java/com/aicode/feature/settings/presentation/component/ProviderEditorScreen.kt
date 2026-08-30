@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.foundation.Image
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -83,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +109,7 @@ import com.aicode.feature.settings.data.local.CustomModelMetadataStore
 import com.aicode.feature.settings.data.remote.ModelTestResult
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
+import com.aicode.feature.settings.domain.model.ProviderPreset
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.data.repository.ProxyConfig
 import com.aicode.feature.settings.domain.model.ProxyType
@@ -121,6 +124,7 @@ import compose.icons.feathericons.Check
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ChevronUp
+import compose.icons.feathericons.Cloud
 import android.widget.Toast
 import compose.icons.feathericons.Copy
 import compose.icons.feathericons.Terminal
@@ -1435,6 +1439,146 @@ internal fun providerTypeLabel(type: ProviderType): String = when (type) {
     ProviderType.OPENAI -> "OpenAI"
     ProviderType.ANTHROPIC -> "Anthropic"
     ProviderType.GEMINI -> "Gemini"
+}
+
+/** 常用提供商预设选择底部弹窗：点「+」添加时弹出，选中后预填名称/类型/Base URL，底部可进入手动配置。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ProviderPresetSelectionSheet(
+    onSelect: (ProviderPreset) -> Unit,
+    onManual: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    val configuration = LocalConfiguration.current
+    val screenHeight = configuration.screenHeightDp.dp
+    val flingFix = rememberSheetFlingFix(sheetState)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = screenHeight * 0.88f)
+                .verticalScroll(rememberScrollState())
+                .nestedScroll(flingFix)
+                .padding(bottom = Spacing.xl)
+        ) {
+            Text(
+                text = stringResource(R.string.provider_preset_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg)
+                    .padding(bottom = Spacing.xs)
+            )
+            Text(
+                text = stringResource(R.string.provider_preset_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg)
+                    .padding(bottom = Spacing.sm)
+            )
+
+            ProviderPreset.ALL_PRESETS.forEachIndexed { index, preset ->
+                if (index > 0) {
+                    SettingsDivider()
+                }
+                Surface(
+                    onClick = {
+                        onDismiss()
+                        onSelect(preset)
+                    },
+                    color = Color.Transparent
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                        ) {
+                            BrandLogoIcon(
+                                logoKey = preset.logoKey,
+                                size = 22.dp,
+                                modifier = Modifier.size(22.dp).align(Alignment.Center)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(Spacing.md))
+                        Text(
+                            text = stringResource(preset.nameRes),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Icon(
+                            imageVector = FeatherIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.semanticColors.subtleText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            SettingsDivider()
+            Surface(
+                onClick = {
+                    onDismiss()
+                    onManual()
+                },
+                color = Color.Transparent
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = FeatherIcons.Plus,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp).align(Alignment.Center)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(Spacing.md))
+                    Text(
+                        text = stringResource(R.string.provider_preset_manual),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = FeatherIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.semanticColors.subtleText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
