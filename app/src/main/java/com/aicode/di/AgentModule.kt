@@ -68,6 +68,7 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 import com.aicode.core.db.MigrationLoader
+import com.aicode.core.db.SchemaCatchUp
 import com.aicode.feature.agent.domain.checkpoint.CheckpointManager
 import com.aicode.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aicode.feature.agent.domain.session.SessionUseCase
@@ -97,6 +98,11 @@ object AgentModule {
             AgentDatabase::class.java,
             "aicode_agent_db"
         ).addMigrations(*MigrationLoader.loadMigrations(context))
+            .addCallback(object : androidx.room.RoomDatabase.Callback() {
+                override fun onOpen(db: SupportSQLiteDatabase) {
+                    SchemaCatchUp.ensure(db)
+                }
+            })
             .fallbackToDestructiveMigration(dropAllTables = false)
             .build()
     }

@@ -1,6 +1,8 @@
 package com.aicode.core.db
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FileMigrationTest {
@@ -51,5 +53,31 @@ class FileMigrationTest {
             statements[0]
         )
         assertEquals("-- 注释\nALTER TABLE sample ADD COLUMN data TEXT", statements[1])
+    }
+
+    @Test
+    fun duplicateColumnMessage_matchesSqliteError() {
+        assertTrue(
+            SchemaCatchUp.isDuplicateColumnMessage(
+                "duplicate column name: proxyEnabled (code 1 SQLITE_ERROR)"
+            )
+        )
+        assertTrue(
+            SchemaCatchUp.isDuplicateColumnMessage(
+                "SQLiteException: Duplicate column name: sortOrder"
+            )
+        )
+        assertFalse(SchemaCatchUp.isDuplicateColumnMessage("no such table: ai_providers"))
+        assertFalse(SchemaCatchUp.isDuplicateColumnMessage(null))
+    }
+
+    @Test
+    fun requiredColumns_coverRenumberedMigrations() {
+        val names = SchemaCatchUp.requiredColumns.map { "${it.table}.${it.name}" }.toSet()
+        assertTrue(names.contains("agent_messages.thinkingBlocksJson"))
+        assertTrue(names.contains("llm_call_records.cacheCreationTokens"))
+        assertTrue(names.contains("chat_sessions.parentId"))
+        assertTrue(names.contains("ai_providers.proxyEnabled"))
+        assertTrue(names.contains("ai_providers.sortOrder"))
     }
 }
