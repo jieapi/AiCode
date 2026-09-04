@@ -1,4 +1,9 @@
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   srcDir: './docs',
@@ -130,5 +135,42 @@ export default defineConfig({
       message: '基于 GPL-3.0 协议开源',
       copyright: 'Copyright © 2025-至今 AiCode'
     }
+  },
+  vite: {
+    plugins: [
+      {
+        name: 'serve-raw-md',
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (req.url && req.url.startsWith('/md/')) {
+              const rel = req.url.slice(4).split('?')[0].split('#')[0]
+              const filePath = resolve(__dirname, '../docs', decodeURIComponent(rel))
+              if (existsSync(filePath) && statSync(filePath).isFile()) {
+                res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(readFileSync(filePath, 'utf-8'))
+                return
+              }
+            }
+            next()
+          })
+        },
+        configurePreviewServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (req.url && req.url.startsWith('/md/')) {
+              const rel = req.url.slice(4).split('?')[0].split('#')[0]
+              const filePath = resolve(__dirname, 'dist/md', decodeURIComponent(rel))
+              if (existsSync(filePath) && statSync(filePath).isFile()) {
+                res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+                res.setHeader('Access-Control-Allow-Origin', '*')
+                res.end(readFileSync(filePath, 'utf-8'))
+                return
+              }
+            }
+            next()
+          })
+        }
+      }
+    ]
   }
 })
