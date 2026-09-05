@@ -44,7 +44,8 @@ export default defineConfig({
           text: '入门',
           items: [
             { text: '快速上手', link: '/guide/quick-start' },
-            { text: '功能总览', link: '/guide/overview' }
+            { text: '功能总览', link: '/guide/overview' },
+            { text: '免费提供商', link: '/guide/free-providers' },
           ]
         },
         {
@@ -53,6 +54,7 @@ export default defineConfig({
             { text: '聊天界面导览', link: '/guide/chat' },
             { text: '三种模式（Build / Plan / Auto）', link: '/guide/modes' },
             { text: '检查点与撤销', link: '/guide/checkpoint' },
+            { text: '终端', link: '/guide/terminal' },
             { text: '文件浏览与代码编辑', link: '/guide/files' },
             { text: 'Git 版本管理', link: '/guide/git' },
             { text: '平板与大屏适配', link: '/guide/tablet' }
@@ -70,7 +72,6 @@ export default defineConfig({
           text: '执行环境',
           items: [
             { text: '容器与镜像', link: '/guide/container' },
-            { text: '终端', link: '/guide/terminal' },
             { text: '远程 SSH 模式', link: '/guide/remote-ssh' },
             { text: '工作区同步', link: '/guide/sync' },
             { text: '网络代理', link: '/guide/proxy' }
@@ -82,7 +83,8 @@ export default defineConfig({
             { text: 'MCP 服务器', link: '/guide/mcp' },
             { text: '技能', link: '/guide/skills' },
             { text: '子代理', link: '/guide/subagent' },
-            { text: '自定义提示词', link: '/guide/custom-prompts' }
+            { text: '自定义提示词', link: '/guide/custom-prompts' },
+            { text: '记忆与项目规则', link: '/guide/memory' }
           ]
         },
         {

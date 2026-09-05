@@ -57,7 +57,7 @@ AiCode 的系统提示词可以自己改。默认提示词随 App 内置、升�
 | --- | --- |
 | `00-identity.md` | AI 身份与角色定义 |
 | `10-communication.md` | 沟通与回复风格 |
-| `15-project-rules.md` | 项目规则加载约定（AGENTS.md / CLAUDE.md） |
+| `15-project-rules.md` | 项目规则加载约定（AGENTS.md / CLAUDE.md），详见 [记忆与项目规则](/guide/memory) |
 | `20-coding-discipline.md` | 编码纪律 |
 | `30-comments.md` | 代码注释规范 |
 | `40-approach.md` | 工作方式与流程 |
