@@ -73,6 +73,8 @@ import com.aicode.feature.agent.presentation.AgentUIState
 import com.aicode.feature.agent.presentation.AIAgentViewModel
 import com.aicode.feature.agent.presentation.MessageRole
 import com.aicode.feature.agent.presentation.hasVisibleContent
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import com.aicode.feature.settings.presentation.SettingsViewModel
 import com.aicode.feature.settings.domain.model.DashboardContext
 import com.aicode.feature.settings.domain.model.ProviderBalanceState
@@ -1165,7 +1167,9 @@ fun AIChatPanel(
                     } else 0f
                 },
                 isScrolling = listState.isScrollInProgress,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onboardingTarget(OnboardingStep.SEND_MESSAGE)
             )
             } // 悬浮层结束
 

@@ -107,6 +107,9 @@ import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Terminal
 import compose.icons.feathericons.Trash2
 import compose.icons.feathericons.Users
+import compose.icons.feathericons.Zap
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import com.aicode.feature.terminal.data.repository.TerminalSettings
 import com.aicode.feature.terminal.presentation.component.TerminalSettingsSheet
 
@@ -175,7 +178,9 @@ private fun SettingsSection.depth(): Int = when (this) {
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
-    onStopAllAndCloseTerminal: () -> Unit = {}
+    onStopAllAndCloseTerminal: () -> Unit = {},
+    onRerunOnboarding: () -> Unit = {},
+    onboardingStep: OnboardingStep? = null
 ) {
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val logLevel by viewModel.logLevel.collectAsStateWithLifecycle()
@@ -246,6 +251,31 @@ fun SettingsScreen(
     var providerPresetPrefill by remember { mutableStateOf<com.aicode.feature.settings.data.local.ProviderPreset?>(null) }
     var showMcpDialog by remember { mutableStateOf(false) }
     var editingMcp by remember { mutableStateOf<McpServerEntry?>(null) }
+
+    LaunchedEffect(onboardingStep) {
+        when (onboardingStep) {
+            OnboardingStep.CONFIG_PROVIDER -> {
+                section = SettingsSection.Menu
+            }
+            OnboardingStep.PROVIDER_ADD -> {
+                section = SettingsSection.Providers
+            }
+            OnboardingStep.PROVIDER_CONFIG_INFO -> {
+                if (section != SettingsSection.ProviderEditor) {
+                    editingProvider = providers.firstOrNull()
+                    section = SettingsSection.ProviderEditor
+                }
+            }
+            OnboardingStep.PROVIDER_FETCH_MODELS,
+            OnboardingStep.SIMULATE_FETCH_DIALOG -> {
+                if (section != SettingsSection.ProviderEditor) {
+                    editingProvider = providers.firstOrNull()
+                    section = SettingsSection.ProviderEditor
+                }
+            }
+            else -> {}
+        }
+    }
     var selectedSkill by remember { mutableStateOf<SkillUiEntry?>(null) }
     var skillToDelete by remember { mutableStateOf<SkillUiEntry?>(null) }
     // 技能编辑目标：null 表示新建一个；编辑现有技能时指向被编辑的条目。
@@ -351,6 +381,7 @@ fun SettingsScreen(
                     Intent(Intent.ACTION_VIEW, Uri.parse(USER_GUIDE_DOCS_URL))
                 )
             },
+            onRerunOnboarding = onRerunOnboarding,
             onOpen = {
                 if (it == SettingsSection.Log) {
                     logReturnSection = SettingsSection.Menu
@@ -410,6 +441,7 @@ fun SettingsScreen(
                 viewModel = viewModel,
                 initialProvider = editingProvider,
                 presetPrefill = providerPresetPrefill,
+                initialTab = if (onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS || onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) 1 else 0,
                 onNavigateBack = {
                     section = SettingsSection.Providers
                     providerPresetPrefill = null
@@ -504,10 +536,13 @@ fun SettingsScreen(
                 },
                 actions = {
                     when (current) {
-                        SettingsSection.Providers -> IconButton(onClick = {
-                            providerPresetPrefill = null
-                            showAddProviderSheet = true
-                        }) {
+                        SettingsSection.Providers -> IconButton(
+                            onClick = {
+                                providerPresetPrefill = null
+                                showAddProviderSheet = true
+                            },
+                            modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_ADD)
+                        ) {
                             Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.settings_add_provider))
                         }
                         SettingsSection.Mcp -> {
@@ -1084,6 +1119,7 @@ internal fun SettingsMenu(
     onOpenBackgroundSheet: () -> Unit,
     onOpenLanguageSheet: () -> Unit,
     onOpenManual: () -> Unit,
+    onRerunOnboarding: () -> Unit,
     onOpen: (SettingsSection) -> Unit
 ) {
     Column(
@@ -1100,7 +1136,8 @@ internal fun SettingsMenu(
             SettingsRow(
                 icon = FeatherIcons.Cloud,
                 title = stringResource(SettingsSection.Providers.titleRes),
-                onClick = { onOpen(SettingsSection.Providers) }
+                onClick = { onOpen(SettingsSection.Providers) },
+                modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER)
             )
             SettingsDivider()
             SettingsRow(
@@ -1259,6 +1296,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.BookOpen,
                 title = stringResource(R.string.settings_user_guide),
                 onClick = onOpenManual
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Zap,
+                title = stringResource(R.string.settings_rerun_onboarding),
+                onClick = onRerunOnboarding
             )
             SettingsDivider()
             SettingsRow(

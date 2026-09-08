@@ -68,6 +68,8 @@ import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.rememberImeBottomInset
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import com.aicode.feature.agent.domain.command.SlashCommandHandler
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.ReasoningEffort
@@ -347,7 +349,8 @@ internal fun ChatInputBar(
                             provider = activeProvider,
                             providers = providers,
                             modelMetadata = modelMetadata,
-                            onSelectModel = onSelectModel
+                            onSelectModel = onSelectModel,
+                            modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
 
                         if (workspaceViewModel != null) {

@@ -140,14 +140,15 @@ internal fun SettingsRow(
     onClick: (() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     subtitle: String? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
-    val modifier = Modifier
+    val baseModifier = modifier
         .fillMaxWidth()
         .let { if (onClick != null && enabled) it.clickable { onClick() } else it }
         .padding(horizontal = Spacing.lg, vertical = 11.dp)
     Row(
-        modifier = modifier.alpha(if (enabled) 1f else 0.5f),
+        modifier = baseModifier.alpha(if (enabled) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {

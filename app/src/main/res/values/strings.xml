@@ -946,6 +946,7 @@
     <string name="provider_fetch_http_error">HTTP %1$d · %2$dms</string>
     <string name="provider_test_success">连通 · %1$dms</string>
     <string name="common_error">错误</string>
+    <string name="common_select">选择</string>
     <string name="provider_model_context_input">输入窗口 (Token)</string>
     <string name="provider_model_context_output">输出窗口 (Token)</string>
     <string name="provider_new">新提供商</string>
@@ -1318,4 +1319,31 @@
     <string name="provider_proxy_section">代理（可选）</string>
     <string name="provider_proxy_enable">为该提供商单独配置代理</string>
     <string name="provider_proxy_enable_desc">开启后该提供商的请求走专属代理；关闭则跟随全局代理</string>
+
+    <!-- 首次启动引导 -->
+    <string name="settings_rerun_onboarding">重新运行新手引导</string>
+    <string name="onboarding_skip">跳过</string>
+    <string name="onboarding_next">下一步</string>
+    <string name="onboarding_done">完成</string>
+    <string name="onboarding_step_badge">新手引导 %1$d/%2$d</string>
+    <string name="onboarding_open_sidebar_title">打开侧边栏</string>
+    <string name="onboarding_open_sidebar_desc">点击左上角按钮打开侧边栏，前往设置配置你的 AI 模型。</string>
+    <string name="onboarding_enter_settings_title">进入设置</string>
+    <string name="onboarding_enter_settings_desc">点击进入系统设置，管理你的 AI 提供商与模型配置。</string>
+    <string name="onboarding_config_provider_title">进入 AI 提供商</string>
+    <string name="onboarding_config_provider_desc">点击进入 AI 提供商管理列表，准备配置模型服务商。</string>
+    <string name="onboarding_provider_add_title">添加提供商</string>
+    <string name="onboarding_provider_add_desc">点击「+」添加提供商，支持 OpenAI、Claude、Gemini、DeepSeek 等官方服务商或自定义中转。</string>
+    <string name="onboarding_provider_config_info_title">填写配置信息</string>
+    <string name="onboarding_provider_config_info_desc">输入你的 API 密钥。官方预设已内置根地址，第三方中转可修改 Base URL。</string>
+    <string name="onboarding_provider_fetch_models_title">拉取模型</string>
+    <string name="onboarding_provider_fetch_models_desc">配置好密钥后，点击「拉取模型」即可自动同步可用模型列表。</string>
+    <string name="onboarding_provider_select_fetched_model_title">添加拉取的模型</string>
+    <string name="onboarding_provider_select_fetched_model_desc">已获取到可用模型！点击添加按钮将该模型加入当前提供商。</string>
+    <string name="onboarding_open_model_picker_title">打开模型面板</string>
+    <string name="onboarding_open_model_picker_desc">回到主页，点击输入框左侧的模型图标打开选择面板。</string>
+    <string name="onboarding_choose_model_in_sheet_title">选择会话模型</string>
+    <string name="onboarding_choose_model_in_sheet_desc">点击刚刚添加的模型，指定当前对话使用的 AI。</string>
+    <string name="onboarding_send_message_title">开始对话</string>
+    <string name="onboarding_send_message_desc">模型已就绪！在输入框输入你的编程需求或问题，开始与 AI 助手协同工作吧！</string>
 </resources>

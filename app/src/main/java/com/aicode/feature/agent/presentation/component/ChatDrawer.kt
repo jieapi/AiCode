@@ -45,6 +45,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.aicode.core.ui.AppTextField
 import com.aicode.core.ui.dialogTextFieldColors
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -212,7 +214,8 @@ fun ChatDrawerContent(
             SettingsRow(
                 icon = FeatherIcons.Settings,
                 title = stringResource(R.string.chat_settings),
-                onClick = onNavigateToSettings
+                onClick = onNavigateToSettings,
+                modifier = Modifier.onboardingTarget(OnboardingStep.ENTER_SETTINGS)
             )
         }
     }

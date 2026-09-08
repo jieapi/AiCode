@@ -946,6 +946,7 @@
     <string name="provider_fetch_http_error">HTTP %1$d · %2$dms</string>
     <string name="provider_test_success">Connected · %1$dms</string>
     <string name="common_error">Error</string>
+    <string name="common_select">Select</string>
     <string name="provider_model_context_input">Input Window (tokens)</string>
     <string name="provider_model_context_output">Output Window (tokens)</string>
     <string name="provider_new">New Provider</string>
@@ -1319,4 +1320,31 @@
     <string name="provider_proxy_section">Proxy (optional)</string>
     <string name="provider_proxy_enable">Configure a dedicated proxy for this provider</string>
     <string name="provider_proxy_enable_desc">When enabled, requests to this provider use its own proxy; otherwise the global proxy applies</string>
+
+    <!-- First-run onboarding -->
+    <string name="settings_rerun_onboarding">Re-run onboarding</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_done">Done</string>
+    <string name="onboarding_step_badge">Guide %1$d/%2$d</string>
+    <string name="onboarding_open_sidebar_title">Open Sidebar</string>
+    <string name="onboarding_open_sidebar_desc">Tap the top-left button to open sidebar and navigate to settings to configure models.</string>
+    <string name="onboarding_enter_settings_title">Go to Settings</string>
+    <string name="onboarding_enter_settings_desc">Tap to open system settings to manage AI providers and API keys.</string>
+    <string name="onboarding_config_provider_title">AI Providers</string>
+    <string name="onboarding_config_provider_desc">Tap to open AI providers list and start setting up your model providers.</string>
+    <string name="onboarding_provider_add_title">Add Provider</string>
+    <string name="onboarding_provider_add_desc">Tap “+” to add a provider, supporting official providers like OpenAI, Claude, Gemini, DeepSeek, or custom relays.</string>
+    <string name="onboarding_provider_config_info_title">Configuration Info</string>
+    <string name="onboarding_provider_config_info_desc">Enter your API key. Official presets come with base URLs prefilled; custom relays can set a custom Base URL.</string>
+    <string name="onboarding_provider_fetch_models_title">Fetch Models</string>
+    <string name="onboarding_provider_fetch_models_desc">Once the key is configured, tap “Fetch models” to sync available models.</string>
+    <string name="onboarding_provider_select_fetched_model_title">Add Fetched Model</string>
+    <string name="onboarding_provider_select_fetched_model_desc">Models retrieved! Tap the add button to add this model to the provider.</string>
+    <string name="onboarding_open_model_picker_title">Open Model Panel</string>
+    <string name="onboarding_open_model_picker_desc">Back on home, tap the model icon next to the input box to open the selection panel.</string>
+    <string name="onboarding_choose_model_in_sheet_title">Choose Model</string>
+    <string name="onboarding_choose_model_in_sheet_desc">Tap the model you just added to set it for your chat session.</string>
+    <string name="onboarding_send_message_title">Start Chatting</string>
+    <string name="onboarding_send_message_desc">Model ready! Type your coding tasks or questions here to start collaborating with the AI assistant.</string>
 </resources>

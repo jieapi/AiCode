@@ -74,12 +74,20 @@ import com.aicode.feature.editor.presentation.CodeEditorScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
 import com.aicode.feature.git.presentation.component.GitScreen
+import com.aicode.feature.onboarding.data.OnboardingStatus
+import com.aicode.feature.onboarding.domain.OnboardingCoordinator
+import com.aicode.feature.onboarding.domain.OnboardingStateHolder
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.LocalOnboardingTargetRegistry
+import com.aicode.feature.onboarding.presentation.OnboardingOverlay
+import com.aicode.feature.onboarding.presentation.OnboardingTargetRegistry
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.AppThemeMode
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aicode.feature.settings.data.repository.ScreenOnSettingsRepository
 import com.aicode.feature.settings.data.repository.ThemeSettingsRepository
 import com.aicode.feature.settings.presentation.SettingsViewModel
+import com.aicode.feature.settings.presentation.FetchState
 import com.aicode.feature.settings.presentation.UpdateCheckUiState
 import com.aicode.feature.settings.presentation.component.githubReleaseUrl
 import com.aicode.feature.settings.presentation.component.SettingsScreen
@@ -131,6 +139,10 @@ class MainActivity : ComponentActivity() {
     /** 三端（UI/AI Bash/交互终端）git 缺凭据统一弹窗桥：在 AIEditorApp 启动后监听 helper 的文件 IPC 请求。 */
     @Inject
     lateinit var credentialRequestBridge: com.aicode.feature.credentials.data.CredentialRequestBridge
+
+    /** 首次启动引导的进度持久化。 */
+    @Inject
+    lateinit var onboardingRepository: com.aicode.feature.onboarding.data.OnboardingRepository
 
     override fun attachBaseContext(newBase: android.content.Context) {
         // 在 Activity 创建前同步应用用户选择的语言，确保冷启动也生效。
@@ -220,7 +232,7 @@ class MainActivity : ComponentActivity() {
                     val bgPath by backgroundSettings.imagePathFlow.collectAsStateWithLifecycle(initialValue = null)
                     val bgAlpha by backgroundSettings.alphaFlow.collectAsStateWithLifecycle(initialValue = BackgroundSettingsRepository.DEFAULT_ALPHA)
                     Box(modifier = Modifier.fillMaxSize()) {
-                        AppNavigation()
+                        AppNavigation(onboardingRepository = onboardingRepository)
                         // 全局凭据弹窗：覆盖所有页面，命令行 git 缺凭据在任意页面都能弹。
                         com.aicode.feature.credentials.presentation.component.GlobalCredentialDialogHost(
                             bridge = credentialRequestBridge
@@ -292,7 +304,9 @@ private const val MAX_PANE_SPLIT = 0.7f
  * ViewModel 提升到这一层创建，以便 Drawer 内容和 AIChatPanel 共享同一实例。
  */
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    onboardingRepository: com.aicode.feature.onboarding.data.OnboardingRepository
+) {
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -310,6 +324,26 @@ fun AppNavigation() {
     val agentViewModel: AIAgentViewModel = hiltViewModel()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
+
+    // ── 首次启动引导 ──
+    val onboardingStateHolder = remember { OnboardingStateHolder() }
+    val onboardingUiState by onboardingStateHolder.state.collectAsStateWithLifecycle()
+    val onboardingRegistry = remember { OnboardingTargetRegistry() }
+    val onboardingScope = rememberCoroutineScope()
+    val onboardingCoordinator = remember {
+        OnboardingCoordinator(
+            stateHolder = onboardingStateHolder,
+            onPersist = { status ->
+                onboardingRepository.markStatus(status)
+            },
+            scope = onboardingScope
+        )
+    }
+    // 启动判断：IN_PROGRESS 则激活引导。
+    LaunchedEffect(Unit) {
+        val status = onboardingRepository.status()
+        onboardingCoordinator.initialize(status ?: OnboardingStatus.IN_PROGRESS)
+    }
 
     // 自动检查更新：进入主页时异步检测（开关开启且每天最多一次，失败静默）
     LaunchedEffect(Unit) {
@@ -558,12 +592,23 @@ fun AppNavigation() {
                 // 这是侧边栏点设置「卡一下」的主因。
                 SettingsScreen(
                     viewModel = settingsViewModel,
-                    onNavigateBack = { 
-                        navController.popBackStack() 
+                    onNavigateBack = {
+                        navController.popBackStack()
                         // 大屏返回聊天页后侧栏本就常驻，不再弹 modal 抽屉。
                         if (!expanded) scope.launch { drawerState.open() }
                     },
-                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() }
+                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
+                    onRerunOnboarding = {
+                        // 从设置页「重新运行引导」：清状态回 in_progress、激活引导并回聊天页。
+                        scope.launch {
+                            onboardingRepository.resetToInProgress()
+                            onboardingCoordinator.resetAndStart()
+                            navController.navigate("chat") {
+                                popUpTo("chat") { inclusive = false }
+                            }
+                        }
+                    },
+                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active }
                 )
             }
             composable("terminal") {
@@ -620,6 +665,8 @@ fun AppNavigation() {
         }
     }
 
+    CompositionLocalProvider(LocalOnboardingTargetRegistry provides onboardingRegistry) {
+    Box(modifier = Modifier.fillMaxSize()) {
     if (expanded) {
         // 大屏不套 ModalNavigationDrawer：侧栏常驻在左，抽屉那套 scrim / 手势 / 锚点在这里完全用不上。
         // 侧栏只在聊天页展开：设置页自己就是「菜单 + 详情」两栏，外面再套一层会话侧栏就成了三栏。
@@ -695,6 +742,99 @@ fun AppNavigation() {
                 settingsViewModel.dismissUpdateCheck()
             }
         )
+    }
+
+    // 首次启动引导覆层（覆盖所有路由之上，全程常驻顶层，页面切换平滑过渡绝不闪烁）。
+    if (onboardingUiState.active) {
+        OnboardingOverlay(
+            stateHolder = onboardingStateHolder,
+            coordinator = onboardingCoordinator,
+            registry = onboardingRegistry,
+            onNextStep = {
+                val step = onboardingStateHolder.state.value.step
+                when (step) {
+                    OnboardingStep.OPEN_SIDEBAR -> {
+                        scope.launch { drawerState.open() }
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.ENTER_SETTINGS -> {
+                        scope.launch {
+                            drawerState.close()
+                            navController.navigate("settings")
+                        }
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.CONFIG_PROVIDER -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_ADD -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_CONFIG_INFO -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_FETCH_MODELS -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SIMULATE_FETCH_DIALOG -> {
+                        navController.popBackStack()
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.OPEN_MODEL_PICKER -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SIMULATE_CHOOSE_MODEL -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SEND_MESSAGE -> {
+                        onboardingCoordinator.complete()
+                    }
+                }
+            },
+            onTargetClick = {
+                val step = onboardingStateHolder.state.value.step
+                when (step) {
+                    OnboardingStep.OPEN_SIDEBAR -> {
+                        scope.launch { drawerState.open() }
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.ENTER_SETTINGS -> {
+                        scope.launch {
+                            drawerState.close()
+                            navController.navigate("settings")
+                        }
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.CONFIG_PROVIDER -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_ADD -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_CONFIG_INFO -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.PROVIDER_FETCH_MODELS -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SIMULATE_FETCH_DIALOG -> {
+                        navController.popBackStack()
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.OPEN_MODEL_PICKER -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SIMULATE_CHOOSE_MODEL -> {
+                        onboardingCoordinator.nextStep()
+                    }
+                    OnboardingStep.SEND_MESSAGE -> {
+                        onboardingCoordinator.complete()
+                    }
+                }
+            }
+        )
+    }
+    }
     }
 }
 

@@ -35,6 +35,8 @@ import com.aicode.R
 import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.feature.agent.domain.model.AgentMode
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import com.aicode.feature.settings.presentation.component.ModelLogoIcon
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.GitBranch
@@ -75,7 +77,10 @@ internal fun ChatHeader(
             ) {
                 // 大屏常驻侧栏时隐掉汉堡键：侧栏已经摆在左边，再给个开关反而困惑。
                 if (showMenuButton) {
-                    IconButton(onClick = onOpenDrawer) {
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_SIDEBAR)
+                    ) {
                         Icon(
                             FeatherIcons.Menu,
                             contentDescription = stringResource(R.string.chat_open_sidebar),

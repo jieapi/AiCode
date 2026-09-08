@@ -33,6 +33,7 @@ import com.aicode.R
 import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.feature.agent.domain.model.ReasoningEffort
+import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.presentation.component.ModelLogoIcon
@@ -49,11 +50,12 @@ internal fun ModelIconButton(
     provider: AIProviderConfig?,
     providers: List<AIProviderConfig>,
     modelMetadata: Map<String, ModelMetadata>,
-    onSelectModel: (String, String) -> Unit
+    onSelectModel: (String, String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var showSheet by remember { mutableStateOf(false) }
 
-    IconButton(onClick = { showSheet = true }, modifier = Modifier.size(36.dp)) {
+    IconButton(onClick = { showSheet = true }, modifier = modifier.size(36.dp)) {
         ModelLogoIcon(modelName = provider?.effectiveModel.orEmpty(), size = 20.dp)
     }
 

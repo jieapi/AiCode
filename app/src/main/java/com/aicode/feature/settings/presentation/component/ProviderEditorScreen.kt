@@ -1,5 +1,7 @@
 package com.aicode.feature.settings.presentation.component
 
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -170,7 +172,8 @@ fun ProviderEditorScreen(
      * 从预设库新建时预填的名称/类型/Base URL/模型列表；
      * 仅当 [initialProvider] 为 null（新建场景）时生效。
      */
-    presetPrefill: ProviderPreset? = null
+    presetPrefill: ProviderPreset? = null,
+    initialTab: Int = 0
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -220,7 +223,12 @@ fun ProviderEditorScreen(
     val scope = rememberCoroutineScope()
     var customMetadata by remember { mutableStateOf<Map<String, ModelMetadata>>(emptyMap()) }
     var editingModel by remember { mutableStateOf<String?>(null) }
-    val pagerState = rememberPagerState(initialPage = 0) { 2 }
+    val pagerState = rememberPagerState(initialPage = initialTab) { 2 }
+    LaunchedEffect(initialTab) {
+        if (pagerState.currentPage != initialTab) {
+            pagerState.animateScrollToPage(initialTab)
+        }
+    }
     var showTypeSheet by remember { mutableStateOf(false) }
     var showAddModelSheet by remember { mutableStateOf(false) }
     var showFetchDialog by remember { mutableStateOf(false) }
@@ -388,7 +396,9 @@ fun ProviderEditorScreen(
                     ) {
                     // ── 基本信息 ──
                     SettingsGroupHeader(text = stringResource(R.string.provider_section_basic))
-                    SettingsGroup {
+                    SettingsGroup(
+                        modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_CONFIG_INFO)
+                    ) {
                         ProviderTextFieldRow(
                             label = stringResource(R.string.common_name),
                             value = name,
@@ -694,7 +704,8 @@ fun ProviderEditorScreen(
                             },
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            ),
+                            modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_FETCH_MODELS)
                         ) {
                             Icon(FeatherIcons.DownloadCloud, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(Spacing.xs))
@@ -1389,7 +1400,7 @@ private fun FetchModelsDialog(
                         }
                     }
                 }
-                else -> {
+                is FetchState.Idle -> {
                     SettingsGroup {
                         Box(
                             modifier = Modifier
