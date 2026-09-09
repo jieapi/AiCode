@@ -15,8 +15,8 @@
 ## 基元律动（OpenSquilla）
 
 - **平台**：基元律动 TokenRhythm
-- **活动地址**：[https://tokenrhythm.studio/i/rf_tr_94nR6O5aJzonCzJ5-JMlCQNO](https://tokenrhythm.studio/i/rf_tr_94nR6O5aJzonCzJ5-JMlCQNO)
-- **说明**：邀请好友限时活动继续延长，体验 OpenSquilla 新功能，畅享免费 token。
+- **官网地址**：[tokenrhythm.studio](https://tokenrhythm.studio/)
+- **说明**：多模型统一 API 接入平台，配套 OpenSquilla 智能路由，注册后可申请 API Key 接入。
 
 ::: tip 新人福利
 注册即送 10 元；安装官方客户端并调用一次后，58 元到账（累计 68 元）。

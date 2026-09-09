@@ -104,7 +104,8 @@ mkdirSync(mdOutDir, { recursive: true })
 const sections = [
   { name: '入口', rels: ['index.md'] },
   { name: '使用手册（guide）', rels: rels.filter((r) => r.startsWith('guide/')) },
-  { name: '进阶教程（advanced）', rels: rels.filter((r) => r.startsWith('advanced/')) }
+  { name: '进阶教程（advanced）', rels: rels.filter((r) => r.startsWith('advanced/')) },
+  { name: 'English', rels: rels.filter((r) => r.startsWith('en/')) }
 ]
 
 const metaByRel = new Map()

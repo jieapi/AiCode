@@ -7,7 +7,66 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   srcDir: './docs',
-  lang: 'zh-Hans',
+  locales: {
+    root: {
+      label: '简体中文',
+      lang: 'zh-Hans'
+    },
+    en: {
+      label: 'English',
+      lang: 'en',
+      title: 'AiCode',
+      titleTemplate: ':title | AiCode - AI Coding Tool & Terminal on Android',
+      description: 'AiCode is an open-source AI coding and mobile workstation tool for Android. It ships with a built-in Linux container and terminal, letting the AI Agent read and write files, run shell commands and builds on its own — with deep integration of the MCP protocol, Git version control and remote SSH development.',
+      head: [
+        ['meta', { name: 'keywords', content: 'AiCode, Android AI coding, mobile development, Linux terminal, PRoot, Termux, AI Agent, MCP, code editor, Git client, mobile workstation, remote SSH' }],
+        ['meta', { property: 'og:title', content: 'AiCode - AI Coding Tool & Linux Terminal on Android' }],
+        ['meta', { property: 'og:description', content: 'An open-source AI coding tool for Android with a built-in Linux container and terminal. AI Agent edits code, runs commands and builds; supports MCP tools, Git and remote SSH.' }],
+        ['meta', { name: 'twitter:title', content: 'AiCode - AI Coding Tool & Linux Terminal on Android' }],
+        ['meta', { name: 'twitter:description', content: 'An open-source AI coding tool for Android with a built-in Linux container and terminal. AI Agent edits code, runs commands and builds; supports MCP tools, Git and remote SSH.' }]
+      ],
+      themeConfig: {
+        nav: [
+          { text: 'Guide', link: '/en/guide/quick-start', activeMatch: '/en/guide/' },
+          { text: 'Download', link: 'https://github.com/jieapi/aicode/releases/latest' }
+        ],
+        sidebar: {
+          '/en/guide/': [
+            {
+              text: 'Getting Started',
+              items: [
+                { text: 'Quick Start', link: '/en/guide/quick-start' },
+                { text: 'Feature Overview', link: '/en/guide/overview' },
+                { text: 'Free Providers', link: '/en/guide/free-providers' }
+              ]
+            },
+            {
+              text: 'Models & Usage',
+              items: [
+                { text: 'AI Providers & Models', link: '/en/guide/providers' }
+              ]
+            }
+          ]
+        },
+        outline: { label: 'On this page', level: [2, 3] },
+        docFooter: { prev: 'Previous', next: 'Next' },
+        lastUpdatedText: 'Last updated',
+        darkModeSwitchLabel: 'Theme',
+        lightModeSwitchTitle: 'Switch to light mode',
+        darkModeSwitchTitle: 'Switch to dark mode',
+        sidebarMenuLabel: 'Menu',
+        returnToTopLabel: 'Back to top',
+        editLink: {
+          pattern: 'https://github.com/jieapi/aicode/edit/main/docs-site/docs/:path',
+          text: 'Edit this page on GitHub'
+        },
+        footer: {
+          message: 'Open source under GPL-3.0',
+          copyright: 'Copyright © 2026-present AiCode'
+        }
+      }
+    }
+  },
   title: 'AiCode',
   titleTemplate: ':title | AiCode - 手机端 AI 编程工具与终端',
   description: 'AiCode 是一款开源的 Android 端 AI 编程与移动工作站工具。内置 Linux 容器与终端环境，AI Agent 可自主读写文件、执行 Shell 命令与运行构建，深度集成 MCP 协议、Git 版本控制与远程 SSH 开发。',
@@ -136,7 +195,7 @@ export default defineConfig({
     },
     footer: {
       message: '基于 GPL-3.0 协议开源',
-      copyright: 'Copyright © 2025-至今 AiCode'
+      copyright: 'Copyright © 2026-至今 AiCode'
     }
   },
   vite: {
