@@ -769,25 +769,27 @@ class BackupManagerImpl @Inject constructor(
     private fun ChatSessionEntity.toDto() = ChatSessionDto(
         id = id, title = title, createdAt = createdAt, updatedAt = updatedAt, workspacePath = workspacePath,
         mode = mode, reasoningEffort = reasoningEffort, providerId = providerId, model = model, isPinned = isPinned,
-        parentId = parentId, subagentType = subagentType
+        parentId = parentId, subagentType = subagentType, presetName = presetName,
+        isGroupChat = isGroupChat, groupMembersJson = groupMembersJson
     )
 
     private fun ChatSessionDto.toEntity() = ChatSessionEntity(
         id = id, title = title, createdAt = createdAt, updatedAt = updatedAt, workspacePath = workspacePath,
         mode = mode, reasoningEffort = reasoningEffort, providerId = providerId, model = model, isPinned = isPinned,
-        parentId = parentId, subagentType = subagentType
+        parentId = parentId, subagentType = subagentType, presetName = presetName,
+        isGroupChat = isGroupChat, groupMembersJson = groupMembersJson
     )
 
     private fun AgentMessageEntity.toDto() = AgentMessageDto(
         id, sessionId, role, content, timestamp, toolCallsJson, toolCallId, toolName, toolArgs,
         isError, reasoning, signature, attachmentsJson, isCompacted, isContextSummary, isCompactionMarker,
-        thinkingBlocksJson
+        thinkingBlocksJson, senderName
     )
 
     private fun AgentMessageDto.toEntity() = AgentMessageEntity(
         id, sessionId, role, content, timestamp, toolCallsJson, toolCallId, toolName, toolArgs,
         isError, reasoning, signature, attachmentsJson, isCompacted, isContextSummary, isCompactionMarker,
-        thinkingBlocksJson = thinkingBlocksJson
+        thinkingBlocksJson = thinkingBlocksJson, senderName = senderName
     )
 
     private fun TodoItemEntity.toDto() = TodoItemDto(id, sessionId, subject, description, status, priority, order, createdAt, updatedAt)

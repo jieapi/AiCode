@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.domain.subagent
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -24,7 +25,8 @@ data class SubAgentEvent(
     val subSessionId: String,
     val parentSessionId: String,
     val type: SubAgentEventType,
-    val detail: String = ""
+    val detail: String = "",
+    val modeReminders: List<String> = emptyList()
 )
 
 /**
@@ -32,7 +34,8 @@ data class SubAgentEvent(
  * 在子会话上启动 AI 工作流；子会话工作流结束时 ViewModel 再发 COMPLETED/FAILED，
  * 父会话据此注入后台通知（类比 terminal 的 notify=true 异步回调）。
  *
- * 同时维护活跃子代理会话 id 集合，供 TaskTool 查询并发上限（最多 5 个运行中）。
+ * 同时维护活跃子代理会话 id 集合，供 TaskTool 查询并发上限（最多 5 个运行中）；
+ * 并记录每个子代理的最终结果类型，供 TaskTool 的 wait/waitAll 操作挂起等待完成。
  */
 @Singleton
 class SubAgentEventBus @Inject constructor() {
@@ -42,6 +45,10 @@ class SubAgentEventBus @Inject constructor() {
     /** 当前活跃（运行中）的子代理会话 id 集合。 */
     private val _activeSubSessionIds = MutableStateFlow<Set<String>>(emptySet())
     val activeSubSessionIds: StateFlow<Set<String>> = _activeSubSessionIds.asStateFlow()
+
+    /** 每个子代理的最终结果类型（COMPLETED/FAILED/STOPPED），供 wait 操作查询。 */
+    private val _completionResults = MutableStateFlow<Map<String, SubAgentEventType>>(emptyMap())
+    val completionResults: StateFlow<Map<String, SubAgentEventType>> = _completionResults.asStateFlow()
 
     /** 运行中的子代理数量。 */
     val activeCount: Int get() = _activeSubSessionIds.value.size
@@ -64,6 +71,41 @@ class SubAgentEventBus @Inject constructor() {
         return true
     }
 
+    /**
+     * 挂起等待指定子代理全部完成（COMPLETED/FAILED/STOPPED 任一终态）。
+     * 内部按退避轮询 completionResults，直到全部终态或超时。
+     * @return 每个子代理的最终结果类型。
+     */
+    suspend fun awaitAllCompletion(subSessionIds: Set<String>, timeoutMs: Long = 300_000): Map<String, SubAgentEventType> {
+        if (subSessionIds.isEmpty()) return emptyMap()
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val remaining = subSessionIds.toMutableSet()
+        val result = mutableMapOf<String, SubAgentEventType>()
+        var backoffMs = 200L
+        while (System.currentTimeMillis() < deadline && remaining.isNotEmpty()) {
+            // 先取快照，再遍历，避免 ConcurrentModificationException
+            val snapshot = _completionResults.value
+            val toRemove = mutableListOf<String>()
+            snapshot.forEach { (id, type) ->
+                if (id in remaining) {
+                    toRemove.add(id)
+                    result[id] = type
+                }
+            }
+            toRemove.forEach { remaining.remove(it) }
+            if (remaining.isEmpty()) break
+            delay(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(2000L)
+        }
+        return result
+    }
+
+    /** 清除子代理记录（删除子代理会话后调用，避免 completionResults 长期堆积）。 */
+    fun forget(subSessionId: String) {
+        _completionResults.value = _completionResults.value - subSessionId
+        _activeSubSessionIds.value = _activeSubSessionIds.value - subSessionId
+    }
+
     fun emit(event: SubAgentEvent) {
         // 同步维护活跃集合
         when (event.type) {
@@ -72,6 +114,7 @@ class SubAgentEventBus @Inject constructor() {
             }
             SubAgentEventType.COMPLETED, SubAgentEventType.FAILED, SubAgentEventType.STOPPED -> {
                 _activeSubSessionIds.value = _activeSubSessionIds.value - event.subSessionId
+                _completionResults.value = _completionResults.value + (event.subSessionId to event.type)
             }
         }
         _events.tryEmit(event)

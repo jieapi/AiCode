@@ -181,13 +181,17 @@ internal fun AgentMessageItem(
         return
     }
 
-    val hasReasoning = message.role == MessageRole.ASSISTANT && !message.reasoning.isNullOrEmpty()
+    // 群聊成员发言：role=USER + senderName（协调器落库）。左对齐渲染为成员气泡（带名字），
+    // 区别于用户自己的右对齐气泡。
+    val isGroupMember = message.senderName != null
+    val isUser = message.role == MessageRole.USER && !isGroupMember
+    // 成员发言与 AI 回复一致：reasoning 由协调器从成员子会话带回，复用思考气泡。
+    val hasReasoning = (isGroupMember || message.role == MessageRole.ASSISTANT) && !message.reasoning.isNullOrEmpty()
     val hasContent = message.content.hasVisibleContent()
     val hasAttachments = message.attachments.isNotEmpty()
     // 模型直出的图片走附件落库，纯图消息没有正文与思考，同样要展示（不能提前 return）。
     if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning && !hasAttachments) return
 
-    val isUser = message.role == MessageRole.USER
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     // 用户气泡随文字撑开，最大撑到与 AI 气泡同宽（消息列宽 - 列表两侧 padding）。
     // 大屏下消息列已限宽居中，气泡上限跟着收窄，不能再拿整个屏宽算。
@@ -227,6 +231,15 @@ internal fun AgentMessageItem(
             ReasoningBubble(text = message.reasoning.orEmpty(), initiallyExpanded = reasoningJustFinished, cache = markdownCache)
         }
         if (hasContent || hasAttachments || message.role != MessageRole.ASSISTANT) {
+            // 群聊成员发言：左对齐 + 成员名（带头像色块），与用户右对齐气泡区分。
+            if (isGroupMember) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GroupMemberNameBadge(message.senderName.orEmpty())
+                }
+            }
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 // 助手消息左对齐，用户消息右对齐
@@ -257,12 +270,12 @@ internal fun AgentMessageItem(
                                 } else {
                                     RoundedCornerShape(Radius.md, Radius.md, Radius.md, Radius.xs)
                                 },
-                                color = when (message.role) {
-                                    MessageRole.USER -> MaterialTheme.colorScheme.primary
-                                    MessageRole.ASSISTANT -> MaterialTheme.colorScheme.surface
-                                    MessageRole.TOOL -> MaterialTheme.colorScheme.surfaceVariant
+                                color = when {
+                                    isGroupMember || message.role == MessageRole.ASSISTANT -> MaterialTheme.colorScheme.surface
+                                    message.role == MessageRole.USER -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
                                 },
-                                border = if (message.role == MessageRole.ASSISTANT) {
+                                border = if (message.role == MessageRole.ASSISTANT || isGroupMember) {
                                     BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                                 } else null,
                                 // 用户气泡随内容自适应宽度，最大撑到与 AI 气泡同宽；AI/工具气泡填满可用宽度
@@ -272,8 +285,10 @@ internal fun AgentMessageItem(
                                     Modifier.fillMaxWidth()
                                 }
                             ) {
-                                val textColor = when (message.role) {
-                                    MessageRole.USER -> MaterialTheme.colorScheme.onPrimary
+                                val textColor = when {
+                                    // 群聊成员发言渲染在 surface 气泡上，必须用 onSurface 深色文字；
+                                    // 只有用户自己的右对齐气泡（primary 底）才用 onPrimary。
+                                    isUser -> MaterialTheme.colorScheme.onPrimary
                                     else -> MaterialTheme.colorScheme.onSurface
                                 }
                                 SelectionContainer {
@@ -590,4 +605,33 @@ private fun CompactionFailureCard(message: AgentUIMessage) {
             }
         }
     }
+}
+
+/** 群聊成员发言上方的名字徽标：头像色块 + 成员名。 */
+@Composable
+private fun GroupMemberNameBadge(name: String) {
+    Row(
+        modifier = Modifier.padding(start = Spacing.sm, bottom = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(groupMemberColor(name))
+        )
+        Spacer(Modifier.width(Spacing.xs))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+/** 成员名 → 稳定色（与 GroupAvatar 同规则）。 */
+private fun groupMemberColor(name: String): Color {
+    val hue = ((name.hashCode() % 360) + 360) % 360
+    return Color.hsv(hue.toFloat(), 0.55f, 0.75f)
 }

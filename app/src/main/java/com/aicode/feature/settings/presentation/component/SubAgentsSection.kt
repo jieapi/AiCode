@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,6 +37,9 @@ import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
+import com.aicode.feature.agent.domain.subagent.SubagentPreset
+import com.aicode.feature.settings.domain.model.AIProviderConfig
+import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
@@ -50,6 +54,10 @@ import compose.icons.feathericons.Users
 internal fun SubAgentsSection(
     projectName: String?,
     entries: List<SubAgentUiEntry>,
+    presets: List<SubagentPreset>,
+    providers: List<AIProviderConfig>,
+    modelMetadata: Map<String, ModelMetadata>,
+    onSaveSubagentPresets: (List<SubagentPreset>) -> Unit,
     onDelete: (SubAgentUiEntry) -> Unit,
     onOpenDetail: (SubAgentUiEntry) -> Unit
 ) {
@@ -154,6 +162,53 @@ internal fun SubAgentsSection(
                 }
             }
         }
+
+        // 子代理预设（模型 + 模式提醒）配置区：与自定义子代理定义同页管理。
+        if (entries.isEmpty()) {
+            Spacer(Modifier.height(Spacing.lg))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                    modifier = Modifier.padding(vertical = Spacing.lg)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(Radius.lg)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            FeatherIcons.Users,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.subagents_empty),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = stringResource(R.string.subagents_empty_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(Spacing.md))
+        SubagentPresetsSection(
+            presets = presets,
+            providers = providers,
+            modelMetadata = modelMetadata,
+            onSave = onSaveSubagentPresets
+        )
     }
 }
 

@@ -205,6 +205,7 @@ fun SettingsScreen(
     val compactionModel by viewModel.compactionModel.collectAsStateWithLifecycle()
     val titleProviderId by viewModel.titleProviderId.collectAsStateWithLifecycle()
     val titleModel by viewModel.titleModel.collectAsStateWithLifecycle()
+    val subagentPresets by viewModel.subagentPresets.collectAsStateWithLifecycle()
     val imageGenProviderId by viewModel.imageGenProviderId.collectAsStateWithLifecycle()
     val imageGenModel by viewModel.imageGenModel.collectAsStateWithLifecycle()
     val modelMetadata by viewModel.modelMetadata.collectAsStateWithLifecycle()
@@ -724,6 +725,10 @@ fun SettingsScreen(
                 SettingsSection.SubAgents -> SubAgentsSection(
                     projectName = currentProjectName,
                     entries = subAgents,
+                    presets = subagentPresets,
+                    providers = providers,
+                    modelMetadata = modelMetadata,
+                    onSaveSubagentPresets = { presets -> viewModel.saveSubagentPresets(presets) },
                     onDelete = { subAgentToDelete = it },
                     onOpenDetail = {
                         selectedSubAgent = it

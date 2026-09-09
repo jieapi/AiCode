@@ -102,6 +102,8 @@ data class AgentUIMessage(
     val isBackgroundNotification: Boolean = false,
     val inputTokens: Int = 0,
     val outputTokens: Int = 0,
+    // 仅群聊成员发言：消息发送者（成员 agent 名）；普通消息为 null。
+    val senderName: String? = null,
     // 仅 ASSISTANT 消息：本次调用输入中命中服务端缓存的 token 数，气泡下方据此算缓存命中率。
     val cachedInputTokens: Int = 0
 )

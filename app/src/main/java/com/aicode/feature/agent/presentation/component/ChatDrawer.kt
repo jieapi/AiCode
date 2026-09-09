@@ -77,6 +77,8 @@ import com.aicode.feature.agent.presentation.AgentUIState
 import com.aicode.feature.agent.presentation.BrowseClipboard
 import com.aicode.feature.agent.presentation.FileBrowseState
 import com.aicode.feature.agent.presentation.FileTreeNode
+import com.aicode.feature.agent.presentation.component.groupchat.GroupChatListTab
+import com.aicode.feature.agent.domain.groupchat.GroupChatMember
 import com.aicode.feature.workspace.domain.isValidFileEntryName
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronDown
@@ -136,7 +138,13 @@ fun ChatDrawerContent(
     onCancelPasteOverwrite: () -> Unit,
     onClearClipboard: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // ── 群聊 Tab ──
+    groupRooms: List<ChatSession> = emptyList(),
+    groupMembers: List<GroupChatMember> = emptyList(),
+    onOpenGroupRoom: (String) -> Unit = {},
+    onCreateGroupRoom: (String, List<String>) -> Unit = {_, _ ->},
+    onDeleteGroupRoom: (ChatSession) -> Unit = {}
 ) {
     // tab 与展开状态进 saveable：大屏下侧栏收起后整棵子树会离开组合（见 MainActivity 的
     // SaveableStateProvider），用 remember 存会让每次回到聊天页都重置回「会话」页。
@@ -172,7 +180,8 @@ fun ChatDrawerContent(
             selected = selectedTab,
             labels = listOf(
                 stringResource(R.string.subagent_tab_sessions),
-                stringResource(R.string.drawer_tab_files)
+                stringResource(R.string.drawer_tab_files),
+                stringResource(R.string.drawer_tab_groups)
             ),
             onSelect = { selectedTab = it }
         )
@@ -204,6 +213,13 @@ fun ChatDrawerContent(
                     onCutEntry = onCutEntry,
                     onPasteEntry = onPasteEntry,
                     onClearClipboard = onClearClipboard
+                )
+                else -> GroupChatListTab(
+                    rooms = groupRooms,
+                    onOpenRoom = onOpenGroupRoom,
+                    members = groupMembers,
+                    onCreateRoom = onCreateGroupRoom,
+                    onDeleteRoom = onDeleteGroupRoom
                 )
             }
         }

@@ -63,6 +63,7 @@ import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicode.feature.agent.domain.tool.mode.PlanApprovalRequest
 import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.agent.domain.tool.question.UserQuestionAnswer
+import com.aicode.feature.agent.domain.groupchat.GroupChatCoordinator
 import com.aicode.feature.agent.domain.session.SessionUseCase
 import com.aicode.feature.agent.domain.session.MessagePersistenceUseCase
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -243,7 +244,16 @@ class AIAgentViewModel @Inject constructor(
         .flatMapLatest { path ->
             if (path.isBlank()) flowOf(emptyList())
             else chatSessionDao.getRootSessionsByWorkspace(path)
-                .map { list -> list.map { it.toDomain() } }
+                .map { list -> list.map { it.toDomain() }.filterNot { it.isGroupChat } }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** 群聊房间列表（isGroupChat=1 的根会话），供侧边栏「群聊」Tab 展示。 */
+    val groupRooms: StateFlow<List<ChatSession>> = _currentWorkspace
+        .flatMapLatest { path ->
+            if (path.isBlank()) flowOf(emptyList())
+            else chatSessionDao.getRootSessionsByWorkspace(path)
+                .map { list -> list.map { it.toDomain() }.filter { it.isGroupChat } }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -628,6 +638,51 @@ class AIAgentViewModel @Inject constructor(
         _streamingReasonings.value = if (text == null) _streamingReasonings.value - sessionId else _streamingReasonings.value + (sessionId to text)
     }
 
+    /**
+     * 子代理实时状态数据：组合会话状态、运行中工具、流式输出，供状态卡片展示。
+     * 只在有活跃子代理时更新，通过 subSessionsByParent 过滤出所有子会话。
+     */
+    data class SubAgentStatus(
+        val sessionId: String,
+        val title: String,
+        val state: AgentUIState,
+        val currentTool: String? = null,
+        val toolProgress: String = "",
+        val lastMessage: String = "",
+        val isRunning: Boolean = false
+    )
+
+    val subAgentStatuses: StateFlow<Map<String, SubAgentStatus>> = combine(
+        subSessionsByParent,
+        _agentStates,
+        _runningTools,
+        _streamingTexts,
+        _streamingReasonings
+    ) { subsMap, agentStates, runningTools, streamingTexts, streamingReasonings ->
+        // 先构建 id -> title 映射，避免每次 O(n) 查找
+        val titleMap = subsMap.values.flatten().associateBy({ it.id }, { it.title })
+        val allSubIds = titleMap.keys
+        allSubIds.associateWith { subId ->
+            val state = agentStates[subId] ?: AgentUIState.Idle
+            val tools = runningTools[subId]?.values?.toList() ?: emptyList()
+            val currentTool = tools.firstOrNull()?.toolName
+            val toolProgress = tools.firstOrNull()?.text ?: ""
+            val streamingText = streamingTexts[subId] ?: ""
+            val streamingReasoning = streamingReasonings[subId] ?: ""
+            val title = titleMap[subId] ?: "子代理"
+
+            SubAgentStatus(
+                sessionId = subId,
+                title = title,
+                state = state,
+                currentTool = currentTool,
+                toolProgress = toolProgress.ifBlank { streamingText.ifBlank { streamingReasoning } },
+                lastMessage = streamingText,
+                isRunning = state is AgentUIState.Loading || state is AgentUIState.Streaming
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     /** 按 sessionId 维护的重试状态；流式恢复或结束后置 null。 */
     private val _retryStates = MutableStateFlow<Map<String, RetryState?>>(emptyMap())
     val retryState: StateFlow<RetryState?> = _currentSessionId
@@ -852,8 +907,15 @@ class AIAgentViewModel @Inject constructor(
         // 子代理运行中不允许重复启动（同一会话已有活跃 job）
         if (sessionJobs[event.subSessionId]?.isActive == true) return
 
+        // 模式提醒（如有）拼到请求末尾，作为子代理第一条消息的补充约束
+        val request = if (event.modeReminders.isNotEmpty()) {
+            event.detail + "\n\n" + event.modeReminders.joinToString("\n\n")
+        } else {
+            event.detail
+        }
+
         executeAgentRequestStream(
-            request = event.detail,
+            request = request,
             projectRoot = parentSession.workspacePath,
             targetSessionId = event.subSessionId,
             skipTitleUpdate = true
@@ -867,6 +929,11 @@ class AIAgentViewModel @Inject constructor(
      */
     private fun enqueueSubAgentNotification(event: SubAgentEvent) {
         viewModelScope.launch {
+            // 群聊房间不跑主 workflow：成员完成通知由 GroupChatCoordinator 接管（读回复落房间），
+            // 不注入房间会话，避免触发房间自己的 agent 循环。
+            val parent = sessionUseCase.getSessionById(event.parentSessionId)
+            if (parent != null && parent.isGroupChat) return@launch
+
             val title = sessionUseCase.getSessionById(event.subSessionId)?.title ?: "子代理"
             notifyParentSubAgentFinished(
                 parentSessionId = event.parentSessionId,
@@ -1114,10 +1181,16 @@ class AIAgentViewModel @Inject constructor(
                 messagePersistenceUseCase.persist(sessionId, MessageRole.USER, request, id = userMsgId, attachments = inputAttachments)
                 checkpointManager.createCheckpoint(sessionId, userMsgId, request)
                 if (isFirst && !skipTitleUpdate) {
-                    sessionUseCase.updateTitle(sessionId, sessionUseCase.deriveTitle(request))
-                    // 后台异步用 LLM 生成更贴切的标题替换临时标题；失败/取不到时保留临时标题
-                    viewModelScope.launch {
-                        agentWorkflow.generateTitle(sessionId, request)?.let { sessionUseCase.updateTitle(sessionId, it) }
+                    // 群聊 Bot Chat 私信会话以固定标题作为身份标识，参与自动命名会改写掉它，
+                    // 导致群聊私信链路（按 title 匹配）断裂、历史会话丢失，故跳过。
+                    val hasFixedTitle = sessionUseCase.getSessionById(sessionId)?.title ==
+                        GroupChatCoordinator.BOT_CHAT_TITLE
+                    if (!hasFixedTitle) {
+                        sessionUseCase.updateTitle(sessionId, sessionUseCase.deriveTitle(request))
+                        // 后台异步用 LLM 生成更贴切的标题替换临时标题；失败/取不到时保留临时标题
+                        viewModelScope.launch {
+                            agentWorkflow.generateTitle(sessionId, request)?.let { sessionUseCase.updateTitle(sessionId, it) }
+                        }
                     }
                 }
             }
@@ -1510,6 +1583,18 @@ class AIAgentViewModel @Inject constructor(
             setStreamingReasoning(sessionId, null)
             setCompacting(sessionId, false)
             setRetryState(sessionId, null)
+            // 若是子代理会话被侧边栏停止：向事件总线广播 STOPPED，清理并发槽位并让 wait() 感知
+            // （task stop 走总线事件回调进来时会二次广播，但 job 已取消、emit 幂等，无副作用）
+            val parentId = sessionUseCase.getSessionById(sessionId)?.parentId
+            if (parentId != null) {
+                subAgentEventBus.emit(
+                    SubAgentEvent(
+                        subSessionId = sessionId,
+                        parentSessionId = parentId,
+                        type = SubAgentEventType.STOPPED
+                    )
+                )
+            }
             // 点「停止」= 跳过当前轮，立即执行队列下一条
             processNextInQueue(sessionId)
         }
@@ -1694,6 +1779,8 @@ class AIAgentViewModel @Inject constructor(
             _runningTools.value = _runningTools.value - sid
             _retryStates.value = _retryStates.value - sid
             _queuedRequests.value = _queuedRequests.value - sid
+            // 清理子代理事件总线的活跃/结果记录，避免已删除的子代理继续占用并发槽位
+            subAgentEventBus.forget(sid)
             _inputDrafts.value = _inputDrafts.value - sid
             draftPrefs.edit().remove(sid).apply()
             agentNotificationCenter.clear(sid)

@@ -21,7 +21,19 @@ class FileMigration(
                         "executed_at INTEGER)"
             )
             for (sql in sqlStatements) {
-                db.execSQL(sql)
+                if (sql.isNotBlank()) {
+                    try {
+                        db.execSQL(sql)
+                    } catch (e: Exception) {
+                        // 历史迁移脚本存在重复编号/重复列（如 44 曾拆成两个文件），
+                        // 重复加列对已有库是常见情况，跳过并记录，避免整个迁移链崩溃。
+                        if (e.message?.contains("duplicate column name") == true) {
+                            FileLogger.w("MigrationLoader", "Skip $scriptName: column already exists, sql: $sql")
+                        } else {
+                            throw e
+                        }
+                    }
+                }
             }
             db.execSQL(
                 "INSERT INTO migration_history (version, script_name, executed_at) VALUES (?, ?, ?)",

@@ -42,7 +42,10 @@ object AgentDefinitionParser {
             disallowedTools = stringList(frontmatter["disallowedTools"]),
             inject = parseInject(frontmatter["inject"]),
             prompt = prompt,
-            file = file
+            file = file,
+            title = frontmatter["title"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            avatarColor = frontmatter["avatarColor"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            avatarShape = frontmatter["avatarShape"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
         )
     }
 

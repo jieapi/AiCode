@@ -18,6 +18,8 @@ import com.aicode.feature.agent.domain.container.ContainerOsDetector
 import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.container.RootfsSource
+import com.aicode.feature.agent.domain.subagent.SubagentPreset
+import com.aicode.feature.settings.data.repository.SubagentModelSettingsRepository
 import com.aicode.feature.agent.domain.mcp.McpConfigRepository
 import com.aicode.feature.agent.domain.mcp.McpManager
 import com.aicode.feature.agent.domain.mcp.McpScope
@@ -290,6 +292,7 @@ class SettingsViewModel @Inject constructor(
     private val imageGenModelSettingsRepository: ImageGenModelSettingsRepository,
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val titleModelSettingsRepository: TitleModelSettingsRepository,
+    private val subagentModelSettingsRepository: SubagentModelSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val containerSettingsRepository: ContainerSettingsRepository,
     private val containerImageCatalog: ContainerImageCatalog,
@@ -408,6 +411,10 @@ class SettingsViewModel @Inject constructor(
 
     private val _titleModel = MutableStateFlow("")
     val titleModel: StateFlow<String> = _titleModel.asStateFlow()
+
+    /** 子代理预设列表：每个预设独立配置模型 + 模式提醒，AI 批量创建按序自动分配。 */
+    private val _subagentPresets = MutableStateFlow<List<SubagentPreset>>(emptyList())
+    val subagentPresets: StateFlow<List<SubagentPreset>> = _subagentPresets.asStateFlow()
 
     /** 生图专用模型选择：providerId 为空即未配置（生图不跟随聊天模型）。 */
     private val _imageGenProviderId = MutableStateFlow("")
@@ -657,6 +664,12 @@ class SettingsViewModel @Inject constructor(
             launch {
                 titleModelSettingsRepository.modelFlow.collectLatest {
                     _titleModel.value = it
+                }
+            }
+
+            launch {
+                subagentModelSettingsRepository.presetsFlow.collectLatest {
+                    _subagentPresets.value = it
                 }
             }
 
@@ -1553,6 +1566,13 @@ class SettingsViewModel @Inject constructor(
     fun clearTitleModel() {
         viewModelScope.launch {
             titleModelSettingsRepository.clear()
+        }
+    }
+
+    /** 整表保存子代理预设列表（列表编辑用，保持顺序）。 */
+    fun saveSubagentPresets(presets: List<SubagentPreset>) {
+        viewModelScope.launch {
+            subagentModelSettingsRepository.savePresets(presets)
         }
     }
 

@@ -68,8 +68,10 @@ import com.aicode.core.ui.isExpandedWidth
 import com.aicode.core.ui.pageEnter
 import com.aicode.core.ui.pageExit
 import com.aicode.feature.agent.presentation.AIAgentViewModel
+import com.aicode.feature.agent.presentation.GroupChatViewModel
 import com.aicode.feature.agent.presentation.component.AIChatPanel
 import com.aicode.feature.agent.presentation.component.ChatDrawerContent
+import com.aicode.feature.agent.presentation.component.groupchat.GroupChatRoomScreen
 import com.aicode.feature.editor.presentation.CodeEditorScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
@@ -338,6 +340,8 @@ fun AppNavigation() {
     val browseState by agentViewModel.browseState.collectAsStateWithLifecycle()
     val browseClipboard by agentViewModel.browseClipboard.collectAsStateWithLifecycle()
     val pasteConflict by agentViewModel.pasteConflict.collectAsStateWithLifecycle()
+    val groupRooms by agentViewModel.groupRooms.collectAsStateWithLifecycle()
+    val groupChatViewModel: GroupChatViewModel = hiltViewModel()
 
     // ── 导出会话：SAF 保存文件 ──
     var pendingExportSessionId by remember { mutableStateOf<String?>(null) }
@@ -483,7 +487,25 @@ fun AppNavigation() {
             onNavigateToSettings = {
                 if (!permanentDrawer) scope.launch { drawerState.close() }
                 navController.navigate("settings")
-            }
+            },
+            // ── 群聊 Tab ──
+            groupRooms = groupRooms,
+            groupMembers = groupChatViewModel.availableMembers.collectAsStateWithLifecycle().value,
+            onOpenGroupRoom = { roomId ->
+                if (!permanentDrawer) scope.launch { drawerState.close() }
+                navController.navigate("group-chat/$roomId")
+            },
+            onCreateGroupRoom = { name, memberKeys ->
+                scope.launch {
+                    val workspace = currentWorkspace?.path ?: return@launch
+                    val roomId = groupChatViewModel.createRoom(name, memberKeys, workspace)
+                    if (roomId != null) {
+                        if (!permanentDrawer) drawerState.close()
+                        navController.navigate("group-chat/$roomId")
+                    }
+                }
+            },
+            onDeleteGroupRoom = { room -> groupChatViewModel.deleteRoom(room.id) }
         )
     }
 
@@ -585,6 +607,21 @@ fun AppNavigation() {
                 val credentialViewModel: com.aicode.feature.credentials.presentation.CredentialViewModel = hiltViewModel()
                 CredentialScreen(
                     viewModel = credentialViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(
+                route = "group-chat/{roomId}",
+                arguments = listOf(
+                    navArgument("roomId") {
+                        type = NavType.StringType
+                    }
+                )
+            ) { entry ->
+                val roomId = entry.arguments?.getString("roomId").orEmpty()
+                GroupChatRoomScreen(
+                    roomId = roomId,
+                    viewModel = groupChatViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

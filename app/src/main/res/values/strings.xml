@@ -11,6 +11,18 @@
     <string name="settings_vision_model">识图模型</string>
     <string name="settings_compaction_model">压缩模型</string>
     <string name="settings_title_model">标题总结模型</string>
+    <string name="settings_subagent_model">子代理模型</string>
+    <string name="settings_subagent_preset_name">名称</string>
+    <string name="settings_subagent_reminder">模式提醒</string>
+    <string name="subagent_presets_empty">暂无子代理预设</string>
+    <string name="subagent_presets_empty_hint">点击下方「添加子代理」创建第一个预设，AI 批量派发子代理时按顺序自动分配。</string>
+    <string name="subagent_preset_add">添加子代理</string>
+    <string name="subagent_reminder_none">无</string>
+    <string name="subagent_reminder_auto">自动模式（AUTO）</string>
+    <string name="subagent_reminder_plan">计划模式（PLAN）</string>
+    <string name="subagent_reminder_custom">自定义提醒</string>
+    <string name="subagent_reminder_custom_empty">暂无自定义提醒，点下方添加。</string>
+    <string name="subagent_reminder_custom_hint">如：你是代码审查员，只报告问题不修改</string>
     <string name="settings_image_gen_model">生图模型</string>
     <string name="settings_mcp">MCP 服务器</string>
     <string name="settings_skills">技能</string>
@@ -120,7 +132,7 @@
     <string name="settings_refresh_logs">刷新日志</string>    <string name="settings_vision_follow_chat">跟随当前聊天模型</string>
     <string name="settings_compaction_follow_chat">跟随当前聊天模型</string>
     <string name="settings_title_follow_chat">跟随当前聊天模型</string>
-    <string name="settings_image_gen_unconfigured">未配置</string>    <string name="settings_theme_title">外观主题</string>    <string name="theme_auto">自动</string>
+    <string name="settings_subagent_follow_chat">继承父会话模型</string>    <string name="settings_image_gen_unconfigured">未配置</string>    <string name="settings_theme_title">外观主题</string>    <string name="theme_auto">自动</string>
     <string name="theme_dark">深色</string>
     <string name="theme_light">浅色</string>
     <string name="theme_mode_section">明暗模式</string>
@@ -262,6 +274,8 @@
     <string name="common_local">本地</string>
     <string name="common_model">模型</string>
     <string name="common_add">添加</string>
+    <string name="common_move_up">上移</string>
+    <string name="common_move_down">下移</string>
     <string name="credential_add">添加凭据</string>
     <string name="common_username">用户名</string>
     <string name="common_got_it">知道了</string>
@@ -446,7 +460,60 @@
     <string name="drawer_tab_files">文件</string>
     <string name="drawer_expand_subagents">展开子代理</string>
     <string name="drawer_collapse_subagents">收起子代理</string>
-    <string name="file_browser_up">上一级</string>
+    <string name="subagent_status_running">运行中</string>
+    <string name="subagent_status_completed">已完成</string>
+    <string name="subagent_status_failed">失败</string>
+    <string name="subagent_status_idle">空闲</string>
+    <string name="subagent_stop">停止</string>
+    <string name="subagent_view_detail">查看详情</string>
+    <string name="subagent_current_tool">正在执行</string>
+
+    <!-- Group Chat -->
+    <string name="drawer_tab_groups">群聊</string>
+    <string name="group_chat_new_room">新建群聊</string>
+    <string name="group_chat_room_name">房间名</string>
+    <string name="group_chat_pick_members">选择成员（1-%1$d 个）</string>
+    <string name="group_chat_no_members">暂无成员，请选择</string>
+    <string name="group_chat_no_rooms">暂无群聊房间</string>
+    <string name="group_chat_create">创建</string>
+    <string name="group_chat_room_members">成员</string>
+    <string name="group_chat_thinking">正在思考…</string>
+    <string name="group_chat_room_settled">本轮已结束</string>
+    <string name="group_chat_stop_room">停止房间</string>
+    <string name="group_chat_release_all">全部恢复</string>
+    <string name="group_chat_member_held">已暂停</string>
+    <string name="group_chat_room_created">群聊房间已创建</string>
+    <string name="group_chat_room_name_required">请输入房间名</string>
+    <string name="group_chat_members_required">请至少选择 1 个成员</string>
+    <string name="group_chat_room_too_many">群聊最多 %1$d 个成员</string>
+    <string name="group_chat_input_hint">@member 提及成员，@all 全员；发送消息开始一轮群聊</string>
+    <string name="group_chat_pick_member_hint">选择成员</string>
+    <string name="group_chat_pick_member_inserted">已插入 @%1$s</string>
+    <string name="group_chat_routines">定时任务</string>
+    <string name="group_chat_routine_add">添加定时任务</string>
+    <string name="group_chat_routine_new">新建定时任务</string>
+    <string name="group_chat_routine_member">执行成员</string>
+    <string name="group_chat_routine_schedule">调度表达式</string>
+    <string name="group_chat_routine_schedule_hint">every 30m / every 2h / daily 09:30</string>
+    <string name="group_chat_routine_instruction">指令</string>
+    <string name="group_chat_routine_instruction_hint">每次触发时让成员执行的事，如：检查今日 TODO 并向用户汇报</string>
+    <string name="group_chat_routine_save">保存</string>
+    <string name="group_chat_routine_schedule_invalid">调度表达式无效，示例：every 30m、every 2h、daily 09:30</string>
+    <string name="group_chat_routine_empty">暂无定时任务</string>
+    <string name="group_chat_routine_run">运行一次</string>
+    <string name="group_chat_routine_delete">删除定时任务</string>
+    <string name="group_chat_routine_member_required">请选择执行成员</string>
+    <string name="group_chat_routine_instruction_required">请输入指令</string>
+    <string name="group_chat_routine_saved">定时任务已创建</string>
+    <string name="group_chat_routine_min_interval_hint">周期任务最短 15 分钟触发一次</string>
+    <string name="group_chat_delete_room">删除群聊</string>
+    <string name="group_chat_delete_room_confirm">确定删除群聊「%1$s」吗？将同时删除成员会话与定时任务，不可恢复。</string>
+    <string name="group_chat_needs_user">有成员 @ 了你，等待你的介入</string>
+    <string name="group_chat_manage_members">管理成员</string>
+    <string name="group_chat_members_current">当前成员</string>
+    <string name="group_chat_members_addable">添加成员</string>
+    <string name="group_chat_member_remove">移除成员</string>
+    <string name="group_chat_member_add">添加成员</string>    <string name="file_browser_up">上一级</string>
     <string name="file_browser_empty">空目录</string>
     <string name="file_browser_error">读取目录失败</string>
     <string name="file_browser_refresh">刷新</string>
@@ -884,7 +951,6 @@
     <string name="subagent_editor_none">无</string>
     <string name="subagent_editor_clear">清空</string>
     <string name="subagent_prompt_hint">写清它的角色、工作方式与产出要求</string>
-    <string name="subagent_no_models">暂无可用模型。请先在「AI 提供商」中添加并配置模型。</string>
     <string name="subagent_editor_error_invalid_name">名称不合法：不能为空，也不能包含路径分隔符等特殊字符</string>
     <string name="subagent_editor_error_empty_prompt">提示词正文不能为空</string>
     <string name="subagent_editor_error_name_conflict">该作用域下已存在同名子代理</string>
@@ -1163,6 +1229,7 @@
     <!-- Compaction Model -->
     <string name="compaction_no_models">暂无可用模型。请在「AI 提供商」中添加并配置模型后再选压缩专用模型。</string>
     <string name="title_no_models">暂无可用模型。请在「AI 提供商」中添加并配置模型后再选标题总结专用模型。</string>
+    <string name="subagent_no_models">暂无可用模型。请在「AI 提供商」中添加并配置模型后再选子代理专用模型。</string>
 
     <!-- Image Generation Model -->
     <string name="image_gen_no_models">暂无可用模型。请在「AI 提供商」中添加并配置模型后（需支持图像输出，如 gpt-image-1 / dall-e-3），再选生图模型。</string>

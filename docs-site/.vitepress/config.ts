@@ -113,6 +113,7 @@ export default defineConfig({
             { text: '聊天界面导览', link: '/guide/chat' },
             { text: '三种模式（Build / Plan / Auto）', link: '/guide/modes' },
             { text: '检查点与撤销', link: '/guide/checkpoint' },
+            { text: '群聊协作', link: '/guide/group-chat' },
             { text: '终端', link: '/guide/terminal' },
             { text: '文件浏览与代码编辑', link: '/guide/files' },
             { text: 'Git 版本管理', link: '/guide/git' },

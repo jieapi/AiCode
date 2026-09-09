@@ -55,6 +55,9 @@ enum class InjectPart(val token: String) {
  * @param inject 要注入的提示词片段
  * @param prompt agent 自身的系统提示词（正文）
  * @param file 定义文件，供设置页展示与删除
+ * @param title 群聊显示名（可选）；缺省用 [name]
+ * @param avatarColor 头像色相（可选，如 "#E8505B" 或 "hsl:120"）；缺省按名字哈希确定
+ * @param avatarShape 头像形状（可选，如 circle/squircle/hexagon）；缺省 circle
  */
 data class AgentDefinition(
     val name: String,
@@ -66,10 +69,15 @@ data class AgentDefinition(
     val disallowedTools: List<String> = emptyList(),
     val inject: Set<InjectPart> = DEFAULT_INJECT,
     val prompt: String,
-    val file: File? = null
+    val file: File? = null,
+    val title: String? = null,
+    val avatarColor: String? = null,
+    val avatarShape: String? = null
 ) {
     /**
-     * 按白名单/黑名单裁剪工具名集合。`task` 永远被剔除——子代理不能嵌套派子代理。
+     * 按白名单/黑名单裁剪工具名集合。`task` 永远被剔除——子代理不能嵌套派子代理；
+     * `group_message` 永远保留——群聊成员由自定义 agent 定义驱动时，私信工具不能被
+     * 定义里的 tools 白名单滤掉（非群聊场景调用会返回 NOT_GROUP_MEMBER，模型自行理解）。
      *
      * 黑名单先生效，再与白名单取交集；支持 `mcp__server__*` 形式的通配，
      * 以便一次禁掉某个 MCP server 的全部工具。
@@ -81,7 +89,8 @@ data class AgentDefinition(
         } else {
             afterDeny.filter { name -> allowedTools.any { matches(it, name) } }
         }
-        return afterAllow.filterNot { it == NESTED_TOOL }
+        val filtered = afterAllow.filterNot { it == NESTED_TOOL }
+        return if (GROUP_MESSAGE_TOOL in all) filtered + GROUP_MESSAGE_TOOL else filtered
     }
 
     private fun matches(pattern: String, toolName: String): Boolean {
@@ -102,6 +111,9 @@ data class AgentDefinition(
 
         /** 子代理不可嵌套派发，其工具集永远剔除该工具。 */
         const val NESTED_TOOL = "task"
+
+        /** 群聊私信工具：定义类子代理的工具集永远保留（群聊成员必用）。 */
+        const val GROUP_MESSAGE_TOOL = "group_message"
     }
 }
 

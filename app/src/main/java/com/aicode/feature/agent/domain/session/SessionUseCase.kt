@@ -81,13 +81,15 @@ class SessionUseCase @Inject constructor(
     }
 
     suspend fun getFirstSessionOfWorkspace(workspacePath: String): ChatSessionEntity? {
-        return chatSessionDao.getRootSessionsByWorkspaceOnce(workspacePath).firstOrNull()
+        return chatSessionDao.getRootSessionsByWorkspaceOnce(workspacePath).firstOrNull { !it.isGroupChat }
     }
 
-    /** 回收工作区下多余的空会话（从未发送过消息），保留 [keepId]；保证列表最多一个空会话。 */
+    /** 回收工作区下多余的空会话（从未发送过消息），保留 [keepId]；保证列表最多一个空会话。
+     *  群聊房间（isGroupChat=1）不参与回收：即使暂无消息也是用户创建的房间，不能自动删除。 */
     suspend fun recycleEmptySessions(workspacePath: String, keepId: String? = null): Int {
         var count = 0
         chatSessionDao.getRootSessionsByWorkspaceOnce(workspacePath).forEach { session ->
+            if (session.isGroupChat) return@forEach
             if (session.id != keepId && !agentMessageDao.hasMessages(session.id)) {
                 deleteSession(session.id)
                 count++

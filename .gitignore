@@ -36,3 +36,11 @@ __pycache__/
 
 # 参考源码（opencode 仓库，仅本地查阅不跟踪）
 opencode/
+
+# 参考源码（hermes bot mode，仅本地查阅不跟踪）
+hermes-agent-main/
+hermes-botmode/
+
+# 临时分析文档（不提交）
+bot_mode_analysis.md
+group_chat_analysis.md

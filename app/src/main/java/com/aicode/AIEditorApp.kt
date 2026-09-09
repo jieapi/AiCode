@@ -13,6 +13,7 @@ import com.aicode.core.util.AILogger
 import com.aicode.core.util.FileLogger
 import net.schmizz.sshj.common.SecurityUtils
 import com.aicode.feature.agent.domain.container.ContainerInstaller
+import com.aicode.feature.agent.domain.groupchat.GroupRoutineWorker
 import com.aicode.feature.agent.domain.mcp.McpManager
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
@@ -244,6 +245,8 @@ class AIEditorApp : Application(), Configuration.Provider {
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。
         mcpManager.start()
+        // 群聊定时任务周期扫描（幂等；最小 15 分钟精度，见 GroupRoutineWorker）。
+        GroupRoutineWorker.schedule(this@AIEditorApp)
         // 启动即监听 mcp.json / permissions.json 的外部直接编辑：改动数秒内刷新设置页列表并重连。
         appScope.launch { mcpConfigRepository.startWatching() }
         appScope.launch { permissionRulesRepository.startWatching() }

@@ -44,7 +44,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
          * 写操作（create/stop）走正常规则评估。
          */
         const val TASK_TOOL = "task"
-        private val TASK_READ_ACTIONS = setOf("read", "list")
+        private val TASK_READ_ACTIONS = setOf("read", "list", "wait", "waitAll")
     }
 
     enum class Verdict { ALLOW, DENY, ASK }

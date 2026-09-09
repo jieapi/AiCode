@@ -164,9 +164,16 @@ data class ChatSessionDto(
     val providerId: String? = null,
     val model: String? = null,
     val isPinned: Boolean = false,
-    /** 子代理会话的父会话 id；丢了它恢复后子会话会变成一堆根会话。 */
+    /** 子代理会话：父会话 id（群聊成员 turn 会话/Bot Chat 的父为房间）；丢了它恢复后子会话会变成一堆根会话。 */
     val parentId: String? = null,
-    val subagentType: String? = null
+    /** 子代理会话：派生子代理的类型（群聊成员为 memberKey）；null 表示普通根会话。 */
+    val subagentType: String? = null,
+    /** 子代理会话：创建时实际命中的预设名（task 显式 preset 或按序自动分配）；null 表示未用预设。 */
+    val presetName: String? = null,
+    /** 群聊房间标记（还原后保持群聊身份与成员配置）。 */
+    val isGroupChat: Boolean = false,
+    /** 群聊房间成员配置 JSON。 */
+    val groupMembersJson: String? = null
 )
 
 @Serializable
@@ -188,7 +195,9 @@ data class AgentMessageDto(
     val isContextSummary: Boolean = false,
     val isCompactionMarker: Boolean = false,
     /** Anthropic thinking / redacted_thinking 内容块的原样快照（JSON 数组文本）。 */
-    val thinkingBlocksJson: String? = null
+    val thinkingBlocksJson: String? = null,
+    /** 群聊成员发言标记（成员 key），null 表示用户/系统消息。 */
+    val senderName: String? = null
 )
 
 @Serializable

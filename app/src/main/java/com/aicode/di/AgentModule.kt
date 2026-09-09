@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aicode.feature.agent.data.local.dao.AgentMessageDao
 import com.aicode.feature.agent.data.local.dao.ChatSessionDao
+import com.aicode.feature.agent.data.local.dao.GroupChatDao
 import com.aicode.feature.agent.data.local.dao.CheckpointDao
 import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicode.feature.agent.data.local.dao.TodoItemDao
@@ -41,6 +42,7 @@ import com.aicode.feature.agent.domain.tool.skill.LoadSkillTool
 import com.aicode.feature.agent.domain.tool.question.AskUserQuestionTool
 import com.aicode.feature.agent.domain.tool.todo.TodoTool
 import com.aicode.feature.agent.domain.tool.subagent.TaskTool
+import com.aicode.feature.agent.domain.tool.groupchat.GroupMessageTool
 import com.aicode.feature.agent.domain.subagent.SubAgentEventBus
 import com.aicode.feature.agent.domain.prompt.SystemPromptProvider
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
@@ -120,6 +122,12 @@ object AgentModule {
     @Singleton
     fun provideChatSessionDao(database: AgentDatabase): ChatSessionDao {
         return database.chatSessionDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideGroupChatDao(database: AgentDatabase): GroupChatDao {
+        return database.groupChatDao()
     }
 
     @Provides
@@ -280,7 +288,8 @@ object AgentModule {
         switchModeTool: SwitchModeTool,
         todoTool: TodoTool,
         memoryTool: MemoryTool,
-        taskTool: TaskTool
+        taskTool: TaskTool,
+        groupMessageTool: GroupMessageTool
     ): ToolRegistry {
         return ToolRegistry().apply {
             register("readFile", readFileTool)
@@ -302,6 +311,7 @@ object AgentModule {
             register("todo", todoTool)
             register("memory", memoryTool)
             register("task", taskTool)
+            register("group_message", groupMessageTool)
         }
     }
 

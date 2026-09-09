@@ -11,6 +11,18 @@
     <string name="settings_vision_model">Vision Model</string>
     <string name="settings_compaction_model">Compaction Model</string>
     <string name="settings_title_model">Title Model</string>
+    <string name="settings_subagent_model">Subagent Model</string>
+    <string name="settings_subagent_preset_name">Name</string>
+    <string name="settings_subagent_reminder">Mode Reminder</string>
+    <string name="subagent_presets_empty">No subagent presets</string>
+    <string name="subagent_presets_empty_hint">Tap "Add Subagent" below to create the first preset. Subagents get presets in order when spawned in batch.</string>
+    <string name="subagent_preset_add">Add Subagent</string>
+    <string name="subagent_reminder_none">None</string>
+    <string name="subagent_reminder_auto">Auto Mode</string>
+    <string name="subagent_reminder_plan">Plan Mode</string>
+    <string name="subagent_reminder_custom">Custom Reminders</string>
+    <string name="subagent_reminder_custom_empty">No custom reminders yet. Tap below to add.</string>
+    <string name="subagent_reminder_custom_hint">e.g. You are a code reviewer, report issues only</string>
     <string name="settings_image_gen_model">Image Generation Model</string>
     <string name="settings_mcp">MCP Servers</string>
     <string name="settings_skills">Skills</string>
@@ -120,7 +132,7 @@
     <string name="settings_refresh_logs">Refresh logs</string>    <string name="settings_vision_follow_chat">Follow current chat model</string>
     <string name="settings_compaction_follow_chat">Follow current chat model</string>
     <string name="settings_title_follow_chat">Follow current chat model</string>
-    <string name="settings_image_gen_unconfigured">Not configured</string>    <string name="settings_theme_title">Appearance</string>    <string name="theme_auto">Auto</string>
+    <string name="settings_subagent_follow_chat">Inherit from parent session</string>    <string name="settings_image_gen_unconfigured">Not configured</string>    <string name="settings_theme_title">Appearance</string>    <string name="theme_auto">Auto</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
     <string name="theme_mode_section">Appearance mode</string>
@@ -262,6 +274,8 @@
     <string name="common_local">Local</string>
     <string name="common_model">Model</string>
     <string name="common_add">Add</string>
+    <string name="common_move_up">Move up</string>
+    <string name="common_move_down">Move down</string>
     <string name="credential_add">Add Credential</string>
     <string name="common_username">Username</string>
     <string name="common_got_it">Got it</string>
@@ -451,6 +465,60 @@
     <string name="drawer_tab_files">Files</string>
     <string name="drawer_expand_subagents">Expand subagents</string>
     <string name="drawer_collapse_subagents">Collapse subagents</string>
+    <string name="subagent_status_running">Running</string>
+    <string name="subagent_status_completed">Completed</string>
+    <string name="subagent_status_failed">Failed</string>
+    <string name="subagent_status_idle">Idle</string>
+    <string name="subagent_stop">Stop</string>
+    <string name="subagent_view_detail">View detail</string>
+    <string name="subagent_current_tool">Executing</string>
+
+    <!-- Group Chat -->
+    <string name="drawer_tab_groups">Groups</string>
+    <string name="group_chat_new_room">New Group Chat</string>
+    <string name="group_chat_room_name">Room name</string>
+    <string name="group_chat_pick_members">Pick members (1-%1$d)</string>
+    <string name="group_chat_no_members">No members, pick some</string>
+    <string name="group_chat_no_rooms">No group chat rooms</string>
+    <string name="group_chat_create">Create</string>
+    <string name="group_chat_room_members">Members</string>
+    <string name="group_chat_thinking">Thinking…</string>
+    <string name="group_chat_room_settled">Round finished</string>
+    <string name="group_chat_stop_room">Stop room</string>
+    <string name="group_chat_release_all">Resume all</string>
+    <string name="group_chat_member_held">Held</string>
+    <string name="group_chat_room_created">Group chat room created</string>
+    <string name="group_chat_room_name_required">Room name required</string>
+    <string name="group_chat_members_required">Pick at least 1 member</string>
+    <string name="group_chat_room_too_many">Up to %1$d members</string>
+    <string name="group_chat_input_hint">@member to mention, @all for everyone; send a message to start a round</string>
+    <string name="group_chat_pick_member_hint">Pick member</string>
+    <string name="group_chat_pick_member_inserted">@%1$s inserted</string>
+    <string name="group_chat_routines">Routines</string>
+    <string name="group_chat_routine_add">Add routine</string>
+    <string name="group_chat_routine_new">New routine</string>
+    <string name="group_chat_routine_member">Member</string>
+    <string name="group_chat_routine_schedule">Schedule</string>
+    <string name="group_chat_routine_schedule_hint">every 30m / every 2h / daily 09:30</string>
+    <string name="group_chat_routine_instruction">Instruction</string>
+    <string name="group_chat_routine_instruction_hint">What the member should do on each trigger, e.g. review today\'s TODOs and report to the user</string>
+    <string name="group_chat_routine_save">Save</string>
+    <string name="group_chat_routine_schedule_invalid">Invalid schedule. Examples: every 30m, every 2h, daily 09:30</string>
+    <string name="group_chat_routine_empty">No routines yet</string>
+    <string name="group_chat_routine_run">Run once</string>
+    <string name="group_chat_routine_delete">Delete routine</string>
+    <string name="group_chat_routine_member_required">Pick a member</string>
+    <string name="group_chat_routine_instruction_required">Instruction required</string>
+    <string name="group_chat_routine_saved">Routine created</string>
+    <string name="group_chat_routine_min_interval_hint">Periodic routines fire at most every 15 minutes</string>
+    <string name="group_chat_delete_room">Delete group chat</string>
+    <string name="group_chat_delete_room_confirm">Delete "%1$s"? Member sessions and routines will be removed. This cannot be undone.</string>
+    <string name="group_chat_needs_user">A member @ you — waiting for your input</string>
+    <string name="group_chat_manage_members">Manage members</string>
+    <string name="group_chat_members_current">Current members</string>
+    <string name="group_chat_members_addable">Add members</string>
+    <string name="group_chat_member_remove">Remove member</string>
+    <string name="group_chat_member_add">Add member</string>
     <string name="file_browser_up">Up one level</string>
     <string name="file_browser_empty">Empty folder</string>
     <string name="file_browser_error">Failed to read folder</string>
@@ -884,7 +952,6 @@
     <string name="subagent_editor_none">None</string>
     <string name="subagent_editor_clear">Clear</string>
     <string name="subagent_prompt_hint">Describe its role, how it should work and what to deliver</string>
-    <string name="subagent_no_models">No models available. Add and configure a model under AI Providers first.</string>
     <string name="subagent_editor_error_invalid_name">Invalid name: it cannot be empty or contain path separators and other special characters</string>
     <string name="subagent_editor_error_empty_prompt">The agent prompt cannot be empty</string>
     <string name="subagent_editor_error_name_conflict">A subagent with this name already exists in this scope</string>
@@ -1164,6 +1231,7 @@
     <!-- Compaction Model -->
     <string name="compaction_no_models">No models available. Please add and configure a model in "AI Providers" before selecting a dedicated compaction model.</string>
     <string name="title_no_models">No models available. Please add and configure a model in "AI Providers" before selecting a dedicated title model.</string>
+    <string name="subagent_no_models">No models available. Please add and configure a model in "AI Providers" before selecting a dedicated subagent model.</string>
 
     <!-- Image Generation Model -->
     <string name="image_gen_no_models">No models available. Please add and configure a model in "AI Providers" (must support image output, e.g. gpt-image-1 / dall-e-3) before selecting an image generation model.</string>

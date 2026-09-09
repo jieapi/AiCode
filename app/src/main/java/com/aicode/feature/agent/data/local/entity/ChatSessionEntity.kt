@@ -28,7 +28,13 @@ data class ChatSessionEntity(
     /** 子代理会话：父会话 id；null 表示普通根会话。 */
     val parentId: String? = null,
     /** 子代理会话：派生子代理的类型（如 coder / researcher）；null 表示普通根会话。 */
-    val subagentType: String? = null
+    val subagentType: String? = null,
+    /** 子代理会话：创建时实际命中的预设名（task 显式 preset 或按序自动分配）；null 表示未用预设（继承主会话）。 */
+    val presetName: String? = null,
+    /** 群聊房间标记：1 表示该会话是一个群聊房间（成员发言以 USER+senderName 落此会话）。 */
+    val isGroupChat: Boolean = false,
+    /** 群聊房间成员配置（JSON 编码的 List<GroupChatMember>）；非房间会话为 null。 */
+    val groupMembersJson: String? = null
 ) {
     fun toDomain(): ChatSession = ChatSession(
         id = id,
@@ -45,7 +51,10 @@ data class ChatSessionEntity(
         lastInputTokens = lastInputTokens,
         isPinned = isPinned,
         parentId = parentId,
-        subagentType = subagentType
+        subagentType = subagentType,
+        presetName = presetName,
+        isGroupChat = isGroupChat,
+        groupMembersJson = groupMembersJson
     )
 
     companion object {
@@ -64,7 +73,10 @@ data class ChatSessionEntity(
             lastInputTokens = session.lastInputTokens,
             isPinned = session.isPinned,
             parentId = session.parentId,
-            subagentType = session.subagentType
+            subagentType = session.subagentType,
+            presetName = session.presetName,
+            isGroupChat = session.isGroupChat,
+            groupMembersJson = session.groupMembersJson
         )
     }
 }
