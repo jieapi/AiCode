@@ -3,7 +3,7 @@ package com.aicode.feature.workspace.domain.remote
 import com.aicode.feature.workspace.domain.model.RemoteConnection
 import com.aicode.feature.workspace.domain.model.RemoteMount
 import com.aicode.feature.workspace.domain.model.RemoteProtocol
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,7 +50,7 @@ class SyncEngineIgnoreTest {
     }
 
     @Test
-    fun download_skips_custom_ignored_directories() = runBlocking {
+    fun download_skips_custom_ignored_directories() = runTest {
         val client = FakeSyncClient(
             remoteFiles = mapOf(
                 remoteRoot to listOf(
@@ -68,7 +68,7 @@ class SyncEngineIgnoreTest {
     }
 
     @Test
-    fun download_applies_gitignore_star_ext() = runBlocking {
+    fun download_applies_gitignore_star_ext() = runTest {
         tempFolder.newFile(".gitignore").writeText("*.log\n")
         val client = FakeSyncClient(
             remoteFiles = mapOf(
@@ -91,7 +91,7 @@ class SyncEngineIgnoreTest {
     }
 
     @Test
-    fun download_applies_gitignore_multi_segment_pattern() = runBlocking {
+    fun download_applies_gitignore_multi_segment_pattern() = runTest {
         tempFolder.newFile(".gitignore").writeText("build/*.log\n")
         val client = FakeSyncClient(
             remoteFiles = mapOf(
@@ -109,7 +109,7 @@ class SyncEngineIgnoreTest {
     }
 
     @Test
-    fun upload_skips_custom_ignored_paths() = runBlocking {
+    fun upload_skips_custom_ignored_paths() = runTest {
         tempFolder.newFile("keep.txt").writeText("keep")
         File(tempFolder.newFolder("node_modules", "pkg"), "index.js").writeText("x")
         File(tempFolder.newFolder("dist"), "bundle.js").writeText("y")
@@ -122,7 +122,7 @@ class SyncEngineIgnoreTest {
     }
 
     @Test
-    fun upload_applies_gitignore() = runBlocking {
+    fun upload_applies_gitignore() = runTest {
         tempFolder.newFile(".gitignore").writeText("*.bak\n")
         tempFolder.newFile("real.txt").writeText("real")
         tempFolder.newFile("junk.bak").writeText("junk")

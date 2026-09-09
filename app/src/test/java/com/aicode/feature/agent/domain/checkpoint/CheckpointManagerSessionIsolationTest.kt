@@ -6,7 +6,7 @@ import com.aicode.feature.agent.data.local.entity.CheckpointEntity
 import com.aicode.feature.agent.data.local.entity.CheckpointFileSnapshotEntity
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.FileEntry
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,7 +38,7 @@ class CheckpointManagerSessionIsolationTest {
     }
 
     @Test
-    fun restoringOtherSession_doesNotRevertModifiedFile() = runBlocking {
+    fun restoringOtherSession_doesNotRevertModifiedFile() = runTest {
         val path = File(workspace, "a.txt").apply { writeText("original") }.absolutePath
 
         manager.createCheckpoint("sessionA", "msgA", "A 的请求")
@@ -55,7 +55,7 @@ class CheckpointManagerSessionIsolationTest {
     }
 
     @Test
-    fun restoringOtherSession_doesNotDeleteCreatedFile() = runBlocking {
+    fun restoringOtherSession_doesNotDeleteCreatedFile() = runTest {
         val path = File(workspace, "new.txt").absolutePath
 
         manager.createCheckpoint("sessionA", "msgA", "A 的请求")
@@ -71,7 +71,7 @@ class CheckpointManagerSessionIsolationTest {
     }
 
     @Test
-    fun restoringOwnSession_revertsAndDeletes() = runBlocking {
+    fun restoringOwnSession_revertsAndDeletes() = runTest {
         val modified = File(workspace, "m.txt").apply { writeText("original") }.absolutePath
         val created = File(workspace, "c.txt").absolutePath
 
@@ -91,7 +91,7 @@ class CheckpointManagerSessionIsolationTest {
     }
 
     @Test
-    fun snapshotsAreScopedToOwningSession() = runBlocking {
+    fun snapshotsAreScopedToOwningSession() = runTest {
         val pathA = File(workspace, "a.txt").apply { writeText("a") }.absolutePath
         val pathB = File(workspace, "b.txt").apply { writeText("b") }.absolutePath
 
@@ -106,7 +106,7 @@ class CheckpointManagerSessionIsolationTest {
     }
 
     @Test
-    fun clearingSessionDropsItsActiveCheckpoint() = runBlocking {
+    fun clearingSessionDropsItsActiveCheckpoint() = runTest {
         val path = File(workspace, "a.txt").apply { writeText("original") }.absolutePath
         val cpA = manager.createCheckpoint("sessionA", "msgA", "A 的请求")
 

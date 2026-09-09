@@ -9,7 +9,7 @@ import com.aicode.feature.agent.data.remote.anthropic.AnthropicStopDetails
 import com.aicode.feature.agent.data.remote.anthropic.AnthropicUsage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.tool.ToolCall
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import okhttp3.ResponseBody
 import org.junit.Assert.assertEquals
@@ -75,7 +75,7 @@ class AnthropicAdapterTest {
     private fun toolCall(id: String) = ToolCall(id = id, name = "readFile", arguments = JsonObject(emptyMap()))
 
     @Test
-    fun max_tokens_uses_model_metadata_output_limit() = runBlocking {
+    fun max_tokens_uses_model_metadata_output_limit() = runTest {
         val api = FakeApi(response())
         adapter(api, maxOutput = 64000).complete("sys", listOf(AgentMessage.UserMessage(content = "hi")))
 
@@ -83,7 +83,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun max_tokens_falls_back_when_metadata_missing() = runBlocking {
+    fun max_tokens_falls_back_when_metadata_missing() = runTest {
         val api = FakeApi(response())
         adapter(api, maxOutput = null).complete("sys", listOf(AgentMessage.UserMessage(content = "hi")))
 
@@ -91,7 +91,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun max_tokens_leaves_room_for_content_above_thinking_budget() = runBlocking {
+    fun max_tokens_leaves_room_for_content_above_thinking_budget() = runTest {
         val api = FakeApi(response())
         // 元数据上限比思考预算还小时不能直接用：max_tokens 必须大于 budget_tokens，否则服务端 400。
         adapter(api, maxOutput = 2048).complete(
@@ -105,7 +105,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun thinking_and_redacted_blocks_are_snapshotted_in_order() = runBlocking {
+    fun thinking_and_redacted_blocks_are_snapshotted_in_order() = runTest {
         val api = FakeApi(
             response(
                 content = listOf(
@@ -130,7 +130,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun stop_details_and_cache_creation_are_surfaced() = runBlocking {
+    fun stop_details_and_cache_creation_are_surfaced() = runTest {
         val api = FakeApi(
             response(
                 content = emptyList(),
@@ -154,7 +154,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun assistant_history_replays_thinking_snapshot_verbatim() = runBlocking {
+    fun assistant_history_replays_thinking_snapshot_verbatim() = runTest {
         val api = FakeApi(response())
         val snapshot = """[{"type":"thinking","thinking":"上轮思考","signature":"sig-a"},""" +
             """{"type":"redacted_thinking","data":"opaque-blob"}]"""
@@ -178,7 +178,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun assistant_history_falls_back_to_signature_block_without_snapshot() = runBlocking {
+    fun assistant_history_falls_back_to_signature_block_without_snapshot() = runTest {
         val api = FakeApi(response())
         adapter(api).complete(
             "sys",
@@ -200,7 +200,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun assistant_history_sends_no_thinking_block_when_nothing_stored() = runBlocking {
+    fun assistant_history_sends_no_thinking_block_when_nothing_stored() = runTest {
         val api = FakeApi(response())
         adapter(api).complete(
             "sys",
@@ -215,7 +215,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun parallel_tool_results_go_into_one_user_message() = runBlocking {
+    fun parallel_tool_results_go_into_one_user_message() = runTest {
         val api = FakeApi(response())
         adapter(api).complete(
             "sys",
@@ -241,7 +241,7 @@ class AnthropicAdapterTest {
     }
 
     @Test
-    fun user_message_keeps_cache_breakpoint_on_last_text_block() = runBlocking {
+    fun user_message_keeps_cache_breakpoint_on_last_text_block() = runTest {
         val api = FakeApi(response())
         adapter(api).complete("sys", listOf(AgentMessage.UserMessage(content = "hi")))
 

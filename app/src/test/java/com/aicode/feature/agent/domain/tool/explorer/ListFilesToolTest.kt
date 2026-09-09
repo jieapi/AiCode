@@ -3,7 +3,7 @@ package com.aicode.feature.agent.domain.tool.explorer
 import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.FileEntry
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -58,8 +58,8 @@ class ListFilesToolTest {
         override fun move(path: String, newPath: String, overwrite: Boolean) = throw UnsupportedOperationException()
     }
 
-    private fun runList(args: String): ToolResult = runBlocking {
-        tool.execute(mapOf("args" to JsonPrimitive(args)))
+    private suspend fun runList(args: String): ToolResult {
+        return tool.execute(mapOf("args" to JsonPrimitive(args)))
     }
 
     private fun contentOf(result: ToolResult): String {
@@ -78,7 +78,7 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_noPipe_listsAllEntries() {
+    fun list_noPipe_listsAllEntries() = runTest {
         val result = runList("-la $dir")
         assertTrue(result is ToolResult.Success)
         assertEquals(6, entriesOf(result)) // . .. a.txt b.txt c.txt .hidden
@@ -88,7 +88,7 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_headLimit_truncatesOutput() {
+    fun list_headLimit_truncatesOutput() = runTest {
         val result = runList("-la $dir | head -2")
         assertTrue(result is ToolResult.Success)
         assertEquals(2, entriesOf(result))
@@ -101,7 +101,7 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_bareHead_defaultsTo10Lines() {
+    fun list_bareHead_defaultsTo10Lines() = runTest {
         val result = runList("-la $dir | head")
         assertTrue(result is ToolResult.Success)
         assertEquals(6, entriesOf(result))
@@ -109,7 +109,7 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_headZero_outputsNothing() {
+    fun list_headZero_outputsNothing() = runTest {
         val result = runList("-la $dir | head -0")
         assertTrue(result is ToolResult.Success)
         assertEquals(0, entriesOf(result))
@@ -117,7 +117,7 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_multipleHeadSegments_takeMinimum() {
+    fun list_multipleHeadSegments_takeMinimum() = runTest {
         val result = runList("-la $dir | head -2 | head -1")
         assertTrue(result is ToolResult.Success)
         assertEquals(1, entriesOf(result))
@@ -125,14 +125,14 @@ class ListFilesToolTest {
     }
 
     @Test
-    fun list_arbitraryPipeCommand_isRejected() {
+    fun list_arbitraryPipeCommand_isRejected() = runTest {
         val result = runList("-la $dir | rm -rf /")
         val error = result as ToolResult.Error
         assertEquals("INVALID_PIPE", error.code)
     }
 
     @Test
-    fun list_pipeWithoutLeadingArgs_isRejected() {
+    fun list_pipeWithoutLeadingArgs_isRejected() = runTest {
         val result = runList("| head -2")
         val error = result as ToolResult.Error
         assertEquals("INVALID_PIPE", error.code)

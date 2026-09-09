@@ -242,7 +242,7 @@ fun joinUrl(baseUrl: String, path: String): String {
     
     // 2. 如果 base 末尾已经是版本号（如 /v3, /v2, /v1beta 等），且待拼路径也以版本段开头（如 v1/chat, v1/models）
     if (lastSegment.matches(VERSION_SEGMENT_REGEX)) {
-        val pathFirstSegment = cleanPath.substringBefore('/', "")
+        val pathFirstSegment = cleanPath.substringBefore('/')
         if (pathFirstSegment.matches(VERSION_SEGMENT_REGEX)) {
             val remainingPath = cleanPath.substringAfter('/', "")
             return if (remainingPath.isNotEmpty()) "$base/$remainingPath" else base
