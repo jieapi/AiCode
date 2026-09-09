@@ -9,9 +9,9 @@ export default {
   extends: DefaultTheme,
   Layout() {
     return h(DefaultTheme.Layout, null, {
-      'layout-top': () => h(TranslationBanner),
+      'home-hero-before': () => h(TranslationBanner),
       'aside-outline-before': () => h(MarkdownActions, { mode: 'aside' }),
-      'doc-before': () => h(MarkdownActions, { mode: 'doc' })
+      'doc-before': () => [h(TranslationBanner), h(MarkdownActions, { mode: 'doc' })]
     })
   },
   enhanceApp({ app }: { app: App }) {
