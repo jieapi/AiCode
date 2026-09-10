@@ -18,6 +18,21 @@ MIRROR=""
 # 基础工具（不参与自定义勾选，始终安装）：git/ripgrep 是 AI 工作流与版本管理基础，bash/curl 是通用依赖
 BASE_PKGS="bash curl ripgrep git"
 
+# ── 诊断日志：写入宿主可见的 $HOME/.aicode/provision.log（容器内 /root/.aicode 绑定到 App 私有目录）。
+# 终端 PTY 起不来或卡住时，App 侧「容器诊断」会把本文件尾部一并打进日志，用于判断脚本执行到了哪一步、
+# 菜单有没有弹出来。超过 256KB 只保留尾部 64KB，避免每次进终端追加一行而无限增长。全部静默失败，不阻塞初始化。
+PROVISION_LOG="$HOME/.aicode/provision.log"
+plog() {
+    [ -n "$HOME" ] || return 0
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$*" >> "$PROVISION_LOG" 2>/dev/null || return 0
+    sz=$(wc -c < "$PROVISION_LOG" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 262144 ] 2>/dev/null; then
+        tail -c 65536 "$PROVISION_LOG" > "$PROVISION_LOG.tmp" 2>/dev/null && mv "$PROVISION_LOG.tmp" "$PROVISION_LOG" 2>/dev/null
+    fi
+    return 0
+}
+plog "provision.sh 启动：version=$PROVISION_VERSION HOME=$HOME uid=$(id -u 2>/dev/null) PATH=$PATH"
+
 # ── 宿主 supplementary gid 修复：proot 会把宿主进程的补充组（Android AID 3003 inet、
 # 9997 everybody、App 自身 uid 派生 gid 等）透传进容器，/etc/group 查不到名字会让
 # groups 等命令报警（cannot find name for group ID xxx）。幂等补行：gid_ 命名空间先清再补
@@ -31,8 +46,8 @@ done
 # 已按当前版本完成或用户选择手动安装（跳过）则直接退出
 if [ -f "$MARKER" ]; then
     state=$(cat "$MARKER" 2>/dev/null)
-    [ "$state" = "$PROVISION_VERSION" ] && exit 0
-    [ "$state" = "$PROVISION_SKIPPED" ] && exit 0
+    if [ "$state" = "$PROVISION_VERSION" ]; then plog "标记已是 $PROVISION_VERSION，跳过菜单"; exit 0; fi
+    if [ "$state" = "$PROVISION_SKIPPED" ]; then plog "用户曾选择手动安装，跳过菜单"; exit 0; fi
 fi
 
 # ── 包管理器探测：菜单前执行一次，供安装/清单共用 ──
@@ -625,6 +640,7 @@ C_DIM=$(printf '\033[2m')
 C_RESET=$(printf '\033[0m')
 
 detect_pmgr
+plog "显示初始化菜单：PMGR=${PMGR:-未识别}"
 
 while :; do
     echo ""
@@ -651,6 +667,7 @@ EOF
     fi
     case "$choice" in
         1)
+            plog "用户选择 1（自动安装）"
             echo ""
             echo "${C_YELLOW}安装提示${C_RESET}："
             echo "  · 安装耗时较长，建议开启「后台保活」并将 App 保持在前台"
@@ -661,6 +678,7 @@ EOF
             case "$rc" in
                 0)
                     echo "$PROVISION_VERSION" > "$MARKER"
+                    plog "自动安装完成，写入标记 $PROVISION_VERSION"
                     echo ""
                     echo "${C_GREEN}基础依赖安装完成，开始使用吧！${C_RESET}"
                     break
@@ -677,11 +695,13 @@ EOF
             esac
             ;;
         2)
+            plog "用户选择 2（自定义安装）"
             install_custom
             rc=$?
             case "$rc" in
                 0)
                     echo "$PROVISION_VERSION" > "$MARKER"
+                    plog "自定义安装完成，写入标记 $PROVISION_VERSION"
                     echo ""
                     echo "${C_GREEN}自定义安装完成，开始使用吧！${C_RESET}"
                     break
@@ -698,6 +718,7 @@ EOF
             esac
             ;;
         3)
+            plog "用户选择 3（手动安装）"
             echo ""
             echo "${C_YELLOW}手动安装提示${C_RESET}："
             echo "  · ripgrep（rg）是必装工具，缺失会影响使用体验"
@@ -708,6 +729,7 @@ EOF
             read manual_confirm
             if [ "$manual_confirm" = "y" ] || [ "$manual_confirm" = "Y" ]; then
                 echo "$PROVISION_SKIPPED" > "$MARKER"
+                plog "确认手动安装，写入跳过标记"
                 echo "已选择手动安装，之后进入终端不再提示。"
                 break
             else
@@ -716,6 +738,7 @@ EOF
             fi
             ;;
         4)
+            plog "用户选择 4（退出，下次仍提示）"
             echo "已退出，下次进入终端仍会提示。"
             break
             ;;
@@ -725,4 +748,5 @@ EOF
             ;;
     esac
 done
+plog "初始化菜单结束"
 git_config

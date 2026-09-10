@@ -60,6 +60,8 @@ class TerminalSessionManager @Inject constructor(
         const val EXIT_MARKER_POLL_MS = 1_000L
         /** 匹配命令退出标记 `[command exited: N]` 的定位前缀（配合手工解析退出码，免全量正则扫描）。 */
         const val EXIT_MARKER_PREFIX = "[command exited: "
+        /** 交互标签创建后多久仍无任何输出就 dump 容器诊断（proot 没起来/卡住时的主动取证）。 */
+        const val SILENT_DIAGNOSTIC_DELAY_MS = 10_000L
     }
 
     private val _tabs = MutableStateFlow<List<TerminalTab>>(emptyList())
@@ -102,19 +104,26 @@ class TerminalSessionManager @Inject constructor(
      * 首次会触发 rootfs/proot 解压（幂等）；失败抛异常由调用方处理。
      */
     suspend fun createInteractiveTab(): String {
+        FileLogger.i(TAG, "新建交互终端标签：开始准备容器")
         ensureContainer()
         val id = nextId()
-        val (session, client) = buildSession(
-            // -w 已把 cwd 设为 /root/workspace，cd 仅作兜底；裸 sh/bash 在 tty 上自动进交互模式，
-            // 靠 ENV=/etc/profile 加载登录环境；exec 让 shell 取代外层 sh -c 成为前台交互 shell。
-            // 首次进入终端时先跑初始化菜单（脚本自行判断已完成/已跳过则秒退），所有容器一致；
-            // 用 `;` 分隔保证脚本任何失败都不阻塞进入 shell。
-            shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
-                "[ -f /root/.aicode/provision.sh ] && sh /root/.aicode/provision.sh; " +
-                "export PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; " +
-                "alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null; alias ll='ls -la --color=auto' 2>/dev/null; " +
-                "exec ${containerEngine.defaultShell()}"
-        )
+        // -w 已把 cwd 设为 /root/workspace，cd 仅作兜底；裸 sh/bash 在 tty 上自动进交互模式，
+        // 靠 ENV=/etc/profile 加载登录环境；exec 让 shell 取代外层 sh -c 成为前台交互 shell。
+        // 首次进入终端时先跑初始化菜单（脚本自行判断已完成/已跳过则秒退），所有容器一致；
+        // 用 `;` 分隔保证脚本任何失败都不阻塞进入 shell。
+        val shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
+            "[ -f /root/.aicode/provision.sh ] && sh /root/.aicode/provision.sh; " +
+            "export PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; " +
+            "alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null; alias ll='ls -la --color=auto' 2>/dev/null; " +
+            "exec ${containerEngine.defaultShell()}"
+        FileLogger.i(TAG, "交互 shell 命令（$id）：$shellCommand")
+        val (session, client) = try {
+            buildSession(shellCommand)
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "创建交互终端会话失败（$id）", e)
+            containerEngine.logContainerDiagnostics("创建交互终端会话失败")
+            throw e
+        }
         addTab(
             TerminalTab(
                 id = id,
@@ -127,8 +136,25 @@ class TerminalSessionManager @Inject constructor(
             )
         )
         _activeTabId.value = id
-        FileLogger.i(TAG, "新建交互终端标签 $id")
+        FileLogger.i(TAG, "新建交互终端标签 $id：pid=${session.pid} 运行中=${session.isRunning}")
+        scheduleSilentSessionDiagnostic(id)
         return id
+    }
+
+    /**
+     * 静默会话诊断：交互标签创建后若迟迟没有任何输出，说明 proot 可能没起来或卡在内核态
+     * （用户报「解压完成后终端一片空白、卡住」正是这种形态）。主动 dump 一次容器状态，
+     * 让日志里留下可定位的证据，而不是只能看到「新建标签」后再无下文。
+     */
+    private fun scheduleSilentSessionDiagnostic(tabId: String) {
+        monitorScope.launch {
+            delay(SILENT_DIAGNOSTIC_DELAY_MS)
+            val tab = tab(tabId) ?: return@launch
+            if (tab.runState !is RunState.Running) return@launch
+            if (!getTabOutput(tabId).isNullOrBlank()) return@launch
+            FileLogger.w(TAG, "终端标签 $tabId 启动 ${SILENT_DIAGNOSTIC_DELAY_MS}ms 后仍无任何输出，dump 容器状态")
+            containerEngine.logContainerDiagnostics("终端标签 $tabId 静默")
+        }
     }
 
     /**
@@ -271,10 +297,12 @@ class TerminalSessionManager @Inject constructor(
     }
 
     private suspend fun ensureContainer() {
+        val startedAt = System.currentTimeMillis()
         containerEngine.ensureInstalled()
         if (!containerEngine.isContainerInstalled()) {
             throw IllegalStateException("容器未安装（缺少 rootfs/proot）")
         }
+        FileLogger.i(TAG, "容器就绪（耗时 ${System.currentTimeMillis() - startedAt}ms）")
     }
 
     private fun nextId(): String = "term-${idCounter.incrementAndGet()}"
@@ -368,6 +396,12 @@ class TerminalSessionManager @Inject constructor(
     private fun buildSession(shellCommand: String): Pair<TerminalSession, AppTerminalSessionClient> {
         val workspace = workspaceRepository.currentPath()
         val invocation = containerEngine.buildProotInvocation(shellCommand, workspace)
+        FileLogger.i(
+            TAG,
+            "PTY 启动：workspace=$workspace 可执行=${invocation.executable}" +
+                "（存在=${java.io.File(invocation.executable).exists()}）argv=${invocation.argv.joinToString(" ")}"
+        )
+        FileLogger.d(TAG, "PTY 环境变量键：${invocation.env.keys.joinToString(",")}")
         lateinit var session: TerminalSession
         val client = AppTerminalSessionClient(
             context = appContext,
@@ -401,6 +435,7 @@ class TerminalSessionManager @Inject constructor(
             client
         )
         session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
+        FileLogger.i(TAG, "PTY 会话已创建：pid=${session.pid} 运行中=${session.isRunning}")
         return session to client
     }
 

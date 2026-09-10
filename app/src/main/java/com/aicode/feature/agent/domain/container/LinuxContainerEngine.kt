@@ -516,6 +516,12 @@ class LinuxContainerEngine @Inject constructor(
      */
     override suspend fun ensureInstalled() {
         val profile = currentProfile
+        val startedAt = System.currentTimeMillis()
+        FileLogger.i(
+            TAG,
+            "ensureInstalled 开始：profile=${profile.id}(${profile.name}) mode=${profile.mode} " +
+                "已安装=${containerInstaller.isInstalledFor(profile)}"
+        )
         // 每次进入终端页前确保提取最新的内置文档
         containerInstaller.extractDocs()
         if (containerInstaller.isInstalledFor(profile)) {
@@ -524,15 +530,25 @@ class LinuxContainerEngine @Inject constructor(
             _initProgress.value = ContainerInitState.Ready
             refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
+            FileLogger.i(TAG, "ensureInstalled 完成（快路径，耗时 ${System.currentTimeMillis() - startedAt}ms）")
+            logContainerDiagnostics("ensureInstalled 快路径")
             return
         }
         // 启动或复用后台初始化 job；initMutex 只保护 job 的创建/复用，真正的耗时工作在 initScope 里跑。
         val job = initMutex.withLock {
             val existing = initJob
             if (existing == null || !existing.isActive) {
+                FileLogger.i(TAG, "创建后台初始化任务：profile=${profile.id}")
                 initJob = initScope.launch { doInit(profile) }
+            } else {
+                FileLogger.i(TAG, "复用进行中的后台初始化任务：profile=${profile.id}")
             }
             initJob!!
+        }
+        // 后台 job 内部抛出的异常不会由 join 重新抛出，这里挂完成回调记录下来，
+        // 避免“日志断在开始安装”后就没了下文。
+        job.invokeOnCompletion { cause ->
+            if (cause != null) FileLogger.e(TAG, "后台初始化任务异常结束：profile=${profile.id}", cause)
         }
         // 等待完成；若调用方（终端页）被取消，join 抛 CancellationException，但后台 job 继续执行。
         job.join()
@@ -540,11 +556,55 @@ class LinuxContainerEngine @Inject constructor(
             _initProgress.value = ContainerInitState.Ready
             refreshContainerHome()
             detectAndCacheOsIfNeeded(profile)
+            FileLogger.i(TAG, "ensureInstalled 完成（耗时 ${System.currentTimeMillis() - startedAt}ms）")
+            logContainerDiagnostics("ensureInstalled 完成后")
         } else {
             val reason = "容器未安装（缺少 rootfs/proot）"
+            FileLogger.e(TAG, "ensureInstalled 失败：$reason（profile=${profile.id}）")
+            logContainerDiagnostics("ensureInstalled 失败")
             _initProgress.value = ContainerInitState.Failed(reason)
             throw IllegalStateException(reason)
         }
+    }
+
+    /**
+     * dump 一次容器运行环境（rootfs / proot 二进制 / 初始化脚本 / 磁盘空间）到日志。
+     *
+     * 这些状态平时不打印，一旦用户报“容器起不来/终端一片空白”就只能靠猜。在初始化前后与终端
+     * 会话静默时主动各 dump 一次，日志里就有了可定位的证据。同时带上 provision.sh 自己的执行日志
+     * 尾部（由脚本写入 /root/.aicode/provision.log），用于判断初始化菜单到底有没有跑起来。
+     */
+    fun logContainerDiagnostics(reason: String) {
+        runCatching {
+            val profile = currentProfile
+            val rootfs = containerInstaller.rootfsDirFor(profile)
+            val marker = provisionMarker(profile)
+            val provision = java.io.File(containerInstaller.aicodeDir, "provision.sh")
+            fun desc(f: java.io.File?): String = when {
+                f == null -> "null"
+                !f.exists() -> "缺失(${f.absolutePath})"
+                f.isDirectory -> "目录(${f.absolutePath})"
+                else -> "${f.absolutePath}[${f.length()}B,可执行=${f.canExecute()}]"
+            }
+            val space = runCatching { rootfs.usableSpace / (1024 * 1024) }.getOrDefault(-1L)
+            val ptmx = java.io.File("/dev/ptmx")
+            FileLogger.i(
+                TAG,
+                "容器诊断($reason)：profile=${profile.id} mode=${profile.mode} rootfs=${desc(rootfs)} " +
+                    "标记=${if (marker.isFile) marker.readText().trim() else "无"} " +
+                    "proot=${desc(containerInstaller.prootBin)} loader=${desc(containerInstaller.prootLoader)} " +
+                    "loader32=${desc(containerInstaller.prootLoader32)} provision.sh=${desc(provision)} " +
+                    "nativeLibDir=${containerInstaller.prootBin.parentFile?.absolutePath} 可用空间=${space}MB " +
+                    "/dev/ptmx(可读=${ptmx.canRead()},可写=${ptmx.canWrite()})"
+            )
+            val provisionLog = java.io.File(containerInstaller.aicodeDir, "provision.log")
+            if (provisionLog.isFile) {
+                val tail = runCatching { provisionLog.readLines().takeLast(20).joinToString(" | ") }.getOrDefault("")
+                FileLogger.i(TAG, "provision 日志尾部（$reason）：$tail")
+            } else {
+                FileLogger.i(TAG, "provision.log 不存在（初始化脚本从未执行）：${provisionLog.absolutePath}")
+            }
+        }.onFailure { FileLogger.w(TAG, "输出容器诊断失败", it) }
     }
 
     /** 在 [initScope] 中真正执行一次性初始化：解压 rootfs（基础工具由进入终端时的初始化菜单引导安装）。 */

@@ -292,21 +292,46 @@ class ContainerInstaller @Inject constructor(
     suspend fun installRootfsIfNeed(
         onProgress: (ContainerInitState) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
-        if (isInstalled()) return@withContext
+        if (isInstalled()) {
+            FileLogger.d(TAG, "rootfs 已是当前版本（$INSTALL_VERSION），跳过解压")
+            return@withContext
+        }
 
-        FileLogger.i(TAG, "开始安装容器 rootfs（版本 $INSTALL_VERSION）")
+        val startedAt = System.currentTimeMillis()
+        FileLogger.i(
+            TAG,
+            "开始安装容器 rootfs（版本 $INSTALL_VERSION，asset=$ASSET_ROOTFS，目标=${rootfsDir.absolutePath}，" +
+                "父目录可用空间=${usableSpaceMb(rootfsDir.parentFile)}MB）"
+        )
+        try {
+            // 版本不匹配时清掉旧的，保证干净安装（大 rootfs 删一遍很慢，带进度报给界面）
+            purgeRootfs(rootfsDir, installedMarker) { onProgress(ContainerInitState.CleaningOldRootfs(it)) }
+            rootfsDir.mkdirs()
+            if (!rootfsDir.isDirectory) FileLogger.e(TAG, "rootfs 目录创建失败：${rootfsDir.absolutePath}")
 
-        // 版本不匹配时清掉旧的，保证干净安装（大 rootfs 删一遍很慢，带进度报给界面）
-        purgeRootfs(rootfsDir, installedMarker) { onProgress(ContainerInitState.CleaningOldRootfs(it)) }
-        rootfsDir.mkdirs()
-
-        extractRootfs(onProgress)
-        configureResolvConf()
-        prootTmpDir.mkdirs()
-
-        installedMarker.writeText(INSTALL_VERSION)
-        FileLogger.i(TAG, "容器 rootfs 安装完成")
+            val entries = extractRootfs(onProgress)
+            configureResolvConf()
+            prootTmpDir.mkdirs()
+            installedMarker.writeText(INSTALL_VERSION)
+            FileLogger.i(
+                TAG,
+                "容器 rootfs 安装完成：$entries 个条目，耗时 ${System.currentTimeMillis() - startedAt}ms，" +
+                    "标记=${installedMarker.absolutePath}"
+            )
+        } catch (e: Exception) {
+            FileLogger.e(
+                TAG,
+                "容器 rootfs 安装失败（耗时 ${System.currentTimeMillis() - startedAt}ms，" +
+                    "剩余空间=${usableSpaceMb(rootfsDir.parentFile)}MB）",
+                e
+            )
+            throw e
+        }
     }
+
+    /** 目录可用空间（MB），用于解压失败时判断是否磁盘不足；路径取不到时返回 -1。 */
+    private fun usableSpaceMb(dir: File?): Long =
+        runCatching { (dir ?: return -1).usableSpace / (1024 * 1024) }.getOrDefault(-1)
 
     /**
      * 按 [profile] 返回 rootfs 目录：内置仍是 [rootfsDir]（不动），自定义本地镜像用 filesDir/rootfs_<id>。
@@ -531,10 +556,10 @@ class ContainerInstaller @Inject constructor(
     /** 从 assets 提取容器初始化依赖安装脚本到 ~/.aicode/provision.sh 并赋可执行位。 */
     fun extractProvisionScript() = extractProvisionScript(context)
 
-    /** 解压 alpine-minirootfs.tar.gz，正确处理目录/文件/符号链接/硬链接与权限位 */
-    private fun extractRootfs(onProgress: (ContainerInitState) -> Unit) {
+    /** 解压 alpine-minirootfs.tar.gz，正确处理目录/文件/符号链接/硬链接与权限位；返回解压条目数。 */
+    private fun extractRootfs(onProgress: (ContainerInitState) -> Unit): Int {
         context.assets.open(ASSET_ROOTFS).use { rawIn ->
-            extractRootfsTo(rootfsDir, rawIn, CompressedFormat.GZIP, onProgress)
+            return extractRootfsTo(rootfsDir, rawIn, CompressedFormat.GZIP, onProgress)
         }
     }
 
@@ -550,8 +575,9 @@ class ContainerInstaller @Inject constructor(
         input: java.io.InputStream,
         format: CompressedFormat = CompressedFormat.GZIP,
         onProgress: (ContainerInitState) -> Unit = {}
-    ) {
+    ): Int {
         var processed = 0
+        val startedAt = System.currentTimeMillis()
         val decompressed = when (format) {
             CompressedFormat.GZIP -> GZIPInputStream(input)
             CompressedFormat.XZ -> XZCompressorInputStream(input)
@@ -567,6 +593,11 @@ class ContainerInstaller @Inject constructor(
                 }
             }
         }
+        FileLogger.i(
+            TAG,
+            "解压到 ${destDir.absolutePath} 完成：$processed 个条目，耗时 ${System.currentTimeMillis() - startedAt}ms"
+        )
+        return processed
     }
 
     private fun extractEntry(
@@ -641,10 +672,14 @@ class ContainerInstaller @Inject constructor(
         val conf = File(etc, "resolv.conf")
         if (conf.isFile) {
             runCatching {
-                if (conf.readText().contains("nameserver")) return
+                if (conf.readText().contains("nameserver")) {
+                    FileLogger.d(TAG, "resolv.conf 已有有效配置，保持不动：${conf.absolutePath}")
+                    return
+                }
             }
         }
         conf.delete()
         conf.writeText("nameserver 223.5.5.5\nnameserver 223.6.6.6\n")
+        FileLogger.i(TAG, "已写入容器 DNS 配置：${conf.absolutePath}")
     }
 }
