@@ -63,13 +63,13 @@ AI 助手与开发者可以依据此规范，编写面板脚本（Python / Node 
 | `AICODE_AGENT_STATE` | `streaming` | 当前 Agent 工作状态：`idle`（空闲）/ `loading`（加载中）/ `streaming`（流式输出中）/ `result`（完成）/ `error`（出错） |
 | `AICODE_SESSION_MODE` | `build` | 当前会话模式：`build`（构建）/ `plan`（计划）/ `auto`（自动） |
 | `AICODE_REASONING_EFFORT` | `high` | 当前思考强度档位：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` |
-| `AICODE_REFRESH_REASON` | `llm` | 本次面板刷新的触发原因：`session`（进入/切换会话）、`llm`（LLM 请求返回后自动刷新）、`manual`（手动点击刷新/错误重试）、`button`（卡片内刷新按钮触发） |
+| `AICODE_REFRESH_REASON` | `llm` | 本次面板刷新的触发原因：`session`（进入/切换会话，数据就绪后触发）、`llm`（LLM 请求返回后自动刷新）、`done`（AI 一轮任务完成后自动刷新，此时 `AICODE_AGENT_STATE` 为最终状态）、`manual`（手动点击刷新/错误重试）、`button`（卡片内刷新按钮触发） |
 
 ### 工作区变量
 
 | 环境变量名 | 示例值 | 说明 |
 | :--- | :--- | :--- |
-| `AICODE_WORKSPACE` | `/root/workspace/my-app` | 当前项目的工作区绝对路径 |
+| `AICODE_WORKSPACE` | `/root/workspace` | 当前工作区在容器内的根路径，恒为 `~/workspace`（展开为 `/root/workspace`）；宿主真实路径不会传给脚本 |
 | `AICODE_WORKSPACE_NAME` | `my-app` | 工作区目录名 |
 
 ### 提供商变量
