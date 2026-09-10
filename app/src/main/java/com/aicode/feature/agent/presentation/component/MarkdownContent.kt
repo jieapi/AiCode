@@ -1,7 +1,6 @@
 package com.aicode.feature.agent.presentation.component
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,8 +20,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aicode.core.theme.semanticColors
-import com.mikepenz.markdown.compose.Markdown
 import com.mikepenz.markdown.compose.LazyMarkdownSuccess
+import com.mikepenz.markdown.compose.Markdown
 import com.mikepenz.markdown.compose.MarkdownSuccess
 import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -124,7 +123,6 @@ internal fun MarkdownContent(
         codeBackgroundCornerSize = 6.dp,
         tableCellPadding = 6.dp,
         tableCornerSize = 6.dp,
-        tableCellWidth = 180.dp,
     )
 
     val highlightsBuilder = remember(isDark) {
@@ -193,57 +191,51 @@ internal fun MarkdownContent(
             }
 
             val mdComponents = markdownComponents(
-                // 代码块与表格包在 DisableSelection 中：避免外层气泡的 SelectionContainer
-                // 在用户双击快速滑动或拖动时误激活选词手势（consume 掉指针事件），导致横向滑动卡死。
+                // 外层 SelectionContainer（MessageBubbles）统一负责选区；超长助手消息已由
+                // AIChatPanel 拆成多条有界 item，不存在超长单 item 的选区树/交互失效问题。
                 codeFence = {
-                    DisableSelection {
-                        MarkdownHighlightedCodeFence(
-                            content = it.content,
-                            node = it.node,
-                            highlightsBuilder = highlightsBuilder,
-                            showHeader = true,
-                        )
-                    }
+                    MarkdownHighlightedCodeFence(
+                        content = it.content,
+                        node = it.node,
+                        highlightsBuilder = highlightsBuilder,
+                        showHeader = true,
+                    )
                 },
                 codeBlock = {
-                    DisableSelection {
-                        MarkdownHighlightedCodeBlock(
-                            content = it.content,
-                            node = it.node,
-                            highlightsBuilder = highlightsBuilder,
-                            showHeader = true,
-                        )
-                    }
+                    MarkdownHighlightedCodeBlock(
+                        content = it.content,
+                        node = it.node,
+                        highlightsBuilder = highlightsBuilder,
+                        showHeader = true,
+                    )
                 },
                 // 库默认 maxLines=1 + Ellipsis，单元格长文会被截断；这里放开为完整多行显示。
                 table = {
-                    DisableSelection {
-                        MarkdownTable(
-                            content = it.content,
-                            node = it.node,
-                            style = it.typography.table,
-                            headerBlock = { content, header, tableWidth, style ->
-                                MarkdownTableHeader(
-                                    content = content,
-                                    header = header,
-                                    tableWidth = tableWidth,
-                                    style = style,
-                                    maxLines = Int.MAX_VALUE,
-                                    overflow = TextOverflow.Clip,
-                                )
-                            },
-                            rowBlock = { content, header, tableWidth, style ->
-                                MarkdownTableRow(
-                                    content = content,
-                                    header = header,
-                                    tableWidth = tableWidth,
-                                    style = style,
-                                    maxLines = Int.MAX_VALUE,
-                                    overflow = TextOverflow.Clip,
-                                )
-                            },
-                        )
-                    }
+                    MarkdownTable(
+                        content = it.content,
+                        node = it.node,
+                        style = it.typography.table,
+                        headerBlock = { content, header, tableWidth, style ->
+                            MarkdownTableHeader(
+                                content = content,
+                                header = header,
+                                tableWidth = tableWidth,
+                                style = style,
+                                maxLines = Int.MAX_VALUE,
+                                overflow = TextOverflow.Clip,
+                            )
+                        },
+                        rowBlock = { content, header, tableWidth, style ->
+                            MarkdownTableRow(
+                                content = content,
+                                header = header,
+                                tableWidth = tableWidth,
+                                style = style,
+                                maxLines = Int.MAX_VALUE,
+                                overflow = TextOverflow.Clip,
+                            )
+                        },
+                    )
                 },
             )
 
@@ -284,4 +276,3 @@ private fun PlainMarkdownText(
         style = MaterialTheme.typography.bodyMedium.copy(color = color, lineHeight = 20.sp)
     )
 }
-
