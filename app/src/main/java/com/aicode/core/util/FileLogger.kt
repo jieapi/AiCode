@@ -3,12 +3,14 @@ package com.aicode.core.util
 import android.content.Context
 import android.util.Log
 import java.io.File
+import java.io.FileOutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
 
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * 日志等级，由低到高。[NONE] 用作阈值时关闭一切输出（没有任何等级 ≥ NONE）。
@@ -38,10 +40,11 @@ object FileLogger {
     private const val TAG = "FileLogger"
     private const val MAX_AGE_DAYS = 7
     private const val MAX_FILE_BYTES = 5 * 1024 * 1024 // 单个日志文件上限 5MB（VERBOSE 下增长较快）
-    /** 缓冲写盘阈值（字符）：达到后 flush 一次，避免每行日志都打开/关闭文件。ERROR 级恒强制 flush。 */
-    private const val FLUSH_THRESHOLD_CHARS = 16 * 1024
+    /** 合并 flush 的延迟：一批日志写完静默这么久即落盘。ERROR 级不等延迟，立即落。 */
+    private const val FLUSH_DELAY_MS = 500L
 
-    private val ioExecutor = Executors.newSingleThreadExecutor { r ->
+    /** 单线程串行执行全部落盘动作，同时用作延迟合并 flush 的调度器。 */
+    private val ioExecutor = ScheduledThreadPoolExecutor(1) { r ->
         Thread(r, "file-logger").apply { isDaemon = true }
     }
     private val fileNameFormat = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(java.time.ZoneId.systemDefault())
@@ -53,7 +56,7 @@ object FileLogger {
     // 以下字段仅由 ioExecutor 单线程访问，无需同步。
     private var writer: java.io.BufferedWriter? = null
     private var writerDate: String? = null
-    private var pendingChars = 0
+    private var flushScheduled = false
 
     /** 当前最低记录等级；低于它的日志一律跳过。默认按构建类型：debug=VERBOSE（开发期全量），release=INFO。 */
     @Volatile
@@ -141,7 +144,7 @@ object FileLogger {
                 writer?.close()
                 writer = null
                 writerDate = null
-                pendingChars = 0
+                flushScheduled = false
                 dir.listFiles { f -> f.isFile && f.name.startsWith("log-") }?.forEach { file ->
                     val size = file.length()
                     if (file.delete()) freed.addAndGet(size)
@@ -173,23 +176,24 @@ object FileLogger {
                 val date = fileNameFormat.format(now)
                 val file = File(dir, "log-$date.txt")
                 // 跨天换文件；单文件超上限则重置重开。writer 仅本线程访问。
+                // 一律追加打开：进程重启、同一天二次启动都不能清掉已写下的日志。
                 if (writerDate != date) {
                     writer?.close()
-                    writer = file.bufferedWriter()
+                    writer = FileOutputStream(file, true).bufferedWriter()
                     writerDate = date
-                    pendingChars = 0
                 } else if (file.length() > MAX_FILE_BYTES) {
                     writer?.close()
                     file.writeText("--- 日志文件超过 ${MAX_FILE_BYTES / 1024 / 1024}MB 已重置 ---\n")
-                    writer = file.bufferedWriter()
-                    pendingChars = 0
+                    writer = FileOutputStream(file, true).bufferedWriter()
                 }
                 writer?.append(line)
-                pendingChars += line.length
-                // 批量 flush：攒够阈值或 ERROR 级（最需要落盘）立即落。
-                if (pendingChars >= FLUSH_THRESHOLD_CHARS || level == "ERROR") {
-                    writer?.flush()
-                    pendingChars = 0
+                // ERROR 立即落盘；其余合并到 FLUSH_DELAY_MS 后统一 flush。
+                // 缓冲期间进程被系统杀掉会丢最后这几百毫秒的日志，不能再攒到更大的阈值。
+                if (level == "ERROR") {
+                    flushWriter()
+                } else if (!flushScheduled) {
+                    flushScheduled = true
+                    ioExecutor.schedule({ runCatching { flushWriter() } }, FLUSH_DELAY_MS, TimeUnit.MILLISECONDS)
                 }
             }.onFailure {
                 Log.e(TAG, "写入日志失败", it)
@@ -204,10 +208,16 @@ object FileLogger {
     fun flushSync() {
         val latch = java.util.concurrent.CountDownLatch(1)
         ioExecutor.execute {
-            runCatching { writer?.flush() }
+            flushWriter()
             latch.countDown()
         }
         runCatching { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) }
+    }
+
+    /** 把缓冲日志推到底层文件。只允许在 [ioExecutor] 单线程上调用。 */
+    private fun flushWriter() {
+        runCatching { writer?.flush() }
+        flushScheduled = false
     }
 
     private fun stackTraceToString(throwable: Throwable): String {
