@@ -32,6 +32,15 @@ final class SubprocessBackend implements SessionBackend {
         int[] processId = new int[1];
         mPtyFd = JNI.createSubprocess(shellPath, cwd, args, env, processId, rows, columns);
         mPid = processId[0];
+        // 原生层失败时（/dev/ptmx 打不开、fork 被拒）返回 fd=-1 且 pid 保持 0，但它只在 stderr
+        // 打一行 perror（落在 logcat，不进 App 日志）。若不在这里主动失败，会话会被当成「运行中」
+        // （0 != -1）永久挂起、终端一片空白且无任何日志——正是用户报的形态。显式抛错让上层进失败态。
+        if (mPtyFd < 0 || mPid <= 0) {
+            throw new IllegalStateException(
+                "createSubprocess 失败：ptyFd=" + mPtyFd + " pid=" + mPid
+                    + " shell=" + shellPath + " cwd=" + cwd
+                    + "（/dev/ptmx 或 fork 被内核/SELinux 拒绝，perror 详情见 logcat）");
+        }
         mWrappedFd = wrapFileDescriptor(mPtyFd);
         mInputStream = new FileInputStream(mWrappedFd);
         mOutputStream = new FileOutputStream(mWrappedFd);
