@@ -16,7 +16,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -120,6 +119,117 @@ private const val MAX_TOGGLE_SETTLE_FRAMES = 12
 
 /** 消息未就绪时延迟多久才显示加载提示（ms）：本地读库很快，立即显示反而闪。 */
 private const val MESSAGES_LOADING_HINT_DELAY_MS = 220L
+
+/**
+ * 长消息拆块渲染：
+ *
+ * 超长助手正文（长文档复述）如果塞成单条 LazyColumn item，撑到几屏深时手势命中区
+ * 会在列表可见区之外，深处表格的横滑/长按复制/点击全部失效（原版深处交互失效的根因）。
+ * 限高+内滚的单窗口方案又会让窗口与列表世界之间出现「接不上、独立一块」的断接。
+ *
+ * 拆块的思路是：分裂成多条「有界高度」的列表 item，每条都是普通气泡（思考只在首块、
+ * 操作行只在末块、相邻块零间距无缝衔接），列表单一滚动轴——世界上下完全接通、深处
+ * 交互（表 8+ 横滑/复制/点击）因每条 item 高度有界而全部恢复。
+ *
+ * 若正文长度不超过阈值，不拆块，与普通消息完全一致。
+ */
+private data class ChatRenderItem(
+    val message: AgentUIMessage,
+    val key: String,
+    val contentType: String,
+    val slice: String? = null,
+    val isChunkHeader: Boolean = true,
+    val isChunkFooter: Boolean = true,
+)
+
+/** 超过该长度（字符）的助手正文拆成多条有界 chunk。 */
+private const val CHUNK_SPLIT_THRESHOLD_CHARS = 2_000
+
+/** 每条 chunk 的目标字符预算：正文按 markdown 块打包，单块超出预算（如巨大表格）时
+ *  按行硬切兜底，保证任意 chunk 高度有界（≈0.5-0.7 屏）。 */
+private const val CHUNK_BUDGET_CHARS = 1_200
+
+/**
+ * 长正文拆块：以行为单位识别三类 markdown 块——代码围栏（整段）、表格（连续 | 行，
+ * 整表保持完整）、普通段落（以空行分隔），然后按字符预算贪心打包成 chunk。
+ * 超预算的单块按行拆分为多个块，宁可打断表格也不让某条 item 无界长高。
+ */
+private fun splitLongContent(text: String): List<String> {
+    val lines = text.lines()
+    val rawBlocks = ArrayList<String>()
+    var i = 0
+    while (i < lines.size) {
+        val line = lines[i]
+        val trimmed = line.trimStart()
+        when {
+            trimmed.startsWith("```") -> {
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && !lines[j].trimStart().startsWith("```")) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                if (j < lines.size) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+            line.isBlank() -> i++
+            trimmed.startsWith("|") -> {
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && lines[j].isNotBlank() && lines[j].trimStart().startsWith("|")) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+            else -> {
+                val sb = StringBuilder(line)
+                var j = i + 1
+                while (j < lines.size && lines[j].isNotBlank() &&
+                    !lines[j].trimStart().startsWith("```") &&
+                    !lines[j].trimStart().startsWith("|")
+                ) {
+                    sb.append('\n').append(lines[j]); j++
+                }
+                rawBlocks.add(sb.toString()); i = j
+            }
+        }
+    }
+    if (rawBlocks.isEmpty()) return listOf(text)
+
+    // 超预算单块（如巨型表格/巨型段落）按行切成预算内的小块，兜底保证有界。
+    val blocks = ArrayList<String>()
+    for (block in rawBlocks) {
+        if (block.length <= CHUNK_BUDGET_CHARS) {
+            blocks.add(block)
+        } else {
+            val piece = StringBuilder()
+            var weight = 0
+            for (ln in block.lines()) {
+                if (weight > 0 && weight + 1 + ln.length > CHUNK_BUDGET_CHARS) {
+                    blocks.add(piece.toString()); piece.setLength(0); weight = 0
+                }
+                piece.append(ln).append('\n'); weight += ln.length + 1
+            }
+            if (piece.isNotBlank()) blocks.add(piece.toString())
+        }
+    }
+
+    val chunks = ArrayList<String>()
+    val cur = StringBuilder()
+    var weight = 0
+    for (block in blocks) {
+        val w = block.length + 2
+        if (weight > 0 && weight + w > CHUNK_BUDGET_CHARS) {
+            chunks.add(cur.toString()); cur.setLength(0); weight = 0
+        }
+        // 块间必须留空行：丢空行会让 markdown 语义粘连（段落 + 紧跟 --- 会被解析成 setext 标题，段落被夸成标题字号）。
+        if (weight > 0) cur.append('\n')
+        cur.append(block).append('\n'); weight += w
+    }
+    if (cur.isNotBlank()) chunks.add(cur.toString())
+    return chunks
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -724,6 +834,50 @@ fun AIChatPanel(
                 } else if (messages.isEmpty()) {
                     WelcomeState(modifier = Modifier.fillMaxSize())
                 } else {
+                    // 拆块：超长助手消息展开成多条有界 item（单条滚动轴、外观连续的气泡），
+                    // 普通消息保持 1:1。chatItems 的顺序即 LazyColumn item 顺序（尾随尾巴 item）。
+                    val chatItems = remember(messages) {
+                        messages.map { message ->
+                            val canSplit = message.role == MessageRole.ASSISTANT &&
+                                !message.isCompactionMarker &&
+                                !message.isContextSummary &&
+                                !message.isCompactionFailure &&
+                                !message.isBackgroundNotification &&
+                                message.content.length > CHUNK_SPLIT_THRESHOLD_CHARS
+                            if (!canSplit) {
+                                listOf(
+                                    ChatRenderItem(
+                                        message = message,
+                                        key = message.id,
+                                        contentType = message.role.name,
+                                    )
+                                )
+                            } else {
+                                val slices = splitLongContent(message.content)
+                                if (slices.size <= 1) {
+                                    // 只拆出一块（如无空行的超长单段）：等同普通消息，避免单块走分块描边。
+                                    listOf(
+                                        ChatRenderItem(
+                                            message = message,
+                                            key = message.id,
+                                            contentType = message.role.name,
+                                        )
+                                    )
+                                } else {
+                                    slices.mapIndexed { idx, slice ->
+                                        ChatRenderItem(
+                                            message = message,
+                                            key = "${message.id}#chunk$idx",
+                                            contentType = "assistant-chunk",
+                                            slice = slice,
+                                            isChunkHeader = idx == 0,
+                                            isChunkFooter = idx == slices.lastIndex,
+                                        )
+                                    }
+                                }
+                            }
+                        }.flatten()
+                    }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -732,15 +886,18 @@ fun AIChatPanel(
                             end = Spacing.lg,
                             top = Spacing.md,
                             bottom = with(LocalDensity.current) { inputBarReservePx.toDp() }
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        )
                     ) {
-                        itemsIndexed(messages, key = { _, it -> it.id }, contentType = { _, it -> it.role.name }) { index, message ->
+                        itemsIndexed(chatItems, key = { _, it -> it.key }, contentType = { _, it -> it.contentType }) { index, item ->
+                            val message = item.message
                             val live = runningTool.firstOrNull { it.messageId == message.id }?.text
                             AgentMessageItem(
                                 message = message,
                                 liveOutput = live,
                                 markdownCache = markdownCache,
+                                contentSlice = item.slice,
+                                isChunkHeader = item.isChunkHeader,
+                                isChunkFooter = item.isChunkFooter,
                                 onRewindClick = { viewModel.openRewindMenu(it) },
                                 onMoreClick = { messageForMenu = it },
                                 onToolToggle = {

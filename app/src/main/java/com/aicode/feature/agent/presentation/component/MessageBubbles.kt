@@ -41,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aicode.R
@@ -159,7 +162,14 @@ internal fun AgentMessageItem(
     /** 本轮任务总耗时（ms）：仅轮末助手消息非空，见 [computeTaskDurations]。 */
     taskDurationMs: Long? = null,
     /** 新消息入场动画延迟（ms）：null 表示历史消息直接显示；非 null 时首次组合延迟后淡入展开。 */
-    entryDelayMs: Long? = null
+    entryDelayMs: Long? = null,
+    /** 长消息分块渲染：非 null 时正文 MarkdownContent 只渲染该片段。
+     *  分块之间气泡无缝衔接（首块带思考、末块带操作行与底部圆角），复制按钮仍复制整条 message.content。 */
+    contentSlice: String? = null,
+    /** 是否为分块的首块（渲染思考块、顶部圆角）；非分块消息恒为 true。 */
+    isChunkHeader: Boolean = true,
+    /** 是否为分块的末块（渲染操作行、底部圆角、与下一条列表 item 的间距）；非分块消息恒为 true。 */
+    isChunkFooter: Boolean = true,
 ) {
     if (message.isCompactionMarker) {
         // 压缩内部锚点不再渲染分隔线：摘要卡片已提供压缩反馈，避免与卡片重复。
@@ -187,6 +197,8 @@ internal fun AgentMessageItem(
     if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning) return
 
     val isUser = message.role == MessageRole.USER
+    // 分块消息：气泡描边只画外沿、接缝不画水平线（见 chunkFrame），避免每块整框描边叠出双线。
+    val chunked = contentSlice != null
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     // 用户气泡随文字撑开，最大撑到与 AI 气泡同宽（消息列宽 - 列表两侧 padding）。
     // 大屏下消息列已限宽居中，气泡上限跟着收窄，不能再拿整个屏宽算。
@@ -216,11 +228,17 @@ internal fun AgentMessageItem(
         label = "tool-entry"
     )
 
+    // 超长助手消息由 AIChatPanel 拆成多条有界 item（拆块）渲染，这里不再做任何限高内滚；
+    // 每条分块都视为普通气泡：正文按块渲染、思考只在首块、操作行只在末块。
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            // LazyColumn 不再统一 spacedBy：末块（或非分块消息）自带与下一条 item 的间距，
+            // 相邻分块之间零间距无缝衔接，整个长消息在外观上仍是一条气泡。
+            .padding(bottom = if (isChunkFooter) Spacing.sm else 0.dp),
         verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
-        if (hasReasoning) {
+        if (hasReasoning && isChunkHeader) {
             // 刚结束思考落库的消息保持展开（流式思考展开→落库折叠会高度骤变抽搐）；稍后/历史默认折叠
             val reasoningJustFinished = System.currentTimeMillis() - message.timestamp < REASONING_FRESH_WINDOW_MS
             ReasoningBubble(text = message.reasoning.orEmpty(), initiallyExpanded = reasoningJustFinished, cache = markdownCache)
@@ -250,43 +268,60 @@ internal fun AgentMessageItem(
                                 ToolMessageBody(message, liveOutput = liveOutput, onToggle = onToolToggle)
                             }
                         } else {
+                            // 分块气泡的圆角只出现在消息首块/末块的外侧边：中间块四角直角，
+                            // 相邻分块同底色直角相接，视觉上仍是整条气泡。
+                            val topCorner = if (isChunkHeader) Radius.md else 0.dp
+                            val bottomCorner = if (isChunkFooter) Radius.xs else 0.dp
                             Surface(
                                 shape = if (isUser) {
                                     RoundedCornerShape(Radius.md, Radius.md, Radius.xs, Radius.md)
                                 } else {
-                                    RoundedCornerShape(Radius.md, Radius.md, Radius.md, Radius.xs)
+                                    RoundedCornerShape(topCorner, topCorner, bottomCorner, bottomCorner)
                                 },
                                 color = when (message.role) {
                                     MessageRole.USER -> MaterialTheme.colorScheme.primary
                                     MessageRole.ASSISTANT -> MaterialTheme.colorScheme.surface
                                     MessageRole.TOOL -> MaterialTheme.colorScheme.surfaceVariant
                                 },
-                                border = if (message.role == MessageRole.ASSISTANT) {
+                                border = if (!chunked && message.role == MessageRole.ASSISTANT) {
                                     BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                                 } else null,
                                 // 用户气泡随内容自适应宽度，最大撑到与 AI 气泡同宽；AI/工具气泡填满可用宽度
                                 modifier = if (isUser) {
                                     Modifier.widthIn(max = maxUserBubbleWidth)
                                 } else {
-                                    Modifier.fillMaxWidth()
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (chunked) {
+                                                Modifier.chunkFrame(
+                                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                                    strokeWidth = 1.dp,
+                                                    header = isChunkHeader,
+                                                    footer = isChunkFooter,
+                                                )
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
                                 }
                             ) {
                                 val textColor = when (message.role) {
                                     MessageRole.USER -> MaterialTheme.colorScheme.onPrimary
                                     else -> MaterialTheme.colorScheme.onSurface
                                 }
+                                val selectionColors = if (isUser) {
+                                    TextSelectionColors(
+                                        handleColor = MaterialTheme.colorScheme.onPrimary,
+                                        backgroundColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f),
+                                    )
+                                } else {
+                                    TextSelectionColors(
+                                        handleColor = MaterialTheme.colorScheme.primary,
+                                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
+                                    )
+                                }
                                 SelectionContainer {
-                                    val selectionColors = if (isUser) {
-                                        TextSelectionColors(
-                                            handleColor = MaterialTheme.colorScheme.onPrimary,
-                                            backgroundColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f),
-                                        )
-                                    } else {
-                                        TextSelectionColors(
-                                            handleColor = MaterialTheme.colorScheme.primary,
-                                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
-                                        )
-                                    }
                                     CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
                                         if (isUser) {
                                             Text(
@@ -297,10 +332,17 @@ internal fun AgentMessageItem(
                                             )
                                         } else {
                                             MarkdownContent(
-                                                text = message.content,
+                                                text = contentSlice ?: message.content,
                                                 color = textColor,
-                                                modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.sm),
-                                                cache = markdownCache
+                                                // 分块气泡：块间只留一个段落间距（xs=4dp），避免相邻两块各留一次
+                                                // 垂直 sm 内边距叠成 16dp 空隙；首块补顶部、末块补底部。
+                                                modifier = Modifier.padding(
+                                                    start = Spacing.sm,
+                                                    end = Spacing.sm,
+                                                    top = if (chunked && !isChunkHeader) 0.dp else Spacing.sm,
+                                                    bottom = if (chunked && !isChunkFooter) Spacing.xs else Spacing.sm,
+                                                ),
+                                                cache = markdownCache,
                                             )
                                         }
                                     }
@@ -312,8 +354,9 @@ internal fun AgentMessageItem(
                 if (isUser && hasAttachments) {
                     MessageAttachmentPreviewRow(attachments = message.attachments)
                 }
-                // 气泡下方操作行（工具消息不显示）。纯图片消息没有文字，同样要能撤销/删除，故附件也算
-                if ((hasContent || (isUser && hasAttachments)) && message.role != MessageRole.TOOL) {
+                // 气泡下方操作行（工具消息不显示）。纯图片消息没有文字，同样要能撤销/删除，故附件也算；
+                // 分块消息只在末块渲染操作行，避免每块都带一排复制/更多按钮。
+                if ((hasContent || (isUser && hasAttachments)) && message.role != MessageRole.TOOL && isChunkFooter) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
                         if (hasContent) {
@@ -402,6 +445,27 @@ internal fun AgentMessageItem(
             }
         }
     }
+}
+
+/**
+ * 分块气泡外沿描边：只画首块顶边、末块底边与左右竖边，块间接缝不画水平线——否则每块
+ * 各自画整框描边，接缝处会叠成双线，破坏「整条气泡」观感。用 drawWithContent 在内容之上
+ * 绘制，避免被 Surface 背景盖住；左右竖边不收纳圆角（1dp 线在圆角处的偏差肉眼不可见）。
+ */
+private fun Modifier.chunkFrame(
+    color: Color,
+    strokeWidth: Dp,
+    header: Boolean,
+    footer: Boolean,
+): Modifier = drawWithContent {
+    drawContent()
+    val w = strokeWidth.toPx()
+    val h = size.height
+    val wid = size.width
+    if (header) drawLine(color, Offset(0f, w / 2), Offset(wid, w / 2), strokeWidth = w)
+    if (footer) drawLine(color, Offset(0f, h - w / 2), Offset(wid, h - w / 2), strokeWidth = w)
+    drawLine(color, Offset(w / 2, 0f), Offset(w / 2, h), strokeWidth = w)
+    drawLine(color, Offset(wid - w / 2, 0f), Offset(wid - w / 2, h), strokeWidth = w)
 }
 
 @Composable
