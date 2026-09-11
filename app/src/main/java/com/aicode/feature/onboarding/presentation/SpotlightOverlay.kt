@@ -195,7 +195,7 @@ fun SpotlightOverlay(
                         SimulatedSheetCard(
                             title = stringResource(R.string.provider_fetch_models),
                             modelName = "claude-3-5-sonnet",
-                            subtitle = "Anthropic · 智能编程推荐模型",
+                            subtitle = stringResource(R.string.onboarding_demo_model_anthropic_desc),
                             actionText = stringResource(R.string.common_add),
                             pulseAlpha = pulseAlpha,
                             onSelect = onNext
@@ -204,7 +204,7 @@ fun SpotlightOverlay(
                         SimulatedSheetCard(
                             title = stringResource(R.string.common_model),
                             modelName = "claude-3-5-sonnet",
-                            subtitle = "当前推荐 · 具备代码生成与分析能力",
+                            subtitle = stringResource(R.string.onboarding_demo_model_choose_desc),
                             actionText = stringResource(R.string.common_select),
                             pulseAlpha = pulseAlpha,
                             onSelect = onNext

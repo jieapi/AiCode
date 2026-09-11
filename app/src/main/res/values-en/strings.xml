@@ -1347,4 +1347,6 @@
     <string name="onboarding_choose_model_in_sheet_desc">Tap the model you just added to set it for your chat session.</string>
     <string name="onboarding_send_message_title">Start Chatting</string>
     <string name="onboarding_send_message_desc">Model ready! Type your coding tasks or questions here to start collaborating with the AI assistant.</string>
+    <string name="onboarding_demo_model_anthropic_desc">Anthropic · Recommended for coding</string>
+    <string name="onboarding_demo_model_choose_desc">Current pick · Capable of code generation and analysis</string>
 </resources>

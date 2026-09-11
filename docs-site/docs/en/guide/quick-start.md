@@ -23,9 +23,11 @@ A mismatched architecture will break the built-in container. If you are not sure
 
 Tip: you can also tap "Download APK" on the [homepage](/en/), which fetches the latest stable `universal` package through an accelerated mirror (falls back to the GitHub link automatically if the mirror is unavailable).
 
-## 1. First Launch
+## 1. First Launch & Onboarding Guide
 
 Open AiCode and you will land on the chat home with a fresh empty conversation. Grant storage permission on first use — otherwise the AI cannot access files on your phone.
+
+On first launch, the app automatically starts an interactive spotlight onboarding guide, walking you through the complete flow: "Open sidebar → Enter Settings to configure provider and fetch models → Return home to select model → Send first message". In each step, you can tap the highlighted target or the "Next" button on the card to proceed, or tap "Skip" at any time. If you want to review the walkthrough later, you can restart it anytime via "Settings → Re-run onboarding".
 
 ## 2. Configure an AI Provider
 
