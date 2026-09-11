@@ -212,7 +212,7 @@ class LinuxContainerEngine @Inject constructor(
         timeoutMs: Long
     ): Flow<CommandEvent> = flow {
         val effectiveTimeout = timeoutMs.coerceIn(1L, MAX_TIMEOUT_MS)
-        FileLogger.d(TAG, "执行命令(流式) cwd=$projectPath timeout=${effectiveTimeout}ms: $command")
+        FileLogger.d(TAG, "执行命令(流式) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
         val process = startContainerProcess(command, projectPath)
         val timedOut = AtomicBoolean(false)
         // 看门狗跑在独立 scope（独立 Job）上：若放进包裹 emit 的 coroutineScope 里，emit 的
@@ -221,7 +221,7 @@ class LinuxContainerEngine @Inject constructor(
         val watchdog = launchKillWatchdog(watchScope, process, effectiveTimeout, timedOut, command)
         val cancellationHook = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
             if (cause is CancellationException && process.isAlive) {
-                FileLogger.i(TAG, "命令被取消，终止进程: $command")
+                FileLogger.i(TAG, "命令被取消，终止进程: ${sanitizeCommandForLog(command)}")
                 runCatching { process.destroy() }
                 runCatching { process.destroyForcibly() }
             }
@@ -235,12 +235,12 @@ class LinuxContainerEngine @Inject constructor(
             val exitCode = process.waitFor()
             watchdog.cancel()
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: $command")
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
                 emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
                 emit(CommandEvent.Exit(null))
             } else {
-                if (exitCode != 0) FileLogger.w(TAG, "命令退出码=$exitCode: $command")
-                else FileLogger.v(TAG, "命令完成(退出码 0): $command")
+                if (exitCode != 0) FileLogger.w(TAG, "命令退出码=$exitCode: ${sanitizeCommandForLog(command)}")
+                else FileLogger.v(TAG, "命令完成(退出码 0): ${sanitizeCommandForLog(command)}")
                 emit(CommandEvent.Exit(exitCode))
             }
         } catch (e: CancellationException) {
@@ -253,11 +253,11 @@ class LinuxContainerEngine @Inject constructor(
             // 非 IO 异常也转成一行提示 + Exit，避免 flow 异常终止丢掉已输出内容。
             watchdog.cancel()
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止(readLine 异常): $command", e)
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止(readLine 异常): ${sanitizeCommandForLog(command)}", e)
                 emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
                 emit(CommandEvent.Exit(null))
             } else {
-                FileLogger.e(TAG, "命令读输出异常(已保留此前输出): $command", e)
+                FileLogger.e(TAG, "命令读输出异常(已保留此前输出): ${sanitizeCommandForLog(command)}", e)
                 emit(CommandEvent.Line("[命令执行异常：${e.message}]"))
                 emit(CommandEvent.Exit(null))
             }
@@ -347,12 +347,12 @@ class LinuxContainerEngine @Inject constructor(
     ): ExecResult = withContext(Dispatchers.IO) {
         try {
             val effectiveTimeout = timeoutMs.coerceIn(1L, MAX_TIMEOUT_MS)
-            FileLogger.d(TAG, "执行命令(同步) cwd=$projectPath timeout=${effectiveTimeout}ms: $command")
+            FileLogger.d(TAG, "执行命令(同步) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
             val process = startContainerProcess(command, projectPath)
             val timedOut = AtomicBoolean(false)
             val cancellationHook = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
                 if (cause is CancellationException && process.isAlive) {
-                    FileLogger.i(TAG, "命令被取消，终止进程: $command")
+                    FileLogger.i(TAG, "命令被取消，终止进程: ${sanitizeCommandForLog(command)}")
                     runCatching { process.destroy() }
                     runCatching { process.destroyForcibly() }
                 }
@@ -385,18 +385,18 @@ class LinuxContainerEngine @Inject constructor(
             }
 
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: $command")
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
                 output.append(timeoutNotice(effectiveTimeout))
                 output.append("\n")
                 ExecResult(output.build(), null)
             } else {
-                FileLogger.v(TAG, "命令完成(退出码 $exitCode，输出 ${output.totalChars} 字符): $command")
+                FileLogger.v(TAG, "命令完成(退出码 $exitCode，输出 ${output.totalChars} 字符): ${sanitizeCommandForLog(command)}")
                 ExecResult(output.build(), exitCode)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.e(TAG, "执行命令异常: $command", e)
+            FileLogger.e(TAG, "执行命令异常: ${sanitizeCommandForLog(command)}", e)
             ExecResult("Error: ${e.message}", null)
         }
     }
@@ -427,13 +427,13 @@ class LinuxContainerEngine @Inject constructor(
             val inflight = credentialPromptInFlight.get()
             if (inflight > 0 && totalWaited < MAX_TIMEOUT_MS) {
                 // 凭据弹窗在途：宽限 1min（不超过绝对上限），再回查。
-                FileLogger.i(TAG, "凭据弹窗在途(${inflight})，watchdog 暂缓，再等 60000ms: $command")
+                FileLogger.i(TAG, "凭据弹窗在途(${inflight})，watchdog 暂缓，再等 60000ms: ${sanitizeCommandForLog(command)}")
                 remaining = minOf(60_000L, MAX_TIMEOUT_MS - totalWaited)
                 continue
             }
             // 不在途，或已达 30min 绝对上限：正常超时终止。
             timedOut.set(true)
-            FileLogger.w(TAG, "命令执行超过 ${timeoutMs}ms（累计等待 ${totalWaited}ms，inflight=${inflight}），终止进程: $command")
+            FileLogger.w(TAG, "命令执行超过 ${timeoutMs}ms（累计等待 ${totalWaited}ms，inflight=${inflight}），终止进程: ${sanitizeCommandForLog(command)}")
             runCatching { process.destroy() }
             delay(TIMEOUT_KILL_GRACE_MS)
             if (process.isAlive) runCatching { process.destroyForcibly() }

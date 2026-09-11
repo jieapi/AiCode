@@ -16,6 +16,7 @@ import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import javax.net.ssl.SSLException
 import kotlin.coroutines.coroutineContext
 import kotlin.math.min
 import kotlin.math.pow
@@ -135,11 +136,21 @@ fun isRetriableNetworkError(t: Throwable): Boolean {
 enum class RetryErrorKind {
     /** HTTP 429 / 服务端 rate limit 类错误。 */
     RATE_LIMIT,
-    /** HTTP 5xx / 服务端过载类错误。 */
+    /** HTTP 503 服务过载（或流式错误码 server_is_overloaded / overloaded）。 */
+    SERVER_OVERLOADED,
+    /** HTTP 5xx（除 503）等服务端错误。 */
     SERVER_ERROR,
-    /** 连接超时 / 读超时。 */
+    /** 连接/读取超时（含首字节 watchdog 触发的断流）。 */
     TIMEOUT,
-    /** DNS 解析失败、连接被拒、流被中断等网络层故障。 */
+    /** 目标端口无服务，连接被拒绝。 */
+    CONNECTION_REFUSED,
+    /** DNS 解析失败（域名不存在或网络不可达）。 */
+    DNS_FAILED,
+    /** 连接建立后被对端/中间设备重置（流中断、unexpected end of stream 等）。 */
+    CONNECTION_RESET,
+    /** TLS/SSL 握手失败。 */
+    SSL_ERROR,
+    /** 其它网络层故障。 */
     NETWORK,
     /** 无法归类的其它错误。 */
     UNKNOWN
@@ -158,18 +169,45 @@ data class RetryErrorInfo(
 fun Throwable.toRetryErrorInfo(): RetryErrorInfo = when {
     this is HttpException -> when {
         code() == 429 -> RetryErrorInfo(RetryErrorKind.RATE_LIMIT, code())
+        code() == 503 -> RetryErrorInfo(RetryErrorKind.SERVER_OVERLOADED, code())
         code() >= 500 -> RetryErrorInfo(RetryErrorKind.SERVER_ERROR, code())
         else -> RetryErrorInfo(RetryErrorKind.UNKNOWN, code())
     }
     this is StreamApiException -> when (code) {
         "rate_limit_exceeded", "rate_limit_error", "insufficient_quota" -> RetryErrorInfo(RetryErrorKind.RATE_LIMIT)
-        "server_error", "server_is_overloaded", "overloaded", "internal_error" -> RetryErrorInfo(RetryErrorKind.SERVER_ERROR)
+        "server_is_overloaded", "overloaded" -> RetryErrorInfo(RetryErrorKind.SERVER_OVERLOADED)
+        "server_error", "internal_error" -> RetryErrorInfo(RetryErrorKind.SERVER_ERROR)
         else -> RetryErrorInfo(RetryErrorKind.UNKNOWN)
     }
     this is SocketTimeoutException || this is InterruptedIOException -> RetryErrorInfo(RetryErrorKind.TIMEOUT)
-    this is UnknownHostException || this is ConnectException -> RetryErrorInfo(RetryErrorKind.NETWORK)
-    this is IOException -> RetryErrorInfo(RetryErrorKind.NETWORK)
+    this is UnknownHostException -> RetryErrorInfo(RetryErrorKind.DNS_FAILED)
+    this is ConnectException -> RetryErrorInfo(RetryErrorKind.CONNECTION_REFUSED)
+    // SSLException / ConnectException / UnknownHostException 都是 IOException 子类，必须先于 IOException 匹配
+    this is SSLException -> RetryErrorInfo(RetryErrorKind.SSL_ERROR)
+    this is IOException -> if (isConnectionReset(this)) {
+        RetryErrorInfo(RetryErrorKind.CONNECTION_RESET)
+    } else {
+        RetryErrorInfo(RetryErrorKind.NETWORK)
+    }
     else -> RetryErrorInfo(RetryErrorKind.UNKNOWN)
+}
+
+/** 流被对端/中间设备中断的常见报错文案，命中则归类为 [RetryErrorKind.CONNECTION_RESET]。 */
+private val RESET_MESSAGES = listOf(
+    "connection reset",
+    "reset by peer",
+    "broken pipe",
+    "unexpected end of stream",
+    "connection closed",
+    "socket hang up",
+    "econnreset",
+    "stream closed",
+    "eof"
+)
+
+private fun isConnectionReset(e: IOException): Boolean {
+    val message = e.message?.lowercase() ?: return false
+    return RESET_MESSAGES.any { message.contains(it) }
 }
 
 /**

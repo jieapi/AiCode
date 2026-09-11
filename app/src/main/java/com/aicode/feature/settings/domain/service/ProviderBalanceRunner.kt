@@ -36,6 +36,7 @@ import com.aicode.feature.settings.domain.model.TabSetElement
 import com.aicode.feature.settings.domain.model.TextBlockElement
 import com.aicode.feature.settings.domain.model.TextSize
 import com.aicode.feature.settings.domain.model.TextWeight
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -52,7 +53,8 @@ import javax.inject.Singleton
 class ProviderBalanceRunner @Inject constructor(
     private val commandEngine: CommandEngine,
     private val containerInstaller: ContainerInstaller,
-    private val keyRotator: ProviderKeyRotator
+    private val keyRotator: ProviderKeyRotator,
+    private val workspaceRepository: WorkspaceRepository
 ) {
     companion object {
         private const val TAG = "ProviderBalanceRunner"
@@ -679,7 +681,13 @@ class ProviderBalanceRunner @Inject constructor(
         val fullCommand = "$envPrefix $execCmd"
 
         FileLogger.i(TAG, "执行面板脚本 provider=${provider.name} targetPath=$targetPath model=${context?.model}")
-        val result = commandEngine.runCommandSyncUnbounded(fullCommand, timeoutMs = SCRIPT_TIMEOUT_MS)
+        // 必须传工作区路径：proot 靠它把当前工作区 bind 到容器内 /root/workspace，
+        // 否则脚本里访问工作区文件（如 .aicode/progress.json）会落到 rootfs 的空目录。
+        val result = commandEngine.runCommandSyncUnbounded(
+            fullCommand,
+            projectPath = workspaceRepository.currentPath(),
+            timeoutMs = SCRIPT_TIMEOUT_MS
+        )
         val output = result.output.trim()
 
         if (result.exitCode != null && result.exitCode != 0) {

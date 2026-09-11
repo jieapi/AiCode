@@ -122,3 +122,16 @@ interface CommandEngine {
         const val MAX_TIMEOUT_MS = 1_800_000L
     }
 }
+
+/**
+ * 日志打印前对命令串脱敏：命令可能带 env 前缀（如面板脚本的 `AICODE_PROVIDER_API_KEY=...`）
+ * 或内联凭据（`--header "Authorization: Bearer ..."`）。按敏感键名把值打码为 `***`。
+ */
+private val SENSITIVE_COMMAND_VALUE_REGEX = Regex(
+    """(?i)(?<![A-Za-z0-9])(api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|authorization|auth[_-]?cookie|cookie)\b\s*([=:])\s*(['"]?)(?:Bearer\s+|Basic\s+)?[^\s'"]+"""
+)
+
+fun sanitizeCommandForLog(command: String): String =
+    SENSITIVE_COMMAND_VALUE_REGEX.replace(command) { m ->
+        m.groupValues[1] + m.groupValues[2] + m.groupValues[3] + "***"
+    }

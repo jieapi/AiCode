@@ -65,7 +65,7 @@ class RemoteSshEngine @Inject constructor(
         timeoutMs: Long
     ): Flow<CommandEvent> = flow {
         val effectiveTimeout = timeoutMs.coerceIn(1L, CommandEngine.MAX_TIMEOUT_MS)
-        FileLogger.d(TAG, "执行命令(远程流式) cwd=$projectPath timeout=${effectiveTimeout}ms: $command")
+        FileLogger.d(TAG, "执行命令(远程流式) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
         val session = connection.startExecSession(buildCdCommand(command, projectPath))
         val timedOut = AtomicBoolean(false)
         val watchScope = CoroutineScope(Dispatchers.IO + Job())
@@ -73,13 +73,13 @@ class RemoteSshEngine @Inject constructor(
             delay(effectiveTimeout)
             if (session.isOpen) {
                 timedOut.set(true)
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: $command")
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
                 runCatching { session.close() }
             }
         }
         val cancellationHook = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
             if (cause is CancellationException && session.isOpen) {
-                FileLogger.i(TAG, "命令被取消，关闭 session: $command")
+                FileLogger.i(TAG, "命令被取消，关闭 session: ${sanitizeCommandForLog(command)}")
                 runCatching { session.close() }
             }
         }
@@ -95,8 +95,8 @@ class RemoteSshEngine @Inject constructor(
                 emit(CommandEvent.Line("[命令执行超时：超过 ${effectiveTimeout}ms 已被强制终止]"))
                 emit(CommandEvent.Exit(null))
             } else {
-                if (exitCode != 0) FileLogger.w(TAG, "命令退出码=$exitCode: $command")
-                else FileLogger.v(TAG, "命令完成(退出码 0): $command")
+                if (exitCode != 0) FileLogger.w(TAG, "命令退出码=$exitCode: ${sanitizeCommandForLog(command)}")
+                else FileLogger.v(TAG, "命令完成(退出码 0): ${sanitizeCommandForLog(command)}")
                 emit(CommandEvent.Exit(exitCode))
             }
         } catch (e: CancellationException) {
@@ -107,7 +107,7 @@ class RemoteSshEngine @Inject constructor(
                 emit(CommandEvent.Line("[命令执行超时：超过 ${effectiveTimeout}ms 已被强制终止]"))
                 emit(CommandEvent.Exit(null))
             } else {
-                FileLogger.e(TAG, "命令读输出异常(已保留此前输出): $command", e)
+                FileLogger.e(TAG, "命令读输出异常(已保留此前输出): ${sanitizeCommandForLog(command)}", e)
                 emit(CommandEvent.Line("[命令执行异常：${e.message}]"))
                 emit(CommandEvent.Exit(null))
             }
@@ -146,7 +146,7 @@ class RemoteSshEngine @Inject constructor(
         if (!isContainerInstalled()) return null
         return runCatching { execCaptured(command, projectPath, timeoutMs) }
             .getOrElse {
-                FileLogger.w(TAG, "远程命令执行失败(连接可能已断): $command", it)
+                FileLogger.w(TAG, "远程命令执行失败(连接可能已断): ${sanitizeCommandForLog(command)}", it)
                 null
             }
     }
@@ -167,7 +167,7 @@ class RemoteSshEngine @Inject constructor(
         unbounded: Boolean = false
     ): CommandResult = withContext(Dispatchers.IO) {
         val effectiveTimeout = timeoutMs.coerceIn(1L, CommandEngine.MAX_TIMEOUT_MS)
-        FileLogger.d(TAG, "执行命令(远程同步) cwd=$projectPath timeout=${effectiveTimeout}ms: $command")
+        FileLogger.d(TAG, "执行命令(远程同步) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
         val session = connection.startExecSession(buildCdCommand(command, projectPath))
         val output = if (unbounded) BoundedOutput(Int.MAX_VALUE, Int.MAX_VALUE) else BoundedOutput()
         var exitCode: Int? = null
@@ -176,7 +176,7 @@ class RemoteSshEngine @Inject constructor(
                 val watchdog = launch {
                     delay(effectiveTimeout)
                     if (session.isOpen) {
-                        FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: $command")
+                        FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
                         runCatching { session.close() }
                     }
                 }
@@ -213,7 +213,7 @@ class RemoteSshEngine @Inject constructor(
         } finally {
             runCatching { session.close() }
         }
-        FileLogger.v(TAG, "命令完成(远程, 退出码 $exitCode，输出 ${output.totalChars} 字符): $command")
+        FileLogger.v(TAG, "命令完成(远程, 退出码 $exitCode，输出 ${output.totalChars} 字符): ${sanitizeCommandForLog(command)}")
         CommandResult(output.build(), exitCode)
     }
 

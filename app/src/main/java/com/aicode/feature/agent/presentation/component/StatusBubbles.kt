@@ -166,8 +166,13 @@ private fun retryErrorLabel(error: RetryErrorInfo): String {
     val base = stringResource(
         when (error.kind) {
             RetryErrorKind.RATE_LIMIT -> R.string.retry_error_rate_limit
+            RetryErrorKind.SERVER_OVERLOADED -> R.string.retry_error_server_overloaded
             RetryErrorKind.SERVER_ERROR -> R.string.retry_error_server
             RetryErrorKind.TIMEOUT -> R.string.retry_error_timeout
+            RetryErrorKind.CONNECTION_REFUSED -> R.string.retry_error_connection_refused
+            RetryErrorKind.DNS_FAILED -> R.string.retry_error_dns_failed
+            RetryErrorKind.CONNECTION_RESET -> R.string.retry_error_connection_reset
+            RetryErrorKind.SSL_ERROR -> R.string.retry_error_ssl
             RetryErrorKind.NETWORK -> R.string.retry_error_network
             RetryErrorKind.UNKNOWN -> R.string.retry_error_unknown
         }

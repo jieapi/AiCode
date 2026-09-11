@@ -76,6 +76,7 @@ import com.aicode.feature.agent.presentation.hasVisibleContent
 import com.aicode.feature.settings.presentation.SettingsViewModel
 import com.aicode.feature.settings.domain.model.DashboardContext
 import com.aicode.feature.settings.domain.model.ProviderBalanceState
+import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.presentation.WorkspaceViewModel
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowDown
@@ -376,14 +377,23 @@ fun AIChatPanel(
             is AgentUIState.Result -> "result"
             is AgentUIState.Error -> "error"
         }
+        // 未显式传最近 token（切会话/任务完成/手动刷新等场景）时，从最后一条含 token 的助手消息兜底：
+        // 否则面板的「最近输入/输出/缓存」会显示 0。llm 事件触发的刷新仍用事件带的实时值（更及时）。
+        val lastTokenMsg = messages.asReversed().firstOrNull {
+            it.role == MessageRole.ASSISTANT && (it.inputTokens > 0 || it.outputTokens > 0)
+        }
+        val effLastInput = if (lastInput > 0) lastInput else (lastTokenMsg?.inputTokens ?: 0)
+        val effLastOutput = if (lastOutput > 0) lastOutput else (lastTokenMsg?.outputTokens ?: 0)
+        val effLastCached = if (lastCached > 0) lastCached else (lastTokenMsg?.cachedInputTokens ?: 0)
         return DashboardContext(
             model = activeModel,
-            workspacePath = projectRoot,
+            // 面板脚本在容器内执行，工作区路径必须是容器视角（~/workspace）；宿主真实路径在容器内不存在
+            workspacePath = WorkspacePathMapper.CONTAINER_ROOT,
             workspaceName = if (projectRoot.isNotBlank()) File(projectRoot).name else "",
             sessionId = curSessionId,
-            lastInputTokens = lastInput,
-            lastOutputTokens = lastOutput,
-            lastCachedTokens = lastCached,
+            lastInputTokens = effLastInput,
+            lastOutputTokens = effLastOutput,
+            lastCachedTokens = effLastCached,
             totalInputTokens = currentSession?.totalInputTokens ?: 0,
             totalOutputTokens = currentSession?.totalOutputTokens ?: 0,
             modelContextTokens = activeModelMetadata?.contextTokens ?: 0,
@@ -403,10 +413,14 @@ fun AIChatPanel(
         )
     }
 
-    // 首次进入、切换提供商、切换脚本路径或切换会话时拉取一次面板
-    LaunchedEffect(activeProvider?.id, activeProvider?.balanceScriptPath, currentSessionId) {
+    // 首次进入、切换提供商、切换脚本路径或切换会话时拉取一次面板。
+    // 会话切换时等 currentSession / messages 都落到新会话（sessionReady）再刷新：
+    // 否则 buildDashboardContext 读到的是切换瞬间的旧会话快照，面板会显示旧数据或空 token。
+    val sessionReady = currentSession?.id == currentSessionId && messagesReady
+    LaunchedEffect(activeProvider?.id, activeProvider?.balanceScriptPath, currentSessionId, sessionReady) {
         val provider = activeProvider ?: return@LaunchedEffect
         if (provider.balanceScriptPath.isBlank()) return@LaunchedEffect
+        if (!sessionReady) return@LaunchedEffect
         val context = buildDashboardContext(refreshReason = "session")
         settingsViewModel?.refreshProviderBalance(provider, context = context, force = true)
     }
@@ -430,6 +444,23 @@ fun AIChatPanel(
                 callEvent.cachedTokens,
                 "llm"
             )
+            settingsViewModel?.refreshProviderBalance(provider, context = context, force = true)
+        }
+    }
+
+    // AI 一轮任务完成后刷新面板：让脚本拿到最终 agentState（result/idle/error），
+    // 否则面板状态会一直停在「生成中」。busy→非busy 每轮只发生一次（Result 后再置 Idle 属
+    // 非busy→非busy，不会重复触发），故这里触发的刷新恰好落在最终状态上。
+    var lastAgentStateForPanel by remember { mutableStateOf<AgentUIState?>(null) }
+    LaunchedEffect(agentState) {
+        val prev = lastAgentStateForPanel
+        lastAgentStateForPanel = agentState
+        val wasBusy = prev is AgentUIState.Loading || prev is AgentUIState.Streaming
+        val nowDone = agentState !is AgentUIState.Loading && agentState !is AgentUIState.Streaming
+        if (wasBusy && nowDone) {
+            val provider = latestActiveProvider ?: return@LaunchedEffect
+            if (provider.balanceScriptPath.isBlank()) return@LaunchedEffect
+            val context = latestBuildDashboardContext(0, 0, 0, "done")
             settingsViewModel?.refreshProviderBalance(provider, context = context, force = true)
         }
     }
