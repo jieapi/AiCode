@@ -137,7 +137,7 @@ Tag 驱动发版，平时 `main` 上的提交不影响发布包。
 
 ### 步骤
 
-0. **更新内置模型数据**（手动跑）：`python3 scripts/update-models-dev-assets.py` 从 models.dev 刷新 `app/src/main/assets/api.official.json`（只保留内置 12 个官方 provider、不引入新 provider，现有 provider 下可扩充模型与单价）。**失败时脚本非零退出且不改快照——直接跳过此步发版，不要重试或手改文件**；成功则把快照改动一并提交。
+0. **更新内置模型数据（仅打 Tag 前执行）**：`python3 scripts/update-models-dev-assets.py` 从 models.dev 刷新 `app/src/main/assets/api.official.json`（只保留内置 12 个官方 provider、不引入新 provider，现有 provider 下可扩充模型与单价）。**该脚本只在打 Tag 发版前手动执行；日常提交 / 推 main / 其它开发流程一律不跑**。**失败时脚本非零退出且不改快照——直接跳过此步发版，不要重试或手改文件**；成功则把快照改动一并提交到即将打 Tag 的分支。
 1. **在 `main` 最新提交上打 Tag 并推送**：`git tag v1.7.0-rc1 && git push origin v1.7.0-rc1`。**严禁在 `feat/*` / `refactor/*` 上打 Tag 发版**，必须先合入 `main`。
 2. CI 捕获 `v*` Tag 后自动推导版本、构建 APK、发布 Release。
 3. **真机装 RC 包**，至少跑通 AI 对话 + 终端 + 容器启动三条主线。
