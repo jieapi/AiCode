@@ -117,16 +117,19 @@ class WorkspacePathMapper @Inject constructor(
      * 判断顺序无歧义。
      */
     fun toContainerPath(hostPath: String): String {
-        val rootPath = hostRoot().absolutePath
-        val aicodePath = aicodeRoot().absolutePath
-        val rootfsPath = rootfsRoot().absolutePath
-        val abs = File(hostPath).absolutePath
+        val rootPath = hostRoot().absolutePath.replace('\\', '/')
+        val aicodePath = aicodeRoot().absolutePath.replace('\\', '/')
+        val rootfsPath = rootfsRoot().absolutePath.replace('\\', '/')
+        val abs = File(hostPath).absolutePath.replace('\\', '/')
+        val raw = hostPath.trim().replace('\\', '/')
+        val resolvedWs = resolvedContainerRoot().replace('\\', '/')
         return when {
             abs == rootPath -> CONTAINER_ROOT
             abs.startsWith("$rootPath/") -> CONTAINER_ROOT + "/" + abs.removePrefix("$rootPath/")
             // 展开后的 $HOME/workspace 形式也还原为 ~/workspace（bind mount 路径可能以绝对形式出现）
-            abs == resolvedContainerRoot() -> CONTAINER_ROOT
-            abs.startsWith(resolvedContainerRoot() + "/") -> CONTAINER_ROOT + "/" + abs.removePrefix(resolvedContainerRoot() + "/")
+            raw == resolvedWs || abs == resolvedWs -> CONTAINER_ROOT
+            raw.startsWith("$resolvedWs/") -> CONTAINER_ROOT + "/" + raw.removePrefix("$resolvedWs/")
+            abs.startsWith("$resolvedWs/") -> CONTAINER_ROOT + "/" + abs.removePrefix("$resolvedWs/")
             abs == aicodePath -> AICODE_ROOT
             abs.startsWith("$aicodePath/") -> AICODE_ROOT + "/" + abs.removePrefix("$aicodePath/")
             abs == rootfsPath -> "/"

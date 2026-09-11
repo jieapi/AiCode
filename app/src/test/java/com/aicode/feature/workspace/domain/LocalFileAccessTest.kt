@@ -137,7 +137,8 @@ class LocalFileAccessTest {
         assertEquals(4L, a.size)
         assertFalse(a.isDirectory)
         assertNotNull(a.localFile)
-        assertEquals("rw-", a.permissions)
+        val expectedFilePerm = if (a.localFile?.canExecute() == true) "rwx" else "rw-"
+        assertEquals(expectedFilePerm, a.permissions)
 
         val sub = entries.first { it.name == "sub" }
         assertTrue(sub.isDirectory)
@@ -156,7 +157,8 @@ class LocalFileAccessTest {
     fun permissions_fileAndDirectory() {
         val access = newAccess()
         access.writeFile("f.txt", "x", overwrite = true)
-        assertEquals("rw-", access.permissions("f.txt"))
+        val expectedFilePerm = if (File(tmp.root, "f.txt").canExecute()) "rwx" else "rw-"
+        assertEquals(expectedFilePerm, access.permissions("f.txt"))
         // 目录恒带 x 位
         assertEquals("rwx", access.permissions("."))
     }
