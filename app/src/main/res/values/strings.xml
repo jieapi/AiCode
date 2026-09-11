@@ -1348,4 +1348,5 @@
     <string name="onboarding_send_message_desc">模型已就绪！在输入框输入你的编程需求或问题，开始与 AI 助手协同工作吧！</string>
     <string name="onboarding_demo_model_anthropic_desc">Anthropic · 智能编程推荐模型</string>
     <string name="onboarding_demo_model_choose_desc">当前推荐 · 具备代码生成与分析能力</string>
+    <string name="onboarding_simulated_badge">演示预览</string>
 </resources>

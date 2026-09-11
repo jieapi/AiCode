@@ -133,6 +133,8 @@ internal fun ChatInputBar(
     forceCollapseBalance: Boolean = false,
     /** 消息列表正在滚动时内容区淡出到 40%，停止滚动恢复；用于长列表阅读时降低底部干扰（同 git 页 tab 栏）。 */
     isScrolling: Boolean = false,
+    forceOpenModelSheet: Boolean = false,
+    onModelSheetDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val hasContent = value.isNotBlank() || pendingAttachments.isNotEmpty()
@@ -350,6 +352,8 @@ internal fun ChatInputBar(
                             providers = providers,
                             modelMetadata = modelMetadata,
                             onSelectModel = onSelectModel,
+                            forceOpenSheet = forceOpenModelSheet,
+                            onSheetDismiss = onModelSheetDismiss,
                             modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
 

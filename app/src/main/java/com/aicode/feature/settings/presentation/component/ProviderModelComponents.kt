@@ -590,10 +590,11 @@ private fun String.trimDecimal(): String =
 internal fun FetchModelRow(
     model: String,
     metadata: ModelMetadata?,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onAdd() }
             .padding(vertical = Spacing.sm, horizontal = Spacing.lg),

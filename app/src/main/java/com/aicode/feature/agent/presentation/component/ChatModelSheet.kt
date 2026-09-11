@@ -51,15 +51,18 @@ internal fun ModelIconButton(
     providers: List<AIProviderConfig>,
     modelMetadata: Map<String, ModelMetadata>,
     onSelectModel: (String, String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    forceOpenSheet: Boolean = false,
+    onSheetDismiss: (() -> Unit)? = null
 ) {
     var showSheet by remember { mutableStateOf(false) }
+    val effectiveShowSheet = showSheet || forceOpenSheet
 
     IconButton(onClick = { showSheet = true }, modifier = modifier.size(36.dp)) {
         ModelLogoIcon(modelName = provider?.effectiveModel.orEmpty(), size = 20.dp)
     }
 
-    if (showSheet) {
+    if (effectiveShowSheet) {
         ModelSheet(
             providers = providers,
             currentProviderId = provider?.id ?: "",
@@ -68,8 +71,12 @@ internal fun ModelIconButton(
             onSelect = { pId, model ->
                 onSelectModel(pId, model)
                 showSheet = false
+                onSheetDismiss?.invoke()
             },
-            onDismiss = { showSheet = false }
+            onDismiss = {
+                showSheet = false
+                onSheetDismiss?.invoke()
+            }
         )
     }
 }

@@ -249,6 +249,8 @@ fun AIChatPanel(
     gitActive: Boolean = false,
     currentFile: String? = null,
     selectedCode: String? = null,
+    onboardingStep: OnboardingStep? = null,
+    onSelectModelInOnboarding: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
@@ -1167,6 +1169,8 @@ fun AIChatPanel(
                     } else 0f
                 },
                 isScrolling = listState.isScrollInProgress,
+                forceOpenModelSheet = onboardingStep == OnboardingStep.SIMULATE_CHOOSE_MODEL,
+                onModelSheetDismiss = onSelectModelInOnboarding,
                 modifier = Modifier
                     .fillMaxWidth()
                     .onboardingTarget(OnboardingStep.SEND_MESSAGE)

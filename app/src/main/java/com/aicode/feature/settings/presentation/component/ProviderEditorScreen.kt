@@ -173,7 +173,8 @@ fun ProviderEditorScreen(
      * 仅当 [initialProvider] 为 null（新建场景）时生效。
      */
     presetPrefill: ProviderPreset? = null,
-    initialTab: Int = 0
+    initialTab: Int = 0,
+    onboardingStep: OnboardingStep? = null
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -273,6 +274,13 @@ fun ProviderEditorScreen(
 
     LaunchedEffect(type, modelIdSet) {
         viewModel.resolveModelMetadata(providerId, type, models.toList())
+    }
+
+    LaunchedEffect(onboardingStep) {
+        if (onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+            fetchDialogKey++
+            showFetchDialog = true
+        }
     }
 
     LaunchedEffect(providerId) {
@@ -978,6 +986,7 @@ fun ProviderEditorScreen(
                 fetchState = fetchState,
                 modelMetadata = modelMetadata,
                 existingModels = models,
+                isOnboarding = onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG,
                 onFetchModels = { viewModel.fetchModels(currentConfig()) },
                 onAddModel = { m ->
                     if (m !in models) {
@@ -1255,7 +1264,8 @@ private fun FetchModelsDialog(
     existingModels: List<String>,
     onFetchModels: () -> Unit,
     onAddModel: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isOnboarding: Boolean = false
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
@@ -1305,57 +1315,98 @@ private fun FetchModelsDialog(
                     FetchModelsSkeleton()
                 }
                 is FetchState.Error -> {
-                    SettingsGroup {
-                        Box(
+                    if (isOnboarding) {
+                        // 引导模式下未配置有效 Key 时，友好呈现推荐模型行供新手继续真实体验
+                        val fallbackModels = listOf("claude-3-5-sonnet", "gpt-4o", "gemini-1.5-pro").filter { it !in existingModels }
+                        val grouped = fallbackModels.groupBy { m -> modelBrandKey(m) }
+                            .toSortedMap(compareBy<String> { it == "other" }.thenBy { brandDisplayName(context, it) })
+                        LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 320.dp),
-                            contentAlignment = Alignment.Center
+                                .heightIn(min = 320.dp, max = 420.dp),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
-                            val displayMsg = if (debugInfo != null && debugInfo.responseCode > 0) {
-                                stringResource(R.string.provider_fetch_http_error, debugInfo.responseCode, debugInfo.latencyMs)
-                            } else {
-                                val codeMatch = Regex("""(?i)(HTTP\s*\d{3}|code[:\s]+[a-zA-Z0-9_]+)""").find(fetchState.message)
-                                if (codeMatch != null) codeMatch.value
-                                else fetchState.message.lines().firstOrNull()?.let { if (it.length > 28) it.take(28) + "..." else it } ?: stringResource(R.string.common_error)
+                            grouped.forEach { (brandKey, models) ->
+                                item(key = "header_$brandKey") {
+                                    SettingsGroupHeader("${brandDisplayName(context, brandKey)} (${models.size})")
+                                }
+                                item(key = "card_$brandKey") {
+                                    SettingsGroup {
+                                        models.forEachIndexed { index, m ->
+                                            if (index > 0) {
+                                                SettingsDivider()
+                                            }
+                                            val isFirstTarget = brandKey == grouped.firstKey() && index == 0
+                                            FetchModelRow(
+                                                model = m,
+                                                metadata = modelMetadata[m],
+                                                onAdd = {
+                                                    onAddModel(m)
+                                                    onDismiss()
+                                                },
+                                                modifier = if (isFirstTarget) Modifier.onboardingTarget(OnboardingStep.SIMULATE_FETCH_DIALOG) else Modifier
+                                            )
+                                        }
+                                    }
+                                }
                             }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                        }
+                    } else {
+                        SettingsGroup {
+                            Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .then(
-                                        if (debugInfo != null) Modifier.clickable { showDebugSheet = true } else Modifier
-                                    )
-                                    .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                                    .fillMaxWidth()
+                                    .heightIn(min = 320.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = FeatherIcons.AlertCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(Spacing.xs))
-                                Text(
-                                    text = displayMsg,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                if (debugInfo != null) {
-                                    Spacer(Modifier.width(4.dp))
+                                val displayMsg = if (debugInfo != null && debugInfo.responseCode > 0) {
+                                    stringResource(R.string.provider_fetch_http_error, debugInfo.responseCode, debugInfo.latencyMs)
+                                } else {
+                                    val codeMatch = Regex("""(?i)(HTTP\s*\d{3}|code[:\s]+[a-zA-Z0-9_]+)""").find(fetchState.message)
+                                    if (codeMatch != null) codeMatch.value
+                                    else fetchState.message.lines().firstOrNull()?.let { if (it.length > 28) it.take(28) + "..." else it } ?: stringResource(R.string.common_error)
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .then(
+                                            if (debugInfo != null) Modifier.clickable { showDebugSheet = true } else Modifier
+                                        )
+                                        .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                                ) {
                                     Icon(
-                                        imageVector = FeatherIcons.ChevronRight,
+                                        imageVector = FeatherIcons.AlertCircle,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(14.dp)
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(16.dp)
                                     )
+                                    Spacer(Modifier.width(Spacing.xs))
+                                    Text(
+                                        text = displayMsg,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    if (debugInfo != null) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = FeatherIcons.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 is FetchState.Success -> {
-                    val newModels = fetchState.models.filter { it !in existingModels && it.contains(searchQuery, ignoreCase = true) }
+                    val rawModels = fetchState.models.filter { it !in existingModels && it.contains(searchQuery, ignoreCase = true) }
+                    val newModels = if (rawModels.isEmpty() && isOnboarding) {
+                        listOf("claude-3-5-sonnet", "gpt-4o").filter { it !in existingModels }
+                    } else rawModels
                     if (newModels.isEmpty()) {
                         SettingsGroup {
                             Box(
@@ -1388,10 +1439,15 @@ private fun FetchModelsDialog(
                                             if (index > 0) {
                                                 SettingsDivider()
                                             }
+                                            val isFirstTarget = isOnboarding && brandKey == grouped.firstKey() && index == 0
                                             FetchModelRow(
                                                 model = m,
                                                 metadata = modelMetadata[m],
-                                                onAdd = { onAddModel(m) }
+                                                onAdd = {
+                                                    onAddModel(m)
+                                                    if (isOnboarding) onDismiss()
+                                                },
+                                                modifier = if (isFirstTarget) Modifier.onboardingTarget(OnboardingStep.SIMULATE_FETCH_DIALOG) else Modifier
                                             )
                                         }
                                     }

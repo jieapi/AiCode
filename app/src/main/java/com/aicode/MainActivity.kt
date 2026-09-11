@@ -515,8 +515,8 @@ fun AppNavigation(
                 sessionExportLauncher.launch("aicode-session-$safeTitle-${System.currentTimeMillis()}.tar.gz")
             },
             onNavigateToSettings = {
-                if (!permanentDrawer) scope.launch { drawerState.close() }
                 navController.navigate("settings")
+                if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
             }
         )
     }
@@ -563,7 +563,13 @@ fun AppNavigation(
                                 onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                 onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
                                 terminalActive = paneOpen && paneKind == WorkbenchPaneKind.TERMINAL,
-                                gitActive = paneOpen && paneKind == WorkbenchPaneKind.GIT
+                                gitActive = paneOpen && paneKind == WorkbenchPaneKind.GIT,
+                                onboardingStep = if (onboardingUiState.active) onboardingUiState.step else null,
+                                onSelectModelInOnboarding = {
+                                    if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_CHOOSE_MODEL) {
+                                        onboardingCoordinator.nextStep()
+                                    }
+                                }
                             )
                         }
                     }
@@ -758,10 +764,8 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.ENTER_SETTINGS -> {
-                        scope.launch {
-                            drawerState.close()
-                            navController.navigate("settings")
-                        }
+                        navController.navigate("settings")
+                        scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.CONFIG_PROVIDER -> {
@@ -799,10 +803,8 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.ENTER_SETTINGS -> {
-                        scope.launch {
-                            drawerState.close()
-                            navController.navigate("settings")
-                        }
+                        navController.navigate("settings")
+                        scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.CONFIG_PROVIDER -> {

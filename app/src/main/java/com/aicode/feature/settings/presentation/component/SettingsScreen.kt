@@ -442,6 +442,7 @@ fun SettingsScreen(
                 initialProvider = editingProvider,
                 presetPrefill = providerPresetPrefill,
                 initialTab = if (onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS || onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) 1 else 0,
+                onboardingStep = onboardingStep,
                 onNavigateBack = {
                     section = SettingsSection.Providers
                     providerPresetPrefill = null

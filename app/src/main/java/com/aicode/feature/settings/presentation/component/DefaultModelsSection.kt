@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
+import com.aicode.feature.onboarding.domain.OnboardingStep
+import com.aicode.feature.onboarding.presentation.onboardingTarget
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import compose.icons.FeatherIcons
@@ -365,15 +367,18 @@ internal fun ModelSelectionSheet(
                             }
                             item(key = "card_${provider.id}") {
                                 SettingsGroup {
+                                    val isFirstProvider = provider == activeProviders.firstOrNull()
                                     filteredModels.forEachIndexed { index, model ->
                                         if (index > 0) {
                                             SettingsDivider()
                                         }
+                                        val isFirstModel = isFirstProvider && index == 0
                                         ModelSelectionRow(
                                             model = model,
                                             selected = provider.id == currentProviderId && model == currentModel,
                                             metadata = modelMetadata[model],
-                                            onClick = { onSelect(provider.id, model) }
+                                            onClick = { onSelect(provider.id, model) },
+                                            modifier = if (isFirstModel) Modifier.onboardingTarget(OnboardingStep.SIMULATE_CHOOSE_MODEL) else Modifier
                                         )
                                     }
                                 }
@@ -391,10 +396,11 @@ private fun ModelSelectionRow(
     model: String,
     selected: Boolean,
     metadata: ModelMetadata?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
             .padding(vertical = Spacing.sm, horizontal = Spacing.lg),

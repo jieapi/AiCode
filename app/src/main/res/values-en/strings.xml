@@ -1349,4 +1349,5 @@
     <string name="onboarding_send_message_desc">Model ready! Type your coding tasks or questions here to start collaborating with the AI assistant.</string>
     <string name="onboarding_demo_model_anthropic_desc">Anthropic · Recommended for coding</string>
     <string name="onboarding_demo_model_choose_desc">Current pick · Capable of code generation and analysis</string>
+    <string name="onboarding_simulated_badge">Preview</string>
 </resources>
