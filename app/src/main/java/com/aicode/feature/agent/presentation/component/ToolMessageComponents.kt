@@ -296,7 +296,7 @@ internal fun ToolMessageBody(
     }
 }
 
-internal data class ToolNotificationInfo(val summary: String, val succeeded: Boolean)
+internal data class ToolNotificationInfo(val summary: String, val succeeded: Boolean, val isMessage: Boolean = false)
 
 /**
  * 从工具结果 transport JSON 顶层的 `notifications` 字段提取搭车通知（后台任务/子代理完成）。
@@ -309,9 +309,11 @@ internal fun parseToolNotifications(raw: String): List<ToolNotificationInfo> {
         val obj = element as? JsonObject ?: return@mapNotNull null
         val summary = (obj["summary"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: return@mapNotNull null
+        val status = (obj["status"] as? JsonPrimitive)?.contentOrNull
         ToolNotificationInfo(
             summary = summary,
-            succeeded = (obj["status"] as? JsonPrimitive)?.contentOrNull == "completed"
+            succeeded = status == "completed",
+            isMessage = status == "message"
         )
     }
 }
@@ -331,8 +333,11 @@ private fun ToolNotificationRow(info: ToolNotificationInfo) {
                 .size(6.dp)
                 .clip(CircleShape)
                 .background(
-                    if (info.succeeded) MaterialTheme.semanticColors.success
-                    else MaterialTheme.colorScheme.error
+                    when {
+                        info.isMessage -> MaterialTheme.colorScheme.primary
+                        info.succeeded -> MaterialTheme.semanticColors.success
+                        else -> MaterialTheme.colorScheme.error
+                    }
                 )
         )
         Text(

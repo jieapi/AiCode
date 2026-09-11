@@ -828,6 +828,8 @@ class AIAgentViewModel @Inject constructor(
                     SubAgentEventType.COMPLETED, SubAgentEventType.FAILED -> {
                         enqueueSubAgentNotification(event)
                     }
+                    SubAgentEventType.MESSAGE_FROM_PARENT -> deliverMessageToSubAgent(event)
+                    SubAgentEventType.MESSAGE_FROM_SUB -> deliverMessageToParent(event)
                 }
             }
         }
@@ -880,6 +882,65 @@ class AIAgentViewModel @Inject constructor(
                 detail = event.detail.takeIf { it.isNotBlank() && event.type == SubAgentEventType.FAILED }
             )
         }
+    }
+
+    /**
+     * 主会话发给运行中/已完成子代理的消息：收件人忙碌时入队搭车，空闲时触发新一轮。
+     * 与 [notifyParentSubAgentFinished] 同分发逻辑，方向相反。
+     */
+    private suspend fun deliverMessageToSubAgent(event: SubAgentEvent) {
+        val senderTitle = sessionUseCase.getSessionById(event.parentSessionId)?.title ?: "主会话"
+        deliverAgentMessage(
+            recipientSessionId = event.subSessionId,
+            senderSessionId = event.parentSessionId,
+            senderTitle = senderTitle,
+            message = event.detail,
+            fromParent = true
+        )
+    }
+
+    /** 子代理发给主会话的消息：同上，收件人为主会话。 */
+    private suspend fun deliverMessageToParent(event: SubAgentEvent) {
+        val senderTitle = sessionUseCase.getSessionById(event.subSessionId)?.title ?: "子代理"
+        deliverAgentMessage(
+            recipientSessionId = event.parentSessionId,
+            senderSessionId = event.subSessionId,
+            senderTitle = senderTitle,
+            message = event.detail,
+            fromParent = false
+        )
+    }
+
+    /**
+     * 投递一条代理间消息：收件人忙碌时入 [AgentNotificationCenter]（本轮内工具结果搭车，或整轮结束后兜底），
+     * 空闲时以一条通知消息触发其新一轮。消息正文随通知一并送达，收件方无需再另行读取。
+     */
+    private suspend fun deliverAgentMessage(
+        recipientSessionId: String,
+        senderSessionId: String,
+        senderTitle: String,
+        message: String,
+        fromParent: Boolean
+    ) {
+        if (message.isBlank()) return
+        if (sessionUseCase.getSessionById(recipientSessionId) == null) return
+        val item = PendingNotification(
+            kind = AgentNotificationKind.AGENT_MESSAGE,
+            sourceId = senderSessionId,
+            title = senderTitle,
+            outcome = NotificationOutcome.COMPLETED,
+            message = message,
+            fromParent = fromParent
+        )
+        if (sessionJobs[recipientSessionId]?.isActive == true) {
+            agentNotificationCenter.enqueue(recipientSessionId, item)
+            return
+        }
+        enqueueAgentRequest(
+            request = AgentNotificationFormatter.buildMessage(listOf(item)),
+            projectRoot = _currentWorkspace.value,
+            targetSessionId = recipientSessionId
+        )
     }
 
     /**
@@ -1152,7 +1213,7 @@ class AIAgentViewModel @Inject constructor(
                     allTools.filter { it.name in allowed }
                 }
                 isSub -> allTools.filterNot { it.name == AgentDefinition.NESTED_TOOL }
-                else -> allTools
+                else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
             }
 
             agentWorkflow.executeEvents(

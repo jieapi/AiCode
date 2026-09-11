@@ -496,8 +496,12 @@ private fun BackgroundNotificationBar(message: AgentUIMessage) {
         .findAll(content).map { it.groupValues.getOrNull(1)?.trim()?.lowercase() }.filterNotNull().toList()
     val summaries = Regex("<summary>(.*?)</summary>")
         .findAll(content).map { it.groupValues.getOrNull(1)?.trim() }.filterNotNull().toList()
-    val isSuccess = statuses.all { it == "completed" }
-    val dotColor = if (isSuccess) MaterialTheme.semanticColors.success else MaterialTheme.colorScheme.error
+    val dotColor = when {
+        // status 为 message 的是代理间消息（非失败），用主色；其余非 completed 视为失败。
+        statuses.any { it != "completed" && it != "message" } -> MaterialTheme.colorScheme.error
+        statuses.any { it == "message" } -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.semanticColors.success
+    }
     val label = when {
         summaries.size <= 1 -> summaries.firstOrNull() ?: stringResource(R.string.chat_bg_command_done)
         else -> {

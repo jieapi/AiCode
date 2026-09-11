@@ -9,8 +9,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** 子代理生命周期事件类型。 */
-enum class SubAgentEventType { SPAWNED, COMPLETED, FAILED, STOPPED }
+/**
+ * 子代理事件类型。前四种为生命周期事件；后两种为收发消息事件，只投递内容，不影响活跃集合。
+ */
+enum class SubAgentEventType {
+    SPAWNED, COMPLETED, FAILED, STOPPED,
+
+    /** 主会话向子代理发来一条消息（发送方是父会话）。 */
+    MESSAGE_FROM_PARENT,
+
+    /** 子代理向主会话发来一条消息（发送方是子会话）。 */
+    MESSAGE_FROM_SUB
+}
 
 /**
  * 子代理生命周期事件。
@@ -18,7 +28,8 @@ enum class SubAgentEventType { SPAWNED, COMPLETED, FAILED, STOPPED }
  * @property subSessionId 子代理会话 id。
  * @property parentSessionId 父会话 id（子会话记录里 parentId）。
  * @property type 事件类型。
- * @property detail 附加说明：SPAWNED 为任务指令；COMPLETED/FAILED 为子代理最终输出/错误信息。
+ * @property detail 附加说明：SPAWNED 为任务指令；COMPLETED/FAILED 为子代理最终输出/错误信息；
+ *   MESSAGE_FROM_PARENT / MESSAGE_FROM_SUB 为消息正文。
  */
 data class SubAgentEvent(
     val subSessionId: String,
@@ -72,6 +83,9 @@ class SubAgentEventBus @Inject constructor() {
             }
             SubAgentEventType.COMPLETED, SubAgentEventType.FAILED, SubAgentEventType.STOPPED -> {
                 _activeSubSessionIds.value = _activeSubSessionIds.value - event.subSessionId
+            }
+            SubAgentEventType.MESSAGE_FROM_PARENT, SubAgentEventType.MESSAGE_FROM_SUB -> {
+                // 收发消息不改变运行状态，活跃集合保持不变。
             }
         }
         _events.tryEmit(event)

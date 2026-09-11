@@ -102,6 +102,9 @@ data class AgentDefinition(
 
         /** 子代理不可嵌套派发，其工具集永远剔除该工具。 */
         const val NESTED_TOOL = "task"
+
+        /** 仅子代理可用的工具（子→主发消息）；主会话工具集剔除它。 */
+        const val PARENT_MESSAGE_TOOL = "messageParent"
     }
 }
 

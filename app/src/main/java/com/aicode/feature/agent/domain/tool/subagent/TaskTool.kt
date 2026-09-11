@@ -35,6 +35,8 @@ import javax.inject.Inject
  *
  * 通过 `action` 参数区分操作类型：
  * - `create`（默认）：创建一个子代理会话并让 AI 替用户向其发消息，子代理自动开始回复。
+ * - `send`：向指定子代理发送一条消息（可反复发送）。运行中的子代理会在下一批工具结果里搭车收到，
+ *   已完成的子代理会被重新唤醒；消息按发送顺序送达。
  * - `read`：读取指定子代理的最后输出（最后一条助手回复）。
  * - `stop`：停止指定子代理的执行（取消其 AI 任务）。
  * - `del`：删除指定子代理会话及其全部消息。
@@ -69,18 +71,18 @@ class TaskTool @Inject constructor(
     override fun effectiveCapabilities(args: Map<String, JsonElement>): Set<ToolCapability> {
         val action = (args["action"] as? JsonPrimitive)?.content?.trim()?.lowercase() ?: "create"
         return when (action) {
-            "read", "list" -> emptySet()
+            "read", "list", "send" -> emptySet()
             else -> setOf(ToolCapability.MODIFY_SESSION_STATE)
         }
     }
 
-    override val description = "管理子代理的生命周期：创建、读取结果、停止、删除、列表。子代理拥有独立上下文与完整工具能力，可并行工作。最多同时运行 5 个。子代理完成后你会收到一条后台通知，不要主动轮询。create 可用 agent 参数指定自定义子代理（专属提示词/模型/工具集）。"
+    override val description = "管理子代理的生命周期：创建、发消息、读取结果、停止、删除、列表。子代理拥有独立上下文与完整工具能力，可并行工作。最多同时运行 5 个。子代理完成后你会收到一条后台通知，不要主动轮询。用 send 可在运行中反复向其追加指令/纠偏，或对已完成的子代理继续追问；子代理运行中也可能主动发消息给你。create 可用 agent 参数指定自定义子代理（专属提示词/模型/工具集）。"
 
     override val parameters: Map<String, ToolParameter> = mapOf(
         "action" to ToolParameter(
             name = "action",
             type = ParameterType.STRING,
-            description = "操作类型：create（默认，创建子代理并执行任务）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）",
+            description = "操作类型：create（默认，创建子代理并执行任务）/ send（向子代理发一条消息，可反复发送）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）",
             required = false
         ),
         "id" to ToolParameter(
@@ -106,6 +108,12 @@ class TaskTool @Inject constructor(
             type = ParameterType.STRING,
             description = "自定义子代理名（create 可选）：取系统提示词「可用子代理」清单中的名称，按其专属提示词、模型与工具集运行；省略则用继承本会话模型的默认通用子代理",
             required = false
+        ),
+        "message" to ToolParameter(
+            name = "message",
+            type = ParameterType.STRING,
+            description = "发给子代理的消息正文（send 必填）。可反复调用；运行中的子代理会尽快收到，已完成的会被重新唤醒",
+            required = false
         )
     )
 
@@ -113,11 +121,12 @@ class TaskTool @Inject constructor(
         val action = (args["action"] as? JsonPrimitive)?.content?.trim()?.lowercase() ?: "create"
         return when (action) {
             "create" -> createSubagent(args, context)
+            "send" -> sendToSubagent(args, context)
             "read" -> readSubagent(args, context)
             "stop" -> stopSubagent(args, context)
             "del" -> deleteSubagent(args, context)
             "list" -> listSubagents(context)
-            else -> ToolResult.Error("未知 action: $action，支持：create / read / stop / del / list", "INVALID_ARGS")
+            else -> ToolResult.Error("未知 action: $action，支持：create / send / read / stop / del / list", "INVALID_ARGS")
         }
     }
 
@@ -189,6 +198,46 @@ class TaskTool @Inject constructor(
                 put("state", "running")
                 definition?.let { put("agent", it.name) }
                 put("message", "子代理已创建并开始执行，任务完成后会通知。可用 task(action=\"read\", id=...) 读取输出，task(action=\"stop\", id=...) 主动关闭。")
+            }
+        )
+    }
+
+    /**
+     * 向指定子代理发送一条消息（可反复发送）。
+     *
+     * 事件交由 ViewModel 按收件人状态分发：运行中的子代理把消息入通知队列、在下一批工具结果里搭车送达；
+     * 已完成的子代理则被重新唤醒并起新一轮。不在工具层直接投递，以复用同一套忙碌/空闲分发逻辑。
+     */
+    private suspend fun sendToSubagent(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
+        val parentSessionId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
+        val subSessionId = (args["id"] as? JsonPrimitive)?.contentOrNull?.trim()
+        if (subSessionId.isNullOrBlank()) {
+            return ToolResult.Error("参数无效：id 不能为空", "INVALID_ARGS")
+        }
+        val message = (args["message"] as? JsonPrimitive)?.contentOrNull?.trim()
+        if (message.isNullOrBlank()) {
+            return ToolResult.Error("参数无效：message 不能为空", "INVALID_ARGS")
+        }
+        val sub = sessionUseCase.getSessionById(subSessionId)
+            ?: return ToolResult.Error("子会话不存在: $subSessionId", "SESSION_NOT_FOUND")
+        if (sub.parentId != parentSessionId) {
+            return ToolResult.Error("只能向当前会话派生的子代理发消息", "NOT_YOUR_SUBAGENT")
+        }
+
+        eventBus.emit(
+            SubAgentEvent(
+                subSessionId = subSessionId,
+                parentSessionId = parentSessionId,
+                type = SubAgentEventType.MESSAGE_FROM_PARENT,
+                detail = message
+            )
+        )
+        FileLogger.i(TAG, "向子代理发送消息: session=$subSessionId parent=$parentSessionId")
+        return ToolResult.Success(
+            buildJsonObject {
+                put("id", subSessionId)
+                put("state", "delivered")
+                put("message", "消息已投递给子代理。运行中的会在下一批工具结果里收到，已完成的会被重新唤醒；可继续用 send 追加。")
             }
         )
     }

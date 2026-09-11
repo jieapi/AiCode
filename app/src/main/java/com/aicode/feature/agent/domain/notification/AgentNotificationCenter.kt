@@ -5,7 +5,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** 待送通知的来源类型。 */
-enum class AgentNotificationKind { BACKGROUND_TASK, SUBAGENT }
+enum class AgentNotificationKind { BACKGROUND_TASK, SUBAGENT, AGENT_MESSAGE }
 
 /**
  * 异步任务的结束方式。[STOPPED] 与 [FAILED] 必须区分：被用户手动终止不是执行出错，
@@ -18,6 +18,9 @@ enum class NotificationOutcome { COMPLETED, FAILED, STOPPED }
  *
  * @property sourceId 终端 tabId 或子代理会话 id，AI 据此调 terminal(read) / task(read) 取完整结果。
  * @property detail 结束原因补充：子代理失败时的错误信息、被终止时的说明；正常完成时为 null。
+ * @property message [AgentNotificationKind.AGENT_MESSAGE] 的消息正文。
+ * @property fromParent [AgentNotificationKind.AGENT_MESSAGE] 的方向：true 表示发送方是主会话（收件人为子代理），
+ *   false 表示发送方是子代理（收件人为主会话）。供 Formatter 生成对应的回复提示。
  * @property seq [AgentNotificationCenter] 分配的单调序号，供 peek 后精确 ack；未入队时为 0。
  */
 data class PendingNotification(
@@ -29,6 +32,8 @@ data class PendingNotification(
     val exitCode: Int? = null,
     val tailOutput: String? = null,
     val detail: String? = null,
+    val message: String? = null,
+    val fromParent: Boolean = false,
     val seq: Long = 0
 )
 
