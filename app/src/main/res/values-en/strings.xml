@@ -880,6 +880,7 @@
     <string name="subagent_description_hint">When to dispatch it; the main session picks agents by this text</string>
     <string name="subagent_editor_model_group">Model</string>
     <string name="subagent_editor_effort">Reasoning effort</string>
+    <string name="subagent_editor_mode">Default mode</string>
     <string name="subagent_editor_tools_allow">Allowed tools</string>
     <string name="subagent_editor_tools_allow_hint">Leave empty to allow every tool except task</string>
     <string name="subagent_editor_tools_deny">Denied tools</string>

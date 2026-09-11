@@ -44,6 +44,7 @@ import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.AppTextField
+import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.ReasoningEffort
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionForm
@@ -85,6 +86,7 @@ internal fun SubAgentEditorScreen(
     var providerId by rememberSaveable { mutableStateOf(initial?.providerId ?: "") }
     var model by rememberSaveable { mutableStateOf(initial?.model ?: "") }
     var effort by rememberSaveable { mutableStateOf(initial?.reasoningEffort ?: "") }
+    var mode by rememberSaveable { mutableStateOf(initial?.mode?.name ?: "") }
     var prompt by rememberSaveable { mutableStateOf(initial?.prompt ?: "") }
     var scopeIsGlobal by rememberSaveable {
         mutableStateOf(initial?.scope?.let { it == AgentDefinitionScope.GLOBAL } ?: true)
@@ -98,6 +100,7 @@ internal fun SubAgentEditorScreen(
 
     var showModelSheet by remember { mutableStateOf(false) }
     var showEffortSheet by remember { mutableStateOf(false) }
+    var showModeSheet by remember { mutableStateOf(false) }
     var showAllowSheet by remember { mutableStateOf(false) }
     var showDenySheet by remember { mutableStateOf(false) }
 
@@ -142,6 +145,7 @@ internal fun SubAgentEditorScreen(
                                     providerId = providerId.ifBlank { null },
                                     model = model.ifBlank { null },
                                     reasoningEffort = effort.ifBlank { null },
+                                    mode = mode.takeIf { it.isNotBlank() }?.let { AgentMode.valueOf(it) },
                                     allowedTools = allowTools,
                                     disallowedTools = denyTools,
                                     inject = injectTokens.mapNotNull { InjectPart.fromToken(it) }.toSet(),
@@ -244,6 +248,12 @@ internal fun SubAgentEditorScreen(
                                 ?: stringResource(R.string.subagent_inherit_parent)
                         )
                     }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    title = stringResource(R.string.subagent_editor_mode),
+                    onClick = { showModeSheet = true },
+                    trailing = { ValueText(mode.ifBlank { stringResource(R.string.subagent_inherit_parent) }) }
                 )
             }
 
@@ -387,6 +397,47 @@ internal fun SubAgentEditorScreen(
                             onClick = {
                                 effort = item.apiValue
                                 showEffortSheet = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showModeSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showModeSheet = false },
+            sheetState = sheetState,
+            containerColor = settingsPageBackground()
+        ) {
+            Column(
+                modifier = Modifier
+                    .nestedScroll(rememberSheetFlingFix(sheetState))
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.lg)
+                    .padding(bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                SettingsGroupHeader(text = stringResource(R.string.subagent_editor_mode))
+                SettingsGroup {
+                    PickerRow(
+                        title = stringResource(R.string.subagent_inherit_parent),
+                        selected = mode.isBlank(),
+                        onClick = {
+                            mode = ""
+                            showModeSheet = false
+                        }
+                    )
+                    AgentMode.entries.forEach { item ->
+                        SettingsDivider()
+                        PickerRow(
+                            title = item.name,
+                            selected = mode == item.name,
+                            onClick = {
+                                mode = item.name
+                                showModeSheet = false
                             }
                         )
                     }

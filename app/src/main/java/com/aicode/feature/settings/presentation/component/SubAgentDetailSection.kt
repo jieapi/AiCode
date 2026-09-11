@@ -91,6 +91,11 @@ internal fun SubAgentDetailSection(
             )
             SettingsDivider()
             InfoRow(
+                label = stringResource(R.string.subagent_editor_mode),
+                value = modeText(entry)
+            )
+            SettingsDivider()
+            InfoRow(
                 label = stringResource(R.string.subagent_tools),
                 value = toolsText(entry)
             )
@@ -154,6 +159,10 @@ private fun modelText(entry: SubAgentUiEntry): String {
     val parts = listOfNotNull(entry.providerId, entry.model, entry.reasoningEffort)
     return if (parts.isEmpty()) stringResource(R.string.subagent_inherit_parent) else parts.joinToString(" / ")
 }
+
+@Composable
+private fun modeText(entry: SubAgentUiEntry): String =
+    entry.mode?.name ?: stringResource(R.string.subagent_inherit_parent)
 
 @Composable
 private fun toolsText(entry: SubAgentUiEntry): String {

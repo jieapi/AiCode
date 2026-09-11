@@ -25,6 +25,7 @@ import com.aicode.feature.agent.domain.mcp.McpServerConfig
 import com.aicode.feature.agent.domain.mcp.McpServerEntry
 import com.aicode.feature.agent.domain.mcp.McpServerStatus
 import com.aicode.feature.agent.domain.mcp.McpToolDescriptor
+import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.permission.PermissionRule
 import com.aicode.feature.agent.domain.permission.PermissionRulesRepository
 import com.aicode.feature.agent.domain.skill.SkillConfigRepository
@@ -218,6 +219,7 @@ data class SubAgentUiEntry(
     val providerId: String?,
     val model: String?,
     val reasoningEffort: String?,
+    val mode: AgentMode?,
     val allowedTools: List<String>,
     val disallowedTools: List<String>,
     val inject: Set<InjectPart>,
@@ -999,6 +1001,7 @@ class SettingsViewModel @Inject constructor(
                         providerId = entry.definition.providerId,
                         model = entry.definition.model,
                         reasoningEffort = entry.definition.reasoningEffort,
+                        mode = entry.definition.mode,
                         allowedTools = entry.definition.allowedTools,
                         disallowedTools = entry.definition.disallowedTools,
                         inject = entry.definition.inject,

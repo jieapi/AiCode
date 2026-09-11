@@ -880,6 +880,7 @@
     <string name="subagent_description_hint">简述何时该派它，主会话 AI 据此选择</string>
     <string name="subagent_editor_model_group">模型</string>
     <string name="subagent_editor_effort">思考强度</string>
+    <string name="subagent_editor_mode">默认模式</string>
     <string name="subagent_editor_tools_allow">工具白名单</string>
     <string name="subagent_editor_tools_allow_hint">不选则开放全部工具（不含 task）</string>
     <string name="subagent_editor_tools_deny">工具黑名单</string>

@@ -176,7 +176,8 @@ class TaskTool @Inject constructor(
             model = definition?.model,
             reasoningEffort = definition?.reasoningEffort?.let { effort ->
                 ReasoningEffort.entries.firstOrNull { it.apiValue == effort }?.name
-            }
+            },
+            mode = definition?.mode
         )
         sessionUseCase.upsertSession(subSession)
         val subSessionId = subSession.id

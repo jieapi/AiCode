@@ -4,6 +4,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.data.local.dao.AgentMessageDao
 import com.aicode.feature.agent.data.local.dao.ChatSessionDao
 import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
+import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.ReasoningEffort
 import com.aicode.feature.agent.presentation.MessageRole
 import java.util.UUID
@@ -104,6 +105,7 @@ class SessionUseCase @Inject constructor(
      * @param providerId 覆盖 provider；null 表示继承父会话
      * @param model 覆盖模型；null 表示继承父会话
      * @param reasoningEffort 覆盖思考强度；null 表示继承父会话
+     * @param mode 覆盖运行模式；null 表示继承父会话
      */
     fun newSubSessionEntity(
         title: String,
@@ -112,7 +114,8 @@ class SessionUseCase @Inject constructor(
         subagentType: String,
         providerId: String? = null,
         model: String? = null,
-        reasoningEffort: String? = null
+        reasoningEffort: String? = null,
+        mode: AgentMode? = null
     ): ChatSessionEntity {
         val now = System.currentTimeMillis()
         return ChatSessionEntity(
@@ -121,9 +124,10 @@ class SessionUseCase @Inject constructor(
             workspacePath = parent.workspacePath,
             createdAt = now,
             updatedAt = now,
-            // 必须继承父会话 mode：权限引擎按会话 mode 判定写拦截，默认 BUILD 会让 PLAN
+            // 默认继承父会话 mode：权限引擎按会话 mode 判定写拦截，默认 BUILD 会让 PLAN
             // 模式下派出的子代理绕过只读限制，反过来 AUTO 模式的子代理又会弹授权窗打扰用户。
-            mode = parent.mode,
+            // 自定义子代理可用定义的 mode 覆盖该默认值。
+            mode = mode?.name ?: parent.mode,
             providerId = providerId ?: parent.providerId,
             model = model ?: parent.model,
             reasoningEffort = reasoningEffort ?: parent.reasoningEffort,

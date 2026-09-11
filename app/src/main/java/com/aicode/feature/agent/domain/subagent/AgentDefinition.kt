@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.domain.subagent
 
+import com.aicode.feature.agent.domain.model.AgentMode
 import java.io.File
 
 /** 子代理定义的来源作用域：全局（跨项目共享）或项目级（仅当前工作区生效，可 git 追踪）。 */
@@ -50,6 +51,7 @@ enum class InjectPart(val token: String) {
  * @param providerId 绑定的 provider id；null 表示继承父会话
  * @param model 绑定的模型名；null 表示继承父会话
  * @param reasoningEffort 思考强度（low/medium/high）；null 表示继承父会话
+ * @param mode 运行模式（build/plan/auto）；null 表示继承父会话
  * @param allowedTools 工具白名单；空表示继承全量工具
  * @param disallowedTools 工具黑名单，先于白名单生效
  * @param inject 要注入的提示词片段
@@ -62,6 +64,7 @@ data class AgentDefinition(
     val providerId: String? = null,
     val model: String? = null,
     val reasoningEffort: String? = null,
+    val mode: AgentMode? = null,
     val allowedTools: List<String> = emptyList(),
     val disallowedTools: List<String> = emptyList(),
     val inject: Set<InjectPart> = DEFAULT_INJECT,
@@ -121,6 +124,7 @@ data class AgentDefinitionForm(
     val providerId: String? = null,
     val model: String? = null,
     val reasoningEffort: String? = null,
+    val mode: AgentMode? = null,
     val allowedTools: List<String> = emptyList(),
     val disallowedTools: List<String> = emptyList(),
     val inject: Set<InjectPart> = AgentDefinition.DEFAULT_INJECT,
