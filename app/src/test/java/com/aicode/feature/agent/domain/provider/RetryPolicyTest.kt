@@ -11,6 +11,7 @@ import java.io.InterruptedIOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 /**
  * 触发重试的异常 → 用户可见错误摘要（[Throwable.toRetryErrorInfo]）的分类逻辑。
@@ -30,8 +31,9 @@ class RetryPolicyTest {
     @Test
     fun http_5xx_maps_to_server_error() {
         assertEquals(RetryErrorKind.SERVER_ERROR, httpError(500).toRetryErrorInfo().kind)
-        assertEquals(RetryErrorKind.SERVER_ERROR, httpError(503).toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.SERVER_OVERLOADED, httpError(503).toRetryErrorInfo().kind)
         assertEquals(503, httpError(503).toRetryErrorInfo().statusCode)
+        assertEquals(RetryErrorKind.SERVER_ERROR, httpError(502).toRetryErrorInfo().kind)
     }
 
     @Test
@@ -41,9 +43,12 @@ class RetryPolicyTest {
     }
 
     @Test
-    fun network_exceptions_map_to_network() {
-        assertEquals(RetryErrorKind.NETWORK, UnknownHostException().toRetryErrorInfo().kind)
-        assertEquals(RetryErrorKind.NETWORK, ConnectException().toRetryErrorInfo().kind)
+    fun network_exceptions_map_to_specific_kinds() {
+        assertEquals(RetryErrorKind.DNS_FAILED, UnknownHostException().toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.CONNECTION_REFUSED, ConnectException().toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.SSL_ERROR, SSLException("handshake failed").toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.CONNECTION_RESET, IOException("Connection reset by peer").toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.CONNECTION_RESET, IOException("unexpected end of stream").toRetryErrorInfo().kind)
         assertEquals(RetryErrorKind.NETWORK, IOException("SSE 流被中断").toRetryErrorInfo().kind)
     }
 
@@ -51,7 +56,8 @@ class RetryPolicyTest {
     fun stream_api_codes_map_to_specific_kinds() {
         assertEquals(RetryErrorKind.RATE_LIMIT, StreamApiException("rate_limit_exceeded", "m").toRetryErrorInfo().kind)
         assertEquals(RetryErrorKind.RATE_LIMIT, StreamApiException("insufficient_quota", "m").toRetryErrorInfo().kind)
-        assertEquals(RetryErrorKind.SERVER_ERROR, StreamApiException("server_is_overloaded", "m").toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.SERVER_OVERLOADED, StreamApiException("server_is_overloaded", "m").toRetryErrorInfo().kind)
+        assertEquals(RetryErrorKind.SERVER_ERROR, StreamApiException("internal_error", "m").toRetryErrorInfo().kind)
         assertEquals(RetryErrorKind.UNKNOWN, StreamApiException("some_other", "m").toRetryErrorInfo().kind)
     }
 
