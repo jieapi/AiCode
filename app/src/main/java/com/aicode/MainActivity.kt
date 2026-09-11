@@ -569,6 +569,11 @@ fun AppNavigation(
                                     if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_CHOOSE_MODEL) {
                                         onboardingCoordinator.nextStep()
                                     }
+                                },
+                                onDismissModelSheetInOnboarding = {
+                                    if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_CHOOSE_MODEL) {
+                                        onboardingCoordinator.goToStep(OnboardingStep.OPEN_MODEL_PICKER)
+                                    }
                                 }
                             )
                         }
@@ -614,7 +619,18 @@ fun AppNavigation(
                             }
                         }
                     },
-                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active }
+                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
+                    onOnboardingModelAdded = {
+                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                            navController.popBackStack()
+                            onboardingCoordinator.nextStep()
+                        }
+                    },
+                    onOnboardingDismissFetchDialog = {
+                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                            onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
+                        }
+                    }
                 )
             }
             composable("terminal") {
@@ -781,6 +797,10 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SIMULATE_FETCH_DIALOG -> {
+                        val current = settingsViewModel.providers.value.firstOrNull()
+                        if (current != null && current.models.isEmpty()) {
+                            settingsViewModel.saveProvider(current.copy(models = listOf("deepseek-v4-flash")))
+                        }
                         navController.popBackStack()
                         onboardingCoordinator.nextStep()
                     }
@@ -788,6 +808,10 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SIMULATE_CHOOSE_MODEL -> {
+                        val current = settingsViewModel.providers.value.firstOrNull()
+                        if (current != null && current.models.isNotEmpty()) {
+                            agentViewModel.setSessionProviderModel(current.id, current.effectiveModel.ifEmpty { current.models.first() })
+                        }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SEND_MESSAGE -> {
@@ -820,6 +844,10 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SIMULATE_FETCH_DIALOG -> {
+                        val current = settingsViewModel.providers.value.firstOrNull()
+                        if (current != null && current.models.isEmpty()) {
+                            settingsViewModel.saveProvider(current.copy(models = listOf("deepseek-v4-flash")))
+                        }
                         navController.popBackStack()
                         onboardingCoordinator.nextStep()
                     }
@@ -827,6 +855,10 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SIMULATE_CHOOSE_MODEL -> {
+                        val current = settingsViewModel.providers.value.firstOrNull()
+                        if (current != null && current.models.isNotEmpty()) {
+                            agentViewModel.setSessionProviderModel(current.id, current.effectiveModel.ifEmpty { current.models.first() })
+                        }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.SEND_MESSAGE -> {

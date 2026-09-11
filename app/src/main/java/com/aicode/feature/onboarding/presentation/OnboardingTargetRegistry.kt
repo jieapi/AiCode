@@ -1,5 +1,6 @@
 package com.aicode.feature.onboarding.presentation
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Modifier
@@ -40,6 +41,11 @@ fun Modifier.onboardingTarget(step: OnboardingStep): Modifier = composed {
     if (registry == null) {
         this
     } else {
+        DisposableEffect(step) {
+            onDispose {
+                registry.unregister(step)
+            }
+        }
         this.onGloballyPositioned { coordinates ->
             if (coordinates.isAttached) {
                 registry.register(step, coordinates.boundsInRoot())

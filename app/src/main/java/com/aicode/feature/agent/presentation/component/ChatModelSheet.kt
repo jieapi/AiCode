@@ -53,6 +53,7 @@ internal fun ModelIconButton(
     onSelectModel: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     forceOpenSheet: Boolean = false,
+    onSelectSuccessInOnboarding: (() -> Unit)? = null,
     onSheetDismiss: (() -> Unit)? = null
 ) {
     var showSheet by remember { mutableStateOf(false) }
@@ -71,7 +72,7 @@ internal fun ModelIconButton(
             onSelect = { pId, model ->
                 onSelectModel(pId, model)
                 showSheet = false
-                onSheetDismiss?.invoke()
+                onSelectSuccessInOnboarding?.invoke()
             },
             onDismiss = {
                 showSheet = false

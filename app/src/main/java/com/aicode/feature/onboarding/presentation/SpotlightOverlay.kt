@@ -112,9 +112,12 @@ fun SpotlightOverlay(
         val screenWidthPx = constraints.maxWidth.toFloat()
         val screenHeightPx = constraints.maxHeight.toFloat()
 
+        val isSheetStep = currentStep == OnboardingStep.SIMULATE_FETCH_DIALOG ||
+            currentStep == OnboardingStep.SIMULATE_CHOOSE_MODEL
+
         // 针对目标形态（图标小按钮 vs 宽组件）自适应计算最佳聚焦尺寸与安全边距，杜绝出界切边
-        val (optimalTargetRect, holeRadiusPx) = remember(targetRect, screenWidthPx, screenHeightPx, density) {
-            if (targetRect != null) {
+        val (optimalTargetRect, holeRadiusPx) = remember(targetRect, screenWidthPx, screenHeightPx, density, isSheetStep) {
+            if (targetRect != null && !isSheetStep) {
                 calculateOptimalHoleBounds(targetRect, screenWidthPx, screenHeightPx, density)
             } else {
                 Rect.Zero to with(density) { 12.dp.toPx() }
@@ -130,8 +133,8 @@ fun SpotlightOverlay(
         var isFirstTarget by remember { mutableStateOf(true) }
         var lastTargetRect by remember { mutableStateOf<Rect?>(null) }
 
-        LaunchedEffect(optimalTargetRect, targetRect) {
-            if (targetRect == null) {
+        LaunchedEffect(optimalTargetRect, targetRect, isSheetStep) {
+            if (isSheetStep || targetRect == null) {
                 spotlightAlpha.animateTo(0f, animationSpec = tween(200))
             } else {
                 val last = lastTargetRect
@@ -244,13 +247,23 @@ fun SpotlightOverlay(
             screenWidthPx * 0.5f
         }
 
-        val cardLeftPx = (targetCenterX - cardWidthPx / 2f).coerceIn(
-            cardMarginPx,
-            (screenWidthPx - cardWidthPx - cardMarginPx).coerceAtLeast(cardMarginPx)
-        )
+        val cardLeftPx = if (isSheetStep) {
+            (screenWidthPx - cardWidthPx) / 2f
+        } else {
+            (targetCenterX - cardWidthPx / 2f).coerceIn(
+                cardMarginPx,
+                (screenWidthPx - cardWidthPx - cardMarginPx).coerceAtLeast(cardMarginPx)
+            )
+        }
 
         val isBottomHalf = targetRect != null && ((holeTop.value + holeBottom.value) / 2f > screenHeightPx * 0.52f)
-        val cardTopPx = if (targetRect == null || spotlightAlpha.value < 0.1f) {
+        val cardTopPx = if (isSheetStep) {
+            // 底部弹窗步骤：弹窗占据下半屏，卡片稳稳居中悬浮在屏幕上半区安全区域，绝不被弹窗遮挡
+            (screenHeightPx * 0.10f).coerceIn(
+                cardMarginPx + with(density) { 36.dp.toPx() },
+                (screenHeightPx * 0.38f - actualCardHeightPx).coerceAtLeast(cardMarginPx + with(density) { 36.dp.toPx() })
+            )
+        } else if (targetRect == null || spotlightAlpha.value < 0.1f) {
             screenHeightPx * 0.38f
         } else if (isBottomHalf) {
             // 目标处于屏幕下半区：卡片居于目标上方，卡片底边距离高亮顶边严格保留 cardGapPx
@@ -441,8 +454,8 @@ private fun calculateOptimalHoleBounds(
         val paddingPx = with(density) { 4.dp.toPx() }
         val left = (target.left - paddingPx).coerceAtLeast(minEdgeMarginPx)
         val top = (target.top - paddingPx).coerceAtLeast(minEdgeMarginPx)
-        val right = (target.right + paddingPx).coerceAtMost(screenWidth - minEdgeMarginPx)
-        val bottom = (target.bottom + paddingPx).coerceAtMost(screenHeight - minEdgeMarginPx)
+        val right = (target.right + paddingPx).coerceAtMost(screenWidth - minEdgeMarginPx).coerceAtLeast(left)
+        val bottom = (target.bottom + paddingPx).coerceAtMost(screenHeight - minEdgeMarginPx).coerceAtLeast(top)
         val rect = Rect(left, top, right, bottom)
         val cornerRadiusPx = with(density) { 12.dp.toPx() }
         rect to cornerRadiusPx

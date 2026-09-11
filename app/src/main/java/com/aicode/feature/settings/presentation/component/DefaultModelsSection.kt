@@ -372,13 +372,11 @@ internal fun ModelSelectionSheet(
                                         if (index > 0) {
                                             SettingsDivider()
                                         }
-                                        val isFirstModel = isFirstProvider && index == 0
                                         ModelSelectionRow(
                                             model = model,
                                             selected = provider.id == currentProviderId && model == currentModel,
                                             metadata = modelMetadata[model],
-                                            onClick = { onSelect(provider.id, model) },
-                                            modifier = if (isFirstModel) Modifier.onboardingTarget(OnboardingStep.SIMULATE_CHOOSE_MODEL) else Modifier
+                                            onClick = { onSelect(provider.id, model) }
                                         )
                                     }
                                 }

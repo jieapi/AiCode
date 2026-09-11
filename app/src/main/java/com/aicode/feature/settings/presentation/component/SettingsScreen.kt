@@ -110,6 +110,7 @@ import compose.icons.feathericons.Users
 import compose.icons.feathericons.Zap
 import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.onboarding.presentation.onboardingTarget
+import com.aicode.feature.settings.data.local.ProviderPreset
 import com.aicode.feature.terminal.data.repository.TerminalSettings
 import com.aicode.feature.terminal.presentation.component.TerminalSettingsSheet
 
@@ -180,7 +181,9 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onStopAllAndCloseTerminal: () -> Unit = {},
     onRerunOnboarding: () -> Unit = {},
-    onboardingStep: OnboardingStep? = null
+    onboardingStep: OnboardingStep? = null,
+    onOnboardingModelAdded: (() -> Unit)? = null,
+    onOnboardingDismissFetchDialog: (() -> Unit)? = null
 ) {
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val logLevel by viewModel.logLevel.collectAsStateWithLifecycle()
@@ -248,7 +251,7 @@ fun SettingsScreen(
     var logReturnSection by remember { mutableStateOf(SettingsSection.Menu) }
     var editingProvider by remember { mutableStateOf<AIProviderConfig?>(null) }
     var showAddProviderSheet by remember { mutableStateOf(false) }
-    var providerPresetPrefill by remember { mutableStateOf<com.aicode.feature.settings.data.local.ProviderPreset?>(null) }
+    var providerPresetPrefill by remember { mutableStateOf<ProviderPreset?>(null) }
     var showMcpDialog by remember { mutableStateOf(false) }
     var editingMcp by remember { mutableStateOf<McpServerEntry?>(null) }
 
@@ -262,14 +265,36 @@ fun SettingsScreen(
             }
             OnboardingStep.PROVIDER_CONFIG_INFO -> {
                 if (section != SettingsSection.ProviderEditor) {
-                    editingProvider = providers.firstOrNull()
+                    val deepseek = providers.firstOrNull { it.name.contains("deepseek", ignoreCase = true) }
+                        ?: providers.firstOrNull()
+                    editingProvider = deepseek
+                    if (deepseek == null && providerPresetPrefill == null) {
+                        providerPresetPrefill = ProviderPreset(
+                            id = "deepseek",
+                            name = "DeepSeek",
+                            type = "DEEPSEEK",
+                            baseUrl = "https://api.deepseek.com",
+                            models = emptyList<String>()
+                        )
+                    }
                     section = SettingsSection.ProviderEditor
                 }
             }
             OnboardingStep.PROVIDER_FETCH_MODELS,
             OnboardingStep.SIMULATE_FETCH_DIALOG -> {
                 if (section != SettingsSection.ProviderEditor) {
-                    editingProvider = providers.firstOrNull()
+                    val deepseek = providers.firstOrNull { it.name.contains("deepseek", ignoreCase = true) }
+                        ?: providers.firstOrNull()
+                    editingProvider = deepseek
+                    if (deepseek == null && providerPresetPrefill == null) {
+                        providerPresetPrefill = ProviderPreset(
+                            id = "deepseek",
+                            name = "DeepSeek",
+                            type = "DEEPSEEK",
+                            baseUrl = "https://api.deepseek.com",
+                            models = emptyList<String>()
+                        )
+                    }
                     section = SettingsSection.ProviderEditor
                 }
             }
@@ -443,6 +468,8 @@ fun SettingsScreen(
                 presetPrefill = providerPresetPrefill,
                 initialTab = if (onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS || onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) 1 else 0,
                 onboardingStep = onboardingStep,
+                onOnboardingModelAdded = onOnboardingModelAdded,
+                onOnboardingDismissFetchDialog = onOnboardingDismissFetchDialog,
                 onNavigateBack = {
                     section = SettingsSection.Providers
                     providerPresetPrefill = null

@@ -251,6 +251,7 @@ fun AIChatPanel(
     selectedCode: String? = null,
     onboardingStep: OnboardingStep? = null,
     onSelectModelInOnboarding: (() -> Unit)? = null,
+    onDismissModelSheetInOnboarding: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
@@ -1170,7 +1171,8 @@ fun AIChatPanel(
                 },
                 isScrolling = listState.isScrollInProgress,
                 forceOpenModelSheet = onboardingStep == OnboardingStep.SIMULATE_CHOOSE_MODEL,
-                onModelSheetDismiss = onSelectModelInOnboarding,
+                onSelectModelInOnboarding = onSelectModelInOnboarding,
+                onModelSheetDismiss = onDismissModelSheetInOnboarding,
                 modifier = Modifier
                     .fillMaxWidth()
                     .onboardingTarget(OnboardingStep.SEND_MESSAGE)

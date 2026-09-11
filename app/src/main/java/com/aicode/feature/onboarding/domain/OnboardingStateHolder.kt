@@ -42,6 +42,12 @@ class OnboardingStateHolder {
         }
     }
 
+    /** 回退或跳转到指定引导步骤。 */
+    fun goToStep(targetStep: OnboardingStep) {
+        if (!_state.value.active) return
+        _state.value = _state.value.copy(step = targetStep)
+    }
+
     /** 跳过引导。 */
     fun skip() {
         _state.value = OnboardingUiState(

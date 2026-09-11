@@ -26,6 +26,13 @@ class OnboardingCoordinator(
         scope.launch { onPersist(current.status) }
     }
 
+    /** 回退或跳转到指定步骤（如关闭弹窗时回退到触发按钮）。 */
+    fun goToStep(targetStep: OnboardingStep) {
+        stateHolder.goToStep(targetStep)
+        val current = stateHolder.state.value
+        scope.launch { onPersist(current.status) }
+    }
+
     /** 用户主动跳过引导。 */
     fun skip() {
         stateHolder.skip()

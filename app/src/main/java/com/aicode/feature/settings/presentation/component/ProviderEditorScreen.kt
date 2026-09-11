@@ -174,7 +174,9 @@ fun ProviderEditorScreen(
      */
     presetPrefill: ProviderPreset? = null,
     initialTab: Int = 0,
-    onboardingStep: OnboardingStep? = null
+    onboardingStep: OnboardingStep? = null,
+    onOnboardingModelAdded: (() -> Unit)? = null,
+    onOnboardingDismissFetchDialog: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -997,7 +999,9 @@ fun ProviderEditorScreen(
                 onDismiss = {
                     showFetchDialog = false
                     viewModel.resetFetchState()
-                }
+                },
+                onOnboardingModelAdded = onOnboardingModelAdded,
+                onOnboardingDismissFetchDialog = onOnboardingDismissFetchDialog
             )
         }
     }
@@ -1265,7 +1269,9 @@ private fun FetchModelsDialog(
     onFetchModels: () -> Unit,
     onAddModel: (String) -> Unit,
     onDismiss: () -> Unit,
-    isOnboarding: Boolean = false
+    isOnboarding: Boolean = false,
+    onOnboardingModelAdded: (() -> Unit)? = null,
+    onOnboardingDismissFetchDialog: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
@@ -1285,7 +1291,12 @@ private fun FetchModelsDialog(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            onDismiss()
+            if (isOnboarding) {
+                onOnboardingDismissFetchDialog?.invoke()
+            }
+        },
         sheetState = sheetState,
         containerColor = settingsPageBackground()
     ) {
@@ -1316,14 +1327,14 @@ private fun FetchModelsDialog(
                 }
                 is FetchState.Error -> {
                     if (isOnboarding) {
-                        // 引导模式下未配置有效 Key 时，友好呈现推荐模型行供新手继续真实体验
-                        val fallbackModels = listOf("claude-3-5-sonnet", "gpt-4o", "gemini-1.5-pro").filter { it !in existingModels }
+                        // 引导模式下未配置有效 Key 时，呈现 DeepSeek 推荐模型演示供新手继续体验
+                        val fallbackModels = listOf("deepseek-v4-flash").filter { it !in existingModels }
                         val grouped = fallbackModels.groupBy { m -> modelBrandKey(m) }
                             .toSortedMap(compareBy<String> { it == "other" }.thenBy { brandDisplayName(context, it) })
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 320.dp, max = 420.dp),
+                                .heightIn(min = 180.dp, max = 420.dp),
                             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             grouped.forEach { (brandKey, models) ->
@@ -1343,6 +1354,9 @@ private fun FetchModelsDialog(
                                                 onAdd = {
                                                     onAddModel(m)
                                                     onDismiss()
+                                                    if (isOnboarding) {
+                                                        onOnboardingModelAdded?.invoke()
+                                                    }
                                                 },
                                                 modifier = if (isFirstTarget) Modifier.onboardingTarget(OnboardingStep.SIMULATE_FETCH_DIALOG) else Modifier
                                             )
@@ -1405,7 +1419,7 @@ private fun FetchModelsDialog(
                 is FetchState.Success -> {
                     val rawModels = fetchState.models.filter { it !in existingModels && it.contains(searchQuery, ignoreCase = true) }
                     val newModels = if (rawModels.isEmpty() && isOnboarding) {
-                        listOf("claude-3-5-sonnet", "gpt-4o").filter { it !in existingModels }
+                        listOf("deepseek-v4-flash").filter { it !in existingModels }
                     } else rawModels
                     if (newModels.isEmpty()) {
                         SettingsGroup {
@@ -1445,7 +1459,10 @@ private fun FetchModelsDialog(
                                                 metadata = modelMetadata[m],
                                                 onAdd = {
                                                     onAddModel(m)
-                                                    if (isOnboarding) onDismiss()
+                                                    if (isOnboarding) {
+                                                        onDismiss()
+                                                        onOnboardingModelAdded?.invoke()
+                                                    }
                                                 },
                                                 modifier = if (isFirstTarget) Modifier.onboardingTarget(OnboardingStep.SIMULATE_FETCH_DIALOG) else Modifier
                                             )

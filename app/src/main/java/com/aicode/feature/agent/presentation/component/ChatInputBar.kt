@@ -134,6 +134,7 @@ internal fun ChatInputBar(
     /** 消息列表正在滚动时内容区淡出到 40%，停止滚动恢复；用于长列表阅读时降低底部干扰（同 git 页 tab 栏）。 */
     isScrolling: Boolean = false,
     forceOpenModelSheet: Boolean = false,
+    onSelectModelInOnboarding: (() -> Unit)? = null,
     onModelSheetDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -353,6 +354,7 @@ internal fun ChatInputBar(
                             modelMetadata = modelMetadata,
                             onSelectModel = onSelectModel,
                             forceOpenSheet = forceOpenModelSheet,
+                            onSelectSuccessInOnboarding = onSelectModelInOnboarding,
                             onSheetDismiss = onModelSheetDismiss,
                             modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
