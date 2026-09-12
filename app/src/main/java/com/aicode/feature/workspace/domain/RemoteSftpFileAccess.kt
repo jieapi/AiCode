@@ -197,6 +197,33 @@ class RemoteSftpFileAccess @Inject constructor(
         }
     }
 
+    override fun listFilesRecursive(path: String, maxDepth: Int): List<String> {
+        val remote = toRemotePath(path)
+        return runCatching {
+            val output = execSync("find ${shellQuote(remote)} -maxdepth $maxDepth -type f 2>/dev/null")
+            val prefix = remote.trimEnd('/') + "/"
+            output.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { if (it.startsWith(prefix)) it.removePrefix(prefix) else it }
+                .toList()
+        }.getOrElse {
+            FileLogger.w(TAG, "listFilesRecursive 失败: $remote", it)
+            emptyList()
+        }
+    }
+
+    override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
+        val remote = toRemotePath(path)
+        if (exists(path) && !overwrite) throw FileAlreadyExistsException(File(remote))
+        val parent = remote.substringBeforeLast('/', "")
+        if (parent.isNotEmpty()) execExitCode("mkdir -p ${shellQuote(parent)}")
+        val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
+        val redirect = if (overwrite) ">" else ">>"
+        val exit = execExitCode("printf %s ${shellQuote(b64)} | base64 -d $redirect ${shellQuote(remote)}")
+        if (exit != 0) FileLogger.w(TAG, "writeBytes 退出码=$exit: $remote")
+    }
+
     override fun copyToLocal(path: String): File {
         val remote = toRemotePath(path)
         val tempFile = File.createTempFile("aicode_remote_", ".copy").apply { deleteOnExit() }

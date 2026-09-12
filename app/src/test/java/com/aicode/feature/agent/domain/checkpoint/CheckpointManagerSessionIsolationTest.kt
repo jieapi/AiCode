@@ -183,6 +183,8 @@ class CheckpointManagerSessionIsolationTest {
         override fun permissions(path: String): String = throw UnsupportedOperationException()
         override fun listFiles(path: String): List<FileEntry> = throw UnsupportedOperationException()
         override fun readBytes(path: String): ByteArray = throw UnsupportedOperationException()
+        override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) = throw UnsupportedOperationException()
+        override fun listFilesRecursive(path: String, maxDepth: Int): List<String> = emptyList()
         override fun copyToLocal(path: String): File = throw UnsupportedOperationException()
         override fun deleteRecursively(path: String) = throw UnsupportedOperationException()
         override fun rename(path: String, newPath: String) = throw UnsupportedOperationException()

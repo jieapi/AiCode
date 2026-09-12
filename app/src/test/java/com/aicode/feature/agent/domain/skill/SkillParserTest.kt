@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.domain.skill
 
+import com.aicode.testutil.TestFileAccessProvider
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -24,7 +25,7 @@ class SkillParserTest {
                     instructions = instructions
                 )
             )
-            val parsed = SkillParser.parse(dir)
+            val parsed = SkillParser.parse(TestFileAccessProvider(), dir.absolutePath)
             assertNotNull(parsed)
             parsed!!
         } finally {

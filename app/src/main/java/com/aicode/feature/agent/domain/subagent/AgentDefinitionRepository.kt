@@ -1,7 +1,8 @@
 package com.aicode.feature.agent.domain.subagent
 
 import com.aicode.core.util.FileLogger
-import java.io.File
+import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.LocalFileAccess
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -9,12 +10,17 @@ import javax.inject.Singleton
  * 子代理定义仓库，聚合全局与项目级两级来源；同名定义项目级优先（与技能、MCP 两级配置一致）。
  * 启停状态由 [AgentDefinitionConfigRepository] 持有：被禁用的定义仍出现在设置页列表里，
  * 但不进主代理的可派发清单、也不能被 [find] 派发出去。
+ *
+ * 全局定义固定在 App 私有目录（始终本地），项目级定义随工作区（本地宿主目录或远程 SSH 工作区），
+ * 读写都经 [FileAccessProvider] 以容器路径完成。
  */
 @Singleton
 class AgentDefinitionRepository @Inject constructor(
     private val localSource: LocalDirectoryAgentSource,
     private val projectSource: ProjectDirectoryAgentSource,
-    private val configRepository: AgentDefinitionConfigRepository
+    private val configRepository: AgentDefinitionConfigRepository,
+    private val localFileAccess: LocalFileAccess,
+    private val fileAccess: FileAccessProvider
 ) {
     /** 全部定义（含来源作用域），未过滤禁用，按名称排序。 */
     fun listAll(): List<AgentDefinitionEntry> =
@@ -68,9 +74,10 @@ class AgentDefinitionRepository @Inject constructor(
         val existingFile = originalName?.let { old ->
             listAll().firstOrNull {
                 it.scope == scope && it.definition.name.equals(old, ignoreCase = true)
-            }?.definition?.file
+            }?.definition?.filePath
         }
 
+        val provider = providerFor(scope)
         val root = agentsRoot(scope)
         val text = AgentDefinitionParser.serialize(
             name = name,
@@ -85,15 +92,15 @@ class AgentDefinitionRepository @Inject constructor(
         )
 
         return try {
-            root.mkdirs()
             // 名字未改时写回原文件，不能按 name 重拼文件名：内置 Explore 的文件叫 explore.md
             // 而 frontmatter 里写的是 Explore，重拼会在大小写敏感的文件系统上多出一份 Explore.md。
-            val target = existingFile?.takeIf { overwritingSelf && it.isFile } ?: File(root, "$name.md")
-            target.writeText(text)
+            val target = existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
+                ?: "${root.trimEnd('/')}/$name.md"
+            provider.writeFile(target, text, overwrite = true)
             // 改名后清掉旧文件，否则会多出一个同内容的旧名子代理
-            if (!overwritingSelf && existingFile?.isFile == true && existingFile != target) {
-                if (!existingFile.delete()) {
-                    FileLogger.w(TAG, "重命名后删除旧定义失败: ${existingFile.absolutePath}")
+            if (!overwritingSelf && existingFile != null && existingFile != target && provider.isFile(existingFile)) {
+                runCatching { provider.delete(existingFile) }.onFailure {
+                    FileLogger.w(TAG, "重命名后删除旧定义失败: $existingFile")
                 }
             }
             null
@@ -108,13 +115,19 @@ class AgentDefinitionRepository @Inject constructor(
         val entry = listAll().firstOrNull {
             it.definition.name.equals(name, ignoreCase = true) && it.scope == scope
         } ?: return false
-        val file = entry.definition.file ?: return false
-        return file.isFile && file.delete()
+        val filePath = entry.definition.filePath ?: return false
+        val provider = providerFor(scope)
+        if (!provider.isFile(filePath)) return false
+        return runCatching { provider.delete(filePath); true }.getOrDefault(false)
     }
 
-    /** 指定作用域的定义目录。 */
-    fun agentsRoot(scope: AgentDefinitionScope): File =
+    /** 指定作用域的定义目录（容器路径）。 */
+    fun agentsRoot(scope: AgentDefinitionScope): String =
         if (scope == AgentDefinitionScope.GLOBAL) localSource.agentsRoot else projectSource.agentsRoot
+
+    /** 全局定义固定在本地私有目录，项目级定义跟随工作区（可能是远程）。 */
+    private fun providerFor(scope: AgentDefinitionScope): FileAccessProvider =
+        if (scope == AgentDefinitionScope.GLOBAL) localFileAccess else fileAccess
 
     companion object {
         private const val TAG = "AgentDefinitionRepository"

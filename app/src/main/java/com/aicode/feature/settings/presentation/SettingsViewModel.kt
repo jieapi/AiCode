@@ -982,7 +982,7 @@ class SettingsViewModel @Inject constructor(
                         disallowedTools = entry.definition.disallowedTools,
                         inject = entry.definition.inject,
                         prompt = entry.definition.prompt,
-                        filePath = entry.definition.file?.absolutePath
+                        filePath = entry.definition.filePath
                     )
                 }
             }

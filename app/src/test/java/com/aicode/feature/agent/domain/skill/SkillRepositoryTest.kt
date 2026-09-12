@@ -1,11 +1,14 @@
 package com.aicode.feature.agent.domain.skill
 
+import com.aicode.testutil.TestFileAccessProvider
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SkillRepositoryTest {
+
+    private val provider = TestFileAccessProvider()
 
     private fun skill(name: String) = Skill(
         name = name,
@@ -107,18 +110,18 @@ class SkillRepositoryTest {
             File(skillDir, "run.py").writeText("print(1)")
 
             // 含 SKILL.md 的目录可删
-            assertTrue(SkillRepository.safeDeleteSkillDir(skillDir))
+            assertTrue(SkillRepository.safeDeleteSkillDir(provider, skillDir.absolutePath))
             assertTrue(!skillDir.exists())
 
             // 不含指令文件的目录拒绝删除
             val plainDir = File(temp, "not-a-skill")
             plainDir.mkdirs()
             File(plainDir, "readme.txt").writeText("x")
-            assertTrue(!SkillRepository.safeDeleteSkillDir(plainDir))
+            assertTrue(!SkillRepository.safeDeleteSkillDir(provider, plainDir.absolutePath))
             assertTrue(plainDir.exists())
 
             // 不存在的目录返回 false
-            assertTrue(!SkillRepository.safeDeleteSkillDir(File(temp, "ghost")))
+            assertTrue(!SkillRepository.safeDeleteSkillDir(provider, File(temp, "ghost").absolutePath))
         } finally {
             temp.deleteRecursively()
         }
@@ -146,14 +149,14 @@ class SkillRepositoryTest {
             val both = File(temp, "both").apply { mkdirs() }
             File(both, "CLAUDE.md").writeText("x")
             File(both, "skill.md").writeText("x")
-            assertEquals("skill.md", SkillRepository.instructionFile(both)?.name)
+            assertEquals("skill.md", SkillRepository.instructionFile(provider, both.absolutePath)?.substringAfterLast('/'))
 
             val claudeOnly = File(temp, "claude-only").apply { mkdirs() }
             File(claudeOnly, "CLAUDE.md").writeText("x")
-            assertEquals("CLAUDE.md", SkillRepository.instructionFile(claudeOnly)?.name)
+            assertEquals("CLAUDE.md", SkillRepository.instructionFile(provider, claudeOnly.absolutePath)?.substringAfterLast('/'))
 
             val empty = File(temp, "empty").apply { mkdirs() }
-            assertEquals(null, SkillRepository.instructionFile(empty))
+            assertEquals(null, SkillRepository.instructionFile(provider, empty.absolutePath))
         } finally {
             temp.deleteRecursively()
         }
