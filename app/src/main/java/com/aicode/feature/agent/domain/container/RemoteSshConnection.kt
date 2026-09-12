@@ -155,6 +155,15 @@ class RemoteSshConnection @Inject constructor(
         return cmd
     }
 
+    /**
+     * 开 exec 会话但**保留 stdin 可写**，供大内容经 stdin 传输（避免命令行参数超过远端 ARG_MAX）。
+     * 调用方负责写入并关闭 [Session.Command.outputStream]、读取输出、关闭 session。
+     */
+    fun startExecSessionWithStdin(command: String): Session.Command {
+        val client = sshClient ?: throw IllegalStateException("SSH 未连接")
+        return client.startSession().exec(command)
+    }
+
     /** 开一个新的 Session，供调用方分配 PTY 并启动 shell。调用方负责关闭 Session。 */
     fun startShellSession(): Session {
         val client = sshClient ?: throw IllegalStateException("SSH 未连接")

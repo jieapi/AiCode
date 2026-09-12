@@ -97,6 +97,34 @@ class RemoteSftpFileAccess @Inject constructor(
         }
     }
 
+    /**
+     * 把 [content] 经远端命令的 stdin 送入并返回退出码。
+     * 用于 base64 大内容落盘：命令行参数上限（ARG_MAX）远小于附件体积，走 stdin 不受此限。
+     */
+    private fun execWithStdin(command: String, content: ByteArray): Int = runBlocking {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val session = try {
+                connection.startExecSessionWithStdin(command)
+            } catch (e: Exception) {
+                FileLogger.w(TAG, friendlySshError(e), e)
+                return@withContext -1
+            }
+            try {
+                session.outputStream.use { out ->
+                    out.write(content)
+                    out.flush()
+                }
+                BufferedReader(InputStreamReader(session.inputStream)).readText()
+                runCatching { session.close() }
+                session.exitStatus ?: -1
+            } catch (e: Exception) {
+                runCatching { session.close() }
+                FileLogger.w(TAG, "命令执行异常: $command", e)
+                -1
+            }
+        }
+    }
+
     override fun readFile(path: String): String {
         val remote = toRemotePath(path)
         return runCatching { execSync("cat ${shellQuote(remote)}") }
@@ -116,16 +144,11 @@ class RemoteSftpFileAccess @Inject constructor(
     override fun writeFile(path: String, content: String, overwrite: Boolean) {
         val remote = toRemotePath(path)
         if (exists(path) && !overwrite) throw FileAlreadyExistsException(File(remote))
-        // 确保父目录存在
-        val parent = remote.substringBeforeLast('/', "")
-        if (parent.isNotEmpty()) execExitCode("mkdir -p ${shellQuote(parent)}")
-        // 用 base64 中转写入：内容编码为单行 base64（无换行、无引号、无特殊字符），远程解码落盘。
-        // 相比 printf %s 直接把原始内容作命令行参数传递，base64 不受换行/引号/二进制内容的破坏，
-        // 与 readBytes/copyToLocal 的 base64 中转方式对称。
+        ensureParentDir(remote)
         val b64 = java.util.Base64.getEncoder().encodeToString(content.toByteArray(Charsets.UTF_8))
         val redirect = if (overwrite) ">" else ">>"
-        val exit = execExitCode("printf %s ${shellQuote(b64)} | base64 -d $redirect ${shellQuote(remote)}")
-        if (exit != 0) FileLogger.w(TAG, "writeFile 退出码=$exit: $remote")
+        val exit = execWithStdin("base64 -d $redirect ${shellQuote(remote)}", b64.toByteArray(Charsets.UTF_8))
+        if (exit != 0) throw IOException("写入远程文件失败（退出码=$exit）：$remote")
     }
 
     override fun exists(path: String): Boolean {
@@ -216,16 +239,25 @@ class RemoteSftpFileAccess @Inject constructor(
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val remote = toRemotePath(path)
         if (exists(path) && !overwrite) throw FileAlreadyExistsException(File(remote))
-        val parent = remote.substringBeforeLast('/', "")
-        if (parent.isNotEmpty()) execExitCode("mkdir -p ${shellQuote(parent)}")
+        ensureParentDir(remote)
         val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
         val redirect = if (overwrite) ">" else ">>"
-        val exit = execExitCode("printf %s ${shellQuote(b64)} | base64 -d $redirect ${shellQuote(remote)}")
-        if (exit != 0) FileLogger.w(TAG, "writeBytes 退出码=$exit: $remote")
+        val exit = execWithStdin("base64 -d $redirect ${shellQuote(remote)}", b64.toByteArray(Charsets.UTF_8))
+        if (exit != 0) throw IOException("写入远程文件失败（退出码=$exit）：$remote")
+    }
+
+    /** 确保远程文件的父目录存在；mkdir 失败时直接报错，避免后续写入落到不存在的目录。 */
+    private fun ensureParentDir(remote: String) {
+        val parent = remote.substringBeforeLast('/', "")
+        if (parent.isEmpty()) return
+        val exit = execExitCode("mkdir -p ${shellQuote(parent)}")
+        if (exit != 0) throw IOException("创建远程目录失败（退出码=$exit）：$parent")
     }
 
     override fun copyToLocal(path: String): File {
         val remote = toRemotePath(path)
+        // 先确认远端文件存在：base64 失败时 stdout 为空，会把空内容解码成空文件而假装成功
+        if (!exists(path)) throw NoSuchFileException(File(remote))
         val tempFile = File.createTempFile("aicode_remote_", ".copy").apply { deleteOnExit() }
         return runCatching {
             // base64 解码到本地临时文件
