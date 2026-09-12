@@ -105,6 +105,7 @@ import compose.icons.feathericons.Save
 import compose.icons.feathericons.Server
 import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Terminal
+import compose.icons.feathericons.Target
 import compose.icons.feathericons.Trash2
 import compose.icons.feathericons.Users
 import compose.icons.feathericons.Zap
@@ -149,6 +150,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     RemoteServers(R.string.settings_remote_servers),
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
+    TargetMode(R.string.settings_target_mode_title),
     Backup(R.string.settings_backup),
     About(R.string.settings_about)
 }
@@ -196,6 +198,7 @@ fun SettingsScreen(
     val projectRules by viewModel.projectRules.collectAsStateWithLifecycle()
     val currentProjectName by viewModel.currentProjectName.collectAsStateWithLifecycle()
     val keepaliveEnabled by viewModel.keepaliveEnabled.collectAsStateWithLifecycle()
+    val targetModeThresholds by viewModel.targetModeThresholds.collectAsStateWithLifecycle()
     val screenOnEnabled by viewModel.screenOnEnabled.collectAsStateWithLifecycle()
     val agentSoundEnabled by viewModel.agentSoundEnabled.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -860,6 +863,11 @@ fun SettingsScreen(
                     onSelectModelPage = { viewModel.setModelStatsPage(it) }
                 )
                 SettingsSection.Storage -> storageViewModel?.let { StorageSectionHost(viewModel = it) }
+                SettingsSection.TargetMode -> TargetModeSection(
+                    thresholds = targetModeThresholds,
+                    onSetMaxStepBudget = { viewModel.setTargetMaxStepBudget(it) },
+                    onSetMaxConsecutiveFailures = { viewModel.setTargetMaxConsecutiveFailures(it) }
+                )
                 SettingsSection.ProviderEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SkillEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
@@ -1285,6 +1293,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.PieChart,
                 title = stringResource(SettingsSection.Storage.titleRes),
                 onClick = { onOpen(SettingsSection.Storage) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Target,
+                title = stringResource(SettingsSection.TargetMode.titleRes),
+                onClick = { onOpen(SettingsSection.TargetMode) }
             )
             SettingsDivider()
             SettingsRow(

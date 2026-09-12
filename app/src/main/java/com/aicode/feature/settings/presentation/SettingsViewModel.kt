@@ -58,6 +58,7 @@ import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.settings.data.repository.ExecutionModeRepository
 import com.aicode.feature.settings.data.repository.AgentSoundSettingsRepository
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
+import com.aicode.feature.settings.data.repository.TargetModeSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicode.feature.settings.data.repository.LogSettingsRepository
 import com.aicode.feature.settings.data.repository.ProxyConfig
@@ -305,7 +306,8 @@ class SettingsViewModel @Inject constructor(
     private val updateCheckService: UpdateCheckService,
     private val providerBalanceRunner: ProviderBalanceRunner,
     private val terminalSettingsRepository: TerminalSettingsRepository,
-    private val proxySettingsRepository: ProxySettingsRepository
+    private val proxySettingsRepository: ProxySettingsRepository,
+    private val targetModeSettingsRepository: TargetModeSettingsRepository
 ) : ViewModel() {
     private companion object {
         const val MAX_LOG_LINES = 1200
@@ -433,6 +435,11 @@ class SettingsViewModel @Inject constructor(
 
     private val _keepaliveEnabled = MutableStateFlow(false)
     val keepaliveEnabled: StateFlow<Boolean> = _keepaliveEnabled.asStateFlow()
+
+    val targetModeThresholds: StateFlow<TargetModeSettingsRepository.Thresholds> =
+        targetModeSettingsRepository.thresholds.stateIn(
+            viewModelScope, SharingStarted.Eagerly, TargetModeSettingsRepository.Thresholds()
+        )
 
     private val _screenOnEnabled = MutableStateFlow(false)
     val screenOnEnabled: StateFlow<Boolean> = _screenOnEnabled.asStateFlow()
@@ -1207,6 +1214,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             keepaliveSettingsRepository.setEnabled(enabled)
         }
+    }
+
+    fun setTargetMaxStepBudget(value: Int) {
+        viewModelScope.launch { targetModeSettingsRepository.setMaxStepBudget(value) }
+    }
+
+    fun setTargetMaxConsecutiveFailures(value: Int) {
+        viewModelScope.launch { targetModeSettingsRepository.setMaxConsecutiveFailures(value) }
     }
 
     // 仅持久化标志位——窗口 FLAG_KEEP_SCREEN_ON 的增删由 MainActivity 监听 enabledFlow 统一完成。

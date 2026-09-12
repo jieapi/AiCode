@@ -75,5 +75,11 @@ data class AgentContext(
      * 本会话绑定的自定义子代理定义；非空表示这是一个按定义运行的子代理会话，
      * 系统提示词与工具集都按其配置组装（见 [com.aicode.feature.agent.domain.prompt.SystemPromptProvider]）。
      */
-    val agentDefinition: AgentDefinition? = null
+    val agentDefinition: AgentDefinition? = null,
+    /** TARGET 模式：当前执行的工具调用步数（跨消息从 DB 恢复）。 */
+    val goalStepCount: Int = 0,
+    /** TARGET 模式：当前连续失败计数。 */
+    val goalFailCount: Int = 0,
+    /** TARGET 模式：终止原因（GoalTerminationReason.name）。 */
+    val goalTerminationReason: String? = null
 )

@@ -30,11 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -113,6 +116,7 @@ internal fun ChatInputBar(
     onSelectModel: (String, String) -> Unit,
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
+    onEnterTarget: (String) -> Unit = {},
     reasoningEffort: ReasoningEffort,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
     pendingAttachments: List<PendingUploadAttachment>,
@@ -310,12 +314,46 @@ internal fun ChatInputBar(
                         val modeColor = when (currentMode) {
                             AgentMode.PLAN -> MaterialTheme.colorScheme.primaryContainer
                             AgentMode.AUTO -> MaterialTheme.colorScheme.error
+                            AgentMode.TARGET -> MaterialTheme.colorScheme.tertiaryContainer
                             AgentMode.BUILD -> MaterialTheme.semanticColors.success
                         }
                         val modeTextColor = when (currentMode) {
                             AgentMode.PLAN -> MaterialTheme.colorScheme.onPrimaryContainer
                             AgentMode.AUTO -> MaterialTheme.colorScheme.onError
+                            AgentMode.TARGET -> MaterialTheme.colorScheme.onTertiaryContainer
                             AgentMode.BUILD -> MaterialTheme.semanticColors.onSuccess
+                        }
+                        var showGoalDialog by remember { mutableStateOf(false) }
+                        if (showGoalDialog) {
+                            var goalText by remember { mutableStateOf("") }
+                            AlertDialog(
+                                onDismissRequest = { showGoalDialog = false },
+                                title = { Text(stringResource(R.string.mode_target)) },
+                                text = {
+                                    OutlinedTextField(
+                                        value = goalText,
+                                        onValueChange = { goalText = it },
+                                        label = { Text(stringResource(R.string.mode_target_goal_hint)) },
+                                        singleLine = false,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            if (goalText.isNotBlank()) {
+                                                onEnterTarget(goalText.trim())
+                                                showGoalDialog = false
+                                            }
+                                        }
+                                    ) { Text(stringResource(R.string.mode_target)) }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showGoalDialog = false }) {
+                                        Text(stringResource(android.R.string.cancel))
+                                    }
+                                }
+                            )
                         }
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -325,9 +363,14 @@ internal fun ChatInputBar(
                                     val nextMode = when (currentMode) {
                                         AgentMode.BUILD -> AgentMode.PLAN
                                         AgentMode.PLAN -> AgentMode.AUTO
-                                        AgentMode.AUTO -> AgentMode.BUILD
+                                        AgentMode.AUTO -> AgentMode.TARGET
+                                        AgentMode.TARGET -> AgentMode.BUILD
                                     }
-                                    onToggleMode(nextMode)
+                                    if (nextMode == AgentMode.TARGET) {
+                                        showGoalDialog = true
+                                    } else {
+                                        onToggleMode(nextMode)
+                                    }
                                 }
                         ) {
                             Box(
