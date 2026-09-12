@@ -3,6 +3,7 @@ package com.aicode.feature.agent.domain.skill
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,13 +38,14 @@ import kotlinx.serialization.json.putJsonArray
 @Singleton
 class SkillConfigRepository @Inject constructor(
     private val containerInstaller: ContainerInstaller,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val projectAicodeRoot: ProjectAicodeRoot
 ) {
     /** 全局配置文件：`filesDir/aicode/skills.json`。 */
     private fun globalFile(): File = File(containerInstaller.aicodeDir, CONFIG_FILE)
 
     /** 当前工作区的项目级配置文件：`workspacePath/.aicode/skills.json`。 */
-    private fun projectFile(): File = File(File(workspaceRepository.currentPath(), AICODE_DIR), CONFIG_FILE)
+    private fun projectFile(): File = File(projectAicodeRoot.current(), CONFIG_FILE)
 
     /** 当前生效的禁用技能名集合（全局 + 项目并集，归一化为小写）。 */
     fun disabledNames(): Set<String> {

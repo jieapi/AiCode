@@ -4,6 +4,7 @@ import android.content.Context
 import com.aicode.core.util.FileLogger
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,12 +52,12 @@ import javax.inject.Singleton
 @Singleton
 class PermissionRulesRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val projectAicodeRoot: ProjectAicodeRoot
 ) {
     private companion object {
         const val TAG = "PermissionRules"
         const val PERMISSIONS_FILE = "permissions.json"
-        const val AICODE_DIR = ".aicode"
         /** 配置文件轮询间隔：外部直接编辑后约 2s 内刷新。 */
         const val WATCH_POLL_MS = 2000L
         val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
@@ -68,7 +69,7 @@ class PermissionRulesRepository @Inject constructor(
 
     /** 当前工作区的项目级权限文件：`workspacePath/.aicode/permissions.json`。 */
     private fun projectFileForPath(workspacePath: String): File =
-        File(File(workspacePath, AICODE_DIR), PERMISSIONS_FILE)
+        File(projectAicodeRoot.forPath(workspacePath), PERMISSIONS_FILE)
 
     // ── 内存缓存与响应式流 ──────────────────────────────────────
 

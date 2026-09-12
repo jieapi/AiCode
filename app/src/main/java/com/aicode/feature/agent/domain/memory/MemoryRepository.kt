@@ -1,8 +1,8 @@
 package com.aicode.feature.agent.domain.memory
 
 import com.aicode.feature.agent.domain.container.ContainerInstaller
-import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -11,11 +11,11 @@ class MemoryRepository @Inject constructor(
     private val globalMemorySource: GlobalMemorySource,
     private val executionModeHolder: ExecutionModeHolder,
     private val containerInstaller: ContainerInstaller,
-    private val remoteSshConnection: RemoteSshConnection
+    private val projectAicodeRoot: ProjectAicodeRoot
 ) {
     /** 按当前会话 projectRoot 创建项目级数据源（内部按执行模式决定存储位置）。 */
     private fun projectSource(projectRoot: String) =
-        ProjectMemorySource(projectRoot, executionModeHolder, containerInstaller, remoteSshConnection)
+        ProjectMemorySource(projectRoot, executionModeHolder, containerInstaller, projectAicodeRoot)
 
     /** 扫描并聚合全局和项目级的 memory。同名 memory 项目级优先。 */
     fun listMemories(projectRoot: String?): List<Memory> {
