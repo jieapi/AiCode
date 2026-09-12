@@ -28,7 +28,15 @@ data class ChatSessionEntity(
     /** 子代理会话：父会话 id；null 表示普通根会话。 */
     val parentId: String? = null,
     /** 子代理会话：派生子代理的类型（如 coder / researcher）；null 表示普通根会话。 */
-    val subagentType: String? = null
+    val subagentType: String? = null,
+    /** TARGET 模式的目标声明；null 表示非 TARGET 模式或未设定。 */
+    val goalStatement: String? = null,
+    /** TARGET 模式终止原因（GoalTerminationReason.name）；null 表示未终止或非 TARGET 模式。 */
+    val goalTerminationReason: String? = null,
+    /** 当前 TARGET 执行已产生的工具调用步数。 */
+    val goalStepCount: Int = 0,
+    /** 当前 TARGET 执行的连续工具失败计数。 */
+    val goalFailCount: Int = 0
 ) {
     fun toDomain(): ChatSession = ChatSession(
         id = id,
@@ -45,7 +53,11 @@ data class ChatSessionEntity(
         lastInputTokens = lastInputTokens,
         isPinned = isPinned,
         parentId = parentId,
-        subagentType = subagentType
+        subagentType = subagentType,
+        goalStatement = goalStatement,
+        goalTerminationReason = goalTerminationReason,
+        goalStepCount = goalStepCount,
+        goalFailCount = goalFailCount
     )
 
     companion object {
@@ -64,7 +76,11 @@ data class ChatSessionEntity(
             lastInputTokens = session.lastInputTokens,
             isPinned = session.isPinned,
             parentId = session.parentId,
-            subagentType = session.subagentType
+            subagentType = session.subagentType,
+            goalStatement = session.goalStatement,
+            goalTerminationReason = session.goalTerminationReason,
+            goalStepCount = session.goalStepCount,
+            goalFailCount = session.goalFailCount
         )
     }
 }

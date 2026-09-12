@@ -518,6 +518,23 @@ class AIAgentViewModel @Inject constructor(
     val currentSessionMode: StateFlow<AgentMode> = currentSessionState.map { it?.mode ?: AgentMode.BUILD }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AgentMode.BUILD)
 
+    /** TARGET 模式：目标描述 */
+    val currentSessionGoal: StateFlow<String?> = currentSessionState.map { it?.goalStatement }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** TARGET 模式：已执行步数 */
+    val currentGoalStepCount: StateFlow<Int> = currentSessionState.map { it?.goalStepCount ?: 0 }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** TARGET 模式：连续失败次数 */
+    val currentGoalFailCount: StateFlow<Int> = currentSessionState.map { it?.goalFailCount ?: 0 }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** TARGET 模式：终止原因（GoalTerminationReason.name） */
+    val currentGoalTerminationReason: StateFlow<String?> =
+        currentSessionState.map { it?.goalTerminationReason }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     /** 当前会话的思考强度（默认 MEDIUM）。 */
     val currentSessionReasoningEffort: StateFlow<ReasoningEffort> =
         currentSessionState.map { it?.reasoningEffort ?: ReasoningEffort.MEDIUM }
@@ -1541,6 +1558,14 @@ class AIAgentViewModel @Inject constructor(
         val sid = _currentSessionId.value ?: return
         viewModelScope.launch {
             sessionUseCase.updateMode(sid, mode.name)
+        }
+    }
+
+    /** 进入 TARGET 模式并设定目标声明；goal 为空时退出 TARGET 回到 BUILD。 */
+    fun setSessionTargetMode(goal: String?) {
+        val sid = _currentSessionId.value ?: return
+        viewModelScope.launch {
+            sessionUseCase.updateTargetMode(sid, goal)
         }
     }
 

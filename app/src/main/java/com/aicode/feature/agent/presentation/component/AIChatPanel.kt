@@ -67,6 +67,7 @@ import com.aicode.core.ui.LocalImageViewer
 import com.aicode.core.ui.readableContentMaxWidth
 import com.aicode.core.ui.rememberImageViewerState
 import com.aicode.core.ui.rememberViewerDecodeSpec
+import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.tool.question.UserQuestionAnswer
 import com.aicode.feature.agent.presentation.AgentUIMessage
 import com.aicode.feature.agent.presentation.AgentUIState
@@ -307,6 +308,9 @@ fun AIChatPanel(
     val currentWorkspace = workspaceViewModel?.current?.collectAsStateWithLifecycle()?.value
     val projectRoot = currentWorkspace?.path ?: ""
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
+    val currentGoal by viewModel.currentSessionGoal.collectAsStateWithLifecycle()
+    val goalStepCount by viewModel.currentGoalStepCount.collectAsStateWithLifecycle()
+    val goalFailCount by viewModel.currentGoalFailCount.collectAsStateWithLifecycle()
 
     var inputText by remember { mutableStateOf("") }
     val inputDraft by viewModel.inputDraft.collectAsStateWithLifecycle()
@@ -851,6 +855,13 @@ fun AIChatPanel(
         ) {
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
+            if (currentMode == AgentMode.TARGET && currentGoal != null) {
+                TargetModeStatusBar(
+                    goal = currentGoal!!,
+                    stepCount = goalStepCount,
+                    failCount = goalFailCount
+                )
+            }
             Box(modifier = Modifier.weight(1f)) {
                 if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
@@ -1131,6 +1142,7 @@ fun AIChatPanel(
                 },
                 currentMode = currentMode,
                 onToggleMode = { viewModel.setSessionMode(it) },
+                onEnterTarget = { viewModel.setSessionTargetMode(it) },
                 reasoningEffort = reasoningEffort,
                 onReasoningEffortChange = { viewModel.setSessionReasoningEffort(it) },
                 pendingAttachments = pendingAttachments,

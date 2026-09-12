@@ -77,6 +77,7 @@ import com.aicode.feature.agent.domain.tool.mcp.ManageMcpTool
 import com.aicode.feature.agent.domain.tool.memory.MemoryTool
 import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicode.feature.agent.domain.tool.mode.SwitchModeTool
+import com.aicode.feature.agent.domain.tool.mode.CompleteGoalTool
 import com.aicode.feature.agent.domain.tool.search.WebFetchTool
 import com.aicode.feature.agent.domain.tool.search.WebSearchTool
 import com.aicode.feature.agent.domain.workflow.ContextCompactor
@@ -278,6 +279,7 @@ object AgentModule {
         webSearchTool: WebSearchTool,
         webFetchTool: WebFetchTool,
         switchModeTool: SwitchModeTool,
+        completeGoalTool: CompleteGoalTool,
         todoTool: TodoTool,
         memoryTool: MemoryTool,
         taskTool: TaskTool
@@ -299,6 +301,7 @@ object AgentModule {
             register("websearch", webSearchTool)
             register("webfetch", webFetchTool)
             register("switchMode", switchModeTool)
+            register("completeGoal", completeGoalTool)
             register("todo", todoTool)
             register("memory", memoryTool)
             register("task", taskTool)
@@ -329,7 +332,9 @@ object AgentModule {
         llmCallRecordDao: LlmCallRecordDao,
         keyRotator: ProviderKeyRotator,
         agentNotificationCenter: AgentNotificationCenter,
-        fileAccess: FileAccessProvider
+        fileAccess: FileAccessProvider,
+        targetModeSettingsRepository: com.aicode.feature.settings.data.repository.TargetModeSettingsRepository,
+        chatSessionDao: com.aicode.feature.agent.data.local.dao.ChatSessionDao
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
             toolRegistry,
@@ -353,7 +358,9 @@ object AgentModule {
             llmCallRecordDao,
             keyRotator,
             agentNotificationCenter,
-            fileAccess
+            fileAccess,
+            targetModeSettingsRepository,
+            chatSessionDao
         )
     }
 }
