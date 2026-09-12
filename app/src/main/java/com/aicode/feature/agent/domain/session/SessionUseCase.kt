@@ -157,6 +157,24 @@ class SessionUseCase @Inject constructor(
         chatSessionDao.upsert(s.copy(mode = mode))
     }
 
+    /** 进入 TARGET 模式：写入目标声明并重置步数/失败计数；从 TARGET 切出时记录中断原因。 */
+    suspend fun updateTargetMode(sessionId: String, goal: String?) {
+        val s = chatSessionDao.getById(sessionId) ?: return
+        val enteringTarget = goal != null
+        val updated = if (enteringTarget) {
+            s.copy(
+                mode = "TARGET",
+                goalStatement = goal,
+                goalStepCount = 0,
+                goalFailCount = 0,
+                goalTerminationReason = null
+            )
+        } else {
+            s.copy(mode = "BUILD")
+        }
+        chatSessionDao.upsert(updated)
+    }
+
     suspend fun updateProviderModel(sessionId: String, providerId: String?, model: String?) {
         chatSessionDao.updateProviderModel(sessionId, providerId, model)
     }

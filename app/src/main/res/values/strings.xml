@@ -1349,4 +1349,24 @@
     <string name="onboarding_demo_model_anthropic_desc">Anthropic · 智能编程推荐模型</string>
     <string name="onboarding_demo_model_choose_desc">当前推荐 · 具备代码生成与分析能力</string>
     <string name="onboarding_simulated_badge">演示预览</string>
+
+    <!-- TARGET 目标驱动模式 -->
+    <string name="mode_target">目标驱动</string>
+    <string name="mode_target_desc">AI 依据目标自主执行，达成或失败即终止</string>
+    <string name="mode_target_goal_hint">描述 AI 需达成的目标</string>
+    <string name="mode_target_goal_label">目标声明</string>
+    <string name="mode_target_step_count">步数 %1$d / %2$d</string>
+    <string name="mode_target_fail_count">连续失败 %1$d</string>
+    <string name="mode_target_enter_hint">进入目标驱动模式需设定目标</string>
+    <string name="mode_target_terminated_achieved">目标已达成</string>
+    <string name="mode_target_terminated_failed">因连续失败终止</string>
+    <string name="mode_target_terminated_step_limit">因步数超限终止</string>
+    <string name="mode_target_terminated_interrupted">已中断目标执行</string>
+    <string name="mode_target_complete_goal">声明目标达成</string>
+    <string name="mode_target_complete_summary_hint">总结完成的工作与最终状态</string>
+    <string name="settings_target_mode_title">目标驱动模式</string>
+    <string name="settings_target_max_step_budget">最大步数上限</string>
+    <string name="settings_target_max_consecutive_failures">连续失败阈值</string>
+    <string name="mode_target_status_steps">步数 %1$d</string>
+    <string name="mode_target_status_fails">连续失败 %1$d</string>
 </resources>

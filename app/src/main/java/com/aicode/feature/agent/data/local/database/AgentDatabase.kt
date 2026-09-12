@@ -34,7 +34,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun llmCallRecordDao(): LlmCallRecordDao
 
     companion object {
-        const val SCHEMA_VERSION = 52
+        const val SCHEMA_VERSION = 53
 
         /** 数据库文件名（落在 `databases/` 下，另有 Room 默认 WAL 模式产生的 `-wal`/`-shm`）。 */
         const val DATABASE_NAME = "aicode_agent_db"

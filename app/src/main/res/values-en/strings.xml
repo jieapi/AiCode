@@ -1350,4 +1350,24 @@
     <string name="onboarding_demo_model_anthropic_desc">Anthropic · Recommended for coding</string>
     <string name="onboarding_demo_model_choose_desc">Current pick · Capable of code generation and analysis</string>
     <string name="onboarding_simulated_badge">Preview</string>
+
+    <!-- TARGET goal-driven mode -->
+    <string name="mode_target">Target</string>
+    <string name="mode_target_desc">AI autonomously works toward a goal until achieved or failed</string>
+    <string name="mode_target_goal_hint">Describe the goal for AI to achieve</string>
+    <string name="mode_target_goal_label">Goal Statement</string>
+    <string name="mode_target_step_count">Steps %1$d / %2$d</string>
+    <string name="mode_target_fail_count">Consecutive failures %1$d</string>
+    <string name="mode_target_enter_hint">Entering Target mode requires a goal</string>
+    <string name="mode_target_terminated_achieved">Goal achieved</string>
+    <string name="mode_target_terminated_failed">Terminated due to consecutive failures</string>
+    <string name="mode_target_terminated_step_limit">Terminated due to step limit</string>
+    <string name="mode_target_terminated_interrupted">Goal execution interrupted</string>
+    <string name="mode_target_complete_goal">Declare goal achieved</string>
+    <string name="mode_target_complete_summary_hint">Summarize the completed work and final state</string>
+    <string name="settings_target_mode_title">Target Mode</string>
+    <string name="settings_target_max_step_budget">Max step budget</string>
+    <string name="settings_target_max_consecutive_failures">Max consecutive failures</string>
+    <string name="mode_target_status_steps">Steps %1$d</string>
+    <string name="mode_target_status_fails">Consecutive failures %1$d</string>
 </resources>

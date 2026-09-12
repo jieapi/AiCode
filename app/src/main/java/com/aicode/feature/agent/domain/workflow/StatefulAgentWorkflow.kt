@@ -59,6 +59,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -99,7 +100,9 @@ class StatefulAgentWorkflow @Inject constructor(
     private val llmCallRecordDao: LlmCallRecordDao,
     private val keyRotator: ProviderKeyRotator,
     private val agentNotificationCenter: AgentNotificationCenter,
-    private val fileAccess: FileAccessProvider
+    private val fileAccess: FileAccessProvider,
+    private val targetModeSettingsRepository: com.aicode.feature.settings.data.repository.TargetModeSettingsRepository,
+    private val chatSessionDao: com.aicode.feature.agent.data.local.dao.ChatSessionDao
 ) : AgentWorkflow {
 
     private companion object {
@@ -112,6 +115,7 @@ class StatefulAgentWorkflow @Inject constructor(
         /** 模式提醒提示词：复用 prompts 目录文件（用户可自定义覆盖），切换时随消息注入而非进 system。 */
         const val MODE_REMINDER_PLAN_FILE = "80-plan-mode.md"
         const val MODE_REMINDER_AUTO_FILE = "81-auto-mode.md"
+        const val MODE_REMINDER_TARGET_FILE = "82-target-mode.md"
         val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
         /** 模型直出图片落盘目录（与 GenerateImageTool 保持一致）。 */
         const val GENERATED_IMAGE_DIR = "~/.aicode/generated-images"
@@ -434,6 +438,17 @@ class StatefulAgentWorkflow @Inject constructor(
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
+
+        // TARGET 模式：从 DB 恢复当前会话的步数与失败计数（跨用户消息持久）。
+        if (currentContext.mode == AgentMode.TARGET && currentContext.sessionId != null) {
+            currentContext = chatSessionDao.getById(currentContext.sessionId)?.let { e ->
+                currentContext.copy(
+                    goalStepCount = e.goalStepCount,
+                    goalFailCount = e.goalFailCount,
+                    goalTerminationReason = e.goalTerminationReason
+                )
+            } ?: currentContext
+        }
         val actionQueue = ArrayDeque<AgentAction>()
         // 模式提醒随最新用户消息注入（不进 system，避免切换时 system 前缀变化打断缓存）。
         val modeReminder = buildModeReminder(currentContext.mode)
@@ -764,6 +779,55 @@ class StatefulAgentWorkflow @Inject constructor(
                         if (notifySessionId != null && notifications.isNotEmpty()) {
                             agentNotificationCenter.ack(notifySessionId, notifications.map { it.seq })
                         }
+
+                        // TARGET 模式：步数与失败计数 + 终止判定。
+                        // 仅对实际执行的工具结果计数（被拒/拦截不计入 failCount，因属预防性阻断）。
+                        if (currentContext.mode == AgentMode.TARGET) {
+                            val thresholds = targetModeSettingsRepository.thresholds.first()
+                            var stepCount = currentContext.goalStepCount
+                            var failCount = currentContext.goalFailCount
+                            batchResults.forEach { br ->
+                                stepCount += 1
+                                if (br.isError) failCount += 1 else failCount = 0
+                            }
+                            val sessionId = currentContext.sessionId
+                            val termination: com.aicode.feature.agent.domain.model.GoalTerminationReason? = when {
+                                stepCount >= thresholds.maxStepBudget ->
+                                    com.aicode.feature.agent.domain.model.GoalTerminationReason.STEP_LIMIT
+                                failCount >= thresholds.maxConsecutiveFailures ->
+                                    com.aicode.feature.agent.domain.model.GoalTerminationReason.FAILED
+                                else -> null
+                            }
+                            if (sessionId != null) {
+                                chatSessionDao.getById(sessionId)?.let { entity ->
+                                    chatSessionDao.upsert(
+                                        entity.copy(
+                                            goalStepCount = stepCount,
+                                            goalFailCount = failCount,
+                                            goalTerminationReason = termination?.name ?: entity.goalTerminationReason,
+                                            mode = if (termination != null) AgentMode.BUILD.name else entity.mode
+                                        )
+                                    )
+                                }
+                            }
+                            currentContext = currentContext.copy(
+                                goalStepCount = stepCount,
+                                goalFailCount = failCount,
+                                goalTerminationReason = termination?.name,
+                                mode = if (termination != null) AgentMode.BUILD else currentContext.mode
+                            )
+                            if (termination != null) {
+                                val reasonText = when (termination) {
+                                    com.aicode.feature.agent.domain.model.GoalTerminationReason.STEP_LIMIT ->
+                                        "TARGET 模式因步数达上限（$stepCount/${thresholds.maxStepBudget}）终止，已切回 BUILD 模式。请用户检查进展并决定后续。"
+                                    com.aicode.feature.agent.domain.model.GoalTerminationReason.FAILED ->
+                                        "TARGET 模式因连续失败达阈值（$failCount/${thresholds.maxConsecutiveFailures}）终止，已切回 BUILD 模式。请用户检查失败原因。"
+                                    else -> "TARGET 模式终止，已切回 BUILD 模式。"
+                                }
+                                send(AgentEvent.ModeChanged(AgentMode.BUILD, reasonText))
+                            }
+                        }
+
                         actionQueue.addLast(AgentAction.ToolBatchFinished(batchResults))
                     }
                 }
@@ -1014,6 +1078,10 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
             .let { "【模式提醒】$it" }
+        AgentMode.TARGET -> promptProvider.resolvePrompt(MODE_REMINDER_TARGET_FILE)
+            .replace(LEADING_COMMENT, "")
+            .trim()
+            .let { "【模式提醒】$it" }
         AgentMode.BUILD -> null
     }
 
@@ -1035,6 +1103,9 @@ class StatefulAgentWorkflow @Inject constructor(
             .trim()
         AgentMode.BUILD -> "\n\n【模式切换】计划已获用户批准，你已切换到 BUILD（构建）模式，可以开始执行计划。"
         AgentMode.AUTO -> "\n\n【模式切换】你已切换到 AUTO（自动）模式。"
+        AgentMode.TARGET -> "\n\n" + promptProvider.resolvePrompt(MODE_REMINDER_TARGET_FILE)
+            .replace(LEADING_COMMENT, "")
+            .trim()
     }
 
     /**
