@@ -104,6 +104,7 @@ export default defineConfig({
           items: [
             { text: '快速上手', link: '/guide/quick-start' },
             { text: '功能总览', link: '/guide/overview' },
+            { text: '视频教程', link: '/guide/video-tutorials' },
             { text: '免费提供商', link: '/guide/free-providers' },
           ]
         },
@@ -165,6 +166,7 @@ export default defineConfig({
           text: '环境搭建',
           items: [
             { text: '在容器中编译 Android 应用', link: '/advanced/build-android-app' },
+            { text: '在容器中编译 Flutter 应用', link: '/advanced/build-flutter-app' },
             { text: '安装 Playwright 浏览器自动化', link: '/advanced/playwright-mcp' }
           ]
         },

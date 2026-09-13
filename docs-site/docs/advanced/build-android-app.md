@@ -32,7 +32,52 @@ apt install -y openjdk-17-jdk-headless curl wget unzip ripgrep
 
 ## 2. 安装 Android SDK
 
-官方源下载慢时可以用国内镜像：
+默认使用国内镜像安装（下载更快、更稳）。除 sdkmanager 本体（cmdline-tools）需手工下载解压外，其余组件通过 `SDK_TEST_BASE_URL` 环境变量覆盖 sdkmanager 的默认仓库根 URL（需以 `/` 结尾，镜像需提供 `repository2-3.xml`），一条命令全部装完（`--list` 与 `--install` 均已实测可用）：
+
+```bash
+# 唯一手工步骤：获取 sdkmanager 本体（从镜像下载）
+mkdir -p ~/android/sdk && cd ~/android/sdk
+curl -fL -C - -o clt.zip https://mirrors.cloud.tencent.com/AndroidSDK/commandlinetools-linux-13114758_latest.zip
+unzip -q clt.zip
+mkdir -p cmdline-tools/latest && mv cmdline-tools/* cmdline-tools/latest/
+
+# 组件全部走镜像安装（自动处理目录布局与许可接受）
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
+export ANDROID_HOME=$HOME/android/sdk
+export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+export SDK_TEST_BASE_URL=https://mirrors.cloud.tencent.com/AndroidSDK/
+
+yes | sdkmanager --install "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+```
+
+::: tip 版本说明
+按目标项目的 `compileSdk` 和 `buildToolsVersion` 选择组件版本，本文示例为 Android 36 / build-tools 35.0.0。
+:::
+
+::: tip 镜像与官方源
+`SDK_TEST_BASE_URL` 虽为测试用途的环境变量（非官方文档化的常规配置），但已被镜像方案广泛使用。镜像安装的 SDK 与官方安装完全等价：即使网络可直接访问 `dl.google.com`，也无需还原为官方流程。若该方式在特定场景下失效，可改用官方源（见下）或手工组装。
+:::
+
+### 可选：官方源安装
+
+若网络可直连 `dl.google.com`，也可使用官方标准流程：
+
+```bash
+mkdir -p ~/android/sdk && cd ~/android/sdk
+curl -O https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+unzip -q commandlinetools-linux-*.zip
+mkdir -p cmdline-tools/latest && mv cmdline-tools/* cmdline-tools/latest/
+
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
+export ANDROID_HOME=$HOME/android/sdk
+export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+
+yes | sdkmanager --install "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+```
+
+### 备选：从镜像手工组装 SDK
+
+若 `SDK_TEST_BASE_URL` 方式不可用，可从腾讯云镜像下载组件 zip 手工组装，最终得到 `build-tools/`、`platforms/`、`platform-tools/` 三个目录，效果与 sdkmanager 一致：
 
 | 组件 | 镜像地址 |
 | --- | --- |
@@ -40,36 +85,6 @@ apt install -y openjdk-17-jdk-headless curl wget unzip ripgrep
 | platform-36 | `https://mirrors.cloud.tencent.com/AndroidSDK/platform-36_r01.zip` |
 | build-tools 35.0.0 | `https://mirrors.cloud.tencent.com/AndroidSDK/build-tools_r35_linux.zip` |
 | platform-tools | `https://mirrors.cloud.tencent.com/AndroidSDK/platform-tools_r35.0.2-linux.zip` |
-
-### 下载命令行工具
-
-从 `https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip` 下载（慢则用上表的腾讯云镜像），放到工作区后解压：
-
-```bash
-mkdir -p ~/android/sdk
-unzip /workspace/commandlinetools-linux-*.zip -d ~/android/sdk
-mkdir -p ~/android/sdk/cmdline-tools/latest
-mv ~/android/sdk/cmdline-tools/bin \
-   ~/android/sdk/cmdline-tools/lib \
-   ~/android/sdk/cmdline-tools/NOTICE.txt \
-   ~/android/sdk/cmdline-tools/source.properties \
-   ~/android/sdk/cmdline-tools/latest/
-```
-
-### 安装 SDK 组件
-
-按目标项目的 `compileSdk` 和 `buildToolsVersion` 选择对应组件：
-
-```bash
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
-export ANDROID_HOME=/root/android/sdk
-export PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-yes | sdkmanager --install "platforms;android-36" "build-tools;35.0.0" "platform-tools"
-```
-
-### 从镜像手工组装 SDK（替代 sdkmanager）
-
-`sdkmanager` 的下载源固定是 dl.google.com，不能改镜像。如果反复下载失败，可以从腾讯云镜像下载组件 zip 手工组装，最终得到 `build-tools/`、`platforms/`、`platform-tools/` 三个目录，效果与 sdkmanager 一致：
 
 ```bash
 cd /workspace

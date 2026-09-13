@@ -1,6 +1,6 @@
 # 功能总览
 
-本页作为使用手册的快速导览索引，整理了主界面核心工作流与设置页各功能入口对应的文档。
+本页作为使用手册的快速导览索引，整理了主界面核心工作流与设置页各功能入口对应的文档。想直观看操作演示，可先浏览[视频教程](/guide/video-tutorials)。
 
 ::: tip 版本说明
 标了版本的条目（如「1.11.0 起」）表示该功能自该版本起引入。
@@ -14,7 +14,7 @@
 | 运行模式（三种模式） | Build / Plan / Auto 的权限控制与场景 → [文档](/guide/modes) |
 | 检查点与撤销 | AI 修改前自动快照，支持一键安全回滚 → [文档](/guide/checkpoint) |
 | 终端交互 | 多标签会话、辅助按键栏、配色与字体设置 → [文档](/guide/terminal) |
-| 文件浏览与代码编辑 | 缩进树形目录、语法高亮、内置代码编辑器（1.11.0 起）→ [文档](/guide/files) |
+| 文件浏览与代码编辑 | 缩进树形目录、语法高亮、内置代码编辑器（1.11.0 起），以及工作区文件在手机上的位置与访问 → [文档](/guide/files) |
 | Git 版本管理 | 可视化状态管理、分支切换、提交历史、回退与删除（1.11.0 起）→ [文档](/guide/git) |
 | 平板与大屏适配 | 响应式分栏、常驻侧边栏、并排双栏工作台（1.11.0 起）→ [文档](/guide/tablet) |
 
@@ -47,7 +47,7 @@
 | 工具授权 | AI 调用工具的授权规则 → [文档](/guide/permissions) |
 | 软件权限 | 保活、屏幕常亮、通知、存储、电池优化等系统权限 → [文档](/guide/app-permissions) |
 | 常见错误提示 | 重试气泡分类含义、常见 HTTP 错误码与排查 → [文档](/guide/error-codes) |
-| 日志 | 查看运行日志、崩溃报告、访问 App 私有目录 → [文档](/guide/logs) |
+| 日志 | 查看运行日志、崩溃报告 → [文档](/guide/logs) |
 
 ### 外观与语言
 
@@ -69,5 +69,6 @@
 | 主题 | 说明 |
 | --- | --- |
 | 在容器中编译 Android 应用 | 搭 JDK 与 Android SDK，从源码出 APK → [文档](/advanced/build-android-app) |
+| 在容器中编译 Flutter 应用 | 装 JDK、Android SDK 与 Flutter SDK，构建 Flutter debug APK → [文档](/advanced/build-flutter-app) |
 | 安装 Playwright 浏览器自动化 | 容器内装 Chromium 并接入 Playwright MCP，让 AI 操作网页 → [文档](/advanced/playwright-mcp) |
 | 自定义面板 | 用脚本在输入框上方画余额或用量卡片 → [文档](/advanced/dashboard-cards) |

@@ -1,6 +1,7 @@
 import DefaultTheme from 'vitepress/theme'
 import MarkdownActions from './components/MarkdownActions.vue'
 import TranslationBanner from './components/TranslationBanner.vue'
+import BilibiliEmbed from './components/BilibiliEmbed.vue'
 import { h } from 'vue'
 import { inject } from '@vercel/analytics'
 import type { App } from 'vue'
@@ -15,6 +16,7 @@ export default {
     })
   },
   enhanceApp({ app }: { app: App }) {
+    app.component('BilibiliEmbed', BilibiliEmbed)
     if (typeof window !== 'undefined') {
       inject()
     }
