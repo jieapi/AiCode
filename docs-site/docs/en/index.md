@@ -2,7 +2,7 @@
 layout: home
 title: AiCode - AI Coding Tool & Linux Terminal on Android
 titleTemplate: false
-description: AiCode is an open-source AI coding and mobile workstation for Android. It ships with a built-in Linux container and terminal — the AI Agent can read/write code and run builds on its own, with support for the MCP protocol, Git version control and remote SSH development.
+description: AiCode is an open-source AI coding tool for Android that needs no computer. It ships a built-in Linux container and terminal so the AI Agent can read/write code and run builds on its own, with Git version control, the MCP protocol and remote SSH support.
 head:
   - - meta
     - name: keywords
@@ -11,7 +11,7 @@ head:
 hero:
   name: AiCode
   text: AI Coding Tool & Mobile Workstation on Your Phone
-  tagline: A built-in Linux container and terminal let the AI Agent read/write files, run shell commands and execute builds on its own. Remote SSH mode and full model ecosystem support is included — start developing anywhere, anytime.
+  tagline: No computer needed — write, debug and commit entirely from your phone. A built-in Linux container and terminal let the AI Agent read/write files, run shell commands and execute builds on its own, with Git, MCP, remote SSH and a full model ecosystem.
   image:
     src: /logo.png
     alt: AiCode

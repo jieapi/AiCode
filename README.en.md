@@ -42,9 +42,9 @@
 
 ## Overview
 
-AiCode is an AI-powered coding assistant that runs natively on Android. It integrates large language models with a local Linux development environment. The built-in Alpine Linux container and terminal emulator let the AI directly read/write files, execute shell commands, and run build tools. It also supports remote SSH servers as the execution backend, turning your phone into a mobile workstation for remote projects.
+AiCode is an AI-powered coding tool that runs on Android, letting you code entirely on your phone without a computer. It bundles an Alpine Linux container and terminal, packing a full Linux development environment into your phone: the AI agent can read and write files, run shell commands, and run build tools, so writing code, debugging and building all happen right on the phone.
 
-Beyond AI chat and the terminal, the app ships a file tree with a full-screen code editor, a visual Git panel, and subagents that work in parallel in the background. On tablets, unfolded foldables and desktop windows it automatically switches to a side-by-side two-pane workbench.
+Terminal, AI agent, file tree with a code editor, visual Git panel and background subagents are all built in, giving you a complete development workflow on mobile. When needed, a remote SSH server can act as the execution backend, turning your phone into a mobile workstation for remote projects; on large screens it automatically switches to a side-by-side two-pane workbench.
 
 ## Advertisement
 
