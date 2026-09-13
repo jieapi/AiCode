@@ -3,8 +3,8 @@ package com.aicode.feature.agent.domain.subagent
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.ReasoningEffort
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import org.yaml.snakeyaml.Yaml
-import java.io.File
 
 /**
  * 解析单个子代理定义文件（`agents/<name>.md`）：YAML frontmatter 为配置，正文为 agent 提示词。
@@ -14,13 +14,10 @@ object AgentDefinitionParser {
     private const val TAG = "AgentDefinitionParser"
     private const val MAX_DESC_CHARS = 500
 
-    /** 正文为空视为非法定义（agent 必须有提示词），返回 null。 */
-    fun parse(file: File): AgentDefinition? {
-        val text = try {
-            if (!file.isFile || !file.canRead()) return null
-            file.readText()
-        } catch (e: Exception) {
-            FileLogger.w(TAG, "读取子代理定义失败: ${file.absolutePath}", e)
+    /** 正文为空视为非法定义（agent 必须有提示词），返回 null。定义文件经 [provider] 以容器路径读取。 */
+    fun parse(provider: FileAccessProvider, filePath: String): AgentDefinition? {
+        val text = runCatching { provider.readFile(filePath) }.getOrElse {
+            FileLogger.w(TAG, "读取子代理定义失败: $filePath", it)
             return null
         }
 
@@ -28,8 +25,9 @@ object AgentDefinitionParser {
         val prompt = body.trim()
         if (prompt.isEmpty()) return null
 
+        val fileName = filePath.substringAfterLast('/')
         val name = frontmatter["name"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-            ?: file.nameWithoutExtension
+            ?: fileName.substringBeforeLast('.')
         val description = (frontmatter["description"]?.toString() ?: "").take(MAX_DESC_CHARS)
 
         return AgentDefinition(
@@ -44,7 +42,7 @@ object AgentDefinitionParser {
             disallowedTools = stringList(frontmatter["disallowedTools"]),
             inject = parseInject(frontmatter["inject"]),
             prompt = prompt,
-            file = file
+            filePath = filePath
         )
     }
 

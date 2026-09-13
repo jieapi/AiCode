@@ -233,6 +233,22 @@ class RemoteSftpFileAccess @Inject constructor(
         }
     }
 
+    override fun listFilesRecursive(path: String, maxDepth: Int): List<String> {
+        val remote = toRemotePath(path)
+        return runCatching {
+            val output = execSync("find ${shellQuote(remote)} -maxdepth $maxDepth -type f 2>/dev/null")
+            val prefix = remote.trimEnd('/') + "/"
+            output.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { if (it.startsWith(prefix)) it.removePrefix(prefix) else it }
+                .toList()
+        }.getOrElse {
+            FileLogger.w(TAG, "listFilesRecursive 失败: $remote", it)
+            emptyList()
+        }
+    }
+
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val remote = toRemotePath(path)
         if (exists(path) && !overwrite) throw FileAlreadyExistsException(File(remote))

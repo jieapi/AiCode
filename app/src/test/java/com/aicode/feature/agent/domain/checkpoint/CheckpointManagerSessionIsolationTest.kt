@@ -188,6 +188,7 @@ class CheckpointManagerSessionIsolationTest {
             File(path).parentFile?.mkdirs()
             File(path).writeBytes(bytes)
         }
+        override fun listFilesRecursive(path: String, maxDepth: Int): List<String> = emptyList()
         override fun copyToLocal(path: String): File = throw UnsupportedOperationException()
         override fun deleteRecursively(path: String) = throw UnsupportedOperationException()
         override fun rename(path: String, newPath: String) = throw UnsupportedOperationException()

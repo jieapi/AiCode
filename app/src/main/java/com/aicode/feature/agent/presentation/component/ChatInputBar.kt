@@ -804,11 +804,17 @@ internal fun PlanApprovalPanel(
             if (effectiveExpanded) {
                 if (state.reason.isNotBlank()) {
                     Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = state.reason,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    SelectionContainer {
+                        Column(
+                            modifier = Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = state.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(Spacing.md))

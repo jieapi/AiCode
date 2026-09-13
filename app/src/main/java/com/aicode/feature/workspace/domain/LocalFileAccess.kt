@@ -106,6 +106,15 @@ class LocalFileAccess @Inject constructor(
         return file.readBytes()
     }
 
+    override fun listFilesRecursive(path: String, maxDepth: Int): List<String> {
+        val dir = resolve(path)
+        if (!dir.isDirectory) return emptyList()
+        return dir.walkTopDown().maxDepth(maxDepth)
+            .filter { it.isFile }
+            .map { it.relativeTo(dir).invariantSeparatorsPath }
+            .toList()
+    }
+
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val file = resolve(path)
         if (file.exists() && !overwrite) throw FileAlreadyExistsException(file)

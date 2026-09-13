@@ -3,6 +3,7 @@ package com.aicode.feature.agent.domain.mcp
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -62,12 +63,12 @@ data class McpServerEntry(
 @Singleton
 class McpConfigRepository @Inject constructor(
     private val containerInstaller: ContainerInstaller,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val projectAicodeRoot: ProjectAicodeRoot
 ) {
     private companion object {
         const val TAG = "McpConfigRepository"
         const val CONFIG_FILE = "mcp.json"
-        const val AICODE_DIR = ".aicode"
         const val DEFAULT_JSON = """{"mcpServers":{}}"""
         /** 配置文件轮询间隔：外部直接编辑后约 2s 内刷新。 */
         const val WATCH_POLL_MS = 2000L
@@ -81,7 +82,7 @@ class McpConfigRepository @Inject constructor(
 
     /** 当前工作区的项目级配置文件：`workspacePath/.aicode/mcp.json`。 */
     private fun projectFileForPath(workspacePath: String): File =
-        File(File(workspacePath, AICODE_DIR), CONFIG_FILE)
+        File(projectAicodeRoot.forPath(workspacePath), CONFIG_FILE)
 
     private val globalState = MutableStateFlow<String?>(null)
     private val projectStates = ConcurrentHashMap<String, MutableStateFlow<String?>>()

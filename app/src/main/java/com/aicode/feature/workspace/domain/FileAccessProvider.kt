@@ -75,6 +75,13 @@ interface FileAccessProvider {
     fun listFiles(path: String): List<FileEntry>
 
     /**
+     * 递归列出 [path] 下所有普通文件，深度不超过 [maxDepth]（[path] 的直接子项算第 1 层）。
+     * 返回相对 [path] 的路径（`/` 分隔）；目录不存在时返回空列表。
+     * 供技能/子代理目录扫描使用。
+     */
+    fun listFilesRecursive(path: String, maxDepth: Int): List<String>
+
+    /**
      * 读取文件原始字节。供 [ViewImageTool] 等需要二进制数据的工具使用。
      * 远程模式下若调用方需要本地文件路径，改用 [copyToLocal]。
      */
@@ -82,7 +89,7 @@ interface FileAccessProvider {
 
     /**
      * 写入文件原始字节。父目录不存在则自动创建。[overwrite] 为 false 且文件已存在时抛 [FileAlreadyExistsException]。
-     * 供 [GenerateImageTool] 等需要落盘二进制数据（图片等）的工具使用；
+     * 供 [GenerateImageTool] 等需要落盘二进制数据（图片等）的工具使用，也用于上传附件等二进制写入；
      * 文本内容仍用 [writeFile]。
      */
     fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean = true)

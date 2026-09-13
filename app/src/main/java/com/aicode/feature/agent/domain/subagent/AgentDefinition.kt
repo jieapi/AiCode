@@ -1,7 +1,6 @@
 package com.aicode.feature.agent.domain.subagent
 
 import com.aicode.feature.agent.domain.model.AgentMode
-import java.io.File
 
 /** 子代理定义的来源作用域：全局（跨项目共享）或项目级（仅当前工作区生效，可 git 追踪）。 */
 enum class AgentDefinitionScope { GLOBAL, PROJECT }
@@ -56,7 +55,7 @@ enum class InjectPart(val token: String) {
  * @param disallowedTools 工具黑名单，先于白名单生效
  * @param inject 要注入的提示词片段
  * @param prompt agent 自身的系统提示词（正文）
- * @param file 定义文件，供设置页展示与删除
+ * @param filePath 定义文件的容器路径，供设置页展示与删除
  */
 data class AgentDefinition(
     val name: String,
@@ -69,7 +68,7 @@ data class AgentDefinition(
     val disallowedTools: List<String> = emptyList(),
     val inject: Set<InjectPart> = DEFAULT_INJECT,
     val prompt: String,
-    val file: File? = null
+    val filePath: String? = null
 ) {
     /**
      * 按白名单/黑名单裁剪工具名集合。`task` 永远被剔除——子代理不能嵌套派子代理。

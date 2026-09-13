@@ -506,7 +506,7 @@ fun AIChatPanel(
             val failures = mutableListOf<String>()
             selected.forEach { uri ->
                 runCatching {
-                    copyUriToWorkspace(context, uri, projectRoot, includeImageData = images)
+                    copyUriToWorkspace(context, uri, viewModel.fileAccess, includeImageData = images)
                 }.onSuccess { uploaded ->
                     pendingAttachments = pendingAttachments + uploaded.toPendingAttachment()
                     successCount += 1

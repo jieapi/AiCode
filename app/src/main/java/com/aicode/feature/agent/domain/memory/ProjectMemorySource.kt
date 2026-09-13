@@ -2,9 +2,9 @@ package com.aicode.feature.agent.domain.memory
 
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerInstaller
-import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import java.io.File
 
 /**
@@ -20,26 +20,15 @@ class ProjectMemorySource(
     private val projectRoot: String,
     private val executionModeHolder: ExecutionModeHolder,
     private val containerInstaller: ContainerInstaller,
-    private val remoteSshConnection: RemoteSshConnection
+    private val projectAicodeRoot: ProjectAicodeRoot
 ) : MemorySource {
 
     private val memoryRoot: File by lazy {
         if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
-            File(containerInstaller.aicodeDir, "memory/projects/${projectKey(projectRoot)}")
+            File(File(containerInstaller.aicodeDir, "memory/projects"), projectAicodeRoot.projectKey(projectRoot))
         } else {
             File(projectRoot, ".aicode/memory")
         }
-    }
-
-    /** 远程模式下的记忆子目录名：项目名 + 标识哈希，标识 = IP:端口:路径，区分不同服务器上的同名工作区。 */
-    private fun projectKey(projectRoot: String): String {
-        val name = projectRoot.trimEnd('/').substringAfterLast('/').ifBlank { "default" }
-        val cfg = remoteSshConnection.config
-        val identity = if (cfg != null) "${cfg.host}:${cfg.port}:$projectRoot" else projectRoot
-        val digest = java.security.MessageDigest.getInstance("MD5")
-            .digest(identity.toByteArray(Charsets.UTF_8))
-        val hash = java.math.BigInteger(1, digest).toString(16).padStart(32, '0').take(8)
-        return "$name-$hash"
     }
 
     override fun listMemories(): List<Memory> {

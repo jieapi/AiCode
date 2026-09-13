@@ -1,43 +1,44 @@
 package com.aicode.feature.agent.domain.skill
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import org.yaml.snakeyaml.Yaml
-import java.io.File
 
 object SkillParser {
     private const val TAG = "SkillParser"
     private const val MAX_DESC_CHARS = 500
+    private const val SKILL_FILE = "SKILL.md"
+    private const val CLAUDE_FILE = "CLAUDE.md"
 
     /**
-     * 解析一个 skill 目录；无 SKILL.md 或无 name 时视为非法，返回 null。
+     * 解析一个 skill 目录；无 SKILL.md / CLAUDE.md 或无 name 时视为非法，返回 null。
+     * 目录经 [provider] 以容器路径读取，本地/远程统一。
      */
-    fun parse(dir: File): Skill? {
-        // 优先查找 SKILL.md，如果没有则回退查找 CLAUDE.md（兼容某些只用 CLAUDE.md 的技能）
-        var file = File(dir, "SKILL.md")
-        if (!file.exists()) {
-            file = File(dir, "CLAUDE.md")
-        }
-        if (!file.exists()) {
-            // 兼容大小写情况
-            file = dir.listFiles()?.firstOrNull { 
-                it.name.equals("SKILL.md", ignoreCase = true) || it.name.equals("CLAUDE.md", ignoreCase = true) 
-            } ?: return null
-        }
-        
-        val text = try {
-            if (!file.isFile || !file.canRead()) return null
-            file.readText()
-        } catch (e: Exception) {
-            FileLogger.w(TAG, "读取 Skill 文件失败: ${file.absolutePath}", e)
+    fun parse(provider: FileAccessProvider, dirPath: String): Skill? {
+        val dir = dirPath.trimEnd('/')
+        // 优先 SKILL.md，其次 CLAUDE.md（兼容只用 CLAUDE.md 的技能）；名称匹配忽略大小写
+        val fileName = runCatching {
+            provider.listFiles(dir).map { it.name }
+        }.getOrElse {
+            FileLogger.w(TAG, "列出技能目录失败: $dir", it)
+            return null
+        }.let { names ->
+            names.firstOrNull { it.equals(SKILL_FILE, ignoreCase = true) }
+                ?: names.firstOrNull { it.equals(CLAUDE_FILE, ignoreCase = true) }
+        } ?: return null
+
+        val text = runCatching { provider.readFile("$dir/$fileName") }.getOrElse {
+            FileLogger.w(TAG, "读取 Skill 文件失败: $dir/$fileName", it)
             return null
         }
 
         val (frontmatter, body) = splitAndParseFrontmatter(text)
-        
+
         // name 优先取 frontmatter，缺省回退到目录名
-        val name = frontmatter["name"]?.toString()?.takeIf { it.isNotBlank() } ?: dir.name
+        val name = frontmatter["name"]?.toString()?.takeIf { it.isNotBlank() }
+            ?: dir.substringAfterLast('/').ifBlank { dir }
         val description = (frontmatter["description"]?.toString() ?: "").take(MAX_DESC_CHARS)
-        
+
         val requiredTools = try {
             val toolsRaw = frontmatter["required_tools"]
             if (toolsRaw is List<*>) {
@@ -46,7 +47,7 @@ object SkillParser {
                 emptyList()
             }
         } catch (e: Exception) {
-            FileLogger.w(TAG, "解析 required_tools 失败: ${file.absolutePath}", e)
+            FileLogger.w(TAG, "解析 required_tools 失败: $dir/$fileName", e)
             emptyList()
         }
 
@@ -54,7 +55,7 @@ object SkillParser {
             name = name,
             description = description,
             requiredTools = requiredTools,
-            dir = dir,
+            dirPath = dir,
             instructions = body.trim()
         )
     }

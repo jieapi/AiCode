@@ -1,6 +1,7 @@
 package com.aicode.feature.agent.domain.subagent
 
 import com.aicode.feature.agent.domain.model.AgentMode
+import com.aicode.testutil.TestFileAccessProvider
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +15,10 @@ class AgentDefinitionParserTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()
+
+    private val provider = TestFileAccessProvider()
+
+    private fun parseFile(file: File): AgentDefinition? = AgentDefinitionParser.parse(provider, file.absolutePath)
 
     private fun write(name: String, content: String): File =
         File(tempFolder.root, name).apply { writeText(content) }
@@ -38,7 +43,7 @@ class AgentDefinitionParserTest {
             """.trimIndent()
         )
 
-        val def = AgentDefinitionParser.parse(file)!!
+        val def = parseFile(file)!!
 
         assertEquals("researcher", def.name)
         assertEquals("只读调研", def.description)
@@ -54,14 +59,14 @@ class AgentDefinitionParserTest {
 
     @Test
     fun parse_nameFallsBackToFileName() {
-        val def = AgentDefinitionParser.parse(write("coder.md", "---\ndescription: 写代码\n---\n正文"))!!
+        val def = parseFile(write("coder.md", "---\ndescription: 写代码\n---\n正文"))!!
 
         assertEquals("coder", def.name)
     }
 
     @Test
     fun parse_defaultsWhenInjectOmitted() {
-        val def = AgentDefinitionParser.parse(write("a.md", "---\nname: a\n---\n正文"))!!
+        val def = parseFile(write("a.md", "---\nname: a\n---\n正文"))!!
 
         assertEquals(AgentDefinition.DEFAULT_INJECT, def.inject)
         assertTrue(def.allowedTools.isEmpty())
@@ -74,7 +79,7 @@ class AgentDefinitionParserTest {
 
     @Test
     fun parse_injectNoneMeansNoInjection() {
-        val def = AgentDefinitionParser.parse(write("a.md", "---\nname: a\ninject: [none]\n---\n正文"))!!
+        val def = parseFile(write("a.md", "---\nname: a\ninject: [none]\n---\n正文"))!!
 
         assertTrue(def.inject.isEmpty())
     }
@@ -82,14 +87,14 @@ class AgentDefinitionParserTest {
     /** 全部取值非法时回退默认，避免写错一个词就丢掉全部上下文。 */
     @Test
     fun parse_invalidInjectFallsBackToDefault() {
-        val def = AgentDefinitionParser.parse(write("a.md", "---\nname: a\ninject: [bogus]\n---\n正文"))!!
+        val def = parseFile(write("a.md", "---\nname: a\ninject: [bogus]\n---\n正文"))!!
 
         assertEquals(AgentDefinition.DEFAULT_INJECT, def.inject)
     }
 
     @Test
     fun parse_toolsAcceptsCommaSeparatedString() {
-        val def = AgentDefinitionParser.parse(
+        val def = parseFile(
             write("a.md", "---\nname: a\ntools: readFile, search\n---\n正文")
         )!!
 
@@ -98,7 +103,7 @@ class AgentDefinitionParserTest {
 
     @Test
     fun parse_invalidReasoningEffortIgnored() {
-        val def = AgentDefinitionParser.parse(
+        val def = parseFile(
             write("a.md", "---\nname: a\nreasoningEffort: turbo\n---\n正文")
         )!!
 
@@ -108,12 +113,12 @@ class AgentDefinitionParserTest {
 
     @Test
     fun parse_blankPromptReturnsNull() {
-        assertNull(AgentDefinitionParser.parse(write("a.md", "---\nname: a\n---\n   \n")))
+        assertNull(parseFile(write("a.md", "---\nname: a\n---\n   \n")))
     }
 
     @Test
     fun parse_noFrontmatterTreatsWholeFileAsPrompt() {
-        val def = AgentDefinitionParser.parse(write("plain.md", "只有正文"))!!
+        val def = parseFile(write("plain.md", "只有正文"))!!
 
         assertEquals("plain", def.name)
         assertEquals("只有正文", def.prompt)
@@ -127,14 +132,14 @@ class AgentDefinitionParserTest {
         File(tempFolder.root, "nested").mkdirs()
         File(File(tempFolder.root, "nested"), "c.md").writeText("---\nname: c\n---\n正文")
 
-        val defs = AgentDefinitionDirectoryScanner.scan(tempFolder.root)
+        val defs = AgentDefinitionDirectoryScanner.scan(provider, tempFolder.root.absolutePath)
 
         assertEquals(listOf("a", "b"), defs.map { it.name })
     }
 
     @Test
     fun scan_missingRootReturnsEmpty() {
-        assertTrue(AgentDefinitionDirectoryScanner.scan(File(tempFolder.root, "not-exists")).isEmpty())
+        assertTrue(AgentDefinitionDirectoryScanner.scan(provider, File(tempFolder.root, "not-exists").absolutePath).isEmpty())
     }
 
     /**
@@ -156,7 +161,7 @@ class AgentDefinitionParserTest {
             prompt = "你是调研专家。\n\n结论要带 文件:行号 引用。"
         )
 
-        val def = AgentDefinitionParser.parse(write("researcher.md", text))!!
+        val def = parseFile(write("researcher.md", text))!!
 
         assertEquals("researcher", def.name)
         assertEquals("只读调研：先 search 定位，再 readFile 核实 #1 优先，别改文件", def.description)
@@ -185,7 +190,7 @@ class AgentDefinitionParserTest {
             prompt = "只用自己的提示词。"
         )
 
-        val def = AgentDefinitionParser.parse(write("bare.md", text))!!
+        val def = parseFile(write("bare.md", text))!!
 
         assertTrue(def.inject.isEmpty())
         assertNull(def.providerId)
