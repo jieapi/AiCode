@@ -28,7 +28,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
 ) {
     private companion object {
         /** 以 `command` 参数承载 shell 命令、按命令前缀做指令级匹配的工具。 */
-        val SHELL_TOOLS = setOf("Bash", "Shizuku")
+        val SHELL_TOOLS = setOf("Bash", "Shizuku", "Root")
 
         /**
          * 合并后的终端会话工具：其 `start` 动作承载 shell 命令，需走指令级前缀匹配；

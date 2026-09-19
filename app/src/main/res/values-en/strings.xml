@@ -60,6 +60,14 @@
     <string name="settings_shizuku_hint_denied">Tap to request Shizuku permission</string>
     <string name="settings_shizuku_hint_ready">Authorized — AI can run commands via adb shell</string>
     <string name="settings_shizuku_desc">Shizuku lets this app run commands as adb shell (uid 2000): pm / am / cmd system commands, reading and writing /sdcard, etc. Install and start the Shizuku app first, then authorize here. Once enabled, the AI gains a tool named Shizuku.</string>
+    <string name="settings_root">Root</string>
+    <string name="settings_root_status_unavailable">Unavailable</string>
+    <string name="settings_root_status_denied">Not authorized</string>
+    <string name="settings_root_status_ready">Ready</string>
+    <string name="settings_root_hint_unavailable">No root (su) detected — tap to probe again</string>
+    <string name="settings_root_hint_denied">Tap to request authorization (the root manager dialog will appear)</string>
+    <string name="settings_root_hint_ready">Root granted — AI can run commands as uid 0 via the Root tool</string>
+    <string name="settings_root_desc">Root lets this app run commands as the superuser (uid 0): access restricted directories such as /data/data and /data/adb, and perform system operations adb shell cannot. The device must be rooted. Root has no programmatic permission API — authorization happens in the root manager dialog, shown when you open this page or the AI first calls the Root tool. Once enabled, the AI gains a tool named Root.</string>
     <string name="settings_backup">Backup &amp; Restore</string>
     <string name="settings_about">About</string>
     <string name="settings_language">Language</string>

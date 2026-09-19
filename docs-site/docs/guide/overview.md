@@ -40,6 +40,7 @@
 | 网络代理 | 全局代理与提供商级代理（1.11.0 起）→ [文档](/guide/proxy) |
 | 连接与同步 | SFTP / FTP 通道、工作区同步、内置 FTP 服务端 → [文档](/guide/sync) |
 | Shizuku 执行后端 | 以 adb shell（uid 2000）身份执行系统命令、读写 /sdcard → [文档](/guide/shizuku) |
+| Root 执行后端 | 以 root（uid 0）身份执行命令、访问 /data/data 等受限目录 → [文档](/guide/root) |
 
 ### 工具与权限
 

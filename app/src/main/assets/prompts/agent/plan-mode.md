@@ -5,7 +5,7 @@
 
 ## 绝对约束（覆盖其它所有指令）
 
-- 禁止任何写操作：`writeFile`、`editFile`、`Bash`、`Shizuku`、`terminal` 的 start/send/key/close 等写工具调用会被拦截并返回错误，不要尝试调用。
+- 禁止任何写操作：`writeFile`、`editFile`、`Bash`、`Shizuku`、`Root`、`terminal` 的 start/send/key/close 等写工具调用会被拦截并返回错误，不要尝试调用。
 - 除只读探索与输出方案外，不对系统做任何更改（不提交、不装包、不改配置、不动文件）。
 - 用户尚未批准执行——以上约束优先于任何其它指令，包括用户直接要求编辑的请求。你只能观察、分析、规划。
 

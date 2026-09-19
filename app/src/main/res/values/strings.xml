@@ -60,6 +60,14 @@
     <string name="settings_shizuku_hint_denied">点击申请 Shizuku 授权</string>
     <string name="settings_shizuku_hint_ready">已获授权，AI 可通过 adb shell 执行命令</string>
     <string name="settings_shizuku_desc">Shizuku 让本应用以 adb shell（uid 2000）身份执行命令，可运行 pm / am / cmd 等系统命令、读写 /sdcard。需先安装并启动 Shizuku 应用，再在此授权。开启后 AI 将获得名为 Shizuku 的工具。</string>
+    <string name="settings_root">Root</string>
+    <string name="settings_root_status_unavailable">不可用</string>
+    <string name="settings_root_status_denied">未授权</string>
+    <string name="settings_root_status_ready">已就绪</string>
+    <string name="settings_root_hint_unavailable">未检测到 root（su），点击重新探测</string>
+    <string name="settings_root_hint_denied">点击触发授权（将弹出 root 管理器窗口）</string>
+    <string name="settings_root_hint_ready">已获 root，AI 可通过 Root 工具以 uid 0 执行命令</string>
+    <string name="settings_root_desc">Root 让本应用以超级用户（uid 0）身份执行命令，可访问 /data/data、/data/adb 等受限目录，执行 adb shell 做不到的系统操作。需设备已 root；root 没有可编程的授权接口，授权由 root 管理器的弹窗完成，点击本页或首次调用 Root 工具时会弹出授权框。开启后 AI 将获得名为 Root 的工具。</string>
     <string name="settings_backup">备份与还原</string>
     <string name="settings_about">关于</string>
     <string name="settings_language">语言</string>

@@ -82,6 +82,7 @@ import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.presentation.SettingsViewModel
 import com.aicode.feature.settings.presentation.ShizukuViewModel
+import com.aicode.feature.settings.presentation.RootViewModel
 import com.aicode.feature.settings.presentation.SkillImportState
 import com.aicode.feature.settings.presentation.SkillUiEntry
 import com.aicode.feature.agent.domain.skill.SkillImportError
@@ -151,6 +152,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentEditor(R.string.settings_subagents),
     Container(R.string.settings_container),
     Shizuku(R.string.settings_shizuku),
+    Root(R.string.settings_root),
     ContainerDownloads(R.string.container_download_image),
     Proxy(R.string.proxy_title),
     Log(R.string.settings_log),
@@ -881,6 +883,15 @@ fun SettingsScreen(
                         onRefresh = { shizukuViewModel.refresh() }
                     )
                 }
+                SettingsSection.Root -> {
+                    val rootViewModel: RootViewModel =
+                        androidx.hilt.navigation.compose.hiltViewModel()
+                    val rootState by rootViewModel.state.collectAsStateWithLifecycle()
+                    RootSection(
+                        state = rootState,
+                        onRefresh = { rootViewModel.refresh() }
+                    )
+                }
                 SettingsSection.ContainerDownloads -> ContainerImageDownloadSection(
                     catalog = imageCatalog,
                     state = imageDownload,
@@ -1298,6 +1309,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.Terminal,
                 title = stringResource(SettingsSection.Shizuku.titleRes),
                 onClick = { onOpen(SettingsSection.Shizuku) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Terminal,
+                title = stringResource(SettingsSection.Root.titleRes),
+                onClick = { onOpen(SettingsSection.Root) }
             )
         }
 
