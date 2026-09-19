@@ -20,6 +20,46 @@ Root 权限最高，请谨慎授权。
 
 需要设备已通过 Magisk / KernelSU / APatch 等方案获取 root，且 root 管理器提供了 `su`。常见路径包括 `/system/bin/su`、`/system/xbin/su`、`/sbin/su`、`/debug_ramdisk/su` 等，AiCode 会自动探测。
 
+## ⚠️ 先搞清楚：容器路径 ≠ 真机路径
+
+AiCode 里有两套文件系统视图，**同一个路径在两边含义不同**：
+
+- `Bash`、`terminal`、文件树、`readFile`/`writeFile` 等都在 **Linux 容器内**；
+- `Root`（以及 `Shizuku`）直接作用于 **宿主真机**。
+
+| 你想操作 | 容器工具用（Bash 等） | Root 用（真机） |
+| --- | --- | --- |
+| 当前工作区文件 | `~/workspace/xxx` | `/data/user/0/<包名>/files/projects/<项目名>/xxx` |
+| AI 配置 | `~/.aicode/xxx` | `/data/user/0/<包名>/files/aicode/xxx` |
+| 容器内系统文件 | `/etc/xxx` | `/data/user/0/<包名>/files/rootfs/etc/xxx` |
+| 真机系统文件 | 看不到 | `/system/xxx`、`/data/xxx` |
+| 手机存储 | 经挂载点映射 | `/sdcard/xxx` |
+
+`<包名>`：正式包为 `com.aicode`，debug 测试包为 `com.aicode.debug`。
+
+**所以**：改项目里的文件，用 `Bash` 或文件树；要动 Android 系统本身（`pm`/`am`、`/data/data`、系统属性），才用 `Root`。
+如果你让 AI 用 `Root` 去操作 `~/workspace`，那是无效的——那不是真机路径。
+
+## 直接访问手机上的受限目录
+
+Android 11 起，普通 App 和 adb shell 都被限制访问 `/Android/data/<其它应用>/` 这类目录，
+于是常见做法是"申请权限"或"挂载"。**用 Root 不需要这些**——uid 0 在宿主上读写任意路径都不受限制。
+
+例：读取 QQ 接收的文件目录
+
+```
+ls /storage/emulated/0/Android/data/com.tencent.mobileqq/Tencent/QQfile_recv/
+```
+
+把文件取进当前工作区时，直接一条命令拷过去即可（工作区在真机上的路径见上表），不需要挂载：
+
+```
+cp '/storage/emulated/0/Android/data/com.tencent.mobileqq/Tencent/QQfile_recv/xxx.pdf' \
+   /data/user/0/<包名>/files/projects/<项目名>/
+```
+
+拷完就能在文件树 / `Bash` 里用 `~/workspace/xxx.pdf` 正常处理。
+
 ## 在 AiCode 中授权
 
 打开「设置 → 运行环境 → Root」，页面会显示当前状态：

@@ -18,7 +18,7 @@
 ## 命令与终端工具
 - `Bash`：执行一次性 shell 命令（列目录、搜索、构建、lint、格式化、git、装依赖等），同步等待命令结束并返回输出。默认超时 120 秒，上限 1800 秒；耗时命令（如安装依赖）可用 timeout 参数调大。
 - `Shizuku`：通过 Shizuku 以 adb shell（uid 2000）身份在 Android 系统上执行 Shell 命令，等价于 `adb shell`。适用于需要 shell 权限的系统操作：`pm`/`am`/`cmd` 等系统命令、读写 `/sdcard`、查询系统状态等。与 `Bash`（在本地容器或远程 SSH 中执行）不同，它直接作用于宿主 Android 系统本身。使用前用户需已安装 Shizuku 并在本应用中授权（设置 → 运行环境 → Shizuku），未就绪时会返回错误提示。参数：`command`（必填）、`timeout`（秒，可选，默认 120、上限 1800）。
-- `Root`：以 root（uid 0）身份在 Android 系统上执行 Shell 命令。相比 `Shizuku`（adb shell，uid 2000），root 可访问系统受限目录并执行需要超级用户权限的操作：读写 `/data/data`、`/data/adb`，修改系统属性，管理其他应用等。使用前设备需已 root，首次调用会弹出 root 管理器授权框（设置 → 运行环境 → Root 可查看状态并触发授权），未就绪时会返回错误提示。参数：`command`（必填）、`timeout`（秒，可选，默认 120、上限 1800）。
+- `Root`：以 root（uid 0）身份在 Android **宿主真机**上执行 Shell 命令（**不是容器内**）。⚠️ **路径与 `Bash` 不同**：`Bash`/`readFile`/`writeFile`/`terminal` 运行在 Linux 容器内，它们看到的 `~/workspace`、`/etc`、`/root` 都是**容器内路径**；`Root` 看到的是宿主真实的 `/data`、`/system`、`/sdcard`。宿主的 App 私有目录为 `/data/user/0/<包名>/files/`（debug 测试包为 `com.aicode.debug`，正式包为 `com.aicode`），其中 `projects/<项目名>/` 是工作区、`aicode/` 是 AI 配置、`rootfs/` 是容器根文件系统。相比 `Shizuku`（adb shell，uid 2000），root 还可访问 `/data/data`、`/data/adb` 等受限目录。使用前设备需已 root，首次调用会弹出 root 管理器授权框（设置 → 运行环境 → Root 可查看状态并触发授权），未就绪时会返回错误提示。参数：`command`（必填）、`timeout`（秒，可选，默认 120、上限 1800）。
 - 环境已内置常用开发工具：`git`、`rg`（ripgrep）、`py`/`python`、`node`。需要时优先直接通过 `Bash` 调用，不要先询问是否安装。
 - `terminal`：管理常驻后台终端会话，用 `action` 参数选操作：
   - **优先复用 AI 自己创建的终端**：启动新常驻进程或执行交互式命令前，先用 `action="read"`（不传 tab_id）列出现有终端。若有 AI 之前创建的活跃标签，直接用 `action="send"` 复用，切忌反复 `start` 开一堆新窗口。
@@ -38,6 +38,48 @@
 - `search`：rg 风格搜索。参数 `args`，如 `search(args="-n \"fun main\" ~/workspace/app")`。只接受 ripgrep 参数；支持末尾追加 `| head [-n N]` 截断输出，其余管道命令（`grep`/`sort`/`wc` 等）与重定向不支持——需要后处理用 `Bash`。
 
 ## 路径约定
+
+> ⚠️ **容器 vs 宿主是两套文件系统视图，同一路径含义不同。**
+
+`Bash` / `terminal` / `readFile` / `writeFile` / `editFile` / `list` / `search` **全部在容器内**，用容器路径。
+`Root` / `Shizuku` **直接作用于宿主真机**，用宿主路径。二者不可混用。
+
+| 你要操作的东西 | 容器工具（Bash 等）用 | Root / Shizuku 用（宿主真机） |
+| --- | --- | --- |
+| 当前工作区文件 | `~/workspace/x` 或相对路径 `x` | `/data/user/0/<包名>/files/projects/<项目名>/x` |
+| AI 配置 / 输出日志 | `~/.aicode/x` | `/data/user/0/<包名>/files/aicode/x` |
+| 容器内系统文件（如 `/etc/apk`） | `/etc/apk/...` | `/data/user/0/<包名>/files/rootfs/etc/apk/...` |
+| 宿主真机系统文件 | 看不到 | `/system/...`、`/data/...` |
+| 手机存储 | 通过挂载点映射 | `/sdcard/...` |
+
+**`<包名>`**：debug 测试包为 `com.aicode.debug`，正式包为 `com.aicode`。
+
+**选择原则**：
+
+- 改**项目代码 / 工作区文件** → 用 `Bash` / `readFile` / `writeFile`（容器路径）；
+- 改 **Android 系统本身**（`pm` / `am` / `cmd`、`/data/data`、系统属性、别的 App） → 用 `Root` / `Shizuku`（宿主路径）；
+- 若你发现自己在用 `Root` 操作 `~/workspace`，那一定搞错了：那不是真机路径，宿主上不存在（或只是 rootfs 里的空占位目录）。
+
+### Root 直接操作宿主存储（不用挂载）
+
+⚠️ **`Root` 以 uid 0 运行在宿主上，任何宿主路径都能直接读写，不存在权限门槛，也不需要"挂载"。**
+如果遇到"需要挂载/需要授权才能访问"的结论，那是把容器视角套到了 Root 上，是错的。
+
+典型场景——**访问其他 App 的 `/Android/data/<包名>/` 目录**（Android 11+ 普通 App 与 adb shell 都被限制）：
+
+```
+Root(command="ls /storage/emulated/0/Android/data/com.tencent.mobileqq/Tencent/QQfile_recv/")
+```
+
+**把文件从受限目录取进工作区**（工作区的宿主真机路径见上表）：
+
+```
+# 直接用 Root 一条命令拷过去，无需任何中间步骤
+Root(command="cp '/storage/emulated/0/Android/data/com.tencent.mobileqq/Tencent/QQfile_recv/xxx.pdf' /data/user/0/<包名>/files/projects/<项目名>/")
+```
+
+拷贝完再回到容器工具（`list` / `readFile` / `Bash`）用 `~/workspace/xxx.pdf` 正常处理即可。
+**不要**改用 SQL/挂载/授权请求绕路——Root 一步到位。
 - 项目根目录固定为容器内路径 `~/workspace`。你只看得到、也只需使用容器内路径。
 - 项目文件用 `~/workspace/...`（如 `~/workspace/src/Main.kt`）或相对路径（如 `src/Main.kt`，相对 `~/workspace`）。
 - `readFile`/`writeFile`/`editFile` 也能读写 `~/workspace` 之外的容器系统文件，直接用容器绝对路径即可（如 `/etc/apk/repositories`、`/root/.bashrc`、`/usr/local/bin/...`）。

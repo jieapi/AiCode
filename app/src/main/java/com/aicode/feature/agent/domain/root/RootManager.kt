@@ -143,15 +143,56 @@ class RootManager @Inject constructor(
     }
 
     /**
+     * 宿主视角的关键路径提示，供工具在检测到 AI 误用容器路径时给出纠正建议。
+     *
+     * Root 作用于宿主 Android，App 私有目录为 `<filesDir>`；而 Bash 等容器工具看到的
+     * `~/workspace`、`/etc` 等是容器内路径，两者不同。
+     */
+    fun hostPathHint(): String {
+        val files = context.filesDir.absolutePath
+        return "宿主对应位置：工作区 $files/projects/<项目名>/；AI 配置 $files/aicode/；容器根文件系统 $files/rootfs/"
+    }
+
+    /**
      * 执行 root 命令。未检测到 `su` 时抛异常，由调用方转成工具错误。
      *
      * 不预先依赖 [state]：授权状态可能尚未探测（避免启动即弹框），此处直接调用，
      * 由 root 管理器在首次调用时弹框授权。
      */
     suspend fun runCommand(command: String, timeoutMs: Long): RootCommandResult {
-        val su = resolveSu() ?: throw IllegalStateException("未检测到 su，设备可能未 root")
+        val su = resolveSu()
+            ?: throw IllegalStateException("未检测到 su（设备可能未 root，或 root 方案未提供 su）")
         val timeout = timeoutMs.coerceIn(1_000L, MAX_TIMEOUT_MS)
-        return withContext(Dispatchers.IO) { execWithSu(su, command, timeout) }
+        val result = withContext(Dispatchers.IO) { execWithSu(su, command, timeout) }
+        // 用真实执行结果校正状态：root 授权由管理器弹窗掌管，状态缓存随时可能过期
+        // （App 被系统回收后重建、用户在管理器里改了授权等），不能拿旧状态当门槛。
+        updateStateFromResult(result)
+        return result
+    }
+
+    /**
+     * 状态未知时在后台补一次探测（不阻塞调用方）。
+     *
+     * 用于「首次调用/进程重建后 state 还是初值」的场景：此时不应拒绝执行，
+     * 而是并行探测、同时照常执行命令。
+     */
+    fun probeInBackgroundIfUnknown() {
+        if (_state.value != RootState.UNAVAILABLE) return
+        refreshState()
+    }
+
+    /** 依据一次真实执行的结果刷新状态，避免状态与事实脱节。 */
+    private fun updateStateFromResult(result: RootCommandResult) {
+        val next = when {
+            result.exitCode == 0 -> RootState.READY
+            // su 被拒绝/无法取得 root 时通常无输出且非 0 退出；有输出则视为命令自身失败，不改状态
+            result.output.isBlank() -> RootState.DENIED
+            else -> return
+        }
+        if (next != _state.value) {
+            _state.value = next
+            FileLogger.d(TAG, "root 状态校正为 $next（exit=${result.exitCode}）")
+        }
     }
 
     /**

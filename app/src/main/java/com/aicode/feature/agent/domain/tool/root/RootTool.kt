@@ -3,7 +3,6 @@ package com.aicode.feature.agent.domain.tool.root
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.BoundedOutput
 import com.aicode.feature.agent.domain.root.RootManager
-import com.aicode.feature.agent.domain.root.RootState
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ParameterType
 import com.aicode.feature.agent.domain.tool.PendingToolPermission
@@ -36,15 +35,26 @@ class RootTool @Inject constructor(
 
         const val DEFAULT_TIMEOUT_SECONDS = 120L
         const val MAX_TIMEOUT_SECONDS = 1_800L
+
+        /**
+         * 容器专属路径特征。命中即在结果后追加提示：Root 作用于宿主，这些路径在宿主上
+         * 不存在（或指向 rootfs 内的空占位目录），AI 多半是想操作容器工作区。
+         */
+        val CONTAINER_PATH_REGEX = Regex(
+            """(?:^|[\s"'=;&|(`])(~/.aicode|~/workspace|/root/workspace|/root/.aicode|/root/.config)"""
+        )
     }
 
     override val name = "Root"
 
     override val description =
-        "以 root（uid 0）身份在 Android 系统上执行 Shell 命令。" +
-            "相比 `Shizuku`（adb shell，uid 2000），root 可访问系统受限目录并执行需要超级用户权限的操作：" +
-            "读写 `/data/data`、`/data/adb`，修改系统属性，管理其他应用等。" +
-            "与 `Bash`（在本地容器或远程 SSH 中执行）不同，它直接作用于宿主 Android 系统本身。" +
+        "以 root（uid 0）身份在 Android 宿主系统上执行 Shell 命令（真机视角，不是容器内）。" +
+            "⚠️ 路径与 `Bash` 不同：`Bash`/`readFile`/`writeFile`/`terminal` 运行在 Linux 容器内，" +
+            "它们看到的 `~/workspace`、`/etc`、`/root` 都是容器内路径；" +
+            "`Root` 作用于宿主真机，看到的是真实的 `/data`、`/system`、`/sdcard`。" +
+            "宿主的 App 私有目录为 `/data/user/0/<包名>/files/`，其中 `projects/<项目名>/` 是工作区、" +
+            "`aicode/` 是 AI 配置、`rootfs/` 是容器根文件系统。" +
+            "相比 `Shizuku`（adb shell，uid 2000），root 还可访问 `/data/data`、`/data/adb` 等受限目录。" +
             "使用前设备需已 root 并在弹出授权框时允许，未就绪时会返回错误提示。"
 
     override val permissionPolicy = ToolPermissionPolicy.ASK
@@ -87,18 +97,32 @@ class RootTool @Inject constructor(
         )
     }
 
+    /**
+     * 若命令里出现容器专属路径，返回一段纠正提示（否则返回空串）。
+     *
+     * 只提示、不改写命令：自动翻译路径一旦判断错会静默写错位置，比报错更糟。
+     */
+    private fun containerPathWarning(command: String): String {
+        val hit = CONTAINER_PATH_REGEX.find(command)?.groupValues?.get(1) ?: return ""
+        return buildString {
+            append("\n\n[Root 路径提示] 命令中出现容器路径「")
+            append(hit)
+            append("」。`Root` 直接作用于宿主 Android，该路径在宿主上不存在（或指向 rootfs 内的空占位目录）。")
+            append("\n")
+            append(rootManager.hostPathHint())
+            append("\n若目标是容器工作区文件，请改用 `Bash` / `readFile` / `writeFile`（它们才在容器内）。")
+        }
+    }
+
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult {
         val command = args["command"]?.jsonPrimitive?.contentOrNull
             ?: return ToolResult.Error("缺少必需参数: command")
 
-        // UNAVAILABLE 时提前失败，避免无谓地起子进程；DENIED 仍尝试执行，
-        // 因为状态可能是未探测时的初值，首次调用会触发 root 管理器弹框重新授权。
-        if (rootManager.state.value == RootState.UNAVAILABLE) {
-            return ToolResult.Error(
-                "未检测到 root：设备可能未 root，或 root 方案未提供 su",
-                code = "ROOT_NOT_AVAILABLE"
-            )
-        }
+        // 刻意不做 state 门禁：state 只是缓存（App 启动/进程重建后为初值），拿它拒绝执行会
+        // 造成「明明已授权却报未 root」。这里一律真实执行一次，由 root 管理器在需要时弹窗授权，
+        // 执行结果再反过来校正 state（见 RootManager.updateStateFromResult）。
+        // 状态未知时顺手在后台补探测，供设置页显示。
+        rootManager.probeInBackgroundIfUnknown()
 
         return try {
             val timeoutMs = resolveTimeoutMs(args)
@@ -106,12 +130,22 @@ class RootTool @Inject constructor(
             val result = rootManager.runCommand(command, timeoutMs)
             val output = BoundedOutput().apply { append(result.output) }.build()
             FileLogger.v(TAG, "Root exec 完成，输出 ${result.output.length} 字符，退出码 ${result.exitCode}")
-            ToolResult.Success(JsonPrimitive(output))
+            val denialHint = if (result.exitCode != 0 && output.isBlank()) {
+                "\n\n[Root 提示] 命令没有输出且退出码非 0（${result.exitCode}），" +
+                    "通常是 root 授权被拒（请在 root 管理器弹窗中选择「允许」，或在其应用列表中放开本应用）。"
+            } else {
+                ""
+            }
+            ToolResult.Success(JsonPrimitive(output + containerPathWarning(command) + denialHint))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             FileLogger.e(TAG, "Root exec 失败: $command", e)
-            ToolResult.Error("执行 Root 命令失败: ${e.message}")
+            ToolResult.Error(
+                "执行 Root 命令失败: ${e.message}\n" +
+                    "（若提示未检测到 su：设备可能未 root；若设备确实已 root，请确认 root 管理器未禁用/隐藏 su）",
+                code = "ROOT_EXEC_FAILED"
+            )
         }
     }
 }
