@@ -30,6 +30,10 @@ class SkillRepository @Inject constructor(
     fun listSkills(): List<Skill> =
         filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
 
+    /** 用外部 [provider] + 技能根 [root] 扫描技能（本地/远程同一套逻辑）。 */
+    fun listSkillsFrom(provider: FileAccessProvider, root: String): List<Skill> =
+        SkillDirectoryScanner.scan(provider, root)
+
     /** 读取指定 skill 的完整指令正文；不存在 / 解析失败 / 已被禁用时返回 null。 */
     fun loadInstructions(name: String): String? {
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null
@@ -52,21 +56,32 @@ class SkillRepository @Inject constructor(
      * 技能正文常按 `~/.aicode/skills/<目录>/run.py` 引用同目录脚本，跟着改名会把这些引用打断。
      */
     fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? {
+        val existing = listAllSkills().filter { it.scope == scope }.map { it.skill }
+        return saveTo(providerFor(scope), skillsRoot(scope), form, originalName, existing)
+    }
+
+    /**
+     * 用外部 [provider] + 技能根 [root] 保存技能（本地与远程同一套逻辑）。
+     * [existing] 为该来源下已有技能，用于同名冲突判定与定位编辑前的原目录。
+     */
+    fun saveTo(
+        provider: FileAccessProvider,
+        root: String,
+        form: SkillForm,
+        originalName: String? = null,
+        existing: List<Skill> = emptyList()
+    ): SkillSaveError? {
         val name = form.name.trim()
         if (!isValidName(name)) return SkillSaveError.INVALID_NAME
         if (form.instructions.isBlank()) return SkillSaveError.EMPTY_INSTRUCTIONS
 
-        val entries = listAllSkills()
         val keepingName = originalName != null && originalName.equals(name, ignoreCase = true)
-        if (!keepingName) {
-            val taken = entries.any { it.scope == scope && it.skill.name.equals(name, ignoreCase = true) }
-            if (taken) return SkillSaveError.NAME_CONFLICT
+        if (!keepingName && existing.any { it.name.equals(name, ignoreCase = true) }) {
+            return SkillSaveError.NAME_CONFLICT
         }
 
         val existingDir = originalName?.let { old ->
-            entries.firstOrNull {
-                it.scope == scope && it.skill.name.equals(old, ignoreCase = true)
-            }?.skill?.dirPath
+            existing.firstOrNull { it.name.equals(old, ignoreCase = true) }?.dirPath
         }
 
         val text = SkillParser.serialize(
@@ -76,9 +91,8 @@ class SkillRepository @Inject constructor(
             instructions = form.instructions
         )
 
-        val provider = providerFor(scope)
         return try {
-            val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${skillsRoot(scope)}/$name"
+            val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${root.trimEnd('/')}/$name"
             provider.mkdirs(dir)
             val target = instructionFile(provider, dir) ?: "${dir.trimEnd('/')}/$INSTRUCTION_FILE"
             provider.writeFile(target, text, overwrite = true)
@@ -102,11 +116,29 @@ class SkillRepository @Inject constructor(
      * 名称非法 / 同名冲突 / 正文为空时整体失败，不落盘。
      */
     fun importMarkdown(text: String, fallbackName: String, scope: SkillScope): SkillImportReport =
-        SkillImporter.importMarkdown(providerFor(scope), skillsRoot(scope), existingNamesIn(scope), text, fallbackName)
+        importMarkdownTo(providerFor(scope), skillsRoot(scope), existingNamesIn(scope), text, fallbackName)
+
+    /** 用外部 [provider] + 技能根 [root] 导入 Markdown 技能。 */
+    fun importMarkdownTo(
+        provider: FileAccessProvider,
+        root: String,
+        existingNames: Set<String>,
+        text: String,
+        fallbackName: String
+    ): SkillImportReport = SkillImporter.importMarkdown(provider, root, existingNames, text, fallbackName)
 
     /** 从 zip 输入流导入技能（可含多个技能目录）到指定作用域。 */
     fun importZip(input: InputStream, fallbackName: String, scope: SkillScope): SkillImportReport =
-        SkillImporter.importArchive(providerFor(scope), skillsRoot(scope), existingNamesIn(scope), input, fallbackName)
+        importZipTo(providerFor(scope), skillsRoot(scope), existingNamesIn(scope), input, fallbackName)
+
+    /** 用外部 [provider] + 技能根 [root] 导入 zip 技能。 */
+    fun importZipTo(
+        provider: FileAccessProvider,
+        root: String,
+        existingNames: Set<String>,
+        input: InputStream,
+        fallbackName: String
+    ): SkillImportReport = SkillImporter.importArchive(provider, root, existingNames, input, fallbackName)
 
     /** 指定作用域下已有技能名（小写），供导入查重。 */
     private fun existingNamesIn(scope: SkillScope): Set<String> =
@@ -114,11 +146,14 @@ class SkillRepository @Inject constructor(
 
     /** 删除指定作用域的技能（删除其目录，不可恢复）。返回是否成功。 */
     fun deleteSkill(name: String, scope: SkillScope): Boolean {
-        val entry = listAllSkills().firstOrNull {
-            it.skill.name.equals(name, ignoreCase = true) && it.scope == scope
-        } ?: return false
-        val dirPath = entry.skill.dirPath ?: return false
-        return safeDeleteSkillDir(providerFor(scope), dirPath)
+        val existing = listAllSkills().filter { it.scope == scope }.map { it.skill }
+        return deleteSkillFrom(providerFor(scope), name, existing)
+    }
+
+    /** 用外部 [provider] 删除指定技能（删除其目录，不可恢复）。 */
+    fun deleteSkillFrom(provider: FileAccessProvider, name: String, existing: List<Skill>): Boolean {
+        val dirPath = existing.firstOrNull { it.name.equals(name, ignoreCase = true) }?.dirPath ?: return false
+        return safeDeleteSkillDir(provider, dirPath)
     }
 
     /** 全局技能固定在本地私有目录，项目级技能跟随工作区（可能是远程）。 */

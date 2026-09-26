@@ -978,6 +978,14 @@
     <string name="skills_editor_scope">Scope</string>
     <string name="skills_scope_global">Global</string>
     <string name="skills_scope_project">This project</string>
+    <string name="skills_scope_remote">Remote server</string>
+    <string name="skills_remote_group">Remote server · %1$s</string>
+    <string name="skills_remote_group_plain">Remote server</string>
+    <string name="skills_remote_not_configured">Remote SSH isn\'t configured. Set it up under Settings → Runtime to manage skills on the remote workspace here.</string>
+    <string name="skills_remote_empty">No skills on the remote workspace</string>
+    <string name="skills_remote_loading">Connecting to remote server…</string>
+    <string name="skills_remote_failed">Connection failed: %1$s</string>
+    <string name="skills_remote_retry">Tap to retry</string>
     <string name="skills_name_hint">Lowercase is recommended, e.g. pdf-report</string>
     <string name="skills_description_hint">When to use it; the AI decides whether to load it by this text</string>
     <string name="skills_instructions_hint">Describe the standard workflow and caveats for this kind of task; Markdown supported</string>
