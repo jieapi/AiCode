@@ -36,7 +36,9 @@
     <string name="settings_enter_to_send">回车键发送消息</string>
     <string name="settings_enter_to_send_desc">关闭后回车换行，需点发送按钮发送</string>
     <string name="settings_compaction_threshold">自动压缩阈值</string>
-    <string name="settings_compaction_threshold_desc">上下文占用达到窗口的该比例时自动压缩</string>
+    <string name="settings_compaction_threshold_desc">上下文占用达到窗口的该比例时，生成摘要压缩早期历史</string>
+    <string name="settings_soft_compaction_threshold">软精简阈值</string>
+    <string name="settings_soft_compaction_threshold_desc">上下文占用达到该比例时，先精简历史里的超长工具输出，暂不调用摘要模型</string>
     <string name="settings_percent_value">%1$d%%</string>
     <string name="settings_compaction_threshold_input_hint">填 1-100 的整数百分比</string>
     <string name="settings_general_tools">工具</string>

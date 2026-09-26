@@ -219,6 +219,7 @@ fun SettingsScreen(
     val maxNetworkRetries by viewModel.maxNetworkRetries.collectAsStateWithLifecycle()
     val enterToSend by viewModel.enterToSend.collectAsStateWithLifecycle()
     val compactionThresholdPercent by viewModel.compactionThresholdPercent.collectAsStateWithLifecycle()
+    val softCompactionThresholdPercent by viewModel.softCompactionThresholdPercent.collectAsStateWithLifecycle()
     val sendFileMaxSizeMb by viewModel.sendFileMaxSizeMb.collectAsStateWithLifecycle()
     val deleteExternalWorkspaceSessions by viewModel.deleteExternalWorkspaceSessions.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -764,6 +765,8 @@ fun SettingsScreen(
                     onToggleEnterToSend = { viewModel.setEnterToSend(it) },
                     compactionThresholdPercent = compactionThresholdPercent,
                     onSetCompactionThresholdPercent = { viewModel.setCompactionThresholdPercent(it) },
+                    softCompactionThresholdPercent = softCompactionThresholdPercent,
+                    onSetSoftCompactionThresholdPercent = { viewModel.setSoftCompactionThresholdPercent(it) },
                     sendFileMaxSizeMb = sendFileMaxSizeMb,
                     onSetSendFileMaxSizeMb = { viewModel.setSendFileMaxSizeMb(it) },
                     deleteExternalWorkspaceSessions = deleteExternalWorkspaceSessions,

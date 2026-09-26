@@ -35,6 +35,9 @@ class ContextCompactor @Inject constructor(
         const val TAG = "ContextCompactor"
 
         const val TOOL_OUTPUT_MAX_CHARS = 2_000
+
+        /** 软精简时单条工具输出的保留上限（比硬压缩宽松，尽量少丢信息）。 */
+        const val SOFT_TRIM_TOOL_CHARS = 3_000
         const val COMPACT_PROMPT_FILE = "agent/compact-summary.md"
         val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
     }
@@ -70,15 +73,29 @@ class ContextCompactor @Inject constructor(
         val windowMetadata = modelMetadataService.resolve(windowModel.providerId, inferProviderType(windowModel), windowModel.model)
         val summaryMetadata = modelMetadataService.resolve(aiProvider.providerId, inferProviderType(aiProvider), aiProvider.model)
         val contextLimit = windowMetadata.contextTokens.takeIf { it > 0 } ?: ModelContextPolicy.DEFAULT_CONTEXT_TOKENS
-        // 触发阈值百分比由「偏好设置 → 模型」配置（默认 90，见 GeneralSettingsRepository）。
-        val triggerThreshold = (contextLimit * generalSettingsRepository.compactionThresholdPercent() / 100.0).toInt()
+        // 硬阈值：完整摘要压缩；软阈值：只精简历史工具输出（不调 LLM）。均可在偏好设置配置。
+        val hardPercent = generalSettingsRepository.compactionThresholdPercent()
+        val softPercent = generalSettingsRepository.softCompactionThresholdPercent()
+        val triggerThreshold = (contextLimit * hardPercent / 100.0).toInt()
+        val softThreshold = (contextLimit * softPercent / 100.0).toInt()
         // 真实 usage 优先（含 system prompt + tools，与上下文窗口同口径）；取不到（0）回退本地估算
         val currentTokens = lastInputTokens.takeIf { it > 0 } ?: estimatedTokens
-        val reachedThreshold = currentTokens >= triggerThreshold
-        val reachedHardLimit = currentTokens >= contextLimit
-        if (messages.size <= 2 || (!force && !reachedThreshold && !reachedHardLimit)) {
-            return messages.toList()
+        val reachedHard = currentTokens >= triggerThreshold || currentTokens >= contextLimit
+        val reachedSoft = currentTokens >= softThreshold
+        if (messages.size <= 2) return messages.toList()
+        // 软阈值：先静默精简历史里的超长工具输出（不调摘要模型、不发事件、不落库），
+        // 让上下文尽量在 40% 退化分界以下停留更久，只在真正逼近硬上限时才做完整摘要。
+        if (!force && !reachedHard && reachedSoft) {
+            val trimmed = softTrim(messages)
+            if (trimmed !== messages) {
+                FileLogger.i(
+                    TAG,
+                    "会话 ${sessionId ?: "-"} 上下文约 $currentTokens tokens 达软阈值 $softThreshold，精简历史工具输出（未调用摘要模型）"
+                )
+            }
+            return trimmed
         }
+        if (!force && !reachedHard) return messages.toList()
 
         val tokensSource = if (lastInputTokens > 0) "真实 usage" else "本地估算"
         // 窗口来源一并打出来：命中目录（含命中的 provider 与自定义覆盖）还是走了 128k 兜底，
@@ -238,6 +255,24 @@ class ContextCompactor @Inject constructor(
         newMessages.add(compactedMessage)
 
         return newMessages
+    }
+
+    /**
+     * 软精简：不调 LLM、不落库，只把历史里超长的工具输出截断，降低主上下文冗余。
+     * 输入主要来自工具结果（文件内容、命令输出等），这里只做保守截断，不改角色结构、不动 DB。
+     * 未产生变化时返回原列表引用，便于调用方判断。
+     */
+    private fun softTrim(messages: List<AgentMessage>): List<AgentMessage> {
+        var changed = false
+        val result = messages.map { msg ->
+            if (msg is AgentMessage.ToolResultMessage && msg.result.length > SOFT_TRIM_TOOL_CHARS) {
+                changed = true
+                msg.copy(result = msg.result.take(SOFT_TRIM_TOOL_CHARS) + "\n[工具输出已精简以节省上下文]")
+            } else {
+                msg
+            }
+        }
+        return if (changed) result else messages
     }
 
     /**

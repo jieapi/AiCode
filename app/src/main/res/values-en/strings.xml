@@ -36,7 +36,9 @@
     <string name="settings_enter_to_send">Enter key sends message</string>
     <string name="settings_enter_to_send_desc">When off, Enter inserts a newline and you send with the button</string>
     <string name="settings_compaction_threshold">Auto-compaction threshold</string>
-    <string name="settings_compaction_threshold_desc">Compact context once it reaches this share of the window</string>
+    <string name="settings_compaction_threshold_desc">Summarize early history once context reaches this share of the window</string>
+    <string name="settings_soft_compaction_threshold">Soft trim threshold</string>
+    <string name="settings_soft_compaction_threshold_desc">Trim long tool outputs from history first once context reaches this share (without summarizing)</string>
     <string name="settings_percent_value">%1$d%%</string>
     <string name="settings_compaction_threshold_input_hint">Integer percentage between 1 and 100</string>
     <string name="settings_general_tools">Tools</string>
