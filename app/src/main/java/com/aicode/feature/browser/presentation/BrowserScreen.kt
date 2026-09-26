@@ -156,6 +156,7 @@ fun BrowserScreen(
         ) {
             AndroidView(
                 factory = { context ->
+                    browserManager.attachVisible()
                     browserManager.getOrCreateContainerView(context)
                 },
                 modifier = Modifier.fillMaxSize()
