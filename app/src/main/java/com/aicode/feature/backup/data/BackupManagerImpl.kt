@@ -331,7 +331,8 @@ class BackupManagerImpl @Inject constructor(
         streamIdleTimeoutSec = if (options.appSettings) generalSettingsRepository.streamIdleTimeoutSecSnapshot() else 0,
         maxNetworkRetries = if (options.appSettings) generalSettingsRepository.maxNetworkRetriesSnapshot() else 6,
         enterToSend = if (options.appSettings) generalSettingsRepository.enterToSendSnapshot() else false,
-        compactionThresholdPercent = if (options.appSettings) generalSettingsRepository.compactionThresholdPercentSnapshot() else 90,
+        compactionThresholdPercent = if (options.appSettings) generalSettingsRepository.compactionThresholdPercentSnapshot() else 85,
+        softCompactionThresholdPercent = if (options.appSettings) generalSettingsRepository.softCompactionThresholdPercentSnapshot() else 60,
         sendFileMaxSizeMb = if (options.appSettings) generalSettingsRepository.sendFileMaxSizeMbSnapshot() else 100,
         deleteExternalWorkspaceSessions = if (options.appSettings) generalSettingsRepository.deleteExternalWorkspaceSessionsSnapshot() else false,
         logLevel = if (options.appSettings) logSettingsRepository.snapshot() else null,
@@ -619,6 +620,7 @@ class BackupManagerImpl @Inject constructor(
         generalSettingsRepository.restoreMaxNetworkRetries(meta.maxNetworkRetries)
         generalSettingsRepository.restoreEnterToSend(meta.enterToSend)
         generalSettingsRepository.restoreCompactionThresholdPercent(meta.compactionThresholdPercent)
+        generalSettingsRepository.restoreSoftCompactionThresholdPercent(meta.softCompactionThresholdPercent)
         generalSettingsRepository.restoreSendFileMaxSizeMb(meta.sendFileMaxSizeMb)
         generalSettingsRepository.restoreDeleteExternalWorkspaceSessions(meta.deleteExternalWorkspaceSessions)
         logSettingsRepository.restore(meta.logLevel)

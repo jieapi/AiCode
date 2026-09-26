@@ -36,7 +36,9 @@
     <string name="settings_enter_to_send">回车键发送消息</string>
     <string name="settings_enter_to_send_desc">关闭后回车换行，需点发送按钮发送</string>
     <string name="settings_compaction_threshold">自动压缩阈值</string>
-    <string name="settings_compaction_threshold_desc">上下文占用达到窗口的该比例时自动压缩</string>
+    <string name="settings_compaction_threshold_desc">上下文占用达到窗口的该比例时，生成摘要压缩早期历史</string>
+    <string name="settings_soft_compaction_threshold">软精简阈值</string>
+    <string name="settings_soft_compaction_threshold_desc">上下文占用达到该比例时，先精简历史里的超长工具输出，暂不调用摘要模型</string>
     <string name="settings_percent_value">%1$d%%</string>
     <string name="settings_compaction_threshold_input_hint">填 1-100 的整数百分比</string>
     <string name="settings_general_tools">工具</string>
@@ -976,6 +978,14 @@
     <string name="skills_editor_scope">作用域</string>
     <string name="skills_scope_global">全局</string>
     <string name="skills_scope_project">当前项目</string>
+    <string name="skills_scope_remote">远程服务器</string>
+    <string name="skills_remote_group">远程服务器 · %1$s</string>
+    <string name="skills_remote_group_plain">远程服务器</string>
+    <string name="skills_remote_not_configured">未配置远程 SSH。去「设置 → 运行环境」配置后，可在此管理远程工作区的技能。</string>
+    <string name="skills_remote_empty">远程工作区暂无技能</string>
+    <string name="skills_remote_loading">正在连接远程服务器…</string>
+    <string name="skills_remote_failed">连接失败：%1$s</string>
+    <string name="skills_remote_retry">点按重试</string>
     <string name="skills_name_hint">建议用英文小写，如 pdf-report</string>
     <string name="skills_description_hint">简述何时该用它，AI 据此判断要不要加载</string>
     <string name="skills_instructions_hint">写清这类任务的标准流程与注意事项，支持 Markdown</string>

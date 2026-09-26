@@ -58,6 +58,8 @@ internal fun GeneralSettingsSection(
     onToggleEnterToSend: (Boolean) -> Unit,
     compactionThresholdPercent: Int,
     onSetCompactionThresholdPercent: (Int) -> Unit,
+    softCompactionThresholdPercent: Int,
+    onSetSoftCompactionThresholdPercent: (Int) -> Unit,
     sendFileMaxSizeMb: Int,
     onSetSendFileMaxSizeMb: (Int) -> Unit,
     deleteExternalWorkspaceSessions: Boolean,
@@ -68,6 +70,7 @@ internal fun GeneralSettingsSection(
     var editingStreamIdleTimeout by remember { mutableStateOf(false) }
     var editingMaxNetworkRetries by remember { mutableStateOf(false) }
     var editingCompactionThreshold by remember { mutableStateOf(false) }
+    var editingSoftCompactionThreshold by remember { mutableStateOf(false) }
     var editingSendFileMaxSize by remember { mutableStateOf(false) }
 
     Column(
@@ -100,6 +103,20 @@ internal fun GeneralSettingsSection(
                 trailing = {
                     Text(
                         text = stringResource(R.string.settings_percent_value, compactionThresholdPercent),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.semanticColors.subtleText
+                    )
+                }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = null,
+                title = stringResource(R.string.settings_soft_compaction_threshold),
+                subtitle = stringResource(R.string.settings_soft_compaction_threshold_desc),
+                onClick = { editingSoftCompactionThreshold = true },
+                trailing = {
+                    Text(
+                        text = stringResource(R.string.settings_percent_value, softCompactionThresholdPercent),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.semanticColors.subtleText
                     )
@@ -275,6 +292,21 @@ internal fun GeneralSettingsSection(
                 editingCompactionThreshold = false
             },
             onDismiss = { editingCompactionThreshold = false }
+        )
+    }
+
+    if (editingSoftCompactionThreshold) {
+        NumberInputDialog(
+            title = stringResource(R.string.settings_soft_compaction_threshold),
+            initialValue = softCompactionThresholdPercent,
+            hint = stringResource(R.string.settings_compaction_threshold_input_hint),
+            minValue = 1,
+            maxValue = 100,
+            onConfirm = {
+                onSetSoftCompactionThresholdPercent(it)
+                editingSoftCompactionThreshold = false
+            },
+            onDismiss = { editingSoftCompactionThreshold = false }
         )
     }
 

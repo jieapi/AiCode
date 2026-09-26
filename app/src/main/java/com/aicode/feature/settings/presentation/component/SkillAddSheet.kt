@@ -19,21 +19,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
-import com.aicode.feature.agent.domain.skill.SkillScope
+import com.aicode.feature.settings.presentation.SkillSource
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Archive
 import compose.icons.feathericons.Edit3
 import compose.icons.feathericons.FileText
 
 /**
- * 「添加技能」底部弹层：顶部选择作用域（全局 / 当前项目），下方三种添加方式——
+ * 「添加技能」底部弹层：顶部选择来源（全局 / 当前项目 / 远程服务器），下方三种添加方式——
  * 手动新建（进编辑表单）、从文件导入（.md）、从压缩包导入（.zip，可含多个技能）。
  */
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun SkillAddSheet(
-    scope: SkillScope,
-    onScopeChange: (SkillScope) -> Unit,
+    source: SkillSource,
+    onSourceChange: (SkillSource) -> Unit,
+    remoteAvailable: Boolean,
     onManual: () -> Unit,
     onPickFile: () -> Unit,
     onPickZip: () -> Unit,
@@ -69,15 +70,22 @@ internal fun SkillAddSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 FilterChip(
-                    selected = scope == SkillScope.GLOBAL,
-                    onClick = { onScopeChange(SkillScope.GLOBAL) },
+                    selected = source == SkillSource.GLOBAL,
+                    onClick = { onSourceChange(SkillSource.GLOBAL) },
                     label = { Text(stringResource(R.string.skills_scope_global)) }
                 )
                 FilterChip(
-                    selected = scope == SkillScope.PROJECT,
-                    onClick = { onScopeChange(SkillScope.PROJECT) },
+                    selected = source == SkillSource.PROJECT,
+                    onClick = { onSourceChange(SkillSource.PROJECT) },
                     label = { Text(stringResource(R.string.skills_scope_project)) }
                 )
+                if (remoteAvailable) {
+                    FilterChip(
+                        selected = source == SkillSource.REMOTE,
+                        onClick = { onSourceChange(SkillSource.REMOTE) },
+                        label = { Text(stringResource(R.string.skills_scope_remote)) }
+                    )
+                }
             }
 
             SettingsGroup {
