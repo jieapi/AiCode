@@ -39,7 +39,7 @@ class MemoryTool @Inject constructor(
         }
     }
     override val description =
-        "管理 AI 的长期记忆（读取/保存/局部编辑/删除/列表）。发现新的用户偏好、项目约定或架构决策时主动记录。"
+        "管理 AI 的长期记忆（读取/保存/局部编辑/删除/列表）。用户明确表达的偏好、纠正、项目约定与已验证的踩坑根因，必须当轮用本工具记录，不等用户要求。"
 
     /** edits 数组单个元素的结构，供 function-calling 的 items schema，语义与 editFile 一致。 */
     private val editItemSchema: Map<String, Any> = mapOf(

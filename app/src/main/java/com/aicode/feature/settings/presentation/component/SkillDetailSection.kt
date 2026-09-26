@@ -42,24 +42,26 @@ internal fun SkillDetailSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        // 卡片 1：是否启用（开关行）
-        SettingsGroup {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(R.string.skills_enable),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                AppSwitch(
-                    checked = !entry.disabled,
-                    onCheckedChange = onToggle
-                )
+        // 卡片 1：是否启用（开关行）。远程技能 v1 无启用/禁用概念，不展示。
+        if (!entry.remote) {
+            SettingsGroup {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.skills_enable),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    AppSwitch(
+                        checked = !entry.disabled,
+                        onCheckedChange = onToggle
+                    )
+                }
             }
         }
 

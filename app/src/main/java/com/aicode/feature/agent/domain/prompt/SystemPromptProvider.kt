@@ -32,6 +32,7 @@ class SystemPromptProvider @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val skillRepository: SkillRepository,
     private val memoryRepository: MemoryRepository,
+    private val promptFileResolver: PromptFileResolver,
     private val containerInstaller: ContainerInstaller,
     private val agentDefinitionRepository: AgentDefinitionRepository
 ) {
@@ -194,7 +195,8 @@ class SystemPromptProvider @Inject constructor(
             val memories = try { memoryRepository.listMemories(ctx.projectRoot) } catch (e: Exception) { return null }
             if (memories.isEmpty()) {
                 cachedByKey[key] = ""
-                return null
+                // 空清单也要注入纪律：首次会话正是建立记忆的起点。
+                return memoryDiscipline()
             }
 
             val globalMemories = memories.filter { it.scope == MemoryScope.GLOBAL }
@@ -212,13 +214,25 @@ class SystemPromptProvider @Inject constructor(
                 }
             }.trimEnd()
 
-            cachedByKey[key] = content
+            // 记忆纪律紧跟清单注入：清单告诉模型「有什么」，纪律告诉它「何时必须写」。
+            val full = listOf(content, memoryDiscipline()).mapNotNull { it }.joinToString("\n\n")
+            if (full.isEmpty()) return null
+
+            cachedByKey[key] = full
             trimIfNeeded()
-            return content
+            return full
         }
+
+        /** 记忆纪律正文（无记忆清单时单独注入）。 */
+        private fun memoryDiscipline(): String? =
+            resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim().ifEmpty { null }
 
         private fun trimIfNeeded() {
             if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
+        }
+
+        fun invalidate(key: SourceCacheKey) {
+            cachedByKey.remove(key)
         }
     }
 
@@ -397,22 +411,15 @@ class SystemPromptProvider @Inject constructor(
     private fun currentDate(): String =
         java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
 
-    /**
-     * 按优先级解析单个提示词片段：
-     * - 名字是顶层 `<NN>-*.md`：先按数字身份在 `prompts.custom/` 顶层找覆盖（尾部名称可自由改），
-     * - 其余名字（含 `agent/` 子目录）：按精确同名在 `prompts.custom/<name>` 找覆盖；
-     * 再落到 `prompts/<name>`（本地默认副本），最后 assets（内置兜底）。
-     *
-     * 本地副本由 [ContainerInstaller.extractPrompts] 在启动时全量释放，App 升级后随之更新。
-     */
-    fun resolvePrompt(name: String): String {
-        PromptFragmentResolver.parseNumber(name)
-            ?.let { number -> readFileOrNull(customFragmentsByNumber[number])?.let { return it } }
-        readFileOrNull(File(customDir, name))?.let { return it }
-        readFileOrNull(File(File(containerInstaller.aicodeDir, "prompts"), name))?.let { return it }
-        return context.assets.open("prompts/$name").bufferedReader().use { it.readText() }
+    /** 按优先级解析单个提示词片段，见 [PromptFileResolver.resolve]。保留本方法以兼容现有调用点。 */
+    fun resolvePrompt(name: String): String = promptFileResolver.resolve(name)
+
+    /** 失效记忆清单的会话级缓存：curator 写入新记忆后调用，让下一轮 system prompt 看到新清单。 */
+    fun invalidateMemoryCache(sessionId: String?, projectRoot: String?) {
+        memoryListSource.invalidate(SourceCacheKey(sessionId, projectRoot))
     }
 
+    /** 直接读本地文件内容；失败返回 null。供静态基线与自定义片段合并时使用。 */
     private fun readFileOrNull(file: File?): String? {
         if (file == null || !file.isFile) return null
         return try {
@@ -428,6 +435,7 @@ class SystemPromptProvider @Inject constructor(
         const val AGENTS_FILE = "AGENTS.md"
         const val CLAUDE_FILE = "CLAUDE.md"
         const val SUBAGENT_BASE_FILE = "agent/subagent-base.md"
+        const val MEMORY_DISCIPLINE_FILE = "agent/memory-discipline.md"
         const val MAX_AGENTS_CHARS = 32_000
         /** 会话级缓存 key 数量上限：超过后整体清空，仅防长期累积；正常会话数远小于此。 */
         const val SOURCE_CACHE_LIMIT = 32

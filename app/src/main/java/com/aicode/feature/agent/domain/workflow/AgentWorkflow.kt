@@ -121,4 +121,12 @@ interface AgentWorkflow {
      * @return 建议的提交说明，失败返回 null。
      */
     suspend fun generateCommitMessage(diff: String): String?
+
+    /**
+     * 会话轮次结束后的记忆兑现（引擎级兑底）：用轻量模型从本轮对话文本中抽取值得长期记住的事实，
+     * 直接写入记忆存储。静默失败，不抛异常。
+     * @param transcript 本轮对话文本（"用户: …/助手: …" 行），由调用方截取最近内容拼出。
+     * @return 本次实际写入的记忆条数。
+     */
+    suspend fun curateMemory(sessionId: String, projectRoot: String?, transcript: String): Int
 }
