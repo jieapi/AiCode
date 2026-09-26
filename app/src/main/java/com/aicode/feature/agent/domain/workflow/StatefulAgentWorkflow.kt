@@ -8,6 +8,7 @@ import com.aicode.feature.agent.data.local.entity.LlmCallRecordEntity
 import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicode.feature.agent.data.remote.gemini.GeminiApi
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
+import com.aicode.feature.agent.domain.memory.MemoryCurator
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
@@ -104,6 +105,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val keyRotator: ProviderKeyRotator,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
+    private val memoryCurator: MemoryCurator,
     private val fileAccess: FileAccessProvider
 ) : AgentWorkflow {
 
@@ -992,6 +994,19 @@ class StatefulAgentWorkflow @Inject constructor(
     }.onFailure { e ->
         FileLogger.w(TAG, "生成提交信息失败", e)
     }.getOrNull()
+
+    /**
+     * 会话轮次结束后的记忆兑底：优先用压缩专用模型（轻量、便宜）抽记忆，
+     * 未配置则回退当前聊天模型。全静默，任何失败都不影响调用方。
+     */
+    override suspend fun curateMemory(sessionId: String, projectRoot: String?, transcript: String): Int = runCatching {
+        if (transcript.isBlank()) return@runCatching 0
+        val provider = resolveCompactionFallbackProvider(sessionId)
+            ?: getEffectiveProvider(sessionId)
+        memoryCurator.curate(provider, sessionId, projectRoot, transcript)
+    }.onFailure { e ->
+        FileLogger.w(TAG, "记忆兑现跳过: ${e.message}")
+    }.getOrDefault(0)
 
     private suspend fun runToolStream(
         tool: StreamingAgentTool, 

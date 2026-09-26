@@ -156,6 +156,9 @@ class AIAgentViewModel @Inject constructor(
 
     private val sessionJobs = mutableMapOf<String, Job>()
 
+    /** 记忆兑现节流：每个会话上次自动整理的时间戳，10 分钟内不重复跑。 */
+    private val lastCurateAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     /**
      * agent 执行期间持有的 CPU 唤醒锁：熄屏后系统会挂起进程，使流式响应中断、工具调用卡死。
      * 不计数（setReferenceCounted(false)），多会话共用一把锁，最后一个任务结束时统一释放。
@@ -950,6 +953,8 @@ class AIAgentViewModel @Inject constructor(
         const val TAG = "AIAgentViewModel"
         const val AGENT_COMPLETE_CHANNEL = "agent_complete"
         const val AGENT_COMPLETE_NOTIFICATION_ID = 100
+        /** 记忆兑现节流：同一会话两次自动整理的最小间隔。 */
+        const val MEMORY_CURATE_INTERVAL_MS = 10 * 60 * 1000L
         /** wakeLock 超时保险：构建、装依赖类工具动辄十几分钟，给足 60 分钟；任务正常结束会主动释放。 */
         const val KEEPALIVE_TIMEOUT_MS = 60 * 60 * 1000L
         /** 从后台任务通知文本中提取 <title> 内容，供系统通知正文展示。 */
@@ -1581,6 +1586,34 @@ class AIAgentViewModel @Inject constructor(
                             .isAtLeast(Lifecycle.State.STARTED)
                         if (!inForeground && agentSoundSettings.isEnabled()) {
                             showAgentCompletedNotification(modelRequest)
+                        }
+
+                        // 引擎级记忆兑底：主模型当轮没调 memory 工具时，后台用轻量模型抽取沉淀。
+                        // 静默失败、不进对话流；子会话跳过（避免与父会话重复沉淀）；同一会话 10 分钟内不重复跑。
+                        if (!isSub) {
+                            val now = System.currentTimeMillis()
+                            val last = lastCurateAt[sessionId] ?: 0L
+                            if (now - last >= MEMORY_CURATE_INTERVAL_MS) {
+                                lastCurateAt[sessionId] = now
+                                viewModelScope.launch {
+                                    // 本轮对话文本：发送前的持久化历史尾部 + 用户请求 + 流式回答快照。
+                                    val tail = history.takeLast(6).joinToString("\n") { msg ->
+                                        when (msg) {
+                                            is com.aicode.feature.agent.domain.model.AgentMessage.UserMessage -> "用户: ${msg.content}"
+                                            is com.aicode.feature.agent.domain.model.AgentMessage.AssistantMessage -> "助手: ${msg.content}"
+                                            else -> ""
+                                        }
+                                    }.removeSuffix("\n")
+                                    val transcript = buildString {
+                                        if (tail.isNotBlank()) appendLine(tail)
+                                        append("用户: ").appendLine(request)
+                                        _streamingTexts.value[sessionId]?.take(4000)?.let { append("助手: ").appendLine(it) }
+                                    }.trim()
+                                    if (transcript.isNotBlank()) {
+                                        agentWorkflow.curateMemory(sessionId, projectRoot, transcript)
+                                    }
+                                }
+                            }
                         }
                     }
                     is AgentEvent.ModeChanged -> {
