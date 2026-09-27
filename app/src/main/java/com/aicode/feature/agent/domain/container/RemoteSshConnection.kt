@@ -105,7 +105,9 @@ class RemoteSshConnection @Inject constructor(
             _connectionState.value = ConnectionState.CONNECTED
         } catch (e: Exception) {
             _connectionState.value = ConnectionState.FAILED
-            throw e
+            // 不重抛：SSH 连接失败是可恢复的网络问题，重抛会在协程取消时变成 suppressed
+            // 异常逃逸到主线程崩溃。调用方通过 connectionState / isConnected() 判断成败。
+            FileLogger.w(TAG, "SSH 连接失败: ${e.message}", e)
         }
     }
 
@@ -214,16 +216,16 @@ class RemoteSshConnection @Inject constructor(
         val cfg = config ?: return false
         if (isConnected()) return true
         _connectionState.value = ConnectionState.CONNECTING
-        return runCatching { connect(cfg) }
-            .onSuccess {
-                FileLogger.i(TAG, "SSH 重连成功（前台触发）")
-                runCatching { onReconnected?.invoke() }
-            }
-            .onFailure {
-                FileLogger.w(TAG, "SSH 重连失败（前台触发）", it)
-                _connectionState.value = ConnectionState.FAILED
-            }
-            .isSuccess
+        connect(cfg)
+        // connect 不再抛异常，用实际连接状态判断成败
+        return if (isConnected()) {
+            FileLogger.i(TAG, "SSH 重连成功（前台触发）")
+            runCatching { onReconnected?.invoke() }
+            true
+        } else {
+            FileLogger.w(TAG, "SSH 重连失败（前台触发）")
+            false
+        }
     }
 
     /**

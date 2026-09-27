@@ -85,7 +85,9 @@ import com.aicode.feature.settings.presentation.ShizukuViewModel
 import com.aicode.feature.settings.presentation.SkillImportState
 import com.aicode.feature.settings.presentation.SkillUiEntry
 import com.aicode.feature.agent.domain.skill.SkillImportError
+import com.aicode.feature.agent.domain.skill.RemoteSkillsState
 import com.aicode.feature.agent.domain.skill.SkillScope
+import com.aicode.feature.settings.presentation.SkillSource
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
@@ -203,6 +205,8 @@ fun SettingsScreen(
     val skills by viewModel.skills.collectAsStateWithLifecycle()
     val skillSaveState by viewModel.skillSaveState.collectAsStateWithLifecycle()
     val skillImportState by viewModel.skillImportState.collectAsStateWithLifecycle()
+    val remoteSkillsState by viewModel.remoteSkills.collectAsStateWithLifecycle()
+    val executionMode by viewModel.executionMode.collectAsStateWithLifecycle()
     val subAgents by viewModel.subAgents.collectAsStateWithLifecycle()
     val subAgentSaveState by viewModel.subAgentSaveState.collectAsStateWithLifecycle()
     val globalRules by viewModel.globalRules.collectAsStateWithLifecycle()
@@ -331,13 +335,25 @@ fun SettingsScreen(
     var pendingSkillName by remember { mutableStateOf<String?>(null) }
     // 「添加技能」底部弹层：选择作用域后走手动新建 / 文件导入 / 压缩包导入。
     var showSkillAddSheet by remember { mutableStateOf(false) }
-    var skillImportScope by remember { mutableStateOf(SkillScope.GLOBAL) }
+    var skillSource by remember { mutableStateOf(SkillSource.GLOBAL) }
     // 技能文件 / 压缩包选择器：结果交给 ViewModel 读取并落盘到所选作用域。
     val skillFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.importSkillFromMarkdown(uri, skillImportScope)
+        if (uri != null) {
+            when (skillSource) {
+                SkillSource.GLOBAL -> viewModel.importSkillFromMarkdown(uri, SkillScope.GLOBAL)
+                SkillSource.PROJECT -> viewModel.importSkillFromMarkdown(uri, SkillScope.PROJECT)
+                SkillSource.REMOTE -> viewModel.importRemoteSkillFromMarkdown(uri)
+            }
+        }
     }
     val skillZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.importSkillsFromZip(uri, skillImportScope)
+        if (uri != null) {
+            when (skillSource) {
+                SkillSource.GLOBAL -> viewModel.importSkillsFromZip(uri, SkillScope.GLOBAL)
+                SkillSource.PROJECT -> viewModel.importSkillsFromZip(uri, SkillScope.PROJECT)
+                SkillSource.REMOTE -> viewModel.importRemoteSkillFromZip(uri)
+            }
+        }
     }
     var selectedSubAgent by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     var subAgentToDelete by remember { mutableStateOf<SubAgentUiEntry?>(null) }
@@ -388,11 +404,26 @@ fun SettingsScreen(
         viewModel.refreshSubAgents()
     }
 
+    // 远程技能管理用独立 SFTP 通道，不依赖执行模式；本地/远程模式都展示「远程服务器」分组。
+    LaunchedEffect(executionMode) {
+        viewModel.connectRemoteSkills()
+    }
+
     // 编辑保存后回详情页：等列表刷新出新快照再换，避免详情页停在保存前的旧值（改名时按新名找）。
     LaunchedEffect(skills, pendingSkillName) {
         val target = pendingSkillName ?: return@LaunchedEffect
         skills.firstOrNull { it.name.equals(target, ignoreCase = true) }?.let { fresh ->
             selectedSkill = fresh
+            pendingSkillName = null
+        }
+    }
+
+    // 远程技能保存后同理：从远程状态里取新快照。
+    LaunchedEffect(remoteSkillsState, pendingSkillName) {
+        val target = pendingSkillName ?: return@LaunchedEffect
+        val loaded = remoteSkillsState as? RemoteSkillsState.Loaded ?: return@LaunchedEffect
+        loaded.skills.firstOrNull { it.name.equals(target, ignoreCase = true) }?.let { fresh ->
+            selectedSkill = fresh.toUiEntry()
             pendingSkillName = null
         }
     }
@@ -512,8 +543,15 @@ fun SettingsScreen(
             current == SettingsSection.SkillEditor -> SkillEditorScreen(
                 initial = editingSkill,
                 saveState = skillSaveState,
-                defaultScope = skillImportScope,
-                onSave = { form, scope -> viewModel.saveSkill(form, scope, editingSkill?.name) },
+                defaultSource = skillSource,
+                remoteAvailable = true,
+                onSave = { form, source ->
+                    when (source) {
+                        SkillSource.GLOBAL -> viewModel.saveSkill(form, SkillScope.GLOBAL, editingSkill?.name)
+                        SkillSource.PROJECT -> viewModel.saveSkill(form, SkillScope.PROJECT, editingSkill?.name)
+                        SkillSource.REMOTE -> viewModel.saveRemoteSkill(form, editingSkill?.name)
+                    }
+                },
                 onSaved = { savedName ->
                     viewModel.clearSkillSaveState()
                     // 从详情页进来的改完回详情页，但得等新快照到位再展示
@@ -816,11 +854,14 @@ fun SettingsScreen(
                 SettingsSection.Skills -> SkillsSection(
                     projectName = currentProjectName,
                     entries = skills,
+                    remoteState = remoteSkillsState,
+                    remoteVisible = true,
                     onDelete = { skillToDelete = it },
                     onOpenDetail = {
                         selectedSkill = it
                         section = SettingsSection.SkillDetail
-                    }
+                    },
+                    onConnectRemote = { viewModel.connectRemoteSkills() }
                 )
                 SettingsSection.SkillDetail -> selectedSkill?.let { entry ->
                     SkillDetailSection(
@@ -1014,8 +1055,9 @@ fun SettingsScreen(
 
     if (showSkillAddSheet) {
         SkillAddSheet(
-            scope = skillImportScope,
-            onScopeChange = { skillImportScope = it },
+            source = skillSource,
+            onSourceChange = { skillSource = it },
+            remoteAvailable = true,
             onManual = {
                 showSkillAddSheet = false
                 editingSkill = null
@@ -1111,7 +1153,11 @@ fun SettingsScreen(
             text = { Text(stringResource(R.string.skills_delete_confirm_message, target.name)) },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.deleteSkill(target.name, target.scope)
+                    if (target.remote) {
+                        viewModel.deleteRemoteSkill(target.name)
+                    } else {
+                        viewModel.deleteSkill(target.name, target.scope)
+                    }
                     skillToDelete = null
                 }) { Text(stringResource(R.string.common_delete)) }
             },

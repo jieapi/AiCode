@@ -17,6 +17,7 @@ import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicode.feature.agent.data.remote.gemini.GeminiApi
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
 import com.aicode.feature.agent.domain.container.CommandEngine
+import com.aicode.feature.agent.domain.memory.MemoryCurator
 import com.aicode.feature.agent.domain.container.DelegatingCommandEngine
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
@@ -346,6 +347,7 @@ object AgentModule {
         keyRotator: ProviderKeyRotator,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
+        memoryCurator: MemoryCurator,
         fileAccess: FileAccessProvider
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
@@ -372,6 +374,7 @@ object AgentModule {
             keyRotator,
             agentNotificationCenter,
             eventInjector,
+            memoryCurator,
             fileAccess
         )
     }

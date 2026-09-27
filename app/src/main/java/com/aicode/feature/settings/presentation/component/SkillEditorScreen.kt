@@ -35,6 +35,7 @@ import com.aicode.core.ui.AppTextField
 import com.aicode.feature.agent.domain.skill.SkillForm
 import com.aicode.feature.agent.domain.skill.SkillSaveError
 import com.aicode.feature.agent.domain.skill.SkillScope
+import com.aicode.feature.settings.presentation.SkillSource
 import com.aicode.feature.settings.presentation.SkillSaveState
 import com.aicode.feature.settings.presentation.SkillUiEntry
 import compose.icons.FeatherIcons
@@ -54,16 +55,24 @@ import compose.icons.feathericons.ArrowLeft
 internal fun SkillEditorScreen(
     initial: SkillUiEntry?,
     saveState: SkillSaveState,
-    onSave: (SkillForm, SkillScope) -> Unit,
+    onSave: (SkillForm, SkillSource) -> Unit,
     onSaved: (String) -> Unit,
     onNavigateBack: () -> Unit,
-    defaultScope: SkillScope = SkillScope.GLOBAL
+    defaultSource: SkillSource = SkillSource.GLOBAL,
+    remoteAvailable: Boolean = false
 ) {
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
     var description by rememberSaveable { mutableStateOf(initial?.description ?: "") }
     var instructions by rememberSaveable { mutableStateOf(initial?.instructions ?: "") }
-    var scopeIsGlobal by rememberSaveable {
-        mutableStateOf(initial?.scope?.let { it == SkillScope.GLOBAL } ?: (defaultScope == SkillScope.GLOBAL))
+    var source by rememberSaveable {
+        mutableStateOf(
+            when {
+                initial == null -> defaultSource
+                initial.remote -> SkillSource.REMOTE
+                initial.scope == SkillScope.GLOBAL -> SkillSource.GLOBAL
+                else -> SkillSource.PROJECT
+            }
+        )
     }
 
     LaunchedEffect(saveState) {
@@ -72,7 +81,6 @@ internal fun SkillEditorScreen(
 
     BackHandler { onNavigateBack() }
 
-    val scope = if (scopeIsGlobal) SkillScope.GLOBAL else SkillScope.PROJECT
     val canSave = name.isNotBlank() && instructions.isNotBlank()
 
     Scaffold(
@@ -106,7 +114,7 @@ internal fun SkillEditorScreen(
                                     instructions = instructions.trim(),
                                     requiredTools = initial?.requiredTools ?: emptyList()
                                 ),
-                                scope
+                                source
                             )
                         }
                     ) {
@@ -165,19 +173,27 @@ internal fun SkillEditorScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        // 作用域决定技能目录落在哪儿，改已有技能的作用域等于搬目录，这里只允许新建时选。
+                        // 来源决定技能目录落在哪儿，改已有技能的来源等于搬目录，这里只允许新建时选。
                         FilterChip(
-                            selected = !scopeIsGlobal,
+                            selected = source == SkillSource.PROJECT,
                             enabled = initial == null,
-                            onClick = { scopeIsGlobal = false },
+                            onClick = { source = SkillSource.PROJECT },
                             label = { Text(stringResource(R.string.skills_scope_project)) }
                         )
                         FilterChip(
-                            selected = scopeIsGlobal,
+                            selected = source == SkillSource.GLOBAL,
                             enabled = initial == null,
-                            onClick = { scopeIsGlobal = true },
+                            onClick = { source = SkillSource.GLOBAL },
                             label = { Text(stringResource(R.string.skills_scope_global)) }
                         )
+                        if (remoteAvailable || source == SkillSource.REMOTE) {
+                            FilterChip(
+                                selected = source == SkillSource.REMOTE,
+                                enabled = initial == null,
+                                onClick = { source = SkillSource.REMOTE },
+                                label = { Text(stringResource(R.string.skills_scope_remote)) }
+                            )
+                        }
                     }
                 }
             }

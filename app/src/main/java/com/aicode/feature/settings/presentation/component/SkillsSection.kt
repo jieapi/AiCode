@@ -2,6 +2,7 @@ package com.aicode.feature.settings.presentation.component
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +38,8 @@ import com.aicode.core.theme.Radius
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
+import com.aicode.feature.agent.domain.skill.RemoteSkillsState
+import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.settings.presentation.SkillUiEntry
 import compose.icons.FeatherIcons
@@ -43,20 +47,27 @@ import compose.icons.feathericons.Book
 import compose.icons.feathericons.ChevronRight
 
 /**
- * 技能二级页：与「工具授权」一致的折叠分组列表——「当前项目 / 全局」两组各自可折叠，
+ * 技能二级页：折叠分组列表——「当前项目 / 全局 / 远程服务器」三组各自可折叠，
  * 每行一个技能（图标 + 名称 + 描述），左滑删除，点击行进入详情。
+ *
+ * 「远程服务器」组展示「远程 SSH 模式」那台服务器工作区里的技能；经独立 SFTP 通道读写，
+ * 本地/远程模式下都可用（远程模式下「当前项目」组即远程技能，远程分组用于换连接/跨工作区管理）。
  */
 @Composable
 internal fun SkillsSection(
     projectName: String?,
     entries: List<SkillUiEntry>,
+    remoteState: RemoteSkillsState,
+    remoteVisible: Boolean,
     onDelete: (SkillUiEntry) -> Unit,
-    onOpenDetail: (SkillUiEntry) -> Unit
+    onOpenDetail: (SkillUiEntry) -> Unit,
+    onConnectRemote: () -> Unit
 ) {
-    val projectSkills = entries.filter { it.scope == SkillScope.PROJECT }
+    val projectSkills = entries.filter { it.scope == SkillScope.PROJECT && !it.remote }
     val globalSkills = entries.filter { it.scope == SkillScope.GLOBAL }
+    val remoteSkills = (remoteState as? RemoteSkillsState.Loaded)?.skills.orEmpty()
 
-    if (entries.isEmpty()) {
+    if (entries.isEmpty() && (!remoteVisible || remoteSkills.isEmpty())) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -98,6 +109,7 @@ internal fun SkillsSection(
 
     var projectExpanded by rememberSaveable { mutableStateOf(true) }
     var globalExpanded by rememberSaveable { mutableStateOf(true) }
+    var remoteExpanded by rememberSaveable { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
@@ -154,8 +166,57 @@ internal fun SkillsSection(
                 }
             }
         }
+
+        if (remoteVisible) {
+            val remoteHost = (remoteState as? RemoteSkillsState.Loaded)?.host
+            CollapsibleGroupHeader(
+                text = if (remoteHost != null) {
+                    stringResource(R.string.skills_remote_group, remoteHost)
+                } else {
+                    stringResource(R.string.skills_remote_group_plain)
+                },
+                expanded = remoteExpanded,
+                onToggle = { remoteExpanded = !remoteExpanded }
+            )
+            AnimatedVisibility(visible = remoteExpanded) {
+                SettingsGroup {
+                    when (val s = remoteState) {
+                        RemoteSkillsState.NotConfigured ->
+                            SkillEmptyHint(stringResource(R.string.skills_remote_not_configured))
+                        RemoteSkillsState.Loading -> RemoteLoadingHint()
+                        is RemoteSkillsState.Failed ->
+                            SkillRetryHint(message = s.message, onRetry = onConnectRemote)
+                        is RemoteSkillsState.Loaded ->
+                            if (s.skills.isEmpty()) {
+                                SkillEmptyHint(stringResource(R.string.skills_remote_empty))
+                            } else {
+                                s.skills.forEachIndexed { index, skill ->
+                                    if (index > 0) SettingsDivider()
+                                    val entry = skill.toUiEntry()
+                                    SkillRow(
+                                        entry = entry,
+                                        onDelete = { onDelete(entry) },
+                                        onClick = { onOpenDetail(entry) }
+                                    )
+                                }
+                            }
+                    }
+                }
+            }
+        }
     }
 }
+
+/** 远程技能（[Skill]）转成列表/详情复用的 [SkillUiEntry]，标记 [SkillUiEntry.remote]。 */
+internal fun Skill.toUiEntry(): SkillUiEntry = SkillUiEntry(
+    name = name,
+    description = description,
+    scope = SkillScope.PROJECT,
+    disabled = false,
+    instructions = instructions,
+    requiredTools = requiredTools,
+    remote = true
+)
 
 /** 单个技能行：图标 + 名称/描述 + 右箭头；左滑删除，点击行进入详情。 */
 @Composable
@@ -206,11 +267,14 @@ private fun SkillRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    McpPill(
-                        text = stringResource(if (entry.disabled) R.string.common_disabled else R.string.common_enabled),
-                        textColor = if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary,
-                        backgroundColor = (if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.12f)
-                    )
+                    // 远程技能无「启用/禁用」概念（v1），不显示状态徽章。
+                    if (!entry.remote) {
+                        McpPill(
+                            text = stringResource(if (entry.disabled) R.string.common_disabled else R.string.common_enabled),
+                            textColor = if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary,
+                            backgroundColor = (if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.12f)
+                        )
+                    }
                 }
                 Text(
                     text = entry.description.ifBlank { stringResource(R.string.mcp_no_description) },
@@ -242,4 +306,46 @@ private fun SkillEmptyHint(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 12.dp)
     )
+}
+
+/** 远程分组加载中：一行进度指示。 */
+@Composable
+private fun RemoteLoadingHint() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+        Text(
+            text = stringResource(R.string.skills_remote_loading),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** 远程分组失败：错误文案 + 点击重试。 */
+@Composable
+private fun SkillRetryHint(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onRetry() }
+            .padding(horizontal = Spacing.lg, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.skills_remote_failed, message),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error
+        )
+        Text(
+            text = stringResource(R.string.skills_remote_retry),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
