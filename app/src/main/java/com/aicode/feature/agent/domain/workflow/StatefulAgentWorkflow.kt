@@ -507,8 +507,10 @@ class StatefulAgentWorkflow @Inject constructor(
             aiProvider.maxOutputTokens = ModelContextPolicy.outputReserveTokens(metadata)
         }
         val lastAssistantIndex = currentContext.history.indexOfLast { it is AgentMessage.AssistantMessage && it.inputTokens > 0 }
-        var baselineEstimate = ContextTokenEstimator.estimate(systemPrompt,
-            currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), currentTools)
+        var baselineEstimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            ContextTokenEstimator.estimate(systemPrompt,
+                currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), currentTools)
+        }
         var baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
             (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
         } else 0
@@ -534,7 +536,9 @@ class StatefulAgentWorkflow @Inject constructor(
                         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
                         var compactedMessages = state.messages
                         if (!compactionAttemptFailed) {
-                            val estimate = ContextTokenEstimator.estimate(systemPrompt, state.messages, currentTools)
+                            val estimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                ContextTokenEstimator.estimate(systemPrompt, state.messages, currentTools)
+                            }
                             val predictedInput = ContextTokenEstimator.calibrated(estimate, baselineEstimate, baselineUsage)
                             val compaction = contextCompactor.compactIfNeeded(state.messages, compactionProvider, context.sessionId,
                                 windowProvider = aiProvider, systemPrompt = systemPrompt, tools = currentTools,
@@ -549,7 +553,9 @@ class StatefulAgentWorkflow @Inject constructor(
                                 baselineEstimate = 0
                             }
                         }
-                        val requestEstimate = ContextTokenEstimator.estimate(systemPrompt, compactedMessages, currentTools)
+                        val requestEstimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            ContextTokenEstimator.estimate(systemPrompt, compactedMessages, currentTools)
+                        }
                         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, baselineEstimate, baselineUsage)
                         send(AgentEvent.ContextUsage(predictedInput, inputBudget, true))
                         if (predictedInput >= inputBudget) {

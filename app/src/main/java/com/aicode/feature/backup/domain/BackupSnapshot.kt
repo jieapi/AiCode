@@ -83,7 +83,8 @@ data class BackupMetadata(
     val compactionProviderId: String = "",
     val compactionModel: String = "",
     val syncSettings: SyncSettingsSnapshot? = null,
-    val workspaces: List<WorkspaceBackupMeta> = emptyList()
+    val workspaces: List<WorkspaceBackupMeta> = emptyList(),
+    val includesAppSettings: Boolean = themeMode != null
 )
 
 /** 备份元数据中的一个工作区段：名称 + 备份的文件数（用于导入摘要）。 */

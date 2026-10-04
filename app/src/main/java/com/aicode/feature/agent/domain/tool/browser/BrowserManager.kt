@@ -23,6 +23,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.aicode.R
@@ -115,6 +116,35 @@ class BrowserManager @Inject constructor(
         private const val DIALOG_TIMEOUT_MS = 30_000L
         const val MAX_TABS = 10
 
+        /**
+         * 自动化特征遮蔽脚本：在 UA 非默认时于页面开始加载时注入，
+         * 让站点看到的 navigator.webdriver / chrome 等与真实浏览器一致。
+         */
+        private val AUTOMATION_MASK_JS = """
+            (function(){
+                try {
+                    Object.defineProperty(Navigator.prototype, 'webdriver', { get: function(){ return false; }, configurable: true });
+                } catch(e){}
+                try {
+                    if (window.chrome === undefined) { window.chrome = { runtime: {} }; }
+                } catch(e){}
+                try {
+                    var origQuery = window.navigator.permissions && window.navigator.permissions.query;
+                    if (origQuery) {
+                        window.navigator.permissions.query = function(params){
+                            if (params && params.name === 'notifications') {
+                                return Promise.resolve({ state: Notification.permission });
+                            }
+                            return origQuery.apply(this, arguments);
+                        };
+                    }
+                } catch(e){}
+                try {
+                    Object.defineProperty(navigator, 'languages', { get: function(){ return ['zh-CN','zh','en']; }, configurable: true });
+                } catch(e){}
+            })();
+        """.trimIndent()
+
         /** 地址栏输入不像网址时，作为关键词交给该搜索引擎（Bing）。 */
         private const val SEARCH_ENGINE_URL = "https://www.bing.com/search?q="
 
@@ -168,7 +198,17 @@ class BrowserManager @Inject constructor(
 
     private val nightMode: Boolean get() = nightModeOverride ?: appDarkTheme
 
+    /** 当前生效的 UA 预设（由设置页推送；默认系统默认）。 */
+    @Volatile
+    private var userAgent: BrowserUserAgent = BrowserUserAgent.DEFAULT
+
     private val _state = MutableStateFlow(BrowserState())
+
+    /** 由设置页推送 UA 预设，并立即应用到所有标签页。 */
+    fun setUserAgent(userAgent: BrowserUserAgent) {
+        this.userAgent = userAgent
+        tabs.forEach { tab -> applyUserAgent(tab.webView) }
+    }
     val state: StateFlow<BrowserState> = _state.asStateFlow()
 
     /** 选择器辅助函数，prepend 到所有需要选择器的 JS 中。支持 ref= / text= / text*= / role= / xpath= / CSS。 */
@@ -273,6 +313,10 @@ class BrowserManager @Inject constructor(
                 tab.error = null
                 view?.setBackgroundColor(if (nightMode) NIGHT_BG_COLOR else Color.WHITE)
                 if (view != null && nightMode) applyNightModeTo(view)
+                // 非系统默认 UA 时，页面开始加载即注入自动化特征遮蔽（尽早生效）。
+                if (view != null && userAgent != BrowserUserAgent.DEFAULT) {
+                    runCatching { view.evaluateJavascript(AUTOMATION_MASK_JS, null) }
+                }
                 publishState()
             }
 
@@ -372,6 +416,7 @@ class BrowserManager @Inject constructor(
         wv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         wv.setBackgroundColor(if (nightMode) NIGHT_BG_COLOR else Color.WHITE)
         applyDarkThemeToSettings(wv)
+        applyUserAgent(wv)
         wv.addJavascriptInterface(BrowserJsBridge(tabId), "__browserBridge__")
 
         // 设置 Headless 默认尺寸，保证后台与离屏测试可用
@@ -465,6 +510,47 @@ class BrowserManager @Inject constructor(
     /** WebView 主题：isLightTheme 决定网页看到的 prefers-color-scheme（见 values/styles.xml）。 */
     private fun webViewThemeRes(night: Boolean): Int =
         if (night) R.style.Theme_AICode_WebView_Dark else R.style.Theme_AICode_WebView
+
+    // ================= User-Agent =================
+
+    /**
+     * 应用当前 UA 预设。
+     *
+     * [BrowserUserAgent.DEFAULT]：还原系统默认 UA（清空自定义 UA，并清空客户端提示覆盖）。
+     * 其余预设：套用对应 UA 字符串与 sec-ch-ua 客户端提示平台信息；
+     * 自动化特征遮蔽由 [AUTOMATION_MASK_JS] 在页面开始时注入。
+     */
+    private fun applyUserAgent(wv: WebView) {
+        val ua = userAgent
+        val uaString = ua.userAgent
+        if (uaString == null) {
+            wv.settings.userAgentString = null
+            runCatching {
+                WebSettingsCompat.setUserAgentMetadata(
+                    wv.settings,
+                    UserAgentMetadata.Builder().build()
+                )
+            }
+            return
+        }
+        wv.settings.userAgentString = uaString
+        runCatching {
+            val builder = UserAgentMetadata.Builder()
+                .setBrandVersionList(
+                    listOf(
+                        UserAgentMetadata.BrandVersion.Builder().setBrand("Google Chrome").setMajorVersion("131").build(),
+                        UserAgentMetadata.BrandVersion.Builder().setBrand("Chromium").setMajorVersion("131").build(),
+                        UserAgentMetadata.BrandVersion.Builder().setBrand("Not_A Brand").setMajorVersion("24").build()
+                    )
+                )
+                .setMobile(ua.mobile)
+                .setBitness(ua.bitness)
+            ua.platform?.let { builder.setPlatform(it) }
+            ua.platformVersion?.let { builder.setPlatformVersion(it) }
+            ua.architecture?.let { builder.setArchitecture(it) }
+            WebSettingsCompat.setUserAgentMetadata(wv.settings, builder.build())
+        }
+    }
 
     /**
      * 内核级暗色设置。prefers-color-scheme 实际由 WebView 主题的 isLightTheme 决定（见 [webViewThemeRes]），

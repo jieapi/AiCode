@@ -46,6 +46,20 @@ class ToolGroupExpansionTest {
     private fun List<ChatRenderItem>.groupItems(): List<ChatRenderItem> =
         flatMap { it.turnProcess }.filter { it.toolGroup != null }
 
+    @Test
+    fun compactionMarkerDoesNotStartNewTurn() {
+        val marker = user("marker").copy(isCompactionMarker = true)
+        val summary = assistant("summary").copy(isContextSummary = true)
+        val rendered = items(
+            listOf(user("u0"), tool("t1"), marker, summary, assistant("answer")),
+            activeTurnKey = "turn:u0"
+        )
+        assertEquals(1, rendered.count { it.turnHeader != null })
+        assertEquals("turn:u0", rendered.header().turnHeader?.key)
+        assertTrue(rendered.any { it.message.id == "marker" })
+        assertTrue(rendered.any { it.message.id == "summary" })
+    }
+
     // ---- 连续工具调用分组 ----
 
     @Test

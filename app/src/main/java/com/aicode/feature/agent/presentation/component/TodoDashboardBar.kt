@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +50,7 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.CheckSquare
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronUp
+import compose.icons.feathericons.Trash2
 
 /**
  * 位于输入框上方的待办任务常驻面板：
@@ -63,7 +65,8 @@ fun TodoDashboardBar(
     sessionId: String,
     modifier: Modifier = Modifier,
     forceCollapse: Boolean = false,
-    onExpandedChange: (Boolean) -> Unit = {}
+    onExpandedChange: (Boolean) -> Unit = {},
+    onDismiss: (() -> Unit)? = null
 ) {
     if (items.isEmpty()) return
 
@@ -152,6 +155,38 @@ fun TodoDashboardBar(
                     )
                 } else {
                     Spacer(Modifier.weight(1f))
+                }
+
+                // 全部完成时，在展开/收起按钮左侧提供删除按钮（带确认）。
+                if (onDismiss != null && totalCount > 0 && completedCount == totalCount) {
+                    var showDeleteConfirm by remember { mutableStateOf(false) }
+                    Icon(
+                        imageVector = FeatherIcons.Trash2,
+                        contentDescription = stringResource(R.string.todo_dashboard_delete),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clickable { showDeleteConfirm = true }
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    if (showDeleteConfirm) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showDeleteConfirm = false },
+                            title = { Text(stringResource(R.string.todo_dashboard_delete_title)) },
+                            text = { Text(stringResource(R.string.todo_dashboard_delete_confirm)) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    showDeleteConfirm = false
+                                    onDismiss()
+                                }) { Text(stringResource(R.string.common_delete)) }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = { showDeleteConfirm = false }) {
+                                    Text(stringResource(R.string.common_cancel))
+                                }
+                            }
+                        )
+                    }
                 }
 
                 ExpandableChevronIcon(

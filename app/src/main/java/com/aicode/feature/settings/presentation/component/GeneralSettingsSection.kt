@@ -36,6 +36,7 @@ import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.AppTextField
 import com.aicode.feature.settings.data.repository.StartupSessionMode
+import com.aicode.feature.settings.data.repository.TodoDisplayPosition
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 
@@ -61,9 +62,12 @@ internal fun GeneralSettingsSection(
     sendFileMaxSizeMb: Int,
     onSetSendFileMaxSizeMb: (Int) -> Unit,
     deleteExternalWorkspaceSessions: Boolean,
-    onToggleDeleteExternalWorkspaceSessions: (Boolean) -> Unit
+    onToggleDeleteExternalWorkspaceSessions: (Boolean) -> Unit,
+    todoDisplayPosition: TodoDisplayPosition,
+    onSetTodoDisplayPosition: (TodoDisplayPosition) -> Unit
 ) {
     var showStartupSessionSheet by remember { mutableStateOf(false) }
+    var showTodoPositionSheet by remember { mutableStateOf(false) }
     var editingFirstByteTimeout by remember { mutableStateOf(false) }
     var editingStreamIdleTimeout by remember { mutableStateOf(false) }
     var editingMaxNetworkRetries by remember { mutableStateOf(false) }
@@ -210,6 +214,20 @@ internal fun GeneralSettingsSection(
                     )
                 }
             )
+            SettingsDivider()
+            SettingsRow(
+                icon = null,
+                title = stringResource(R.string.settings_todo_display_position),
+                subtitle = stringResource(R.string.settings_todo_display_position_desc),
+                onClick = { showTodoPositionSheet = true },
+                trailing = {
+                    Text(
+                        text = stringResource(todoPositionLabelRes(todoDisplayPosition)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.semanticColors.subtleText
+                    )
+                }
+            )
         }
     }
 
@@ -221,6 +239,17 @@ internal fun GeneralSettingsSection(
                 showStartupSessionSheet = false
             },
             onDismiss = { showStartupSessionSheet = false }
+        )
+    }
+
+    if (showTodoPositionSheet) {
+        TodoPositionSheet(
+            selected = todoDisplayPosition,
+            onSelect = {
+                onSetTodoDisplayPosition(it)
+                showTodoPositionSheet = false
+            },
+            onDismiss = { showTodoPositionSheet = false }
         )
     }
 
@@ -416,4 +445,65 @@ private fun StartupSessionMode.labelRes(): Int = when (this) {
 private fun StartupSessionMode.descRes(): Int = when (this) {
     StartupSessionMode.NEW_SESSION -> R.string.settings_startup_session_new_desc
     StartupSessionMode.RECENT_SESSION -> R.string.settings_startup_session_recent_desc
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TodoPositionSheet(
+    selected: TodoDisplayPosition,
+    onSelect: (TodoDisplayPosition) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = Spacing.xl)
+        ) {
+            Text(
+                text = stringResource(R.string.settings_todo_display_position),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg)
+                    .padding(bottom = Spacing.md)
+            )
+
+            TodoDisplayPosition.entries.forEach { position ->
+                val isSelected = position == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(position) }
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(todoPositionLabelRes(position)),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (isSelected) {
+                        Icon(
+                            imageVector = FeatherIcons.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun todoPositionLabelRes(position: TodoDisplayPosition): Int = when (position) {
+    TodoDisplayPosition.BELOW_TITLE -> R.string.settings_todo_position_below_title
+    TodoDisplayPosition.ABOVE_INPUT -> R.string.settings_todo_position_above_input
 }

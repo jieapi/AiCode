@@ -28,6 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,7 +119,7 @@ class RemoteRepository @Inject constructor(
 
     fun getConnections(): Flow<List<RemoteConnection>> = dao.getAllConnections().map { list ->
         list.map { it.toDomainModel() }
-    }
+    }.flowOn(Dispatchers.IO)
     
     fun getMounts(): Flow<List<RemoteMount>> = combine(
         dao.getAllMounts(),
@@ -132,9 +133,9 @@ class RemoteRepository @Inject constructor(
                 connectionState = states[mountEntity.id]
             )
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
-    suspend fun addConnection(conn: RemoteConnection, auth: RemoteAuth) {
+    suspend fun addConnection(conn: RemoteConnection, auth: RemoteAuth) = withContext(Dispatchers.IO) {
         val authType = if (auth is RemoteAuth.Password) "PASSWORD" else "PRIVATE_KEY"
         val authData = if (auth is RemoteAuth.Password) auth.password else (auth as RemoteAuth.PrivateKey).privateKeyPath
         val passphrase = if (auth is RemoteAuth.PrivateKey) auth.passphrase else null

@@ -22,6 +22,9 @@ import com.aicode.feature.settings.domain.model.ModelContextPolicy
 import com.aicode.feature.settings.domain.model.ProviderType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -63,6 +66,25 @@ class ContextCompactor @Inject constructor(
         currentInputTokens: Int = 0,
         onEvent: suspend (AgentEvent) -> Unit = {}
     ): CompactionResult {
+        val eventContext = currentCoroutineContext().minusKey(Job)
+        return withContext(Dispatchers.Default) {
+            compactOnBackground(messages, aiProvider, sessionId, force, windowProvider, systemPrompt, tools, currentInputTokens) { event ->
+                withContext(eventContext) { onEvent(event) }
+            }
+        }
+    }
+
+    private suspend fun compactOnBackground(
+        messages: List<AgentMessage>,
+        aiProvider: AIProvider,
+        sessionId: String?,
+        force: Boolean,
+        windowProvider: AIProvider?,
+        systemPrompt: String,
+        tools: List<AgentTool>,
+        currentInputTokens: Int,
+        onEvent: suspend (AgentEvent) -> Unit
+    ): CompactionResult {
         val unchanged = CompactionResult(messages, compacted = false)
         val windowModel = windowProvider ?: aiProvider
         val metadata = modelMetadataService.resolve(windowModel.providerId, inferProviderType(windowModel), windowModel.model)
@@ -74,6 +96,8 @@ class ContextCompactor @Inject constructor(
 
         onEvent(AgentEvent.CompactionStarted(currentTokens))
         val originalOutputLimit = aiProvider.maxOutputTokens
+        val markerTimestamp = if (sessionId != null) messagePersistenceUseCase.nextTimestamp() else null
+        val summaryTimestamp = if (sessionId != null) messagePersistenceUseCase.nextTimestamp() else null
         try {
             var splitIndex = CompactionText.selectTailStartIndex(messages, inputBudget)
             if (force && splitIndex <= 0) splitIndex = messages.lastIndex
@@ -85,16 +109,14 @@ class ContextCompactor @Inject constructor(
             check(material.isNotEmpty()) { "No new history to summarize" }
 
             val headIds = head.map { it.id }.filter { it.isNotBlank() }.distinct()
-            val anchorTs = if (sessionId != null) {
+            if (sessionId != null) {
                 check(headIds.isNotEmpty() && head.all { it.id.isNotBlank() }) { "History has no stable persistence IDs" }
                 val entities = agentMessageDao.getMessagesBySessionOnce(sessionId)
                 val persistedIds = entities.mapTo(HashSet()) { it.id }
                 check(headIds.all { it in persistedIds }) { "History persistence is not complete yet" }
                 val tailIds = tail.map { it.id }.toSet()
-                val timestamp = entities.filter { it.id in tailIds }.minOfOrNull { it.timestamp }
-                check(timestamp != null && timestamp > Long.MIN_VALUE + 2) { "Retained history has no persisted timestamp anchor" }
-                timestamp
-            } else null
+                check(entities.any { it.id in tailIds }) { "Retained history has no persisted timestamp anchor" }
+            }
 
             val summaryMetadata = modelMetadataService.resolve(aiProvider.providerId, inferProviderType(aiProvider), aiProvider.model)
             val summaryContext = summaryMetadata.contextTokens.takeIf { it > 0 } ?: ModelContextPolicy.DEFAULT_CONTEXT_TOKENS
@@ -106,7 +128,9 @@ class ContextCompactor @Inject constructor(
             )
             aiProvider.maxOutputTokens = outputLimit
             val summaryBudget = minOf(ModelContextPolicy.effectiveInputBudget(summaryMetadata), summaryContext - outputLimit)
-            val prompt = systemPromptProvider.resolvePrompt("agent/compact-summary.md").replace(LEADING_COMMENT, "")
+            val prompt = withContext(Dispatchers.IO) {
+                systemPromptProvider.resolvePrompt("agent/compact-summary.md").replace(LEADING_COMMENT, "")
+            }
             var summary = extractPreviousSummary(head)
             val cursor = CompactionText.Cursor(CompactionText.units(material))
             var block = 0
@@ -138,9 +162,9 @@ class ContextCompactor @Inject constructor(
                     headIds = headIds,
                     messages = listOf(
                         AgentMessageEntity(id = markerId, sessionId = sessionId, role = MessageRole.USER.name,
-                            content = CONTEXT_COMPACTION_MARKER, timestamp = requireNotNull(anchorTs) - 2, isCompactionMarker = true),
+                            content = CONTEXT_COMPACTION_MARKER, timestamp = requireNotNull(markerTimestamp), isCompactionMarker = true),
                         AgentMessageEntity(id = summaryId, sessionId = sessionId, role = MessageRole.ASSISTANT.name,
-                            content = summary, timestamp = requireNotNull(anchorTs) - 1, isContextSummary = true)
+                            content = summary, timestamp = requireNotNull(summaryTimestamp), isContextSummary = true)
                     ),
                     summaryId = summaryId
                 )
@@ -323,13 +347,19 @@ internal object CompactionText {
 
         fun next(budget: Int): String {
             val result = StringBuilder()
+            var ascii = 0
+            var other = 0
             while (!finished) {
                 val unit = units[index]
                 val label = "[history-unit ${index + 1}, character-offset $offset]\n"
                 val remaining = unit.substring(offset)
-                val candidate = result.toString() + label + remaining + "\n\n"
-                if (tokens(candidate) <= budget) {
-                    result.append(label).append(remaining).append("\n\n")
+                val fragment = label + remaining + "\n\n"
+                val fragmentAscii = fragment.count { it.code < 128 }
+                val fragmentOther = fragment.length - fragmentAscii
+                if (ModelContextPolicy.estimateTokens(ascii + fragmentAscii) + other + fragmentOther <= budget) {
+                    result.append(fragment)
+                    ascii += fragmentAscii
+                    other += fragmentOther
                     index++
                     offset = 0
                 } else {

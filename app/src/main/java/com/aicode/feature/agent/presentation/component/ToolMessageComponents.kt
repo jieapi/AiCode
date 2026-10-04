@@ -43,6 +43,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -85,6 +87,8 @@ import compose.icons.feathericons.FileText
 import compose.icons.feathericons.Search
 import compose.icons.feathericons.Terminal
 import compose.icons.feathericons.Tool
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -146,33 +150,47 @@ internal fun ToolMessageBody(
 ) {
     val streaming = liveOutput != null
     val running = message.isToolRunning(liveOutput)
-    val edit = if (!running && !message.isError &&
-        (message.toolName == "editFile" || message.toolName == "writeFile")
-    ) {
-        remember(message.id, message.content) { parseEditDiff(message.content) }
-    } else null
-
-    val resultText = if (!running) {
-        remember(message.id, message.content) { formatToolResult(message.content) }
-    } else null
-    val argHint = remember(message.toolArgs) { toolArgHint(message.toolArgs) }
-    val argsFull = remember(message.toolArgs) { formatToolArgs(message.toolArgs) }
-
-    val todoData = if (message.toolName == "todo" && !running && !message.isError) {
-        remember(message.id, message.content) { parseTodoResult(message.content) }
-    } else null
-    val webSearchData = if (message.toolName == "websearch" && !running && !message.isError) {
-        remember(message.id, message.content) { parseWebSearchResult(message.content) }
-    } else null
-    // 后台任务/子代理完成通知：搭车在本次工具结果里送给 AI 的，同时常显给用户看。
-    val notifications = if (!running) {
-        remember(message.id, message.content) { parseToolNotifications(message.content) }
-    } else emptyList()
+    // produceState 的 key 只重启任务，不重置 value；组合 key 同时隔离旧输入的结果。
+    val metadata by key(message.id, message.content, message.toolName, message.isError, running) {
+        produceState<ToolMessageMetadata?>(initialValue = null) {
+            value = withContext(Dispatchers.Default) {
+                ToolMessageMetadata(
+                    edit = if (!running && !message.isError &&
+                        (message.toolName == "editFile" || message.toolName == "writeFile")
+                    ) parseEditDiff(message.content) else null,
+                    todo = if (message.toolName == "todo" && !running && !message.isError) {
+                        parseTodoResult(message.content)
+                    } else null,
+                    webSearch = if (message.toolName == "websearch" && !running && !message.isError) {
+                        parseWebSearchResult(message.content)
+                    } else null,
+                    notifications = if (!running) parseToolNotifications(message.content) else emptyList(),
+                    hasResult = !running && hasToolResult(message.content)
+                )
+            }
+        }
+    }
+    val argumentMetadata by key(message.id, message.toolArgs) {
+        produceState<ToolArgumentMetadata?>(initialValue = null) {
+            value = withContext(Dispatchers.Default) {
+                ToolArgumentMetadata(
+                    hint = toolArgHint(message.toolArgs),
+                    path = extractFilePathArg(message.toolArgs),
+                    hasArgs = hasToolArgs(message.toolArgs)
+                )
+            }
+        }
+    }
+    val edit = metadata?.edit
+    val todoData = metadata?.todo
+    val argHint = argumentMetadata?.hint
+    val notifications = metadata?.notifications.orEmpty()
 
     // 执行中也可折叠/展开（如 bash 刷屏时可收起只看标题行），无论当前是否有输出；无输出时折叠态无内容，但保持可点击与箭头一致
     val hasLiveOutput = !liveOutput.isNullOrBlank()
-    val expandable = streaming || (!running && (edit != null || !resultText.isNullOrBlank() || !argsFull.isNullOrBlank()
-            || (todoData != null && todoData.items.isNotEmpty()) || webSearchData != null))
+    val expandable = streaming || (!running && (metadata == null || argumentMetadata == null ||
+        edit != null || metadata?.hasResult == true || argumentMetadata?.hasArgs == true ||
+        (todoData != null && todoData.items.isNotEmpty()) || metadata?.webSearch != null))
     // 工具调用一律默认收起（差异卡、待办卡也不例外）：要不要看细节由用户点开，
     // 手动开关过（expandedOverride 非 null）就以用户的选择为准。展开态由宿主保管，
     // 因此滚出视口、切页返回都不会再丢。
@@ -183,7 +201,7 @@ internal fun ToolMessageBody(
     val filePath = if (edit != null) {
         edit.path
     } else {
-        remember(message.toolArgs) { extractFilePathArg(message.toolArgs) }
+        argumentMetadata?.path
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -298,6 +316,12 @@ internal fun ToolMessageBody(
                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
             ) {
+                val preparedArgs by key(message.id, message.toolArgs, running) {
+                    produceState<String?>(initialValue = null) {
+                        value = withContext(Dispatchers.Default) { formatToolArgs(message.toolArgs) }
+                    }
+                }
+                val argsFull = preparedArgs
                 Column {
                     if (!argsFull.isNullOrBlank()) {
                         Spacer(Modifier.height(Spacing.sm))
@@ -316,6 +340,29 @@ internal fun ToolMessageBody(
                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
             ) {
+                // 详情任务跟随 AnimatedVisibility 的内容生命周期，收起时保留至退出动画结束。
+                val details by key(
+                    message.id, message.content, message.toolArgs, message.toolName,
+                    message.isError, running
+                ) {
+                    produceState<ToolMessageDetails?>(initialValue = null, key1 = metadata) {
+                        val prepared = metadata ?: return@produceState
+                        value = withContext(Dispatchers.Default) {
+                            val webSearch = prepared.webSearch
+                            val plain = prepared.edit == null &&
+                                prepared.todo?.items.isNullOrEmpty() && webSearch == null
+                            ToolMessageDetails(
+                                args = if (plain) formatToolArgs(message.toolArgs) else null,
+                                result = if (plain && !running) formatToolResult(message.content) else null,
+                                webSearch = webSearch,
+                                diffCopyText = prepared.edit?.hunks?.joinToString("\n") { it.diff }
+                            )
+                        }
+                    }
+                }
+                val argsFull = details?.args
+                val resultText = details?.result
+                val webSearchData = details?.webSearch
                 Column(
                     modifier = Modifier.pointerInput(message.id) {
                         detectDoubleTapToCollapse {
@@ -330,12 +377,12 @@ internal fun ToolMessageBody(
                 } else if (webSearchData != null) {
                     Spacer(Modifier.height(Spacing.xs))
                     WebSearchResultCard(result = webSearchData)
-                } else if (edit != null) {
+                } else if (edit != null && details != null) {
                     // 差异卡：头部给路径与「复制」，页脚给增删统计（DSH 那块白底描边卡）
                     Spacer(Modifier.height(Spacing.xs))
                     ChatCodeCard(
                         title = edit.path.ifBlank { null },
-                        copyText = edit.hunks.joinToString("\n") { it.diff },
+                        copyText = details?.diffCopyText.orEmpty(),
                         footer = stringResource(
                             R.string.tool_changed_files_summary,
                             edit.added,
@@ -375,6 +422,23 @@ internal fun ToolMessageBody(
         }
     }
 }
+
+private data class ToolMessageMetadata(
+    val edit: EditDiff?,
+    val todo: ParsedTodoResult?,
+    val webSearch: ParsedWebSearchResult?,
+    val notifications: List<ToolNotificationInfo>,
+    val hasResult: Boolean
+)
+
+private data class ToolArgumentMetadata(val hint: String?, val path: String?, val hasArgs: Boolean)
+
+private data class ToolMessageDetails(
+    val args: String?,
+    val result: String?,
+    val webSearch: ParsedWebSearchResult?,
+    val diffCopyText: String?
+)
 
 internal data class ToolNotificationInfo(val summary: String, val succeeded: Boolean, val isMessage: Boolean = false)
 
@@ -938,6 +1002,54 @@ internal fun formatJsonData(jsonStr: String): String? = runCatching {
         else -> jsonStr.trim()
     }
 }.getOrNull()
+
+private fun hasToolResult(raw: String): Boolean {
+    val s = raw.withoutToolStatusPrefix()
+    parseToolTransport(s)?.let { obj ->
+        return when (obj["status"]?.jsonPrimitive?.contentOrNull) {
+            "error" -> (obj["message"]?.jsonPrimitive?.contentOrNull ?: s).isNotBlank()
+            "success", "partial" -> hasToolData(obj["data"]) ?: s.isNotBlank()
+            else -> s.isNotBlank()
+        }
+    }
+    val inner = when {
+        s.startsWith("Error(") -> {
+            val msgIdx = s.indexOf("message=")
+            if (msgIdx < 0) return s.isNotBlank()
+            val body = s.substring(msgIdx + "message=".length)
+            val codeIdx = body.lastIndexOf(", code=")
+            return (if (codeIdx >= 0) body.substring(0, codeIdx) else body.removeSuffix(")")).isNotBlank()
+        }
+        s.startsWith("Success(data=") -> s.removePrefix("Success(data=").removeSuffix(")")
+        s.startsWith("Partial(data=") -> {
+            val body = s.removePrefix("Partial(data=")
+            val msgIdx = body.lastIndexOf(", message=")
+            if (msgIdx >= 0) body.substring(0, msgIdx) else body.removeSuffix(")")
+        }
+        else -> return s.isNotBlank()
+    }
+    return runCatching {
+        when (val data = Json.parseToJsonElement(inner.trim())) {
+            is JsonPrimitive, is JsonObject -> hasToolData(data) ?: inner.isNotBlank()
+            else -> inner.isNotBlank()
+        }
+    }.getOrElse { inner.isNotBlank() }
+}
+
+private fun hasToolData(data: JsonElement?): Boolean? = when (data) {
+    is JsonPrimitive -> data.contentOrNull?.isNotBlank() ?: true
+    is JsonObject -> {
+        val main = data["content"] ?: data["output"] ?: data["stdout"] ?: data["text"]
+        (main as? JsonPrimitive)?.contentOrNull?.isNotBlank() ?: data.isNotEmpty()
+    }
+    null -> null
+    else -> true
+}
+
+private fun hasToolArgs(argsJson: String?): Boolean {
+    if (argsJson.isNullOrBlank()) return false
+    return runCatching { Json.parseToJsonElement(argsJson).jsonObject.isNotEmpty() }.getOrDefault(true)
+}
 
 /** 把传入参数 JSON 列成 `key: value` 多行 */
 internal fun formatToolArgs(argsJson: String?): String? {

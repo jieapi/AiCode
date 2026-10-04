@@ -348,9 +348,16 @@ fun ProviderEditorScreen(
             customHeaders.any { it.first.isNotBlank() } ||
             models.isNotEmpty()
 
+    var lastSubmittedConfig by remember {
+        mutableStateOf(if (initialProvider != null) currentConfig() else null)
+    }
+
     fun saveCurrent() {
         if (!hasSubstantiveInput()) return
-        onSave(currentConfig())
+        val config = currentConfig()
+        if (config == lastSubmittedConfig) return
+        onSave(config)
+        lastSubmittedConfig = config
     }
 
     // 拉取成功后自动对齐：远端已不存在的本地模型直接移除（可在「偏好设置」关掉）。拉取失败或返回空列表时不动列表。
@@ -780,6 +787,25 @@ fun ProviderEditorScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             val allSelected = models.isNotEmpty() && selectedModels.size == models.size
+                            // 勾选失败项：一键把测试未返回 200 的模型加入选择（未测试的不动）。
+                            TextButton(
+                                onClick = {
+                                    models.forEach { m ->
+                                        val r = testResults[m]
+                                        if (r != null && r.responseCode != 200) {
+                                            if (m !in selectedModels) selectedModels.add(m)
+                                        }
+                                    }
+                                },
+                                enabled = models.any { testResults[it]?.responseCode?.let { code -> code != 200 } == true },
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(FeatherIcons.AlertCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(Spacing.xs))
+                                Text(stringResource(R.string.provider_models_select_failed))
+                            }
                             TextButton(
                                 onClick = {
                                     if (allSelected) {

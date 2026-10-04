@@ -4,13 +4,10 @@ name: Deploy Docs
 # Vercel 的 Git 自动部署已在 docs-site/vercel.json 用 git.deploymentEnabled=false 关闭，
 # 生产部署统一由本工作流用 Vercel CLI 完成。
 # 前置配置（GitHub 仓库 Secret）：VERCEL_TOKEN、VERCEL_ORG_ID、VERCEL_PROJECT_ID
-# Vercel 项目需设置 Root Directory = docs-site。CLI 必须从仓库根运行（官方 monorepo 指南）：
-# 在子目录里跑 vercel 会读不到 docs-site/vercel.json，退回 VitePress preset 默认命令而报 vitepress not found。
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 jobs:
   deploy:
@@ -19,6 +16,10 @@ jobs:
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    # vercel.json / package-lock.json 都在 docs-site，项目根即此处。
+    defaults:
+      run:
+        working-directory: docs-site
     steps:
       - name: Checkout
         uses: actions/checkout@v4

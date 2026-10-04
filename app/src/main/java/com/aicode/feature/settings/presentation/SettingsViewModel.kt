@@ -70,6 +70,7 @@ import com.aicode.feature.settings.data.repository.ProxyConfig
 import com.aicode.feature.settings.data.repository.ProxySettingsRepository
 import com.aicode.feature.settings.data.repository.ScreenOnSettingsRepository
 import com.aicode.feature.settings.data.repository.StartupSessionMode
+import com.aicode.feature.settings.data.repository.TodoDisplayPosition
 import com.aicode.feature.settings.data.repository.ThemeSettingsRepository
 import com.aicode.feature.settings.data.repository.ToolSafetySettingsRepository
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
@@ -313,6 +314,8 @@ class SettingsViewModel @Inject constructor(
     private val mcpManager: McpManager,
     private val permissionRulesRepository: PermissionRulesRepository,
     private val toolSafetySettingsRepository: ToolSafetySettingsRepository,
+    private val browserSettingsRepository: com.aicode.feature.settings.data.repository.BrowserSettingsRepository,
+    private val browserManager: com.aicode.feature.agent.domain.tool.browser.BrowserManager,
     private val skillRepository: SkillRepository,
     private val agentDefinitionRepository: AgentDefinitionRepository,
     private val agentDefinitionConfigRepository: AgentDefinitionConfigRepository,
@@ -480,6 +483,17 @@ class SettingsViewModel @Inject constructor(
 
     private val _startupSessionMode = MutableStateFlow(StartupSessionMode.NEW_SESSION)
     val startupSessionMode: StateFlow<StartupSessionMode> = _startupSessionMode.asStateFlow()
+
+    private val _todoDisplayPosition = MutableStateFlow(TodoDisplayPosition.ABOVE_INPUT)
+    val todoDisplayPosition: StateFlow<TodoDisplayPosition> = _todoDisplayPosition.asStateFlow()
+
+    private val _browserUserAgent = MutableStateFlow(com.aicode.feature.agent.domain.tool.browser.BrowserUserAgent.DEFAULT)
+    val browserUserAgent: StateFlow<com.aicode.feature.agent.domain.tool.browser.BrowserUserAgent> = _browserUserAgent.asStateFlow()
+
+    private val _browserActionEnabled = MutableStateFlow(
+        com.aicode.feature.agent.domain.tool.browser.BrowserActionCatalog.ALL.associateWith { true }
+    )
+    val browserActionEnabled: StateFlow<Map<String, Boolean>> = _browserActionEnabled.asStateFlow()
 
     private val _firstByteTimeoutSec = MutableStateFlow(300)
     val firstByteTimeoutSec: StateFlow<Int> = _firstByteTimeoutSec.asStateFlow()
@@ -810,6 +824,25 @@ class SettingsViewModel @Inject constructor(
             launch {
                 generalSettingsRepository.startupSessionModeFlow.collectLatest {
                     _startupSessionMode.value = it
+                }
+            }
+
+            launch {
+                generalSettingsRepository.todoDisplayPositionFlow.collectLatest {
+                    _todoDisplayPosition.value = it
+                }
+            }
+
+            launch {
+                browserSettingsRepository.userAgentFlow.collectLatest {
+                    _browserUserAgent.value = it
+                    browserManager.setUserAgent(it)
+                }
+            }
+
+            launch {
+                browserSettingsRepository.actionEnabledFlow.collectLatest {
+                    _browserActionEnabled.value = it
                 }
             }
 
@@ -1553,6 +1586,23 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             generalSettingsRepository.setStartupSessionMode(mode)
         }
+    }
+
+    /** 任务待办在聊天页的显示位置。 */
+    fun setTodoDisplayPosition(position: TodoDisplayPosition) {
+        viewModelScope.launch {
+            generalSettingsRepository.setTodoDisplayPosition(position)
+        }
+    }
+
+    /** 浏览器 User-Agent 预设。 */
+    fun setBrowserUserAgent(userAgent: com.aicode.feature.agent.domain.tool.browser.BrowserUserAgent) {
+        viewModelScope.launch { browserSettingsRepository.setUserAgent(userAgent) }
+    }
+
+    /** 浏览器 AI 控制权限：逐 action 开关。 */
+    fun setBrowserActionEnabled(action: String, enabled: Boolean) {
+        viewModelScope.launch { browserSettingsRepository.setActionEnabled(action, enabled) }
     }
 
     /** 流式请求首字超时（秒）；0 表示不限制。 */
