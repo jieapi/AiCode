@@ -95,6 +95,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -158,6 +159,12 @@ class AIAgentViewModel @Inject constructor(
     private val sessionJobs = mutableMapOf<String, Job>()
 
     /**
+     * 正在回退（rewind）的会话集合：回退会删除对话消息，此后到达的后台任务/子代理完成等
+     * 系统事件不应再触发新一轮（否则会在已清空的历史上凭空跑起来）。
+     */
+    private val rewindSuppressedSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
      * agent 执行期间持有的 CPU 唤醒锁：熄屏后系统会挂起进程，使流式响应中断、工具调用卡死。
      * 不计数（setReferenceCounted(false)），多会话共用一把锁，最后一个任务结束时统一释放。
      */
@@ -174,13 +181,37 @@ class AIAgentViewModel @Inject constructor(
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
 
+    /** 各会话「用户已手动删除待办」时记录的 id 集合；待办更新后自动失效。 */
+    private val _dismissedTodoIds = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val currentSessionTodoItems: StateFlow<List<TodoItem>> = _currentSessionId
-        .flatMapLatest { id ->
-            if (id.isNullOrBlank()) flowOf(emptyList())
-            else todoItemDao.getBySession(id).map { entities -> entities.map { it.toDomain() } }
+    val currentSessionTodoItems: StateFlow<List<TodoItem>> = combine(_currentSessionId, _dismissedTodoIds) { id, dismissed ->
+        id to dismissed
+    }.flatMapLatest { (id, dismissed) ->
+        if (id.isNullOrBlank()) flowOf(emptyList())
+        else todoItemDao.getBySession(id).map { entities ->
+            val items = entities.map { it.toDomain() }
+            val dismissedIds = dismissed[id]
+            // 用户主动删除后：若待办集合与删除时完全一致，则不展示；一旦有更新（新增/变更）则重新展示。
+            if (dismissedIds != null && items.isNotEmpty() && items.map { it.id }.toSet() == dismissedIds) {
+                emptyList()
+            } else {
+                items
+            }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 删除当前会话全部待办并隐藏面板，直到下一次待办更新。
+     * 记录被删 id 集合：若之后待办集合与之一致则不展示，有新增/变化则自动恢复展示。
+     */
+    fun dismissTodos(sessionId: String) {
+        viewModelScope.launch {
+            val ids = todoItemDao.getBySessionOnce(sessionId).map { it.id }.toSet()
+            _dismissedTodoIds.value = _dismissedTodoIds.value + (sessionId to ids)
+            todoItemDao.deleteBySession(sessionId)
+        }
+    }
 
     private val _agentStates = MutableStateFlow<Map<String, AgentUIState>>(emptyMap())
     val agentStates: StateFlow<Map<String, AgentUIState>> = _agentStates.asStateFlow()
@@ -221,6 +252,7 @@ class AIAgentViewModel @Inject constructor(
 
     private val _messageLimit = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val defaultLimit = 30
+    private val loadedMessageLimits = mutableMapOf<String, Int>()
 
     /** 聊天记录搜索：命中条数上限、输入防抖、片段上下文宽度、定位时预留的分页余量。 */
     private val chatSearchLimit = 50
@@ -309,7 +341,10 @@ class AIAgentViewModel @Inject constructor(
 
     fun loadMoreMessages() {
         val sid = _currentSessionId.value ?: return
+        val state = messagesState.value
+        if (state.sessionId != sid || !state.loaded || !state.hasMore) return
         val currentLimit = _messageLimit.value[sid] ?: defaultLimit
+        if (loadedMessageLimits[sid] != currentLimit) return
         _messageLimit.value = _messageLimit.value + (sid to (currentLimit + 30))
     }
 
@@ -773,7 +808,8 @@ class AIAgentViewModel @Inject constructor(
                     hasMore = list.size >= limit,
                     isLoadingMore = false
                 )
-            }
+            }.flowOn(Dispatchers.Default)
+                .onEach { loadedMessageLimits[id] = limit }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ChatMessagesState(null, emptyList(), loaded = false))
 
@@ -1041,6 +1077,9 @@ class AIAgentViewModel @Inject constructor(
 
         /** 写文件会连珠触发多个 inotify 事件，合并后再重读目录。 */
         const val BROWSE_DEBOUNCE_MS = 300L
+
+        /** 回退抑制窗口：回退后短时间内丢弃系统事件，避免旧 job 的 finally 触发新一轮。 */
+        const val REWIND_SUPPRESS_MS = 1_500L
     }
 
     init {
@@ -1262,6 +1301,11 @@ class AIAgentViewModel @Inject constructor(
      * 避免各处重复判断忙碌/空闲。
      */
     private fun deliverSystemEvent(sessionId: String, item: PendingNotification) {
+        // 回退期间：丢弃系统事件，不回退刚清空的对话基础上又跑起来。
+        if (sessionId in rewindSuppressedSessions) {
+            FileLogger.d(TAG, "deliverSystemEvent suppressed (rewinding): sid=$sessionId")
+            return
+        }
         if (sessionJobs[sessionId]?.isActive == true) {
             agentNotificationCenter.enqueue(sessionId, item)
             return
@@ -1290,6 +1334,11 @@ class AIAgentViewModel @Inject constructor(
      * 已被工具结果搭车送达的通知此时已 ack 移除，取到空则什么都不做。
      */
     private fun flushPendingNotifications(sessionId: String) {
+        // 回退期间不搭车发送残留通知，避免回退后自动起新一轮。
+        if (sessionId in rewindSuppressedSessions) {
+            agentNotificationCenter.clear(sessionId)
+            return
+        }
         val items = agentNotificationCenter.drain(sessionId)
         if (items.isEmpty()) return
         FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${items.size} state=${_agentStates.value[sessionId]}")
@@ -2321,14 +2370,38 @@ class AIAgentViewModel @Inject constructor(
         val sessionId = _currentSessionId.value ?: return@launch
         dismissRewindMenu()
 
+        // 0. 进入回退抑制窗口：取消旧 job 的 finally / 后台任务完成事件可能触发新一轮，
+        //    在窗口内丢弃这些系统事件，避免回退后 AI 又在已清空的历史上跑起来。
+        rewindSuppressedSessions.add(sessionId)
+        viewModelScope.launch {
+            delay(REWIND_SUPPRESS_MS)
+            rewindSuppressedSessions.remove(sessionId)
+        }
+
         // 1. 停止当前正在运行的 Agent 任务及后续排队
         _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
         agentNotificationCenter.clear(sessionId)
         val runningJob = sessionJobs[sessionId]
         if (runningJob != null && runningJob.isActive) {
             runningJob.cancelAndJoin()
+            // 只删自己取消的那个 job：cancelAndJoin 期间 finally 可能已启动接替的新 job 并注册。
+            if (sessionJobs[sessionId] === runningJob) sessionJobs.remove(sessionId)
+        } else {
+            sessionJobs.remove(sessionId)
         }
-        sessionJobs.remove(sessionId)
+
+        // 1b. 停止该会话的全部子代理 job（回退父会话时它们仍在独立 job 上跑，
+        //     完成后还会反向唤起父会话）。
+        runCatching {
+            chatSessionDao.getSubSessionsByParentOnce(sessionId).forEach { child ->
+                sessionJobs[child.id]?.let { subJob ->
+                    if (subJob.isActive) subJob.cancel()
+                    if (sessionJobs[child.id] === subJob) sessionJobs.remove(child.id)
+                }
+                subAgentEventBus.release(child.id)
+                agentNotificationCenter.clear(child.id)
+            }
+        }
 
         // 2. 重置会话运行、流式与检查点状态
         setAgentState(sessionId, AgentUIState.Idle)

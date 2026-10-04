@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -656,6 +658,26 @@ private val ReasoningWindowMaxHeight = 300.dp
 private val ReasoningWindowFadeHeight = 28.dp
 
 /**
+ * 将超长思考文本按块切分，供展开时惰性渲染。
+ * 优先在换行处切；单块目标长度适中，避免单个 MarkdownContent 解析过大文本造成主线程卡顿。
+ */
+private fun chunkReasoningText(text: String, chunkSize: Int = 4_000): List<String> {
+    if (text.length <= chunkSize) return listOf(text)
+    val result = ArrayList<String>((text.length / chunkSize) + 1)
+    var start = 0
+    while (start < text.length) {
+        var end = (start + chunkSize).coerceAtMost(text.length)
+        if (end < text.length) {
+            val newline = text.lastIndexOf('\n', end)
+            if (newline > start) end = newline + 1
+        }
+        result.add(text.substring(start, end))
+        start = end
+    }
+    return result
+}
+
+/**
  * 思考过程折叠行：左对齐、浅色弱化，与正式回复区分。**默认收起**，点这一行随时展开/收起。
  *
  * 收起态只占一行：行首思考图标 + 一行内容预览（见 [reasoningPreviewLine]，超宽省略号截断）；
@@ -760,29 +782,36 @@ internal fun ReasoningBubble(
         ) {
             Column {
                 Spacer(Modifier.height(Spacing.sm))
-                val scrollState = rememberScrollState()
+                // 超长思考文本分块惰性渲染：避免一次性把巨量 Markdown 交给解析器造成主线程卡死/崩溃。
+                val chunks = remember(renderText) { chunkReasoningText(renderText) }
+                val listState = rememberLazyListState()
                 val fadeColor = MaterialTheme.colorScheme.background
                 Box(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    MarkdownContent(
-                        text = renderText,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        cache = cache,
-                        compact = true,
+                    LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = ReasoningWindowMaxHeight)
-                            .nestedScroll(rememberBoundNestedScrollConnection(scrollState))
-                            .verticalScroll(scrollState)
                             .pointerInput(text) {
                                 detectTapGestures(
                                     onDoubleTap = { toggleExpanded(false) }
                                 )
                             }
-                    )
+                    ) {
+                        items(chunks.size) { index ->
+                            MarkdownContent(
+                                text = chunks[index],
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                cache = cache,
+                                compact = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                     // 底部渐隐：只有还能继续往下滚时才盖一层，提示“下面还有内容”
-                    if (scrollState.canScrollForward) {
+                    if (listState.canScrollForward) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)

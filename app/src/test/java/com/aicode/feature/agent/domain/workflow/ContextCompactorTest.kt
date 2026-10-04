@@ -113,6 +113,17 @@ class ContextCompactorTest {
     }
 
     @Test
+    fun cursorIncrementalBudgetMatchesWholeTextCounting() {
+        val units = List(120) { index -> if (index % 2 == 0) "ascii-$index" else "混合-$index" }
+        val cursor = CompactionText.Cursor(units)
+        val chunks = mutableListOf<String>()
+        while (!cursor.finished) chunks.add(cursor.next(160))
+        assertTrue(chunks.all { CompactionText.tokens(it) <= 160 })
+        assertEquals(units.size, chunks.sumOf { chunk -> Regex("\\[history-unit ").findAll(chunk).count() })
+        units.forEach { unit -> assertTrue(chunks.any { it.contains("\n$unit\n") }) }
+    }
+
+    @Test
     fun multipleBlocksFusePreviousSummaryAndRetainLatestGoal() = runTest {
         prepare()
         val requests = mutableListOf<List<AgentMessage>>()
@@ -174,8 +185,9 @@ class ContextCompactorTest {
     }
 
     @Test
-    fun commitUsesHeadIdsAndEarliestTailTimestamp() = runTest {
+    fun commitUsesHeadIdsAndCompactionTriggerTimestamp() = runTest {
         prepare()
+        every { persistence.nextTimestamp() } returnsMany listOf(300L, 301L)
         coEvery { dao.getMessagesBySessionOnce("session") } returns listOf(
             AgentMessageEntity(id = "old", sessionId = "session", role = "USER", content = "history", timestamp = 50),
             AgentMessageEntity(id = "answer", sessionId = "session", role = "ASSISTANT", content = "done", timestamp = 200),
@@ -184,7 +196,7 @@ class ContextCompactorTest {
         val result = compactor.compactIfNeeded(history(), provider, sessionId = "session", force = true)
         assertTrue(result.compacted)
         coVerify(exactly = 1) {
-            dao.commitCompaction("session", listOf("old"), match { it.map { row -> row.timestamp } == listOf(98L, 99L) }, any())
+            dao.commitCompaction("session", listOf("old"), match { it.map { row -> row.timestamp } == listOf(300L, 301L) }, any())
         }
         coVerify(exactly = 1) { persistence.invalidateHistory("session") }
     }

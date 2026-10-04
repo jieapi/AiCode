@@ -20,7 +20,8 @@ import javax.inject.Inject
 
 class BrowserTool @Inject constructor(
     private val browserManager: BrowserManager,
-    private val fileAccess: FileAccessProvider
+    private val fileAccess: FileAccessProvider,
+    private val browserSettingsRepository: com.aicode.feature.settings.data.repository.BrowserSettingsRepository
 ) : AgentTool() {
 
     private companion object {
@@ -100,6 +101,14 @@ class BrowserTool @Inject constructor(
         val action = args["action"]?.jsonPrimitive?.contentOrNull?.trim()
             ?: return ToolResult.Error("缺少必需参数：action", "MISSING_ACTION")
         val tabId = args["tabId"]?.jsonPrimitive?.contentOrNull?.trim()
+
+        // AI 控制浏览器权限：用户在设置页逐 action 关闭的项，执行前直接拒绝。
+        if (!browserSettingsRepository.isActionEnabled(action)) {
+            return ToolResult.Error(
+                "浏览器操作「$action」已被用户在设置中禁用",
+                "ACTION_DISABLED_BY_USER"
+            )
+        }
 
         return try {
             executeAction(action, tabId, args)

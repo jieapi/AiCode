@@ -78,6 +78,7 @@ import com.aicode.feature.agent.domain.mcp.McpServerStatus
 import com.aicode.feature.agent.presentation.component.MarkdownContent
 import com.aicode.feature.agent.presentation.component.MarkdownRenderCache
 import com.aicode.feature.backup.presentation.BackupSection
+import com.aicode.feature.backup.presentation.WebDavSyncScreen
 import com.aicode.feature.settings.data.repository.AppThemeMode
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aicode.feature.settings.domain.model.AIProviderConfig
@@ -157,6 +158,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentEditor(R.string.settings_subagents),
     Container(R.string.settings_container),
     ContainerDownloads(R.string.container_download_image),
+    Browser(R.string.settings_browser),
     Proxy(R.string.proxy_title),
     Log(R.string.settings_log),
     Permissions(R.string.settings_permissions),
@@ -166,6 +168,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
     Backup(R.string.settings_backup),
+    WebDav(R.string.webdav_title),
     About(R.string.settings_about)
 }
 
@@ -187,6 +190,7 @@ private fun SettingsSection.depth(): Int = when (this) {
     SettingsSection.SkillDetail,
     SettingsSection.SubAgentDetail,
     SettingsSection.ContainerDownloads,
+    SettingsSection.WebDav,
     SettingsSection.Log -> 2
     else -> 1
 }
@@ -224,6 +228,9 @@ fun SettingsScreen(
     val agentSoundEnabled by viewModel.agentSoundEnabled.collectAsStateWithLifecycle()
     val autoRemoveStaleModels by viewModel.autoRemoveStaleModels.collectAsStateWithLifecycle()
     val startupSessionMode by viewModel.startupSessionMode.collectAsStateWithLifecycle()
+    val todoDisplayPosition by viewModel.todoDisplayPosition.collectAsStateWithLifecycle()
+    val browserUserAgent by viewModel.browserUserAgent.collectAsStateWithLifecycle()
+    val browserActionEnabled by viewModel.browserActionEnabled.collectAsStateWithLifecycle()
     val firstByteTimeoutSec by viewModel.firstByteTimeoutSec.collectAsStateWithLifecycle()
     val streamIdleTimeoutSec by viewModel.streamIdleTimeoutSec.collectAsStateWithLifecycle()
     val maxNetworkRetries by viewModel.maxNetworkRetries.collectAsStateWithLifecycle()
@@ -396,6 +403,7 @@ fun SettingsScreen(
         SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.ContainerDownloads -> SettingsSection.Container
+        SettingsSection.WebDav -> SettingsSection.Backup
         else -> if (expanded) null else SettingsSection.Menu
     }
 
@@ -520,6 +528,11 @@ fun SettingsScreen(
             label = "settings-section"
         ) { current ->
         when {
+            // 自带顶栏的页面，不能嵌进下面的 Scaffold（会双层顶栏）：窄窗占整屏，大屏占右栏。
+            current == SettingsSection.WebDav -> WebDavSyncScreen(
+                onNavigateBack = { section = SettingsSection.Backup }
+            )
+
             // 这两页自带顶栏，不能嵌进下面的 Scaffold（会双层顶栏）：窄窗占整屏，大屏占右栏。
             current == SettingsSection.ProviderEditor -> ProviderEditorScreen(
                 viewModel = viewModel,
@@ -711,6 +724,16 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        SettingsSection.Backup -> {
+                            IconButton(onClick = { section = SettingsSection.WebDav }) {
+                                Icon(
+                                    FeatherIcons.Cloud,
+                                    contentDescription = stringResource(R.string.backup_webdav_entry),
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
                         SettingsSection.Skills -> IconButton(onClick = {
                             showSkillAddSheet = true
                         }) {
@@ -850,7 +873,9 @@ fun SettingsScreen(
                     sendFileMaxSizeMb = sendFileMaxSizeMb,
                     onSetSendFileMaxSizeMb = { viewModel.setSendFileMaxSizeMb(it) },
                     deleteExternalWorkspaceSessions = deleteExternalWorkspaceSessions,
-                    onToggleDeleteExternalWorkspaceSessions = { viewModel.setDeleteExternalWorkspaceSessions(it) }
+                    onToggleDeleteExternalWorkspaceSessions = { viewModel.setDeleteExternalWorkspaceSessions(it) },
+                    todoDisplayPosition = todoDisplayPosition,
+                    onSetTodoDisplayPosition = { viewModel.setTodoDisplayPosition(it) }
                 )
                 SettingsSection.Providers -> ProvidersSection(
                     providers = providers,
@@ -1012,6 +1037,12 @@ fun SettingsScreen(
                     onImport = { entryId, fileUri -> viewModel.importDownloadedImage(entryId, fileUri) },
                     onDelete = { entryId -> viewModel.deleteDownloadedImage(entryId) }
                 )
+                SettingsSection.Browser -> BrowserSettingsSection(
+                    userAgent = browserUserAgent,
+                    actionEnabled = browserActionEnabled,
+                    onSelectUserAgent = { viewModel.setBrowserUserAgent(it) },
+                    onToggleAction = { action, enabled -> viewModel.setBrowserActionEnabled(action, enabled) }
+                )
                 SettingsSection.Proxy -> ProxySection(
                     config = proxyConfig,
                     testState = proxyTestState,
@@ -1081,6 +1112,7 @@ fun SettingsScreen(
                 SettingsSection.SkillEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
                 SettingsSection.RemoteServers -> {} // 已在上方 early return 处理
+                SettingsSection.WebDav -> {} // 已在上方 early return 处理
                 SettingsSection.About -> AboutSection(
                     updateCheckEnabled = updateCheckEnabled,
                     updateCheckChannel = updateCheckChannel,
@@ -1598,6 +1630,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.Server,
                 title = stringResource(SettingsSection.RemoteServers.titleRes),
                 onClick = { onOpen(SettingsSection.RemoteServers) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Globe,
+                title = stringResource(SettingsSection.Browser.titleRes),
+                onClick = { onOpen(SettingsSection.Browser) }
             )
         }
 

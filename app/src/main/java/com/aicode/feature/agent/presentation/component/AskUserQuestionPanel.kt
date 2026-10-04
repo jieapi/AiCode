@@ -31,8 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -43,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +53,7 @@ import com.aicode.feature.agent.domain.tool.question.SingleAnswer
 import com.aicode.feature.agent.domain.tool.question.UserQuestionAnswer
 import androidx.compose.ui.res.stringResource
 import com.aicode.R
+import com.aicode.core.ui.AppTextField
 import com.aicode.core.ui.ExpandableChevronIcon
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronDown
@@ -309,25 +307,16 @@ private fun QuestionCard(
             // 「其他」被选中时展开文本输入框
             if (isOther && isSelected) {
                 Spacer(Modifier.height(Spacing.xs))
-                TextField(
+                AppTextField(
                     value = customText,
                     onValueChange = onCustomTextChanged,
-                    placeholder = { Text(stringResource(R.string.ask_input_hint), style = MaterialTheme.typography.bodySmall) },
+                    placeholder = stringResource(R.string.ask_input_hint),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 28.dp),
                     textStyle = MaterialTheme.typography.bodySmall,
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    ),
-                    shape = RoundedCornerShape(Radius.sm)
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done)
                 )
             }
         }

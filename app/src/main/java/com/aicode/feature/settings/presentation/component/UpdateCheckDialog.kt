@@ -49,8 +49,8 @@ internal fun UpdateCheckDialog(
                     text = state.changelog,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .heightIn(max = 320.dp),
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

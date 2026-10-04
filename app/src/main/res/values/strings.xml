@@ -1603,4 +1603,100 @@
     <string name="browser_night_mode_on">关闭夜间模式</string>
     <string name="browser_night_mode_off">开启夜间模式</string>
     <string name="browser_devtools">开发者工具</string>
+
+    <!-- 浏览器设置 -->
+    <string name="settings_browser">浏览器</string>
+    <string name="browser_settings_group_ua">UA 设置</string>
+    <string name="browser_settings_ua_hint">选择浏览器向网站报告的设备与系统；非系统默认时会同时对齐对应的客户端提示头。</string>
+    <string name="browser_ua_default">系统默认</string>
+    <string name="browser_ua_android_phone">安卓手机</string>
+    <string name="browser_ua_android_tablet">安卓平板</string>
+    <string name="browser_ua_windows_10">Windows 10 电脑</string>
+    <string name="browser_ua_windows_11">Windows 11 电脑</string>
+    <string name="browser_ua_mac_intel">Mac 电脑（Intel 芯片）</string>
+    <string name="browser_ua_mac_apple">Mac 电脑（Apple 芯片）</string>
+    <string name="browser_settings_group_ai">AI 控制权限</string>
+    <string name="browser_settings_ai_hint">关闭某项后，AI 调用该浏览器操作会被拒绝；默认全部开启。</string>
+    <string name="browser_action_navigate">导航网页</string>
+    <string name="browser_action_evaluate">执行 JavaScript</string>
+    <string name="browser_action_click">点击元素</string>
+    <string name="browser_action_fill">填写表单</string>
+    <string name="browser_action_select">选择下拉项</string>
+    <string name="browser_action_hover">悬停元素</string>
+    <string name="browser_action_press">按键</string>
+    <string name="browser_action_get_text">读取文本</string>
+    <string name="browser_action_get_html">读取 HTML</string>
+    <string name="browser_action_get_backbone">读取无障碍树</string>
+    <string name="browser_action_screenshot">页面截图</string>
+    <string name="browser_action_console">读取控制台日志</string>
+    <string name="browser_action_wait">等待页面条件</string>
+    <string name="browser_action_scroll">滚动页面</string>
+    <string name="browser_action_dialog">处理弹窗</string>
+    <string name="browser_action_back">后退</string>
+    <string name="browser_action_forward">前进</string>
+    <string name="browser_action_reload">刷新</string>
+    <string name="browser_action_new_tab">新建标签页</string>
+    <string name="browser_action_close_tab">关闭标签页</string>
+    <string name="browser_action_select_tab">切换标签页</string>
+    <string name="browser_action_list_tabs">列出标签页</string>
+    <string name="browser_action_navigate_desc">导航到指定网址并等待加载完成</string>
+    <string name="browser_action_evaluate_desc">在页面中执行任意 JavaScript</string>
+    <string name="browser_action_click_desc">按选择器点击网页元素</string>
+    <string name="browser_action_fill_desc">向输入框中填入内容</string>
+    <string name="browser_action_select_desc">选择原生下拉框的选项</string>
+    <string name="browser_action_hover_desc">将鼠标悬停在元素上</string>
+    <string name="browser_action_press_desc">发送按键（回车、Esc、方向键等）</string>
+    <string name="browser_action_get_text_desc">提取页面或元素的文本</string>
+    <string name="browser_action_get_html_desc">提取页面或元素的 HTML</string>
+    <string name="browser_action_get_backbone_desc">提取无障碍树以定位元素</string>
+    <string name="browser_action_screenshot_desc">截取当前页面供识别</string>
+    <string name="browser_action_console_desc">读取页面控制台日志</string>
+    <string name="browser_action_wait_desc">等待某个条件满足</string>
+    <string name="browser_action_scroll_desc">滚动到元素或页面底部</string>
+    <string name="browser_action_dialog_desc">接受或取消页面弹窗</string>
+    <string name="browser_action_back_desc">返回上一页</string>
+    <string name="browser_action_forward_desc">前进到下一页</string>
+    <string name="browser_action_reload_desc">重新加载当前页面</string>
+    <string name="browser_action_new_tab_desc">新建标签页（可指定网址）</string>
+    <string name="browser_action_close_tab_desc">关闭指定标签页</string>
+    <string name="browser_action_select_tab_desc">切换到指定标签页</string>
+    <string name="browser_action_list_tabs_desc">列出所有标签页及状态</string>
+
+    <!-- WebDAV 同步 -->
+    <string name="backup_webdav_entry">WebDAV 备份同步</string>
+    <string name="backup_webdav_entry_desc">将备份同步到 WebDAV 云端</string>
+    <string name="webdav_title">WebDAV 备份同步</string>
+    <string name="webdav_tab_connection">连接</string>
+    <string name="webdav_tab_auto">自动同步</string>
+    <string name="webdav_server">服务器</string>
+    <string name="webdav_address">地址</string>
+    <string name="webdav_username">用户名</string>
+    <string name="webdav_password">密码</string>
+    <string name="webdav_test">连接测试</string>
+    <string name="webdav_sync_now">立即同步</string>
+    <string name="webdav_last_sync">上次同步：%1$s</string>
+    <string name="webdav_op_done">同步结果</string>
+    <string name="webdav_op_failed">操作失败</string>
+    <string name="webdav_auto_sync">自动同步</string>
+    <string name="webdav_auto_sync_toggle">自动备份同步</string>
+    <string name="webdav_auto_sync_toggle_desc">按设定频率自动将备份上传到云端</string>
+    <string name="webdav_sync_content">同步内容</string>
+    <string name="webdav_interval">同步频率</string>
+    <string name="webdav_interval_number">间隔</string>
+    <string name="webdav_interval_every">每隔</string>
+    <string name="webdav_unit_minute">分钟</string>
+    <string name="webdav_unit_hour">小时</string>
+    <string name="webdav_unit_day">天</string>
+
+    <!-- 任务待办 -->
+    <string name="settings_todo_display_position">任务待办显示位置</string>
+    <string name="settings_todo_display_position_desc">任务待办面板在聊天页的展示位置</string>
+    <string name="settings_todo_position_below_title">标题栏下方</string>
+    <string name="settings_todo_position_above_input">消息栏上方</string>
+    <string name="todo_dashboard_delete">删除待办</string>
+    <string name="todo_dashboard_delete_title">删除待办</string>
+    <string name="todo_dashboard_delete_confirm">确定删除当前会话的全部待办？删除后将隐藏，直到下次待办更新。</string>
+
+    <!-- 模型批量选择 -->
+    <string name="provider_models_select_failed">勾选失败</string>
 </resources>

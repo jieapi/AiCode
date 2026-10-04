@@ -1604,4 +1604,100 @@
     <string name="browser_night_mode_on">Turn off night mode</string>
     <string name="browser_night_mode_off">Turn on night mode</string>
     <string name="browser_devtools">Developer tools</string>
+
+    <!-- Browser settings -->
+    <string name="settings_browser">Browser</string>
+    <string name="browser_settings_group_ua">User-Agent</string>
+    <string name="browser_settings_ua_hint">Choose the device and OS the browser reports; non-default selections also align the matching client hints.</string>
+    <string name="browser_ua_default">System default</string>
+    <string name="browser_ua_android_phone">Android phone</string>
+    <string name="browser_ua_android_tablet">Android tablet</string>
+    <string name="browser_ua_windows_10">Windows 10 PC</string>
+    <string name="browser_ua_windows_11">Windows 11 PC</string>
+    <string name="browser_ua_mac_intel">Mac (Intel chip)</string>
+    <string name="browser_ua_mac_apple">Mac (Apple chip)</string>
+    <string name="browser_settings_group_ai">AI Control Permissions</string>
+    <string name="browser_settings_ai_hint">Turning an item off makes the AI call to that browser action be rejected. All are on by default.</string>
+    <string name="browser_action_navigate">Navigate</string>
+    <string name="browser_action_evaluate">Run JavaScript</string>
+    <string name="browser_action_click">Click element</string>
+    <string name="browser_action_fill">Fill form</string>
+    <string name="browser_action_select">Select option</string>
+    <string name="browser_action_hover">Hover element</string>
+    <string name="browser_action_press">Press key</string>
+    <string name="browser_action_get_text">Read text</string>
+    <string name="browser_action_get_html">Read HTML</string>
+    <string name="browser_action_get_backbone">Read accessibility tree</string>
+    <string name="browser_action_screenshot">Screenshot</string>
+    <string name="browser_action_console">Read console logs</string>
+    <string name="browser_action_wait">Wait for condition</string>
+    <string name="browser_action_scroll">Scroll page</string>
+    <string name="browser_action_dialog">Handle dialog</string>
+    <string name="browser_action_back">Back</string>
+    <string name="browser_action_forward">Forward</string>
+    <string name="browser_action_reload">Reload</string>
+    <string name="browser_action_new_tab">New tab</string>
+    <string name="browser_action_close_tab">Close tab</string>
+    <string name="browser_action_select_tab">Switch tab</string>
+    <string name="browser_action_list_tabs">List tabs</string>
+    <string name="browser_action_navigate_desc">Navigate to a URL and wait for load</string>
+    <string name="browser_action_evaluate_desc">Execute arbitrary JavaScript in the page</string>
+    <string name="browser_action_click_desc">Click a page element by selector</string>
+    <string name="browser_action_fill_desc">Type a value into an input field</string>
+    <string name="browser_action_select_desc">Choose an option in a native dropdown</string>
+    <string name="browser_action_hover_desc">Hover the pointer over an element</string>
+    <string name="browser_action_press_desc">Send a key (Enter, Esc, arrows, ...)</string>
+    <string name="browser_action_get_text_desc">Extract text from the page or an element</string>
+    <string name="browser_action_get_html_desc">Extract HTML from the page or an element</string>
+    <string name="browser_action_get_backbone_desc">Extract the accessibility tree to locate elements</string>
+    <string name="browser_action_screenshot_desc">Capture the current page for analysis</string>
+    <string name="browser_action_console_desc">Read the page console logs</string>
+    <string name="browser_action_wait_desc">Wait until a condition is met</string>
+    <string name="browser_action_scroll_desc">Scroll to an element or the bottom</string>
+    <string name="browser_action_dialog_desc">Accept or dismiss a page dialog</string>
+    <string name="browser_action_back_desc">Go back one page</string>
+    <string name="browser_action_forward_desc">Go forward one page</string>
+    <string name="browser_action_reload_desc">Reload the current page</string>
+    <string name="browser_action_new_tab_desc">Open a new tab (optionally with a URL)</string>
+    <string name="browser_action_close_tab_desc">Close a specific tab</string>
+    <string name="browser_action_select_tab_desc">Switch to a specific tab</string>
+    <string name="browser_action_list_tabs_desc">List all tabs and their state</string>
+
+    <!-- WebDAV sync -->
+    <string name="backup_webdav_entry">WebDAV Sync</string>
+    <string name="backup_webdav_entry_desc">Sync backups to a WebDAV server</string>
+    <string name="webdav_title">WebDAV Sync</string>
+    <string name="webdav_tab_connection">Connection</string>
+    <string name="webdav_tab_auto">Auto sync</string>
+    <string name="webdav_server">Server</string>
+    <string name="webdav_address">Address</string>
+    <string name="webdav_username">Username</string>
+    <string name="webdav_password">Password</string>
+    <string name="webdav_test">Test connection</string>
+    <string name="webdav_sync_now">Sync now</string>
+    <string name="webdav_last_sync">Last sync: %1$s</string>
+    <string name="webdav_op_done">Sync result</string>
+    <string name="webdav_op_failed">Operation failed</string>
+    <string name="webdav_auto_sync">Auto sync</string>
+    <string name="webdav_auto_sync_toggle">Automatic backup sync</string>
+    <string name="webdav_auto_sync_toggle_desc">Upload backups automatically at the configured interval</string>
+    <string name="webdav_sync_content">Sync content</string>
+    <string name="webdav_interval">Sync interval</string>
+    <string name="webdav_interval_number">Interval</string>
+    <string name="webdav_interval_every">every</string>
+    <string name="webdav_unit_minute">Minutes</string>
+    <string name="webdav_unit_hour">Hours</string>
+    <string name="webdav_unit_day">Days</string>
+
+    <!-- Todo -->
+    <string name="settings_todo_display_position">Todo display position</string>
+    <string name="settings_todo_display_position_desc">Where the todo panel shows on the chat screen</string>
+    <string name="settings_todo_position_below_title">Below the title bar</string>
+    <string name="settings_todo_position_above_input">Above the input bar</string>
+    <string name="todo_dashboard_delete">Delete todos</string>
+    <string name="todo_dashboard_delete_title">Delete todos</string>
+    <string name="todo_dashboard_delete_confirm">Delete all todos for this session? They will stay hidden until the next todo update.</string>
+
+    <!-- Model batch selection -->
+    <string name="provider_models_select_failed">Select failed</string>
 </resources>

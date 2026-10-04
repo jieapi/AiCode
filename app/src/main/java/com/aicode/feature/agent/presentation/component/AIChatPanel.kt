@@ -56,6 +56,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
@@ -339,7 +340,7 @@ private fun splitChatTurns(messages: List<AgentUIMessage>): Pair<List<AgentUIMes
     var user: AgentUIMessage? = null
     var body: MutableList<AgentUIMessage>? = null
     for (message in messages) {
-        if (message.role == MessageRole.USER && !message.isBackgroundNotification) {
+        if (message.role == MessageRole.USER && !message.isBackgroundNotification && !message.isCompactionMarker) {
             user?.let { turns += ChatTurn(turnKeyOf(it.id), it, body?.toList().orEmpty()) }
             user = message
             body = ArrayList()
@@ -582,6 +583,9 @@ fun AIChatPanel(
     val pendingPermissionSessionTitle by viewModel.pendingToolPermissionSessionTitle.collectAsStateWithLifecycle()
     val pendingQuestion by viewModel.pendingUserQuestion.collectAsStateWithLifecycle()
     val currentTodoItems by viewModel.currentSessionTodoItems.collectAsStateWithLifecycle()
+    // 待办显示位置：标题栏下方 / 消息栏上方（默认）。
+    val todoDisplayPositionState = settingsViewModel?.todoDisplayPosition?.collectAsStateWithLifecycle()
+    val todoBelowTitle = todoDisplayPositionState?.value == com.aicode.feature.settings.data.repository.TodoDisplayPosition.BELOW_TITLE
     val queuedRequests by viewModel.queuedRequests.collectAsStateWithLifecycle()
     val targetRewindMessageId by viewModel.targetRewindMessageId.collectAsStateWithLifecycle()
     val providers = (settingsViewModel?.providers?.collectAsStateWithLifecycle()?.value ?: emptyList()).filter { it.isEnabled }
@@ -614,11 +618,7 @@ fun AIChatPanel(
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
     val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
 
-    var inputText by remember { mutableStateOf("") }
-    val inputDraft by viewModel.inputDraft.collectAsStateWithLifecycle()
-    LaunchedEffect(inputDraft) {
-        if (inputText != inputDraft) inputText = inputDraft
-    }
+    val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
     // 输入 "/" 打开命令菜单时重扫技能，反映磁盘上技能的增删改。
     LaunchedEffect(inputText) {
         if (inputText == "/") viewModel.refreshSlashCommands()
@@ -675,7 +675,7 @@ fun AIChatPanel(
         if (!isBusy) {
             null
         } else {
-            messages.lastOrNull { it.role == MessageRole.USER && !it.isBackgroundNotification }
+            messages.lastOrNull { it.role == MessageRole.USER && !it.isBackgroundNotification && !it.isCompactionMarker }
                 ?.let { turnKeyOf(it.id) }
         }
     }
@@ -1205,7 +1205,6 @@ fun AIChatPanel(
                 inputImages = images,
                 inputAttachments = attachments.toAgentAttachments()
             )
-            inputText = ""
             viewModel.clearInputDraft()
             pendingAttachments = emptyList()
             followBottom = true
@@ -1434,6 +1433,22 @@ fun AIChatPanel(
                 .widthIn(max = readableContentMaxWidth())
                 .fillMaxSize()
         ) {
+            // 待办显示位置为「标题栏下方」时，在页面头部（顶栏之下）渲染待办面板。
+            if (todoBelowTitle && currentTodoItems.isNotEmpty()) {
+                TodoDashboardBar(
+                    items = currentTodoItems,
+                    sessionId = currentSessionId.orEmpty(),
+                    forceCollapse = pendingPermission != null || pendingQuestion != null || imeVisible,
+                    onExpandedChange = { todoExpanded = it },
+                    onDismiss = { viewModel.dismissTodos(currentSessionId.orEmpty()) },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(1f)
+                        .padding(horizontal = Spacing.lg)
+                        .padding(top = Spacing.xs)
+                )
+            }
+
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f)) {
@@ -1576,7 +1591,9 @@ fun AIChatPanel(
             val questionForPanel = rememberLastNonNull(pendingQuestion)
             AnimatedVisibility(
                 visible = pendingQuestion != null,
-                modifier = Modifier.graphicsLayer { alpha = floatingPanelAlpha },
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .graphicsLayer { alpha = floatingPanelAlpha },
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
@@ -1610,7 +1627,7 @@ fun AIChatPanel(
 
             ChatInputBar(
                 value = inputText,
-                onValueChange = { inputText = it; viewModel.updateInputDraft(it) },
+                onValueChange = viewModel::updateInputDraft,
                 onSend = sendMessage,
                 enterToSend = settingsViewModel?.enterToSend?.collectAsStateWithLifecycle()?.value ?: false,
                 onStop = { viewModel.stopAgent() },
@@ -1646,9 +1663,10 @@ fun AIChatPanel(
                 onEditQueued = { queuedEditing = it },
                 onInterjectQueued = { viewModel.interjectQueuedRequest(it) },
                 dashboardState = currentDashboardState,
-                todoItems = currentTodoItems,
+                todoItems = if (todoBelowTitle) emptyList() else currentTodoItems,
                 sessionId = currentSessionId.orEmpty(),
                 onTodoExpandedChange = { todoExpanded = it },
+                onTodoDismiss = { viewModel.dismissTodos(currentSessionId.orEmpty()) },
                 forceCollapseDashboard = pendingPermission != null || pendingQuestion != null || planApproval != null || imeVisible,
                 onDashboardExpandedChange = { dashboardExpanded = it },
                 onRefreshDashboard = {
@@ -1741,7 +1759,7 @@ fun AIChatPanel(
                     promptSnippet = targetMsg?.content ?: "",
                     onOptionSelected = { option ->
                         viewModel.executeRewindOption(targetId, option) { text, attachments ->
-                            inputText = text
+                            viewModel.updateInputDraft(text)
                             pendingAttachments = attachments.map { it.toPendingAttachment() }
                         }
                     },

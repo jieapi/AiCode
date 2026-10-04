@@ -24,6 +24,15 @@ enum class StartupSessionMode {
     RECENT_SESSION
 }
 
+/** 任务待办（Todo）在聊天页的显示位置。 */
+enum class TodoDisplayPosition {
+    /** 消息栏上方（默认）：紧贴输入框上方展示。 */
+    ABOVE_INPUT,
+
+    /** 标题栏下方：在页面头部顶栏之下展示。 */
+    BELOW_TITLE
+}
+
 /**
  * 「偏好设置」里的用户偏好。
  *
@@ -48,6 +57,7 @@ class GeneralSettingsRepository @Inject constructor(
         val COMPACTION_THRESHOLD_PERCENT_KEY = intPreferencesKey("compaction_threshold_percent")
         val SENDFILE_MAX_SIZE_MB_KEY = intPreferencesKey("sendfile_max_size_mb")
         val DELETE_EXTERNAL_WORKSPACE_SESSIONS_KEY = booleanPreferencesKey("delete_external_workspace_sessions")
+        val TODO_DISPLAY_POSITION_KEY = stringPreferencesKey("todo_display_position")
         /** 「提示词」页使用说明公告已展示内容的哈希；无值或与当前内容哈希不一致时重新弹出。 */
         val PROMPTS_ANNOUNCEMENT_SHOWN_HASH_KEY = stringPreferencesKey("prompts_announcement_shown_hash")
 
@@ -86,6 +96,18 @@ class GeneralSettingsRepository @Inject constructor(
 
     /** 切换到工作区前读一次偏好，避免在会话初始化路径上多开一条收集流。 */
     suspend fun startupSessionMode(): StartupSessionMode = startupSessionModeFlow.first()
+
+    /** 任务待办显示位置；未设置或值无法识别时回退到 [TodoDisplayPosition.ABOVE_INPUT]。 */
+    val todoDisplayPositionFlow: Flow<TodoDisplayPosition> = context.generalDataStore.data.map { prefs ->
+        when (prefs[TODO_DISPLAY_POSITION_KEY]) {
+            TodoDisplayPosition.BELOW_TITLE.name -> TodoDisplayPosition.BELOW_TITLE
+            else -> TodoDisplayPosition.ABOVE_INPUT
+        }
+    }
+
+    suspend fun setTodoDisplayPosition(position: TodoDisplayPosition) {
+        context.generalDataStore.edit { it[TODO_DISPLAY_POSITION_KEY] = position.name }
+    }
 
     /** 备份快照：当前自动对齐开关。 */
     suspend fun autoRemoveStaleModelsSnapshot(): Boolean = autoRemoveStaleModelsFlow.first()

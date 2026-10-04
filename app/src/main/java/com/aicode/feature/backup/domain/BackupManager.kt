@@ -1,5 +1,6 @@
 package com.aicode.feature.backup.domain
 
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -43,6 +44,9 @@ interface BackupManager {
      * @param input 调用方负责打开与关闭输入流
      */
     suspend fun previewImport(input: InputStream, password: CharArray?): Result<ImportPreview>
+
+    /** 准备经过完整解密校验的压缩包，调用方负责在预览和恢复结束后删除临时文件。 */
+    suspend fun prepareImport(input: InputStream, password: CharArray?): File
 }
 
 /** 导入预览结果：备份中的工作区列表（供勾选）。 */

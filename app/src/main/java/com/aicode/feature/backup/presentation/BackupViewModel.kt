@@ -18,8 +18,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.OutputStream
+import kotlinx.coroutines.NonCancellable
 import javax.inject.Inject
 
 sealed class BackupState {
@@ -27,11 +30,10 @@ sealed class BackupState {
     data object Working : BackupState()
     data object ExportDone : BackupState()
     data class ImportSuccess(val stats: RestoreStats) : BackupState()
-    /** 导入预览完成，备份含工作区数据：等待用户勾选要恢复的工作区（暂存 uri 与口令）。 */
+    /** 导入预览完成，等待选择要恢复的工作区。 */
     data class WorkspaceSelection(
         val workspaces: List<WorkspaceBackupMeta>,
-        val uri: Uri,
-        val password: String
+        val uri: Uri
     ) : BackupState()
     data class Error(val message: String) : BackupState()
 }
@@ -44,6 +46,9 @@ class BackupViewModel @Inject constructor(
 
     private val _state = MutableStateFlow<BackupState>(BackupState.Idle)
     val state: StateFlow<BackupState> = _state.asStateFlow()
+
+    @Volatile
+    private var preparedImport: File? = null
 
     private val prefs = context.getSharedPreferences("backup_options", Context.MODE_PRIVATE)
 
@@ -97,32 +102,43 @@ class BackupViewModel @Inject constructor(
             val pw = password.toCharArray().takeIf { it.isNotEmpty() }
             FileLogger.i(TAG, "导入请求：${describeUri(uri)}（${if (pw != null) "加密" else "明文"}）")
             try {
-                val input = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)
+                val preview = withContext(Dispatchers.IO + NonCancellable) {
+                    val input = context.contentResolver.openInputStream(uri)
                         ?: throw IllegalArgumentException(context.getString(R.string.backup_read_failed))
-                }
-                input.use { backupManager.previewImport(it, pw) }
-                    .onSuccess { preview ->
-                        if (preview.hasWorkspaceData) {
-                            _state.value = BackupState.WorkspaceSelection(preview.workspaces, uri, password)
+                    input.use {
+                        if (pw == null) {
+                            backupManager.previewImport(it, null)
                         } else {
-                            restoreFromUri(uri, pw, null)
+                            val file = backupManager.prepareImport(it, pw)
+                            preparedImport = file
+                            file.inputStream().use { source -> backupManager.previewImport(source, null) }
                         }
                     }
-                    .onFailure { _state.value = BackupState.Error(describeImportError(it)) }
+                }
+                preview.onSuccess { preview ->
+                    if (preview.hasWorkspaceData) {
+                        _state.value = BackupState.WorkspaceSelection(preview.workspaces, uri)
+                    } else {
+                        restoreFromUri(uri, null)
+                    }
+                }.onFailure { _state.value = BackupState.Error(describeImportError(it)) }
             } catch (e: Exception) {
                 _state.value = BackupState.Error(describeImportError(e))
+            } finally {
+                pw?.fill('\u0000')
+                if (_state.value !is BackupState.WorkspaceSelection || !isActive) {
+                    clearPreparedImport()
+                }
             }
         }
     }
 
-    /** 勾选确认后按所选工作区恢复（重新打开输入流执行真正还原）。 */
+    /** 勾选确认后按所选工作区恢复，复用已校验的解密文件。 */
     fun confirmImportSelection(selected: Set<String>) {
         val current = _state.value as? BackupState.WorkspaceSelection ?: return
         _state.value = BackupState.Working
         viewModelScope.launch {
-            val pw = current.password.toCharArray().takeIf { it.isNotEmpty() }
-            restoreFromUri(current.uri, pw, selected)
+            restoreFromUri(current.uri, selected)
         }
     }
 
@@ -130,18 +146,21 @@ class BackupViewModel @Inject constructor(
     fun cancelImportSelection() {
         if (_state.value is BackupState.WorkspaceSelection) {
             _state.value = BackupState.Idle
+            val file = preparedImport
+            preparedImport = null
+            viewModelScope.launch(Dispatchers.IO + NonCancellable) { file?.delete() }
         }
     }
 
-    private suspend fun restoreFromUri(uri: Uri, pw: CharArray?, selected: Set<String>?) {
+    private suspend fun restoreFromUri(uri: Uri, selected: Set<String>?) {
         try {
             FileLogger.i(TAG, "开始还原：${describeUri(uri)}${if (selected != null) "，勾选工作区=${selected.size}个" else "，全量"}")
-            val input = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)
+            val result = withContext(Dispatchers.IO) {
+                val input = preparedImport?.inputStream() ?: context.contentResolver.openInputStream(uri)
                     ?: throw IllegalArgumentException(context.getString(R.string.backup_read_failed))
+                input.use { backupManager.import(it, null, selected) }
             }
-            input.use { backupManager.import(it, pw, selected) }
-                .onSuccess {
+            result.onSuccess {
                     FileLogger.i(TAG, "还原成功：$it")
                     _state.value = BackupState.ImportSuccess(it)
                 }
@@ -152,7 +171,21 @@ class BackupViewModel @Inject constructor(
         } catch (e: Exception) {
             FileLogger.e(TAG, "还原异常", e)
             _state.value = BackupState.Error(describeImportError(e))
+        } finally {
+            clearPreparedImport()
         }
+    }
+
+    private suspend fun clearPreparedImport() {
+        val file = preparedImport
+        preparedImport = null
+        withContext(Dispatchers.IO + NonCancellable) { file?.delete() }
+    }
+
+    override fun onCleared() {
+        preparedImport?.delete()
+        preparedImport = null
+        super.onCleared()
     }
 
     /** 日志用 URI 摘要：只保留 scheme://authority/最后一段，避免记录完整路径。 */
@@ -180,7 +213,11 @@ class BackupViewModel @Inject constructor(
     }
 
     fun reset() {
-        _state.value = BackupState.Idle
+        if (_state.value is BackupState.WorkspaceSelection) {
+            cancelImportSelection()
+        } else {
+            _state.value = BackupState.Idle
+        }
     }
 
     companion object {

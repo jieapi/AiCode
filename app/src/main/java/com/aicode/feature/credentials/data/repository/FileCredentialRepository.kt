@@ -119,9 +119,19 @@ class FileCredentialRepository @Inject constructor(
     private fun encode(plain: String): String =
         Base64.encodeToString(plain.toByteArray(Charsets.UTF_8), Base64.NO_WRAP).reversed()
 
-    /** 解码编码串；不是本格式（如旧版明文）时返回 null。 */
+    /**
+     * 解码编码串；不是本格式（如旧版明文）时返回 null。
+     *
+     * android.util.Base64 的 DEFAULT 解码是「宽容」的：`:`、`/`、`@` 等非法字符一律按 SKIP 忽略、
+     * 不抛异常，明文也能被「解码」成乱码。因此不能以「未抛异常」判定格式，改用往返校验：只有
+     * `encode(decode(raw)) == raw` 才认定为编码格式，否则按明文处理（旧版明文需回退解析，否则凭据全部读空）。
+     */
     private fun tryDecode(text: String): String? = runCatching {
-        String(Base64.decode(text.reversed(), Base64.DEFAULT), Charsets.UTF_8)
+        val raw = text.trim()
+        if (raw.isEmpty()) return@runCatching null
+        val decoded = String(Base64.decode(raw.reversed(), Base64.DEFAULT), Charsets.UTF_8)
+        if (encode(decoded) != raw) return@runCatching null
+        decoded
     }.getOrNull()
 
     /** 把旧版明文凭据文件迁移为编码格式（幂等）。 */

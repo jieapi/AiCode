@@ -15,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -174,6 +175,7 @@ internal fun ChatInputBar(
     todoItems: List<TodoItem> = emptyList(),
     sessionId: String = "",
     onTodoExpandedChange: (Boolean) -> Unit = {},
+    onTodoDismiss: (() -> Unit)? = null,
     forceCollapseDashboard: Boolean = false,
     /** 消息列表正在滚动时内容区淡出到 40%，停止滚动恢复；用于长列表阅读时降低底部干扰（同 git 页 tab 栏）。 */
     isScrolling: Boolean = false,
@@ -234,9 +236,10 @@ internal fun ChatInputBar(
         // 渐变终点固定在蒙版可视高度内：若跟随整个 Box（含 imeInset 被键盘拉长的部分），
         // 键盘弹起时可见区域只占渐变前段，alpha 被摊薄到几乎透明——看起来像没有蒙版。
         val maskGradientEndY = with(LocalDensity.current) { INPUT_BAR_MASK_HEIGHT.toPx() }
-        Box(
+        BoxWithConstraints(
             modifier = Modifier.fillMaxWidth()
         ) {
+            val dashboardBodyMaxHeight = (maxHeight - imeInset - Spacing.md).coerceAtLeast(0.dp) * 0.4f
             // 半透明渐变蒙版：盖住输入框区域 + 导航栏（手势小白条）区域，滚动内容滑入时被遮罩
             // （能看见但看不清）；高度含 IME inset 随键盘上移，渐变在 INPUT_BAR_MASK_HEIGHT 内完成，
             // 之下为纯色。注意 IME padding 不能加在外层 Box 上——align(BottomCenter) 的子项
@@ -279,6 +282,8 @@ internal fun ChatInputBar(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(rememberScrollState())
                             .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
                     ) {
                         filteredCommands.forEach { command ->
@@ -340,7 +345,8 @@ internal fun ChatInputBar(
                     items = todoItems,
                     sessionId = sessionId,
                     forceCollapse = forceCollapseDashboard,
-                    onExpandedChange = onTodoExpandedChange
+                    onExpandedChange = onTodoExpandedChange,
+                    onDismiss = onTodoDismiss
                 )
             }
 
@@ -351,6 +357,7 @@ internal fun ChatInputBar(
                     onRefresh = onRefreshDashboard,
                     onRefreshByButton = onRefreshDashboardByButton,
                     onExpandedChange = onDashboardExpandedChange,
+                    maxExpandedBodyHeight = dashboardBodyMaxHeight,
                     forceCollapse = forceCollapseDashboard
                 )
             }

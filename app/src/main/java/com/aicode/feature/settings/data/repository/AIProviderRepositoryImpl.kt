@@ -15,8 +15,11 @@ import com.aicode.feature.settings.domain.model.ProxyType
 import com.aicode.feature.settings.domain.model.sanitized
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
 import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -56,18 +59,18 @@ class AIProviderRepositoryImpl @Inject constructor(
     override fun getAllProviders(): Flow<List<AIProviderConfig>> {
         return aiProviderDao.getAllProviders().map { entities ->
             entities.map { it.toDomainModel() }
-        }
+        }.flowOn(Dispatchers.IO)
     }
 
-    override suspend fun getProviderById(id: String): AIProviderConfig? {
-        return aiProviderDao.getProviderById(id)?.toDomainModel()
+    override suspend fun getProviderById(id: String): AIProviderConfig? = withContext(Dispatchers.IO) {
+        aiProviderDao.getProviderById(id)?.toDomainModel()
     }
 
     /**
      * 保存提供商。排序值以数据库当前值为准（重排可能异步持久化，UI 传入的
      * sortOrder 可能陈旧，直接使用会撤销刚完成的排序）；新提供商取最大排序 +1。
      */
-    override suspend fun saveProvider(provider: AIProviderConfig) {
+    override suspend fun saveProvider(provider: AIProviderConfig): Unit = withContext(Dispatchers.IO) {
         agentDatabase.withTransaction {
             val current = aiProviderDao.getProviderById(provider.id)
             val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
