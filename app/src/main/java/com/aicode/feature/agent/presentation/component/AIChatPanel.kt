@@ -104,6 +104,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 
 /**
@@ -621,6 +623,8 @@ fun AIChatPanel(
     }
     var pendingAttachments by remember { mutableStateOf<List<PendingUploadAttachment>>(emptyList()) }
     var uploadingCount by remember { mutableStateOf(0) }
+    // 串行化附件上传：两次上传并发时 pendingAttachments 的读-改-写会互相覆盖，导致先选的附件预览丢失。
+    val attachmentUploadMutex = remember { Mutex() }
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -871,20 +875,23 @@ fun AIChatPanel(
         scope.launch {
             var successCount = 0
             val failures = mutableListOf<String>()
-            uploadingCount = selected.size
-            try {
-                selected.forEach { uri ->
-                    runCatching {
-                        copyUriToWorkspace(context, uri, viewModel.fileAccess, includeImageData = images)
-                    }.onSuccess { uploaded ->
-                        pendingAttachments = pendingAttachments + uploaded.toPendingAttachment()
-                        successCount += 1
-                    }.onFailure { error ->
-                        failures += (error.message ?: uploadFallbackError(context))
+            // 串行化：并发上传会让 pendingAttachments 的读-改-写互相覆盖，先选的附件预览丢失。
+            attachmentUploadMutex.withLock {
+                uploadingCount = selected.size
+                try {
+                    selected.forEach { uri ->
+                        runCatching {
+                            copyUriToWorkspace(context, uri, viewModel.fileAccess, includeImageData = images)
+                        }.onSuccess { uploaded ->
+                            pendingAttachments = pendingAttachments + uploaded.toPendingAttachment()
+                            successCount += 1
+                        }.onFailure { error ->
+                            failures += (error.message ?: uploadFallbackError(context))
+                        }
                     }
+                } finally {
+                    uploadingCount = 0
                 }
-            } finally {
-                uploadingCount = 0
             }
             // 结果提示：全失败展示首个错误；有文件被上限截断或上传失败时用 partial 文案；全成功用 success 文案。
             val skipped = uris.size - selected.size
