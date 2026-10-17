@@ -1,0 +1,235 @@
+{
+  "sources": {
+    "official": {
+      "name": {
+        "zh": "官方源",
+        "en": "Official"
+      },
+      "distros": {
+        "alpine": "https://dl-cdn.alpinelinux.org",
+        "ubuntu": "https://cdimage.ubuntu.com",
+        "debian": "https://doi-janky.infosiftr.net"
+      }
+    },
+    "huawei": {
+      "name": {
+        "zh": "华为云",
+        "en": "Huawei Cloud"
+      },
+      "distros": {
+        "alpine": "https://repo.huaweicloud.com",
+        "ubuntu": "https://repo.huaweicloud.com/ubuntu-cdimage"
+      }
+    },
+    "aliyun": {
+      "name": {
+        "zh": "阿里云",
+        "en": "Aliyun"
+      },
+      "distros": {
+        "alpine": "https://mirrors.aliyun.com",
+        "ubuntu": "https://mirrors.aliyun.com/ubuntu-cdimage"
+      }
+    },
+    "tencent": {
+      "name": {
+        "zh": "腾讯云",
+        "en": "Tencent Cloud"
+      },
+      "distros": {
+        "alpine": "https://mirrors.cloud.tencent.com",
+        "ubuntu": ""
+      }
+    }
+  },
+  "images": [
+    {
+      "id": "alpine-3.21",
+      "name": "Alpine Linux",
+      "version": "3.21.8",
+      "eol": "2026-11-01",
+      "description": "极简 Linux 发行版，rootfs 仅数 MB；与内置 Alpine 同为 3.21 分支",
+      "sizeBytes": 3831912,
+      "distro": "alpine",
+      "path": "alpine/v3.21/releases/{abi}/alpine-minirootfs-3.21.8-{abi}.tar.gz",
+      "sha256ByAbi": {
+        "arm64": "f25a96d2846a4bc439093107c1b48a8b0c93dcb411e2cb9cfded6f790b2bc001",
+        "x86_64": "6ea461b0225faad280b7e13df878b30fdd6d969dde25ef05f85a1bcec9033348"
+      },
+      "abiNames": {
+        "arm64": "aarch64",
+        "x86_64": "x86_64"
+      }
+    },
+    {
+      "id": "alpine-3.22",
+      "name": "Alpine Linux",
+      "version": "3.22.6",
+      "eol": "2027-05-01",
+      "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
+      "sizeBytes": 3969729,
+      "distro": "alpine",
+      "path": "alpine/v3.22/releases/{abi}/alpine-minirootfs-3.22.6-{abi}.tar.gz",
+      "sha256ByAbi": {
+        "arm64": "821565fa8f3953eefd12497b166b4b50add2f7c57fb312e75862f5867e06fefe",
+        "x86_64": "27694aaa55fd7a9e3ef596e0ad4eb66802308bb20172b17030cd5f4d8ae9bac2"
+      },
+      "abiNames": {
+        "arm64": "aarch64",
+        "x86_64": "x86_64"
+      }
+    },
+    {
+      "id": "alpine-3.23",
+      "name": "Alpine Linux",
+      "version": "3.23.6",
+      "eol": "2027-11-01",
+      "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
+      "sizeBytes": 4026314,
+      "distro": "alpine",
+      "path": "alpine/v3.23/releases/{abi}/alpine-minirootfs-3.23.6-{abi}.tar.gz",
+      "sha256ByAbi": {
+        "arm64": "b17a57958e29735ff0e6e64254d958e65903687a70ca30cc430b33a965ad49d7",
+        "x86_64": "6fc0e3639a1c01f156970d7626aab90bc90697117069dbc39ad880b84efa319a"
+      },
+      "abiNames": {
+        "arm64": "aarch64",
+        "x86_64": "x86_64"
+      }
+    },
+    {
+      "id": "alpine-3.24",
+      "name": "Alpine Linux",
+      "version": "3.24.2",
+      "eol": "2028-06-01",
+      "description": "极简 Linux 发行版，rootfs 仅数 MB；当前最新稳定版",
+      "sizeBytes": 4028030,
+      "distro": "alpine",
+      "path": "alpine/v3.24/releases/{abi}/alpine-minirootfs-3.24.2-{abi}.tar.gz",
+      "sha256ByAbi": {
+        "arm64": "9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773",
+        "x86_64": "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
+      },
+      "abiNames": {
+        "arm64": "aarch64",
+        "x86_64": "x86_64"
+      }
+    },
+    {
+      "id": "ubuntu-20.04",
+      "name": "Ubuntu",
+      "version": "20.04.5",
+      "eol": "2030-04-23",
+      "description": "Ubuntu 20.04 LTS (Focal) base rootfs",
+      "sizeBytes": 27763108,
+      "distro": "ubuntu",
+      "path": "ubuntu-base/releases/20.04/release/ubuntu-base-20.04.5-base-{abi}.tar.gz",
+      "supportEnds": "2025-05-31",
+      "supportExtension": "ESM",
+      "sha256ByAbi": {
+        "arm64": "f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52",
+        "x86_64": "60e216b60947653dc8989be3821380268315b99b2959c29882781541bfe5a426"
+      },
+      "abiNames": {
+        "arm64": "arm64",
+        "x86_64": "amd64"
+      }
+    },
+    {
+      "id": "ubuntu-22.04",
+      "name": "Ubuntu",
+      "version": "22.04.5",
+      "eol": "2032-04-21",
+      "description": "Ubuntu 22.04 LTS (Jammy) base rootfs",
+      "sizeBytes": 29832285,
+      "distro": "ubuntu",
+      "path": "ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-{abi}.tar.gz",
+      "supportEnds": "2027-06-01",
+      "supportExtension": "ESM",
+      "sha256ByAbi": {
+        "arm64": "075d4abd2817a5023ab0a82f5cb314c5ec0aa64a9c0b40fd3154ca3bfdae979f",
+        "x86_64": "242cd8898b33ea806ef5f13b1076ed7c76f9f989d18384452f7166692438ff1a"
+      },
+      "abiNames": {
+        "arm64": "arm64",
+        "x86_64": "amd64"
+      }
+    },
+    {
+      "id": "ubuntu-24.04",
+      "name": "Ubuntu",
+      "version": "24.04.5",
+      "eol": "2034-04-25",
+      "description": "Ubuntu 24.04 LTS (Noble) base rootfs，生态完整，适合作为主力开发环境",
+      "sizeBytes": 30028293,
+      "distro": "ubuntu",
+      "path": "ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-{abi}.tar.gz",
+      "supportEnds": "2029-05-31",
+      "supportExtension": "ESM",
+      "sha256ByAbi": {
+        "arm64": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
+        "x86_64": "e77b6f10c2590cef872b33ee9f635a0e3fd1f57fb074c0e52b5c7f56147a0c86"
+      },
+      "abiNames": {
+        "arm64": "arm64",
+        "x86_64": "amd64"
+      }
+    },
+    {
+      "id": "ubuntu-26.04",
+      "name": "Ubuntu",
+      "version": "26.04.1",
+      "eol": "2036-04-23",
+      "description": "Ubuntu 26.04 LTS (Resolute Raccoon) base rootfs，最新 LTS，生态完整",
+      "sizeBytes": 35092106,
+      "distro": "ubuntu",
+      "path": "ubuntu-base/releases/26.04/release/ubuntu-base-26.04.1-base-{abi}.tar.gz",
+      "supportEnds": "2031-05-29",
+      "supportExtension": "ESM",
+      "sha256ByAbi": {
+        "arm64": "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd",
+        "x86_64": "a496a960472ce474a59590b8987d3a1135d3cbef1991f3b1abe8cacfea8bf85a"
+      },
+      "abiNames": {
+        "arm64": "arm64",
+        "x86_64": "amd64"
+      }
+    },
+    {
+      "id": "debian-12",
+      "name": "Debian",
+      "version": "12.15",
+      "versionSuffix": "(bookworm)",
+      "versionPath": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/bookworm/rootfs.debian_version",
+      "eol": "2028-06-30",
+      "description": "Debian 12 稳定版，Docker 官方镜像同源 rootfs（debuerreotype 构建）",
+      "sizeBytes": 30627660,
+      "distro": "debian",
+      "path": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/bookworm/rootfs.tar.xz",
+      "supportEnds": "2026-07-11",
+      "supportExtension": "LTS",
+      "abiNames": {
+        "arm64": "arm64v8",
+        "x86_64": "amd64"
+      }
+    },
+    {
+      "id": "debian-13",
+      "name": "Debian",
+      "version": "13.7",
+      "versionSuffix": "(trixie)",
+      "versionPath": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/trixie/rootfs.debian_version",
+      "eol": "2030-06-30",
+      "description": "Debian 13 最新稳定版，Docker 官方镜像同源 rootfs（debuerreotype 构建）",
+      "sizeBytes": 30894916,
+      "distro": "debian",
+      "path": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/trixie/rootfs.tar.xz",
+      "supportEnds": "2028-08-09",
+      "supportExtension": "LTS",
+      "abiNames": {
+        "arm64": "arm64v8",
+        "x86_64": "amd64"
+      }
+    }
+  ]
+}
