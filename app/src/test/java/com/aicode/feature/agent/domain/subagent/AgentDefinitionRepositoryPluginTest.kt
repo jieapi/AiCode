@@ -43,10 +43,13 @@ class AgentDefinitionRepositoryPluginTest {
     }
 
     @Test
-    fun listAll_excludesPluginAgents() {
-        every { plugin.listDefinitions() } returns listOf(agent("a.kit:one"))
+    fun listAll_includesPluginAgentsWithPluginScope() {
+        every { plugin.listAllDefinitions() } returns listOf(agent("a.kit:one"))
 
-        assertTrue(repository.listAll().isEmpty())
+        val entries = repository.listAll()
+        assertEquals(1, entries.size)
+        assertEquals("a.kit:one", entries.first().definition.name)
+        assertEquals(AgentDefinitionScope.PLUGIN, entries.first().scope)
     }
 
     @Test

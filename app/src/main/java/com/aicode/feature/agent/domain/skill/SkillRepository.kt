@@ -13,7 +13,7 @@ import javax.inject.Singleton
  *
  * 全局技能 `~/.aicode/skills`、项目级技能 `<workspace>/.aicode/skills`，两者都经 [FileAccessProvider]
  * 以容器路径读写，跟随当前执行环境（本地宿主目录或远程 SSH 工作区）。
- * 插件技能来自手机端插件包，只读，只进入注入清单与正文加载，不出现在 [listAllSkills]（设置页的可编辑列表）。
+ * 插件技能来自手机端插件包，只读，同样出现在 [listAllSkills] 供设置页展示，但不允许直接编辑或删除。
  */
 @Singleton
 class SkillRepository @Inject constructor(
@@ -23,14 +23,18 @@ class SkillRepository @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val pluginSkillSource: PluginSkillSource
 ) {
-    /** 全部技能（含来源作用域），未过滤禁用；同名技能项目级优先（与 MCP 两级配置一致）。 */
-    fun listAllSkills(): List<SkillEntry> =
+    /** 用户自建的全部技能（全局 + 项目级）。 */
+    fun listOwnSkills(): List<SkillEntry> =
         mergeAll(globalDirectorySkillSource.listSkills(), projectDirectorySkillSource.listSkills())
+
+    /** 全部技能条目（含用户自建与插件提供），用于设置页管理列表；同名技能项目级优先。 */
+    fun listAllSkills(): List<SkillEntry> =
+        listOwnSkills() + pluginSkillSource.listAllSkills().map { SkillEntry(it, SkillScope.PLUGIN) }
 
     /** 启用的技能列表（注入系统提示词用），禁用技能被过滤；插件技能排在用户技能之后。 */
     fun listSkills(): List<Skill> {
         val disabled = skillConfigRepository.disabledNames()
-        val own = filterDisabled(listAllSkills(), disabled).map { it.skill }
+        val own = filterDisabled(listOwnSkills(), disabled).map { it.skill }
         return appendPluginSkills(own, pluginSkillSource.listSkills(), disabled)
     }
 
@@ -60,6 +64,7 @@ class SkillRepository @Inject constructor(
      * 技能正文常按 `~/.aicode/skills/<目录>/run.py` 引用同目录脚本，跟着改名会把这些引用打断。
      */
     fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? {
+        if (scope == SkillScope.PLUGIN) return SkillSaveError.IO_FAILED
         val name = form.name.trim()
         if (!isValidName(name)) return SkillSaveError.INVALID_NAME
         if (form.instructions.isBlank()) return SkillSaveError.EMPTY_INSTRUCTIONS
@@ -99,10 +104,10 @@ class SkillRepository @Inject constructor(
 
     /** 指定作用域的技能根目录（容器路径）。 */
     fun skillsRoot(scope: SkillScope): String =
-        if (scope == SkillScope.GLOBAL) {
-            globalDirectorySkillSource.skillsRoot
-        } else {
-            projectDirectorySkillSource.skillsRoot
+        when (scope) {
+            SkillScope.GLOBAL -> globalDirectorySkillSource.skillsRoot
+            SkillScope.PROJECT -> projectDirectorySkillSource.skillsRoot
+            SkillScope.PLUGIN -> ""
         }
 
     /**
@@ -122,6 +127,7 @@ class SkillRepository @Inject constructor(
 
     /** 删除指定作用域的技能（删除其目录，不可恢复）。返回是否成功。 */
     fun deleteSkill(name: String, scope: SkillScope): Boolean {
+        if (scope == SkillScope.PLUGIN) return false
         val entry = listAllSkills().firstOrNull {
             it.skill.name.equals(name, ignoreCase = true) && it.scope == scope
         } ?: return false

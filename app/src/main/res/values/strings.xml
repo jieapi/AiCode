@@ -2082,4 +2082,8 @@
     <string name="plugins_error_storage_failed">保存失败，请稍后重试。</string>
     <string name="plugins_error_preview_expired">这次导入已经过期，请重新选择文件。</string>
     <string name="plugins_error_permission_not_granted">必要权限没有授予：%1$s</string>
+    <string name="skills_group_plugin">插件提供</string>
+    <string name="subagents_group_plugin">插件提供</string>
+    <string name="plugins_scope_badge">插件</string>
+    <string name="plugins_item_readonly_hint">此内容由插件「%1$s」提供，如需禁用或卸载请前往插件管理。</string>
 </resources>

@@ -92,6 +92,7 @@ import com.aicode.feature.settings.presentation.SkillImportState
 import com.aicode.feature.settings.presentation.SkillUiEntry
 import com.aicode.feature.agent.domain.skill.SkillImportError
 import com.aicode.feature.agent.domain.skill.SkillScope
+import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
 import com.aicode.feature.plugin.presentation.PluginDetailSection
 import com.aicode.feature.plugin.presentation.PluginImportHost
@@ -809,17 +810,19 @@ fun SettingsScreen(
                             }
                         }
                         SettingsSection.SkillDetail -> selectedSkill?.let { entry ->
-                            IconButton(onClick = {
-                                editingSkill = entry
-                                skillEditorReturn = SettingsSection.SkillDetail
-                                section = SettingsSection.SkillEditor
-                            }) {
-                                Icon(
-                                    FeatherIcons.Edit2,
-                                    contentDescription = stringResource(R.string.skills_edit),
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                            if (entry.scope != SkillScope.PLUGIN) {
+                                IconButton(onClick = {
+                                    editingSkill = entry
+                                    skillEditorReturn = SettingsSection.SkillDetail
+                                    section = SettingsSection.SkillEditor
+                                }) {
+                                    Icon(
+                                        FeatherIcons.Edit2,
+                                        contentDescription = stringResource(R.string.skills_edit),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                         SettingsSection.SubAgents -> {
@@ -840,17 +843,19 @@ fun SettingsScreen(
                             }
                         }
                         SettingsSection.SubAgentDetail -> selectedSubAgent?.let { entry ->
-                            IconButton(onClick = {
-                                editingSubAgent = entry
-                                subAgentEditorReturn = SettingsSection.SubAgentDetail
-                                section = SettingsSection.SubAgentEditor
-                            }) {
-                                Icon(
-                                    FeatherIcons.Edit2,
-                                    contentDescription = stringResource(R.string.subagent_edit),
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                            if (entry.scope != AgentDefinitionScope.PLUGIN) {
+                                IconButton(onClick = {
+                                    editingSubAgent = entry
+                                    subAgentEditorReturn = SettingsSection.SubAgentDetail
+                                    section = SettingsSection.SubAgentEditor
+                                }) {
+                                    Icon(
+                                        FeatherIcons.Edit2,
+                                        contentDescription = stringResource(R.string.subagent_edit),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                         SettingsSection.Plugins -> {

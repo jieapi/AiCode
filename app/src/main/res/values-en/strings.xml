@@ -2083,4 +2083,8 @@
     <string name="plugins_error_storage_failed">Couldn\'t save. Please try again.</string>
     <string name="plugins_error_preview_expired">This import has expired. Please pick the file again.</string>
     <string name="plugins_error_permission_not_granted">A required permission wasn\'t granted: %1$s</string>
+    <string name="skills_group_plugin">From Plugins</string>
+    <string name="subagents_group_plugin">From Plugins</string>
+    <string name="plugins_scope_badge">Plugin</string>
+    <string name="plugins_item_readonly_hint">This item is provided by plugin \"%1$s\". Manage or disable it in Plugin Settings.</string>
 </resources>

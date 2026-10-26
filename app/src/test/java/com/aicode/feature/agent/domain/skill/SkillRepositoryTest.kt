@@ -26,6 +26,7 @@ class SkillRepositoryTest {
     }
     private val pluginSource = mockk<PluginSkillSource>().apply {
         every { listSkills() } returns emptyList()
+        every { listAllSkills() } returns emptyList()
         every { loadInstructions(any()) } returns null
     }
     private val repository = SkillRepository(globalSource, projectSource, config, provider, pluginSource)
@@ -239,10 +240,13 @@ class SkillRepositoryTest {
     }
 
     @Test
-    fun listAllSkills_neverContainsPluginSkills() {
-        every { pluginSource.listSkills() } returns listOf(skill("a.kit:one"))
+    fun listAllSkills_containsPluginSkillsWithPluginScope() {
+        every { pluginSource.listAllSkills() } returns listOf(skill("a.kit:one"))
 
-        assertTrue(repository.listAllSkills().isEmpty())
+        val entries = repository.listAllSkills()
+        assertEquals(1, entries.size)
+        assertEquals("a.kit:one", entries.first().skill.name)
+        assertEquals(SkillScope.PLUGIN, entries.first().scope)
     }
 
     @Test

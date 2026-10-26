@@ -70,14 +70,20 @@ internal fun SubAgentsSection(
     onBatchDelete: (List<SubAgentUiEntry>) -> Unit,
     onBatchSetEnabled: (List<SubAgentUiEntry>, Boolean) -> Unit
 ) {
-    // 只在数据变化时分组，避免每次重组都产生两份新 List。
-    val (projectAgents, globalAgents) = remember(entries) {
-        entries.filter { it.scope == AgentDefinitionScope.PROJECT } to
-            entries.filter { it.scope == AgentDefinitionScope.GLOBAL }
+    // 只在数据变化时分组，避免每次重组都产生新 List。
+    val (projectAgents, globalAgents, pluginAgents) = remember(entries) {
+        Triple(
+            entries.filter { it.scope == AgentDefinitionScope.PROJECT },
+            entries.filter { it.scope == AgentDefinitionScope.GLOBAL },
+            entries.filter { it.scope == AgentDefinitionScope.PLUGIN }
+        )
     }
 
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
-    val allKeys = remember(entries) { entries.map { subAgentSelectionKey(it) } }
+    // 插件子代理只读、不可通过子代理页批量删除，剔除出全选键集
+    val allKeys = remember(entries) {
+        entries.filter { it.scope != AgentDefinitionScope.PLUGIN }.map { subAgentSelectionKey(it) }
+    }
     val keyToEntry = remember(entries) { entries.associateBy { subAgentSelectionKey(it) } }
 
     // 列表刷新后剔除已消失的选中项；全空了就退出多选。
@@ -128,6 +134,7 @@ internal fun SubAgentsSection(
 
     var projectExpanded by rememberSaveable { mutableStateOf(true) }
     var globalExpanded by rememberSaveable { mutableStateOf(true) }
+    var pluginExpanded by rememberSaveable { mutableStateOf(true) }
     val allSelected = selection.selectedCount > 0 && selection.selectedCount == allKeys.size
     val selectedEntries: List<SubAgentUiEntry> = selection.selectedKeys.mapNotNull { keyToEntry[it] }
 
@@ -246,6 +253,34 @@ internal fun SubAgentsSection(
                     }
                 }
             }
+
+            if (pluginAgents.isNotEmpty()) {
+                item(key = "plugin-header", contentType = "header") {
+                    CollapsibleGroupHeader(
+                        text = stringResource(R.string.subagents_group_plugin),
+                        expanded = pluginExpanded,
+                        onToggle = { pluginExpanded = !pluginExpanded }
+                    )
+                }
+                if (pluginExpanded) {
+                    itemsIndexed(
+                        items = pluginAgents,
+                        key = { _, entry -> "plugin:${entry.name}" },
+                        contentType = { _, _ -> "agent-row" }
+                    ) { index, entry ->
+                        LazyGroupItem(index = index, lastIndex = pluginAgents.lastIndex) {
+                            SubAgentRow(
+                                entry = entry,
+                                onDelete = {},
+                                onClick = { onOpenDetail(entry) },
+                                selectionMode = selection.isActive,
+                                selected = false,
+                                onToggleSelect = {}
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -276,10 +311,13 @@ private fun SubAgentRow(
     selected: Boolean = false,
     onToggleSelect: () -> Unit = {}
 ) {
+    val isPlugin = entry.scope == AgentDefinitionScope.PLUGIN
     // 行背景由 SwipeToDeleteRow 提供，这里不再重复画一层。
     SwipeToDeleteRow(
         onDelete = onDelete,
         onClick = onClick,
+        deleteEnabled = !isPlugin,
+        selectable = !isPlugin,
         selectionMode = selectionMode,
         selected = selected,
         onToggleSelect = onToggleSelect
@@ -322,6 +360,13 @@ private fun SubAgentRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (isPlugin) {
+                        McpPill(
+                            text = stringResource(R.string.plugins_scope_badge),
+                            textColor = MaterialTheme.colorScheme.primary,
+                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        )
+                    }
                     entry.model?.let { model ->
                         McpPill(
                             text = model,

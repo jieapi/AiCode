@@ -13,7 +13,7 @@ import javax.inject.Singleton
  *
  * 全局定义 `~/.aicode/agents`、项目级定义 `<workspace>/.aicode/agents`，两者都经 [FileAccessProvider]
  * 以容器路径读写，跟随当前执行环境（本地宿主目录或远程 SSH 工作区）。
- * 插件子代理来自手机端插件包，只读，只进入可派发清单（[listEnabled] 与 [find]），不出现在 [listAll]（设置页的可编辑列表）。
+ * 插件子代理来自手机端插件包，只读，同样出现在 [listAll] 供设置页展示，但不允许直接编辑或删除。
  */
 @Singleton
 class AgentDefinitionRepository @Inject constructor(
@@ -35,14 +35,19 @@ class AgentDefinitionRepository @Inject constructor(
     private fun bumpVersion() {
         definitionsVersionField++
     }
-    /** 全部定义（含来源作用域），未过滤禁用，按名称排序。不含插件定义。 */
-    fun listAll(): List<AgentDefinitionEntry> =
+
+    /** 用户自建的全部定义（全局 + 项目级）。 */
+    fun listOwn(): List<AgentDefinitionEntry> =
         mergeAll(globalSource.listDefinitions(), projectSource.listDefinitions())
+
+    /** 全部定义条目（含用户自建与插件提供），未过滤禁用，按名称排序。 */
+    fun listAll(): List<AgentDefinitionEntry> =
+        listOwn() + pluginSource.listAllDefinitions().map { AgentDefinitionEntry(it, AgentDefinitionScope.PLUGIN) }
 
     /** 已启用的定义（注入主代理的可派发清单用），其后追加生效中的插件子代理。 */
     fun listEnabled(): List<AgentDefinitionEntry> {
         val disabled = configRepository.disabledNames()
-        val own = listAll().filterNot { it.definition.name.lowercase() in disabled }
+        val own = listOwn().filterNot { it.definition.name.lowercase() in disabled }
         return own + pluginEntries(own, disabled)
     }
 
@@ -87,6 +92,7 @@ class AgentDefinitionRepository @Inject constructor(
         scope: AgentDefinitionScope,
         originalName: String? = null
     ): AgentSaveError? {
+        if (scope == AgentDefinitionScope.PLUGIN) return AgentSaveError.IO_FAILED
         val name = form.name.trim()
         if (!isValidName(name)) return AgentSaveError.INVALID_NAME
         if (form.prompt.isBlank()) return AgentSaveError.EMPTY_PROMPT
@@ -142,6 +148,7 @@ class AgentDefinitionRepository @Inject constructor(
 
     /** 删除指定作用域的定义文件，不可恢复。返回是否成功。 */
     fun delete(name: String, scope: AgentDefinitionScope): Boolean {
+        if (scope == AgentDefinitionScope.PLUGIN) return false
         val entry = listAll().firstOrNull {
             it.definition.name.equals(name, ignoreCase = true) && it.scope == scope
         } ?: return false
@@ -155,7 +162,11 @@ class AgentDefinitionRepository @Inject constructor(
 
     /** 指定作用域的定义目录（容器路径）。 */
     fun agentsRoot(scope: AgentDefinitionScope): String =
-        if (scope == AgentDefinitionScope.GLOBAL) globalSource.agentsRoot else projectSource.agentsRoot
+        when (scope) {
+            AgentDefinitionScope.GLOBAL -> globalSource.agentsRoot
+            AgentDefinitionScope.PROJECT -> projectSource.agentsRoot
+            AgentDefinitionScope.PLUGIN -> ""
+        }
 
     companion object {
         private const val TAG = "AgentDefinitionRepository"

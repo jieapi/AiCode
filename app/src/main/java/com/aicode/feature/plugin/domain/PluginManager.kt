@@ -157,6 +157,12 @@ class PluginManager internal constructor(
             .flatMap { plugin -> plugin.content.skills.map { it.skill } }
     }
 
+    /** 全部已读出的插件技能，不论插件是否启用。供设置页全量展示使用。 */
+    fun allSkills(): List<Skill> {
+        ensureLoaded()
+        return _plugins.value.flatMap { plugin -> plugin.content.skills.map { it.skill } }
+    }
+
     /** 当前生效的插件子代理定义，条件同 [activeSkills]，对应 `agents.register`。 */
     fun activeAgents(): List<AgentDefinition> {
         ensureLoaded()

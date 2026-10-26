@@ -18,6 +18,9 @@ class PluginSkillSource @Inject constructor(
 
     override fun listSkills(): List<Skill> = manager.activeSkills()
 
+    /** 全部插件技能，不论插件是否启用，供设置页全量展示。 */
+    fun listAllSkills(): List<Skill> = manager.allSkills()
+
     override fun loadInstructions(name: String): String? =
         listSkills().firstOrNull { it.name.equals(name, ignoreCase = true) }?.instructions
 }

@@ -117,6 +117,7 @@ class PluginManagerTest {
         assertTrue(manager.setEnabled("community.demo-kit", false))
         assertTrue(manager.activeSkills().isEmpty())
         assertTrue(manager.activeAgents().isEmpty())
+        assertEquals(skillName, manager.allSkills().single().name)
         assertEquals(agentName, manager.allAgents().single().name)
 
         assertTrue(manager.setEnabled("community.demo-kit", true))

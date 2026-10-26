@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
+import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.agent.presentation.component.MarkdownContent
 import com.aicode.feature.agent.presentation.component.MarkdownRenderCache
 import com.aicode.feature.settings.presentation.SkillUiEntry
@@ -42,6 +43,20 @@ internal fun SkillDetailSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        if (entry.scope == SkillScope.PLUGIN) {
+            val pluginId = entry.name.substringBefore(':', "")
+            SettingsGroup {
+                Text(
+                    text = stringResource(R.string.plugins_item_readonly_hint, pluginId),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp)
+                )
+            }
+        }
+
         // 卡片 1：是否启用（开关行）
         SettingsGroup {
             Row(
