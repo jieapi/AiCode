@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.domain.skill
 
+import com.aicode.feature.plugin.domain.PluginSkillSource
 import com.aicode.testutil.TestFileAccessProvider
 import io.mockk.every
 import io.mockk.mockk
@@ -23,7 +24,11 @@ class SkillRepositoryTest {
     private val config = mockk<SkillConfigRepository>().apply {
         every { disabledNames() } returns emptySet()
     }
-    private val repository = SkillRepository(globalSource, projectSource, config, provider)
+    private val pluginSource = mockk<PluginSkillSource>().apply {
+        every { listSkills() } returns emptyList()
+        every { loadInstructions(any()) } returns null
+    }
+    private val repository = SkillRepository(globalSource, projectSource, config, provider, pluginSource)
 
     private fun skill(name: String) = Skill(
         name = name,
@@ -198,6 +203,46 @@ class SkillRepositoryTest {
         } finally {
             temp.deleteRecursively()
         }
+    }
+
+    @Test
+    fun listSkills_appendsPluginSkillsAfterUserSkillsSortedByName() {
+        every { globalSource.listSkills() } returns listOf(skill("zeta"))
+        every { pluginSource.listSkills() } returns listOf(skill("b.kit:two"), skill("a.kit:one"))
+
+        assertEquals(listOf("zeta", "a.kit:one", "b.kit:two"), repository.listSkills().map { it.name })
+    }
+
+    @Test
+    fun listSkills_userSkillWinsOverSameNamedPluginSkill() {
+        val own = skill("Same").copy(instructions = "mine")
+        every { globalSource.listSkills() } returns listOf(own)
+        every { pluginSource.listSkills() } returns listOf(skill("same").copy(instructions = "plugin"))
+
+        assertEquals(listOf(own), repository.listSkills())
+    }
+
+    @Test
+    fun listSkills_disabledNamesAlsoHidePluginSkills() {
+        every { pluginSource.listSkills() } returns listOf(skill("a.kit:one"), skill("a.kit:two"))
+        every { config.disabledNames() } returns setOf("a.kit:one")
+
+        assertEquals(listOf("a.kit:two"), repository.listSkills().map { it.name })
+        assertNull(repository.loadInstructions("a.kit:one"))
+    }
+
+    @Test
+    fun loadInstructions_fallsBackToPluginSource() {
+        every { pluginSource.loadInstructions("a.kit:one") } returns "plugin body"
+
+        assertEquals("plugin body", repository.loadInstructions("a.kit:one"))
+    }
+
+    @Test
+    fun listAllSkills_neverContainsPluginSkills() {
+        every { pluginSource.listSkills() } returns listOf(skill("a.kit:one"))
+
+        assertTrue(repository.listAllSkills().isEmpty())
     }
 
     @Test

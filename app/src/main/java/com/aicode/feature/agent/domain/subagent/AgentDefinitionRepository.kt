@@ -1,6 +1,7 @@
 package com.aicode.feature.agent.domain.subagent
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.plugin.domain.PluginAgentSource
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -12,34 +13,45 @@ import javax.inject.Singleton
  *
  * 全局定义 `~/.aicode/agents`、项目级定义 `<workspace>/.aicode/agents`，两者都经 [FileAccessProvider]
  * 以容器路径读写，跟随当前执行环境（本地宿主目录或远程 SSH 工作区）。
+ * 插件子代理来自手机端插件包，只读，只进入可派发清单（[listEnabled] 与 [find]），不出现在 [listAll]（设置页的可编辑列表）。
  */
 @Singleton
 class AgentDefinitionRepository @Inject constructor(
     private val globalSource: GlobalDirectoryAgentSource,
     private val projectSource: ProjectDirectoryAgentSource,
     private val configRepository: AgentDefinitionConfigRepository,
-    private val fileAccess: FileAccessProvider
+    private val fileAccess: FileAccessProvider,
+    private val pluginSource: PluginAgentSource
 ) {
     /**
-     * 定义内容版本：经本仓库的 save/delete/setDisabled 修改定义后递增。
+     * 定义内容版本：经本仓库的 save/delete/setDisabled 修改定义后递增，插件集合变化也会使它变化。
      * 系统提示词里的可用清单按它做缓存失效——否则会话中途新建的子代理
      * 要等到下一个会话才出现在主代理的派发清单里。外部直接改文件不经过这里，
      * 这部分维持原有的「新会话才刷新」行为。
      */
     @Volatile private var definitionsVersionField: Long = 0
-    val definitionsVersion: Long get() = definitionsVersionField
+    val definitionsVersion: Long get() = definitionsVersionField + pluginSource.revision
 
     private fun bumpVersion() {
         definitionsVersionField++
     }
-    /** 全部定义（含来源作用域），未过滤禁用，按名称排序。 */
+    /** 全部定义（含来源作用域），未过滤禁用，按名称排序。不含插件定义。 */
     fun listAll(): List<AgentDefinitionEntry> =
         mergeAll(globalSource.listDefinitions(), projectSource.listDefinitions())
 
-    /** 已启用的定义（注入主代理的可派发清单用）。 */
+    /** 已启用的定义（注入主代理的可派发清单用），其后追加生效中的插件子代理。 */
     fun listEnabled(): List<AgentDefinitionEntry> {
         val disabled = configRepository.disabledNames()
-        return listAll().filterNot { it.definition.name.lowercase() in disabled }
+        val own = listAll().filterNot { it.definition.name.lowercase() in disabled }
+        return own + pluginEntries(own, disabled)
+    }
+
+    private fun pluginEntries(own: List<AgentDefinitionEntry>, disabled: Set<String>): List<AgentDefinitionEntry> {
+        val taken = own.mapTo(HashSet()) { it.definition.name.lowercase() }
+        return pluginSource.listDefinitions()
+            .filter { it.name.lowercase() !in disabled && taken.add(it.name.lowercase()) }
+            .sortedBy { it.name.lowercase() }
+            .map { AgentDefinitionEntry(it, AgentDefinitionScope.PLUGIN) }
     }
 
     /** 按名称查找可派发的定义（忽略大小写）；不存在或已被禁用时返回 null。 */
@@ -52,6 +64,7 @@ class AgentDefinitionRepository @Inject constructor(
      */
     fun findIncludingDisabled(name: String): AgentDefinition? =
         listAll().firstOrNull { it.definition.name.equals(name, ignoreCase = true) }?.definition
+            ?: pluginSource.listAllDefinitions().firstOrNull { it.name.equals(name, ignoreCase = true) }
 
     /** 当前被禁用的子代理名集合（小写归一化）。批量判断取一次即可，避免逐个重读配置文件。 */
     fun disabledNames(): Set<String> = configRepository.disabledNames()

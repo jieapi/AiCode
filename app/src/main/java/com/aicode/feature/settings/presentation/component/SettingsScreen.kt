@@ -93,6 +93,12 @@ import com.aicode.feature.settings.presentation.SkillUiEntry
 import com.aicode.feature.agent.domain.skill.SkillImportError
 import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
+import com.aicode.feature.plugin.presentation.PluginDetailSection
+import com.aicode.feature.plugin.presentation.PluginImportHost
+import com.aicode.feature.plugin.presentation.PluginsSection
+import com.aicode.feature.plugin.presentation.PluginsViewModel
+import com.aicode.feature.plugin.presentation.currentLanguageTag
+import com.aicode.feature.plugin.presentation.displayName
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.BarChart2
@@ -110,6 +116,7 @@ import compose.icons.feathericons.Info
 import compose.icons.feathericons.Lock
 import compose.icons.feathericons.Moon
 import compose.icons.feathericons.MessageSquare
+import compose.icons.feathericons.Package
 import compose.icons.feathericons.Edit2
 import compose.icons.feathericons.PieChart
 import compose.icons.feathericons.Plus
@@ -143,6 +150,9 @@ private val SettingsMenuWidth = 320.dp
  */
 private val SettingsTwoPaneMinWidth = 840.dp
 
+/** 插件包选择器接受的类型：部分文件管理器会把 .zip 报成 octet-stream。 */
+private val PluginPackageMimeTypes = arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+
 /** 设置页内部二级菜单分区。Menu 为首页菜单，其余为各自的二级页。 */
 internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Menu(R.string.settings_title),
@@ -160,6 +170,8 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgents(R.string.settings_subagents),
     SubAgentDetail(R.string.settings_subagents),
     SubAgentEditor(R.string.settings_subagents),
+    Plugins(R.string.settings_plugins),
+    PluginDetail(R.string.settings_plugins),
     Container(R.string.settings_container),
     ContainerDownloads(R.string.container_download_image),
     Proxy(R.string.proxy_title),
@@ -191,6 +203,7 @@ private fun SettingsSection.depth(): Int = when (this) {
     SettingsSection.PromptDetail,
     SettingsSection.SkillDetail,
     SettingsSection.SubAgentDetail,
+    SettingsSection.PluginDetail,
     SettingsSection.ContainerDownloads,
     SettingsSection.Log -> 2
     else -> 1
@@ -381,6 +394,16 @@ fun SettingsScreen(
     val skillZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.importSkillsFromZip(uri, skillImportScope)
     }
+    // 插件的导入流程状态都在 PluginsViewModel 里；这里只记当前打开详情的插件。
+    val pluginsViewModel: PluginsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val plugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
+    val pluginsLoaded by pluginsViewModel.loaded.collectAsStateWithLifecycle()
+    var selectedPluginId by remember { mutableStateOf<String?>(null) }
+    val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
+    val pluginLanguageTag = currentLanguageTag()
+    val pluginZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pluginsViewModel.import(uri)
+    }
     var selectedSubAgent by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     var subAgentToDelete by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     // 子代理编辑目标：null 表示新建一个；编辑现有定义时指向被编辑的条目。
@@ -417,6 +440,7 @@ fun SettingsScreen(
         SettingsSection.SkillEditor -> skillEditorReturn
         SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
+        SettingsSection.PluginDetail -> SettingsSection.Plugins
         SettingsSection.ContainerDownloads -> SettingsSection.Container
         else -> if (expanded) null else SettingsSection.Menu
     }
@@ -448,6 +472,11 @@ fun SettingsScreen(
             selectedSubAgent = fresh
             pendingSubAgentName = null
         }
+    }
+
+    // 在详情页卸载插件（或记录消失）后回到列表，别停在一个空页面。
+    LaunchedEffect(selectedPlugin, section) {
+        if (section == SettingsSection.PluginDetail && selectedPlugin == null) section = SettingsSection.Plugins
     }
 
     // 首次（或公告内容更新后）进入「容器与镜像」页自动弹出使用说明；哈希比对在 ViewModel 完成。
@@ -645,6 +674,7 @@ fun SettingsScreen(
             val stateKey: String = when (current) {
                 SettingsSection.SkillDetail -> "SkillDetail:${selectedSkill?.name.orEmpty()}"
                 SettingsSection.SubAgentDetail -> "SubAgentDetail:${selectedSubAgent?.name.orEmpty()}"
+                SettingsSection.PluginDetail -> "PluginDetail:${selectedPluginId.orEmpty()}"
                 SettingsSection.PromptDetail -> "PromptDetail:${selectedPrompt?.number ?: 0}"
                 else -> current.name
             }
@@ -663,6 +693,8 @@ fun SettingsScreen(
                             selectedSkill?.name ?: stringResource(current.titleRes)
                         } else if (current == SettingsSection.SubAgentDetail) {
                             selectedSubAgent?.name ?: stringResource(current.titleRes)
+                        } else if (current == SettingsSection.PluginDetail) {
+                            selectedPlugin?.displayName(pluginLanguageTag) ?: stringResource(current.titleRes)
                         } else if (expanded && current == SettingsSection.Menu) {
                             // 大屏左栏顶部已经写着「设置」，右栏空态不再重复
                             ""
@@ -818,6 +850,16 @@ fun SettingsScreen(
                                     contentDescription = stringResource(R.string.subagent_edit),
                                     tint = MaterialTheme.colorScheme.onBackground,
                                     modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        SettingsSection.Plugins -> {
+                            IconButton(onClick = { pluginZipLauncher.launch(PluginPackageMimeTypes) }) {
+                                Icon(
+                                    FeatherIcons.Plus,
+                                    contentDescription = stringResource(R.string.plugins_import),
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
@@ -1209,6 +1251,28 @@ fun SettingsScreen(
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
                 SettingsSection.RemoteServers -> {} // 已在上方 early return 处理
                 SettingsSection.Backup -> {} // 已在上方 early return 处理
+                SettingsSection.Plugins -> PluginsSection(
+                    plugins = plugins,
+                    loaded = pluginsLoaded,
+                    onOpenDetail = {
+                        selectedPluginId = it.id
+                        section = SettingsSection.PluginDetail
+                    },
+                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) }
+                )
+                SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
+                    PluginDetailSection(
+                        plugin = plugin,
+                        onToggleEnabled = { pluginsViewModel.setEnabled(plugin.id, it) },
+                        onTogglePermission = { permission, granted ->
+                            pluginsViewModel.setGranted(plugin.id, permission, granted)
+                        },
+                        onUninstall = {
+                            pluginsViewModel.uninstall(plugin.id)
+                            section = SettingsSection.Plugins
+                        }
+                    )
+                }
                 SettingsSection.About -> AboutSection(
                     updateCheckEnabled = updateCheckEnabled,
                     updateCheckChannel = updateCheckChannel,
@@ -1441,6 +1505,8 @@ fun SettingsScreen(
     }
 
     SkillImportResultDialog(state = skillImportState, onDismiss = { viewModel.clearSkillImportState() })
+
+    PluginImportHost(viewModel = pluginsViewModel)
 
     subAgentToDelete?.let { target ->
         val deleting = target.name in subAgentDeleting
@@ -1749,6 +1815,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.Users,
                 title = stringResource(SettingsSection.SubAgents.titleRes),
                 onClick = { onOpen(SettingsSection.SubAgents) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Package,
+                title = stringResource(SettingsSection.Plugins.titleRes),
+                onClick = { onOpen(SettingsSection.Plugins) }
             )
             SettingsDivider()
             SettingsRow(

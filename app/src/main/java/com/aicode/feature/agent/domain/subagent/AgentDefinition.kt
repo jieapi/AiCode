@@ -3,7 +3,7 @@ package com.aicode.feature.agent.domain.subagent
 import com.aicode.feature.agent.domain.model.AgentMode
 
 /** 子代理定义的来源作用域：全局（跨项目共享）或项目级（仅当前工作区生效，可 git 追踪）。 */
-enum class AgentDefinitionScope { GLOBAL, PROJECT }
+enum class AgentDefinitionScope { GLOBAL, PROJECT, PLUGIN }
 
 /**
  * 子代理系统提示词的可注入片段。省略 `inject` 时使用 [AgentDefinition.DEFAULT_INJECT]。

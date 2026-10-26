@@ -1,32 +1,38 @@
 package com.aicode.feature.agent.domain.skill
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.plugin.domain.PluginSkillSource
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Skill 仓库，聚合各 [SkillSource]（全局目录 + 项目目录）提供的技能，
+ * Skill 仓库，聚合各 [SkillSource]（全局目录 + 项目目录 + 插件）提供的技能，
  * 并按 [SkillConfigRepository] 的禁用名单过滤注入清单。
  *
  * 全局技能 `~/.aicode/skills`、项目级技能 `<workspace>/.aicode/skills`，两者都经 [FileAccessProvider]
  * 以容器路径读写，跟随当前执行环境（本地宿主目录或远程 SSH 工作区）。
+ * 插件技能来自手机端插件包，只读，只进入注入清单与正文加载，不出现在 [listAllSkills]（设置页的可编辑列表）。
  */
 @Singleton
 class SkillRepository @Inject constructor(
     private val globalDirectorySkillSource: GlobalDirectorySkillSource,
     private val projectDirectorySkillSource: ProjectDirectorySkillSource,
     private val skillConfigRepository: SkillConfigRepository,
-    private val fileAccess: FileAccessProvider
+    private val fileAccess: FileAccessProvider,
+    private val pluginSkillSource: PluginSkillSource
 ) {
     /** 全部技能（含来源作用域），未过滤禁用；同名技能项目级优先（与 MCP 两级配置一致）。 */
     fun listAllSkills(): List<SkillEntry> =
         mergeAll(globalDirectorySkillSource.listSkills(), projectDirectorySkillSource.listSkills())
 
-    /** 启用的技能列表（注入系统提示词用），禁用技能被过滤。 */
-    fun listSkills(): List<Skill> =
-        filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
+    /** 启用的技能列表（注入系统提示词用），禁用技能被过滤；插件技能排在用户技能之后。 */
+    fun listSkills(): List<Skill> {
+        val disabled = skillConfigRepository.disabledNames()
+        val own = filterDisabled(listAllSkills(), disabled).map { it.skill }
+        return appendPluginSkills(own, pluginSkillSource.listSkills(), disabled)
+    }
 
     /** 当前被禁用的技能名集合（小写归一化）。批量判断取一次即可，避免逐个重读配置文件。 */
     fun disabledNames(): Set<String> = skillConfigRepository.disabledNames()
@@ -36,6 +42,7 @@ class SkillRepository @Inject constructor(
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null
         return projectDirectorySkillSource.loadInstructions(name)
             ?: globalDirectorySkillSource.loadInstructions(name)
+            ?: pluginSkillSource.loadInstructions(name)
     }
 
     /** 技能是否在任一作用域中被禁用。 */
@@ -158,6 +165,17 @@ class SkillRepository @Inject constructor(
         /** 过滤禁用技能（禁用名单已归一化为小写）。 */
         internal fun filterDisabled(entries: List<SkillEntry>, disabled: Set<String>): List<SkillEntry> =
             entries.filterNot { it.skill.name.lowercase() in disabled }
+
+        /**
+         * 把插件技能追加到用户技能之后。插件技能名带 `插件ID:` 前缀，正常不会重名；
+         * 万一重名，用户自建的优先，插件不能覆盖。
+         */
+        internal fun appendPluginSkills(own: List<Skill>, plugin: List<Skill>, disabled: Set<String>): List<Skill> {
+            val taken = own.mapTo(HashSet()) { it.name.lowercase() }
+            return own + plugin
+                .filter { it.name.lowercase() !in disabled && taken.add(it.name.lowercase()) }
+                .sortedBy { it.name.lowercase() }
+        }
 
         /** 仅当目录存在且含 SKILL.md/CLAUDE.md 指令文件时才删除，避免误删非技能目录。 */
         internal fun safeDeleteSkillDir(provider: FileAccessProvider, dirPath: String): Boolean {

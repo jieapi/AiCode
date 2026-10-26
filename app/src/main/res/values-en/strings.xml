@@ -2006,4 +2006,81 @@
     <string name="browser_ua_custom_dialog_title">Custom User-Agent</string>
     <string name="browser_ua_custom_input_hint">Enter full User-Agent string</string>
     <string name="browser_ua_applied_toast">User-Agent updated, page reloaded</string>
+
+    <!-- Plugins -->
+    <string name="settings_plugins">Plugins</string>
+    <string name="plugins_import">Import plugin</string>
+    <string name="plugins_empty_title">No plugins installed</string>
+    <string name="plugins_empty_hint">Tap + to import a plugin package (.zip). Plugins can give the AI extra skills and sub-agents.</string>
+    <string name="plugins_item_subtitle">v%1$s · %2$s</string>
+    <string name="plugins_status_disabled">Disabled</string>
+    <string name="plugins_status_needs_permission">Needs permission</string>
+    <string name="plugins_status_damaged">Damaged</string>
+    <string name="plugins_status_incompatible">Unavailable</string>
+    <string name="plugins_reading">Reading plugin package…</string>
+    <string name="plugins_installing">Installing…</string>
+    <string name="plugins_import_failed_title">Can\'t import this plugin</string>
+    <string name="plugins_import_failed_more">%1$d more problems</string>
+
+    <string name="plugins_preview_title">Install plugin</string>
+    <string name="plugins_preview_local_notice">This package was imported from a local file, so AiCode can\'t verify where it came from. Only install plugins you trust.</string>
+    <string name="plugins_preview_behavior_notice">Skills and sub-agents are instructions that shape how the AI behaves. Their names and descriptions are also added to the system prompt.</string>
+    <string name="plugins_preview_replace_notice">Version %1$s is installed. Continuing replaces it, and you need to confirm the permissions below again.</string>
+    <string name="plugins_preview_identical_notice">This is the same file that is already installed (identical content).</string>
+    <string name="plugins_preview_contents">What it provides</string>
+    <string name="plugins_preview_permissions">Permissions it needs</string>
+    <string name="plugins_preview_optional_hint">Optional permissions are off by default and only take effect when you turn them on.</string>
+    <string name="plugins_permission_required">Required</string>
+    <string name="plugins_permission_optional">Optional</string>
+    <string name="plugins_install">Install</string>
+    <string name="plugins_install_replace">Replace</string>
+
+    <string name="plugins_content_skill">Skill · %1$s</string>
+    <string name="plugins_content_agent">Sub-agent · %1$s</string>
+    <string name="plugins_permission_skills_register">Register skills</string>
+    <string name="plugins_permission_agents_register">Register sub-agents</string>
+
+    <string name="plugins_enable">Enable plugin</string>
+    <string name="plugins_enable_hint">When off, the skills and sub-agents it provides stop working.</string>
+    <string name="plugins_hint_needs_permission">A required permission hasn\'t been granted, so the plugin has no effect yet. Turn on the matching permission below.</string>
+    <string name="plugins_hint_damaged">The plugin files are damaged or missing, so it can\'t be enabled. Uninstall it and import it again.</string>
+    <string name="plugins_hint_incompatible">This plugin isn\'t compatible with this version of AiCode, so it can\'t be enabled.</string>
+    <string name="plugins_section_summary">About</string>
+    <string name="plugins_section_info">Details</string>
+    <string name="plugins_section_contents">What it provides</string>
+    <string name="plugins_section_permissions">Permissions</string>
+    <string name="plugins_info_version">Version</string>
+    <string name="plugins_info_publisher">Publisher</string>
+    <string name="plugins_info_license">License</string>
+    <string name="plugins_info_repository">Source repository (declared by the plugin, not verified)</string>
+    <string name="plugins_info_origin">Source</string>
+    <string name="plugins_origin_local">Imported from a local file</string>
+    <string name="plugins_no_contents">Nothing to show</string>
+    <string name="plugins_uninstall">Uninstall plugin</string>
+    <string name="plugins_uninstall_confirm_title">Uninstall plugin?</string>
+    <string name="plugins_uninstall_confirm_message">This removes “%1$s” and its permission records. The skills and sub-agents it provides go away too.</string>
+
+    <string name="plugins_error_archive_unreadable">This file can\'t be read. It isn\'t a valid ZIP archive.</string>
+    <string name="plugins_error_archive_too_large">The archive is too large.</string>
+    <string name="plugins_error_archive_too_many">The archive contains too many files.</string>
+    <string name="plugins_error_entry_too_large">A file in the archive is too large: %1$s</string>
+    <string name="plugins_error_unsafe_path">The archive contains an unsafe path: %1$s</string>
+    <string name="plugins_error_duplicate_entry">The archive contains a duplicate file: %1$s</string>
+    <string name="plugins_error_manifest_missing">There is no plugin.json at the root of the archive.</string>
+    <string name="plugins_error_manifest_too_large">plugin.json is too large.</string>
+    <string name="plugins_error_manifest_not_json">plugin.json isn\'t valid JSON.</string>
+    <string name="plugins_error_field_missing">plugin.json is missing a field: %1$s</string>
+    <string name="plugins_error_field_invalid">plugin.json has an invalid field: %1$s</string>
+    <string name="plugins_error_manifest_version">Unsupported manifest version: %1$s</string>
+    <string name="plugins_error_unsupported_field">Field not supported by this version: %1$s</string>
+    <string name="plugins_error_unsupported_contribution">Content type not supported by this version yet: %1$s</string>
+    <string name="plugins_error_unsupported_permission">Permission not supported by this version yet: %1$s</string>
+    <string name="plugins_error_api_incompatible">The plugin requires plugin API %1$s, which this version of AiCode doesn\'t provide.</string>
+    <string name="plugins_error_duplicate_id">Duplicate ID: %1$s</string>
+    <string name="plugins_error_scope_mismatch">The permission scope doesn\'t match what the plugin provides: %1$s</string>
+    <string name="plugins_error_file_missing">A file referenced by the manifest is missing: %1$s</string>
+    <string name="plugins_error_content_invalid">Invalid content: %1$s</string>
+    <string name="plugins_error_storage_failed">Couldn\'t save. Please try again.</string>
+    <string name="plugins_error_preview_expired">This import has expired. Please pick the file again.</string>
+    <string name="plugins_error_permission_not_granted">A required permission wasn\'t granted: %1$s</string>
 </resources>

@@ -2005,4 +2005,81 @@
     <string name="browser_ua_custom_dialog_title">自定义 User-Agent</string>
     <string name="browser_ua_custom_input_hint">输入完整的 User-Agent 字符串</string>
     <string name="browser_ua_applied_toast">已切换浏览器标识并刷新页面</string>
+
+    <!-- 插件 -->
+    <string name="settings_plugins">插件</string>
+    <string name="plugins_import">导入插件</string>
+    <string name="plugins_empty_title">还没有安装插件</string>
+    <string name="plugins_empty_hint">点右上角「＋」导入插件包（.zip）。插件可以为 AI 提供额外的技能和子代理。</string>
+    <string name="plugins_item_subtitle">v%1$s · %2$s</string>
+    <string name="plugins_status_disabled">已停用</string>
+    <string name="plugins_status_needs_permission">待授权</string>
+    <string name="plugins_status_damaged">已损坏</string>
+    <string name="plugins_status_incompatible">不可用</string>
+    <string name="plugins_reading">正在读取插件包…</string>
+    <string name="plugins_installing">正在安装…</string>
+    <string name="plugins_import_failed_title">无法导入这个插件</string>
+    <string name="plugins_import_failed_more">还有 %1$d 个问题</string>
+
+    <string name="plugins_preview_title">安装插件</string>
+    <string name="plugins_preview_local_notice">这是从本地文件导入的插件包，AiCode 无法核验它的来源。请只安装你信任的插件。</string>
+    <string name="plugins_preview_behavior_notice">技能和子代理的内容会作为指令影响 AI 的行为，它们的名称与描述还会进入系统提示词。</string>
+    <string name="plugins_preview_replace_notice">已安装 %1$s 版。继续会整体替换它，下面的权限需要重新确认。</string>
+    <string name="plugins_preview_identical_notice">已安装的就是这个文件（内容完全一致）。</string>
+    <string name="plugins_preview_contents">将提供的内容</string>
+    <string name="plugins_preview_permissions">需要的权限</string>
+    <string name="plugins_preview_optional_hint">可选权限默认不开启，打开才会生效。</string>
+    <string name="plugins_permission_required">必要</string>
+    <string name="plugins_permission_optional">可选</string>
+    <string name="plugins_install">安装</string>
+    <string name="plugins_install_replace">替换安装</string>
+
+    <string name="plugins_content_skill">技能 · %1$s</string>
+    <string name="plugins_content_agent">子代理 · %1$s</string>
+    <string name="plugins_permission_skills_register">注册技能</string>
+    <string name="plugins_permission_agents_register">注册子代理</string>
+
+    <string name="plugins_enable">启用插件</string>
+    <string name="plugins_enable_hint">关闭后，它提供的技能和子代理都不再生效。</string>
+    <string name="plugins_hint_needs_permission">必要权限还没有授予，插件暂不生效。请在下方打开对应权限。</string>
+    <string name="plugins_hint_damaged">插件文件已损坏或丢失，无法启用。请卸载后重新导入。</string>
+    <string name="plugins_hint_incompatible">这个插件与当前版本的 AiCode 不兼容，无法启用。</string>
+    <string name="plugins_section_summary">简介</string>
+    <string name="plugins_section_info">信息</string>
+    <string name="plugins_section_contents">提供的内容</string>
+    <string name="plugins_section_permissions">权限</string>
+    <string name="plugins_info_version">版本</string>
+    <string name="plugins_info_publisher">发布者</string>
+    <string name="plugins_info_license">许可证</string>
+    <string name="plugins_info_repository">源码仓库（插件自述，未核验）</string>
+    <string name="plugins_info_origin">来源</string>
+    <string name="plugins_origin_local">本地导入</string>
+    <string name="plugins_no_contents">没有可显示的内容</string>
+    <string name="plugins_uninstall">卸载插件</string>
+    <string name="plugins_uninstall_confirm_title">卸载插件？</string>
+    <string name="plugins_uninstall_confirm_message">将删除「%1$s」及其授权记录，它提供的技能和子代理会一并消失。</string>
+
+    <string name="plugins_error_archive_unreadable">无法读取这个文件，它不是有效的 ZIP 压缩包。</string>
+    <string name="plugins_error_archive_too_large">压缩包过大。</string>
+    <string name="plugins_error_archive_too_many">压缩包内的文件过多。</string>
+    <string name="plugins_error_entry_too_large">压缩包内有文件过大：%1$s</string>
+    <string name="plugins_error_unsafe_path">压缩包内有不安全的路径：%1$s</string>
+    <string name="plugins_error_duplicate_entry">压缩包内有重复的文件：%1$s</string>
+    <string name="plugins_error_manifest_missing">压缩包根目录里没有 plugin.json。</string>
+    <string name="plugins_error_manifest_too_large">plugin.json 过大。</string>
+    <string name="plugins_error_manifest_not_json">plugin.json 不是有效的 JSON。</string>
+    <string name="plugins_error_field_missing">plugin.json 缺少字段：%1$s</string>
+    <string name="plugins_error_field_invalid">plugin.json 的字段无效：%1$s</string>
+    <string name="plugins_error_manifest_version">不支持的清单版本：%1$s</string>
+    <string name="plugins_error_unsupported_field">此版本不支持的字段：%1$s</string>
+    <string name="plugins_error_unsupported_contribution">此版本暂不支持的内容类型：%1$s</string>
+    <string name="plugins_error_unsupported_permission">此版本暂不支持的权限：%1$s</string>
+    <string name="plugins_error_api_incompatible">插件要求的插件接口版本（%1$s）与当前 AiCode 不兼容。</string>
+    <string name="plugins_error_duplicate_id">重复的 ID：%1$s</string>
+    <string name="plugins_error_scope_mismatch">权限范围与提供的内容不一致：%1$s</string>
+    <string name="plugins_error_file_missing">清单引用的文件不存在：%1$s</string>
+    <string name="plugins_error_content_invalid">内容无效：%1$s</string>
+    <string name="plugins_error_storage_failed">保存失败，请稍后重试。</string>
+    <string name="plugins_error_preview_expired">这次导入已经过期，请重新选择文件。</string>
+    <string name="plugins_error_permission_not_granted">必要权限没有授予：%1$s</string>
 </resources>
