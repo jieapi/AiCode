@@ -20,7 +20,14 @@ object AgentDefinitionParser {
             FileLogger.w(TAG, "读取子代理定义失败: $filePath", it)
             return null
         }
+        return parseText(text, filePath.substringAfterLast('/').substringBeforeLast('.'), filePath)
+    }
 
+    /**
+     * 从原始文本解析定义（不依赖磁盘），供插件包等不经 [FileAccessProvider] 的来源使用。
+     * [fallbackName] 为 frontmatter 缺 name 时的兜底名；[filePath] 仅用于设置页展示与删除。
+     */
+    fun parseText(text: String, fallbackName: String, filePath: String? = null): AgentDefinition? {
         // frontmatter 顶层不是键值表（如写成了列表）时返回 null 跳过该文件并留痕；
         // 泛型 load 的 unchecked 转换在顶层非 map 时不会立即失败，而是拖到取值处抛
         // ClassCastException，进而连累整个目录的扫描降级为空。
@@ -28,9 +35,7 @@ object AgentDefinitionParser {
         val prompt = body.trim()
         if (prompt.isEmpty()) return null
 
-        val fileName = filePath.substringAfterLast('/')
-        val name = frontmatter["name"]?.toString()?.trim()?.takeIf { it.isNotBlank() }
-            ?: fileName.substringBeforeLast('.')
+        val name = frontmatter["name"]?.toString()?.trim()?.takeIf { it.isNotBlank() } ?: fallbackName
         val description = (frontmatter["description"]?.toString() ?: "").take(MAX_DESC_CHARS)
 
         return AgentDefinition(

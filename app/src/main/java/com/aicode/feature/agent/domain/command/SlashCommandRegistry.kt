@@ -4,12 +4,16 @@ import android.content.Context
 import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.aicode.feature.plugin.domain.PluginManager
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -24,8 +28,16 @@ import kotlinx.coroutines.withContext
 class SlashCommandRegistry @Inject constructor(
     actionHandlers: Set<@JvmSuppressWildcards ActionCommandHandler>,
     private val skillRepository: SkillRepository,
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val pluginManager: PluginManager? = null
 ) {
+    /** 供单测等不注入插件管理器的场景使用。 */
+    constructor(
+        actionHandlers: Set<ActionCommandHandler>,
+        skillRepository: SkillRepository,
+        context: Context
+    ) : this(actionHandlers, skillRepository, context, null)
+
     private val actions: List<ActionCommandHandler> = actionHandlers.sortedBy { it.name.lowercase() }
     private val actionsByName: Map<String, ActionCommandHandler> =
         actions.associateBy { it.name.lowercase() }
@@ -38,6 +50,16 @@ class SlashCommandRegistry @Inject constructor(
 
     /** `/` 菜单展示的命令列表。 */
     val commands: StateFlow<List<SlashCommand>> = _commands.asStateFlow()
+
+    init {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope.launch { refresh() }
+        pluginManager?.let { pm ->
+            scope.launch {
+                pm.plugins.collect { refresh() }
+            }
+        }
+    }
 
     /** 重新扫描技能并重建菜单。涉及文件 IO，调用方应在 IO 上下文调用。 */
     suspend fun refresh() = withContext(Dispatchers.IO) {

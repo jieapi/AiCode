@@ -149,6 +149,7 @@ export default defineConfig({
             { text: 'MCP 服务器', link: '/guide/mcp' },
             { text: '技能', link: '/guide/skills' },
             { text: '子代理', link: '/guide/subagent' },
+            { text: '插件', link: '/guide/plugins' },
             { text: 'Shizuku 工具', link: '/guide/shizuku' },
             { text: '自定义提示词', link: '/guide/custom-prompts' },
             { text: '记忆与项目规则', link: '/guide/memory' }
@@ -197,7 +198,8 @@ export default defineConfig({
         {
           text: '扩展开发',
           items: [
-            { text: '自定义面板', link: '/advanced/dashboard-cards' }
+            { text: '自定义面板', link: '/advanced/dashboard-cards' },
+            { text: '开发插件', link: '/advanced/plugin-development' }
           ]
         }
       ]
