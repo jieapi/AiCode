@@ -114,7 +114,8 @@ object PluginManifestParser {
                     structuredUi = engines.second,
                     permissions = requireNotNull(permissions),
                     skills = requireNotNull(contributes).skills,
-                    agents = contributes.agents
+                    agents = contributes.agents,
+                    workspaceTools = contributes.workspaceTools
                 )
             )
         }
@@ -301,23 +302,75 @@ object PluginManifestParser {
             return distinct
         }
 
-        private class Contributes(val skills: List<PluginContributionRef>, val agents: List<PluginContributionRef>)
+        private class Contributes(
+            val skills: List<PluginContributionRef>,
+            val agents: List<PluginContributionRef>,
+            val workspaceTools: List<PluginWorkspaceToolRef>
+        )
 
         private fun readContributes(obj: JsonObject): Contributes? {
             val raw = obj["contributes"] ?: return null.also { missing("contributes") }
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
-            contributes.keys.filter { it != "skills" && it != "agents" }.forEach {
+            contributes.keys.filter { it != "skills" && it != "agents" && it != "workspaceTools" }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
             }
             val skills = readContributionList(contributes["skills"], "contributes.skills") ?: run { ok = false; emptyList() }
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
-            if (ok && skills.isEmpty() && agents.isEmpty()) {
+            val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty()) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents) else null
+            return if (ok) Contributes(skills, agents, workspaceTools) else null
+        }
+
+        private fun readWorkspaceTools(raw: JsonElement?, path: String): List<PluginWorkspaceToolRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginWorkspaceToolRef>()
+            var ok = true
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    ok = false
+                    return@forEachIndexed
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val titleRaw = item["title"]
+                val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
+                val descRaw = item["description"]
+                val description = if (descRaw != null) parseLocalized(descRaw, "$itemPath.description", MAX_DESCRIPTION) ?: LocalizedText.single("") else LocalizedText.single("")
+                val icon = item["icon"]?.stringOrNull() ?: "play"
+                val category = item["category"]?.stringOrNull() ?: "通用"
+                val pageFile = item["pageFile"]?.stringOrNull()
+                if (id == null) { invalid("$itemPath.id"); ok = false }
+                if (title == null) { invalid("$itemPath.title"); ok = false }
+                if (pageFile == null || !isSafeRelativePath(pageFile) || !pageFile.endsWith(".json", ignoreCase = true)) {
+                    invalid("$itemPath.pageFile")
+                    ok = false
+                }
+                if (id != null && title != null && pageFile != null && ok) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                        ok = false
+                    } else {
+                        result += PluginWorkspaceToolRef(
+                            id = id,
+                            title = title,
+                            description = description,
+                            icon = icon,
+                            category = category,
+                            pageFile = pageFile
+                        )
+                    }
+                }
+            }
+            return if (ok) result else null
         }
 
         /** 缺省视为空列表；存在但格式不合法返回 null。 */
@@ -362,6 +415,7 @@ object PluginManifestParser {
         private fun crossCheck(permissions: List<PluginPermissionRequest>, contributes: Contributes) {
             checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills, permissions)
             checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents, permissions)
+            checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { PluginContributionRef(it.id, it.pageFile) }, permissions)
         }
 
         private fun checkCoverage(

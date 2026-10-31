@@ -55,6 +55,7 @@ internal fun PluginPermission.label(): String = stringResource(
     when (this) {
         PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
         PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
+        PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
     }
 )
 
@@ -200,7 +201,8 @@ internal fun PluginDetailSection(
             SettingsGroup {
                 val skills = plugin.content.skills
                 val agents = plugin.content.agents
-                if (skills.isEmpty() && agents.isEmpty()) {
+                val tools = plugin.content.workspaceTools
+                if (skills.isEmpty() && agents.isEmpty() && tools.isEmpty()) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -221,6 +223,12 @@ internal fun PluginDetailSection(
                         stringResource(R.string.plugins_content_agent, it.definition.name),
                         it.definition.description,
                         PluginPermission.AGENTS_REGISTER
+                    )
+                } + tools.map {
+                    Triple(
+                        stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)),
+                        it.description.resolve(languageTag),
+                        PluginPermission.WORKSPACE_TOOLS
                     )
                 }
                 rows.forEachIndexed { index, (title, description, permission) ->

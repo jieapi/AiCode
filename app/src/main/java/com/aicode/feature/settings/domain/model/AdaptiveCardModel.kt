@@ -465,3 +465,94 @@ sealed interface AdaptiveCardAction {
         val value: String
     ) : AdaptiveCardAction
 }
+
+// ── 以下为增强的通用表单与富交互节点（支持插件结构化 UI 与自定义面板扩展） ──
+
+/** 表单输入元素统一接口，[id] 为变量键名。 */
+sealed interface FormInputElement : AdaptiveCardElement {
+    val id: String
+}
+
+/** 单行/多行文本输入框。 */
+data class InputTextElement(
+    override val id: String,
+    val label: String = "",
+    val placeholder: String = "",
+    val defaultValue: String = "",
+    val multiline: Boolean = false
+) : FormInputElement
+
+/** 下拉选项条目。 */
+data class InputChoiceItem(
+    val title: String,
+    val value: String
+)
+
+/** 下拉单选/选择集。 */
+data class InputSelectElement(
+    override val id: String,
+    val label: String = "",
+    val choices: List<InputChoiceItem> = emptyList(),
+    val defaultValue: String = ""
+) : FormInputElement
+
+/** 布尔开关（Toggle/Switch）。 */
+data class InputToggleElement(
+    override val id: String,
+    val label: String = "",
+    val hint: String? = null,
+    val defaultValue: Boolean = false
+) : FormInputElement
+
+/** 动态参数列表输入（支持增加/删除条目）。 */
+data class InputListElement(
+    override val id: String,
+    val label: String = "",
+    val placeholder: String = "",
+    val defaultValues: List<String> = emptyList()
+) : FormInputElement
+
+/** 语法高亮代码块展示。 */
+data class CodeBlockElement(
+    val code: String,
+    val language: String = "bash"
+) : AdaptiveCardElement
+
+/** Markdown 富文本说明块。 */
+data class MarkdownBlockElement(
+    val content: String
+) : AdaptiveCardElement
+
+/** 带标题、支持折叠的分组卡片。 */
+data class CardElement(
+    val title: String? = null,
+    val collapsible: Boolean = false,
+    val expandedDefault: Boolean = true,
+    val style: ContainerStyle = ContainerStyle.DEFAULT,
+    val padding: CardPadding? = null,
+    val margin: CardPadding? = null,
+    val items: List<AdaptiveCardElement> = emptyList()
+) : AdaptiveCardElement
+
+/**
+ * 二维网格布局容器：支持固定列数或最小项宽自适应降列。
+ * 解决原有自定义面板只能单列 Column 或多行手动拼凑 ColumnSet 的限制。
+ */
+data class GridElement(
+    val columns: Int = 2,
+    val minColumnWidthDp: Int? = null,
+    val gapDp: Int? = null,
+    val verticalGapDp: Int? = null,
+    val padding: CardPadding? = null,
+    val margin: CardPadding? = null,
+    val items: List<AdaptiveCardElement> = emptyList()
+) : AdaptiveCardElement
+
+/** 表单提交/命令执行主操作按钮。 */
+data class ActionSubmitElement(
+    val id: String = "submit",
+    val title: String,
+    val commandTemplate: String? = null,
+    val terminalTitle: String? = null,
+    val style: ContainerStyle = ContainerStyle.ACCENT
+) : AdaptiveCardElement

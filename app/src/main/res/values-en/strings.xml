@@ -2037,8 +2037,10 @@
 
     <string name="plugins_content_skill">Skill · %1$s</string>
     <string name="plugins_content_agent">Sub-agent · %1$s</string>
+    <string name="plugins_content_tool">Workspace Tool · %1$s</string>
     <string name="plugins_permission_skills_register">Register skills</string>
     <string name="plugins_permission_agents_register">Register sub-agents</string>
+    <string name="plugins_permission_workspace_tools">Register workspace tools</string>
 
     <string name="plugins_enable">Enable plugin</string>
     <string name="plugins_enable_hint">When off, the skills and sub-agents it provides stop working.</string>
@@ -2087,4 +2089,18 @@
     <string name="subagents_group_plugin">From Plugins</string>
     <string name="plugins_scope_badge">Plugin</string>
     <string name="plugins_item_readonly_hint">This item is provided by plugin \"%1$s\". Manage or disable it in Plugin Settings.</string>
+    <string name="plugins_add_parameter">Add Parameter</string>
+
+    <string name="plugins_current_project">Current Project</string>
+    <string name="plugins_quick_run">Run</string>
+    <string name="plugins_no_project_tools">No tools added to current project</string>
+    <string name="plugins_add_tool">Add Tool</string>
+    <string name="plugins_all_tools">All Tools</string>
+    <string name="plugins_search_tools">Search tools...</string>
+    <string name="plugins_no_available_tools">No available tools found</string>
+    <string name="plugins_tool_add">Add</string>
+    <string name="plugins_tool_added">Added</string>
+
+    <string name="card_form_param_placeholder">Parameter</string>
+    <string name="card_form_add_param">Add Parameter</string>
 </resources>

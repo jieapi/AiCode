@@ -180,6 +180,20 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { plugin -> plugin.content.agents.map { it.definition } }
     }
 
+    /** 当前生效的插件工作区工具：已启用且授予了 `workspace.tools`。 */
+    fun activeWorkspaceTools(): List<PluginWorkspaceTool> {
+        ensureLoaded()
+        return _plugins.value
+            .filter { it.isActive && PluginPermission.WORKSPACE_TOOLS in it.granted }
+            .flatMap { it.content.workspaceTools }
+    }
+
+    /** 全部插件声明的工作区工具，供全部工具库展示添加。 */
+    fun allWorkspaceTools(): List<PluginWorkspaceTool> {
+        ensureLoaded()
+        return _plugins.value.flatMap { it.content.workspaceTools }
+    }
+
     /** 读取并校验 [input] 中的插件包，通过后暂存等待 [install]。同一时刻只保留一个待确认的暂存包。 */
     suspend fun preview(input: InputStream): PluginPreviewResult = withContext(Dispatchers.IO) {
         mutex.withLock {
