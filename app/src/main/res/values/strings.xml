@@ -2036,8 +2036,10 @@
 
     <string name="plugins_content_skill">技能 · %1$s</string>
     <string name="plugins_content_agent">子代理 · %1$s</string>
+    <string name="plugins_content_tool">工作区工具 · %1$s</string>
     <string name="plugins_permission_skills_register">注册技能</string>
     <string name="plugins_permission_agents_register">注册子代理</string>
+    <string name="plugins_permission_workspace_tools">注册工作区工具</string>
 
     <string name="plugins_enable">启用插件</string>
     <string name="plugins_enable_hint">关闭后，它提供的技能和子代理都不再生效。</string>
@@ -2086,4 +2088,18 @@
     <string name="subagents_group_plugin">插件提供</string>
     <string name="plugins_scope_badge">插件</string>
     <string name="plugins_item_readonly_hint">此内容由插件「%1$s」提供，如需禁用或卸载请前往插件管理。</string>
+    <string name="plugins_add_parameter">添加参数</string>
+
+    <string name="plugins_current_project">当前项目</string>
+    <string name="plugins_quick_run">运行</string>
+    <string name="plugins_no_project_tools">当前项目尚未添加任何工具</string>
+    <string name="plugins_add_tool">添加工具</string>
+    <string name="plugins_all_tools">全部工具</string>
+    <string name="plugins_search_tools">搜索工具...</string>
+    <string name="plugins_no_available_tools">没有找到匹配的可用工具</string>
+    <string name="plugins_tool_add">添加</string>
+    <string name="plugins_tool_added">已添加</string>
+
+    <string name="card_form_param_placeholder">参数</string>
+    <string name="card_form_add_param">添加参数</string>
 </resources>

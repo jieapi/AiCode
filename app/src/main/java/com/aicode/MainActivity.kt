@@ -14,7 +14,10 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -47,10 +50,13 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import kotlin.math.abs
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -88,6 +94,12 @@ import com.aicode.feature.editor.presentation.EditorLeaveGuard
 import com.aicode.feature.browser.presentation.BrowserScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
+import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
+import com.aicode.feature.plugin.presentation.drawer.ProjectToolsDrawer
+import com.aicode.feature.plugin.presentation.drawer.ProjectToolsViewModel
+import com.aicode.feature.plugin.presentation.drawer.ToolDetailScreen
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import com.aicode.feature.git.presentation.component.GitScreen
 import com.aicode.feature.onboarding.data.OnboardingStatus
 import com.aicode.feature.onboarding.domain.OnboardingCoordinator
@@ -373,6 +385,8 @@ fun AppNavigation(
     val agentViewModel: AIAgentViewModel = hiltViewModel()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
+    val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
+    val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
     val onboardingStateHolder = remember { OnboardingStateHolder() }
@@ -403,6 +417,9 @@ fun AppNavigation(
     // 侧边栏打开时，系统返回键先收起侧边栏。
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
+    }
+    BackHandler(enabled = rightDrawerState.isOpen) {
+        scope.launch { rightDrawerState.close() }
     }
 
     // 侧边栏需要的数据。
@@ -645,6 +662,17 @@ fun AppNavigation(
         )
     }
 
+    var reopenRightDrawerOnDetailBack by remember { mutableStateOf(false) }
+
+    // 从右侧工具抽屉进入详情时，返回后恢复抽屉与列表位置；从全部工具页进入则不恢复。
+    val returnFromToolDetail: () -> Unit = {
+        if (reopenRightDrawerOnDetailBack) {
+            reopenRightDrawerOnDetailBack = false
+            scope.launch { rightDrawerState.open() }
+        }
+        navController.popBackStack()
+    }
+
     // 页面主体（NavHost）：大屏放进 Row 的右侧，窄窗放进 modal 抽屉容器里。
     val navBody: @Composable () -> Unit = {
         NavHost(
@@ -839,6 +867,84 @@ fun AppNavigation(
                     }
                 )
             }
+            composable("plugin_all_tools") {
+                val allTools by projectToolsViewModel.allPluginTools.collectAsStateWithLifecycle()
+                val tools by projectToolsViewModel.projectTools.collectAsStateWithLifecycle()
+                val enabledKeys = remember(tools) { tools.map { it.toolKey }.toSet() }
+
+                AllToolsScreen(
+                    availableTools = allTools,
+                    enabledToolKeys = enabledKeys,
+                    onBack = { navController.popBackStack() },
+                    onAddTool = { tool -> projectToolsViewModel.addToolToProject(tool) },
+                    onViewDetail = { tool ->
+                        projectToolsViewModel.selectTool(tool)
+                        navController.navigate("plugin_tool_detail/${tool.key}")
+                    }
+                )
+            }
+            composable("plugin_tool_detail/{toolKey}") { backStackEntry ->
+                val toolKey = backStackEntry.arguments?.getString("toolKey").orEmpty()
+                androidx.compose.runtime.LaunchedEffect(toolKey) {
+                    projectToolsViewModel.selectToolByKey(toolKey)
+                }
+                val tool by projectToolsViewModel.selectedTool.collectAsStateWithLifecycle()
+                val toolItem by projectToolsViewModel.selectedToolItem.collectAsStateWithLifecycle()
+
+                BackHandler { returnFromToolDetail() }
+                if (tool != null) {
+                    ToolDetailScreen(
+                        tool = tool!!,
+                        savedParams = toolItem?.savedParams ?: emptyMap(),
+                        onBack = returnFromToolDetail,
+                        onExecute = { _, template, params ->
+                            reopenRightDrawerOnDetailBack = false
+                            projectToolsViewModel.executeTool(tool!!, params, template) {
+                                openWorkbench(WorkbenchPaneKind.TERMINAL)
+                            }
+                            navController.popBackStack()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    val projectToolsListState = rememberLazyListState()
+
+    val rightDrawerSheet: @Composable () -> Unit = {
+        ModalDrawerSheet(
+            drawerShape = RectangleShape,
+            drawerContainerColor = settingsPageBackground(),
+            drawerTonalElevation = 0.dp,
+            modifier = Modifier.width(drawerWidth())
+        ) {
+            val tools by projectToolsViewModel.projectTools.collectAsStateWithLifecycle()
+            val activeTools by projectToolsViewModel.activePluginTools.collectAsStateWithLifecycle()
+            val toolsMap = remember(activeTools) { activeTools.associateBy { it.key } }
+
+            ProjectToolsDrawer(
+                workspacePath = projectToolsViewModel.currentWorkspacePath,
+                tools = tools,
+                pluginToolsMap = toolsMap,
+                listState = projectToolsListState,
+                onOpenToolDetail = { tool, item ->
+                    reopenRightDrawerOnDetailBack = true
+                    scope.launch { rightDrawerState.close() }
+                    projectToolsViewModel.selectTool(tool, item)
+                    navController.navigate("plugin_tool_detail/${tool.key}")
+                },
+                onQuickRun = { tool, item ->
+                    scope.launch { rightDrawerState.close() }
+                    projectToolsViewModel.executeTool(tool, item.savedParams) {
+                        openWorkbench(WorkbenchPaneKind.TERMINAL)
+                    }
+                },
+                onOpenAllTools = {
+                    scope.launch { rightDrawerState.close() }
+                    navController.navigate("plugin_all_tools")
+                }
+            )
         }
     }
 
@@ -850,7 +956,7 @@ fun AppNavigation(
     // 文件树里点开的图片走这个查看器；聊天面板自带一个，两层互不影响。
     ImageViewerHost(state = drawerImageViewerState, load = drawerImageLoad)
     if (expanded) {
-        // 大屏不套 ModalNavigationDrawer：侧栏常驻在左，抽屉那套 scrim / 手势 / 锚点在这里完全用不上。
+        // 大屏左侧会话侧栏常驻，不走 ModalNavigationDrawer；右侧工具抽屉仍用 Modal 覆盖内容区。
         // 侧栏只在聊天页展开：设置页自己就是「菜单 + 详情」两栏，外面再套一层会话侧栏就成了三栏。
         // 宽度走补间而不是直接增删，否则右侧区域宽度突变，切页时会明显闪一下；
         // 时长与页面过渡取同一个值，两段动画同时收尾。
@@ -884,7 +990,30 @@ fun AppNavigation(
                 VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
             Box(modifier = Modifier.weight(1f)) {
-                navBody()
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    ModalNavigationDrawer(
+                        drawerState = rightDrawerState,
+                        gesturesEnabled = rightDrawerState.isOpen,
+                        drawerContent = {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                rightDrawerSheet()
+                            }
+                        }
+                    ) {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .openRightDrawerOnSwipe(
+                                        enabled = currentRoute == "chat",
+                                        onOpen = { scope.launch { rightDrawerState.open() } }
+                                    )
+                            ) {
+                                navBody()
+                            }
+                        }
+                    }
+                }
             }
         }
     } else {
@@ -903,7 +1032,31 @@ fun AppNavigation(
                 }
             }
         ) {
-            navBody()
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                ModalNavigationDrawer(
+                    drawerState = rightDrawerState,
+                    // 关闭时不接管横向手势，否则会吞掉外层左抽屉的「左边缘向右滑」。
+                    gesturesEnabled = rightDrawerState.isOpen,
+                    drawerContent = {
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            rightDrawerSheet()
+                        }
+                    }
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .openRightDrawerOnSwipe(
+                                    enabled = currentRoute == "chat",
+                                    onOpen = { scope.launch { rightDrawerState.open() } }
+                                )
+                        ) {
+                            navBody()
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1075,6 +1228,37 @@ private val OPAQUE_URL_SCHEME = Regex(
 )
 
 private val TRAILING_LINE = Regex("^(.*):(\\d+)$")
+
+/**
+ * 在屏幕右半部分向左滑打开右侧抽屉。
+ *
+ * 起点放宽到右半屏，避免只认最右边缘时被系统返回手势拦截；
+ * 位移直接读指针位置差，不依赖事件是否被子组件消费。
+ */
+private fun Modifier.openRightDrawerOnSwipe(
+    enabled: Boolean,
+    onOpen: () -> Unit
+): Modifier = if (!enabled) this else pointerInput(Unit) {
+    val threshold = 56.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.position.x < size.width * 0.5f) return@awaitEachGesture
+        var horizontal = 0f
+        var vertical = 0f
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (change.changedToUpIgnoreConsumed()) break
+            val delta = change.position - change.previousPosition
+            horizontal += delta.x
+            vertical += delta.y
+            if (horizontal <= -threshold && abs(horizontal) > abs(vertical) * 1.5f) {
+                onOpen()
+                break
+            }
+        }
+    }
+}
 
 /** 文件树里点击即在内置查看器预览的图片格式（与 sendFile 的图片判定一致）。 */
 private val PREVIEWABLE_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")

@@ -6,7 +6,8 @@ package com.aicode.feature.plugin.domain
  */
 enum class PluginPermission(val id: String) {
     SKILLS_REGISTER("skills.register"),
-    AGENTS_REGISTER("agents.register");
+    AGENTS_REGISTER("agents.register"),
+    WORKSPACE_TOOLS("workspace.tools");
 
     companion object {
         fun fromId(id: String): PluginPermission? = entries.firstOrNull { it.id == id }
@@ -23,6 +24,16 @@ data class PluginPermissionRequest(
 
 /** `contributes` 里指向包内 Markdown 文件的一条贡献。[file] 相对于包根目录。 */
 data class PluginContributionRef(val id: String, val file: String)
+
+/** `contributes.workspaceTools` 声明的工作区工具项，包含入口元数据与页面定义文件引用。 */
+data class PluginWorkspaceToolRef(
+    val id: String,
+    val title: LocalizedText,
+    val description: LocalizedText,
+    val icon: String = "play",
+    val category: String = "通用",
+    val pageFile: String
+)
 
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
@@ -41,10 +52,11 @@ data class PluginManifest(
     val structuredUi: String?,
     val permissions: List<PluginPermissionRequest>,
     val skills: List<PluginContributionRef>,
-    val agents: List<PluginContributionRef>
+    val agents: List<PluginContributionRef>,
+    val workspaceTools: List<PluginWorkspaceToolRef> = emptyList()
 ) {
     /** 清单声明的贡献总数。 */
-    val contributionCount: Int get() = skills.size + agents.size
+    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size
 
     fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
         permissions.firstOrNull { it.permission == permission }
