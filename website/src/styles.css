@@ -610,13 +610,14 @@ code {
     left: 0;
     width: 276px;
     transform: translateX(-102%);
-    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.18);
+    box-shadow: none;
   }
 }
 
 @media (max-width: 860px) {
   .aicode-device.drawer-open .ac-drawer {
     transform: translateX(0);
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.18);
   }
 }
 
