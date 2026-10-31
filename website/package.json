@@ -1,0 +1,19 @@
+{
+  "name": "aicode-official-website",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build && vite build --ssr src/entry-server.js --outDir .ssr && node scripts/prerender.mjs",
+    "preview": "vite preview --host 0.0.0.0 --port 5173"
+  },
+  "dependencies": {
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/server-renderer": "^3.5.42",
+    "vite": "^5.4.21"
+  }
+}
