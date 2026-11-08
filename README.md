@@ -1,42 +1,42 @@
-<p align="center">
-  <img src="docs/icon.webp" width="112" alt="AiCode" />
-  <h1 align="center">AiCode</h1>
-  <p align="center">
-    Android 上的通用 AI Coding Agent · Linux 开发环境 · 支持本地与远程 SSH
-    <br />
-    <a href="README.md">中文</a> · <a href="README.en.md">English</a>
+<palign="中心">
+<IMGsrc="docs/icon.webp"宽度="112"alt="AiCode"/>
+  <h1 对齐="中心">AiCode</h1>
+  <p对齐="中心">
+安卓上的通用AI编码代理·Linux开发环境·支持本地与远程SSH
+    <溴/>
+    <一个href="README.md">中文</一个> · <一个href="README.en.md">英语</一个>
   </p>
 </p>
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License GPL-3.0" /></a>
-  <img src="https://img.shields.io/badge/Platform-Android-green.svg" alt="Android Platform" />
-  <a href="https://github.com/jieapi/aicode/releases"><img src="https://img.shields.io/github/v/release/jieapi/aicode?display_name=tag&include_prereleases" alt="Latest Release" /></a>
+<p对齐="中心">
+  <一个href="许可"><IMGsrc="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="许可证GPL-3.0" /></一个>
+<IMGsrc="https://img.shields.io/badge/Platform-Android-green.svg"alt="Android平台"/>
+<一个href="https://github.com/jieapi/aicode/releases"><IMGsrc="https://img.shields.io/github/v/release/jieapi/aicode?display_name=tag&include_prereleases"alt="最新版本"/></一个>
 </p>
 
 ## 关于开源协议的声明
 
 近期发现，某闭源商业 App 大量使用了 AiCode 的代码及静态资源，甚至保留了本项目的类名与相关标识，却未遵守本项目的开源协议。与此同时，其开发者声称从未听说过 AiCode。
 
-**AiCode 允许在遵守 [GPL-3.0](LICENSE) 的前提下进行商业使用。** 我们反对的不是商业化，而是使用本项目代码后，以闭源形式分发衍生作品，且未履行保留版权与许可声明、按 GPL-3.0 授权及提供对应源代码等义务的行为。开源不等于放弃版权，请尊重开源协议与开发者的劳动成果。
+**AiCode 允许在遵守 [GPL-3.0](许可证) 的前提下进行商业使用。** 我们反对的不是商业化，而是使用本项目代码后，以闭源形式分发衍生作品，且未履行保留版权与许可声明、按 GPL-3.0 授权及提供对应源代码等义务的行为。开源不等于放弃版权，请尊重开源协议与开发者的劳动成果。
 
-<p align="center">
+<palign="中心">
   <table>
     <tr>
-      <td align="center"><img src="docs/screenshots/home.png" alt="AiCode 主页 - AI 对话界面，支持代码生成与 Markdown 渲染" width="270"/></td>
-      <td align="center"><img src="docs/screenshots/git.png" alt="AiCode Git 集成 - 可视化提交记录与分支管理" width="270"/></td>
+      <td align="中心"><IMGsrc="docs/screenshots/home.png" alt="AiCode 主页 - AI 对话界面，支持代码生成与 Markdown 渲染" 宽度="270"/></td>
+      <td align="中心"><IMGsrc="docs/screenshots/git.png" alt="AiCode Git 集成 - 可视化提交记录与分支管理" 宽度="270"/></td>
     </tr>
     <tr>
-      <td align="center">主页 · AI 对话</td>
-      <td align="center">Git · 提交历史</td>
+      <td align="中心">主页 · AI 对话</td>
+      <td align="中心">Git · 提交历史</td>
     </tr>
     <tr>
-      <td align="center"><img src="docs/screenshots/container.png" alt="AiCode 容器设置 - 容器镜像管理" width="270"/></td>
-      <td align="center"><img src="docs/screenshots/models.png" alt="AiCode 模型列表 - 多供应商模型管理" width="270"/></td>
+      <td align="中心"><IMGsrc="docs/screenshots/container.png" alt="AiCode 容器设置 - 容器镜像管理" 宽度="270"/></td>
+      <td align="中心"><IMGsrc="docs/screenshots/models.png" alt="AiCode 模型列表 - 多供应商模型管理" 宽度="270"/></td>
     </tr>
     <tr>
-      <td align="center">容器 · 镜像管理</td>
-      <td align="center">模型 · 列表配置</td>
+      <td align="中心">容器 · 镜像管理</td>
+      <td align="中心">模型 · 列表配置</td>
     </tr>
   </table>
 </p>
