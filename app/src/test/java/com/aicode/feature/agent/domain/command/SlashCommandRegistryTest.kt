@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -19,6 +20,12 @@ class SlashCommandRegistryTest {
 
     private val context = mockk<Context>()
     private val skillRepository = mockk<SkillRepository>()
+
+    /** 构造时 init 会自动 refresh，默认给出空结果，避免与具体测试的 stub 竞态。 */
+    @Before
+    fun setUp() {
+        every { skillRepository.listSkills() } returns emptyList()
+    }
 
     private fun action(cmdName: String, descRes: Int, takesArgs: Boolean = false) =
         object : ActionCommandHandler {
