@@ -282,6 +282,23 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun newReadonlyHookEvents_areAccepted() {
+        val manifest = success(
+            hooksManifest(
+                permissionsBlock = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-request", "on-tool", "on-compact"], "events": ["agent.request.started", "agent.tool.finished", "agent.compaction"]}}""",
+                hooksBlock = """{"id": "on-request", "event": "agent.request.started", "handler": "hooks.onRequest"},
+                    {"id": "on-tool", "event": "agent.tool.finished", "handler": "hooks.onTool"},
+                    {"id": "on-compact", "event": "agent.compaction", "handler": "hooks.onCompact"}"""
+            )
+        )
+        assertEquals(3, manifest.hooks.size)
+        assertEquals(
+            listOf("agent.request.started", "agent.tool.finished", "agent.compaction"),
+            manifest.requestFor(PluginPermission.AGENT_EVENTS)?.events
+        )
+    }
+
+    @Test
     fun hooksRequireAgentEventsPermission() {
         assertRejected(
             hooksManifest(permissionsBlock = ""),

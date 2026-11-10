@@ -71,7 +71,7 @@ class PluginToolManager @Inject constructor(
             .distinctBy { it.name }
 
         val currentActiveIds = plugins
-            .filter { it.isActive && PluginPermission.TOOLS_REGISTER in it.granted }
+            .filter { it.isActive && it.content.runtime != null }
             .map { it.id }
             .toSet()
         (activePluginIds - currentActiveIds).forEach { runtime.closePlugin(it) }

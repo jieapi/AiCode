@@ -504,12 +504,20 @@ class StatefulAgentWorkflow @Inject constructor(
         var hookErrorCode: String? = null
         var hookToolCalls = 0
         var hookMode = context.mode.name
+        val hookScope = if (context.agentDefinition != null) "subagent" else "main"
+        val hookAgentName = context.agentDefinition?.name
 
         return channelFlow {
             if (hookSessionId != null) {
                 hookRunId = UUID.randomUUID().toString()
                 hookStarted = true
-                pluginHookDispatcher.dispatchRunStarted(hookSessionId, hookRunId, hookMode)
+                pluginHookDispatcher.dispatchRunStarted(
+                    sessionId = hookSessionId,
+                    runId = hookRunId,
+                    mode = hookMode,
+                    scope = hookScope,
+                    agentName = hookAgentName
+                )
             }
         var currentContext = context
         var state = AgentSessionState()
@@ -605,6 +613,14 @@ class StatefulAgentWorkflow @Inject constructor(
                                 state = state.copy(messages = compaction.messages)
                                 baselineUsage = 0
                                 baselineEstimate = 0
+                                pluginHookDispatcher.dispatchCompaction(
+                                    sessionId = hookSessionId,
+                                    runId = hookRunId,
+                                    mode = currentContext.mode.name,
+                                    scope = hookScope,
+                                    agentName = hookAgentName,
+                                    estimatedInputTokens = predictedInput
+                                )
                             }
                         }
                         val requestEstimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -616,6 +632,19 @@ class StatefulAgentWorkflow @Inject constructor(
                             actionQueue.addLast(AgentAction.LlmError("", "input_budget_exceeded"))
                             continue
                         }
+
+                        val hookRequestId = UUID.randomUUID().toString()
+                        pluginHookDispatcher.dispatchRequestStarted(
+                            sessionId = hookSessionId,
+                            runId = hookRunId,
+                            requestId = hookRequestId,
+                            mode = currentContext.mode.name,
+                            scope = hookScope,
+                            agentName = hookAgentName,
+                            messageCount = compactedMessages.size,
+                            toolCount = currentTools.size,
+                            estimatedInputTokens = predictedInput
+                        )
 
                         // 调用统计埋点：记录请求发出/首字/结束时刻与 usage，失败与取消同样留痕。
                         val callStartElapsed = SystemClock.elapsedRealtime()
@@ -724,6 +753,25 @@ class StatefulAgentWorkflow @Inject constructor(
                         } finally {
                             val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
                             val usage = stream.finalResponse
+                            pluginHookDispatcher.dispatchRequestFinished(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                requestId = hookRequestId,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                status = when {
+                                    callCompleted -> "success"
+                                    callError != null -> "error"
+                                    else -> "cancelled"
+                                },
+                                inputTokens = usage?.inputTokens ?: 0,
+                                outputTokens = usage?.outputTokens ?: 0,
+                                toolCalls = usage?.toolCalls?.size ?: 0,
+                                durationMs = durationMillis,
+                                stopReason = usage?.stopReason,
+                                errorCode = callError
+                            )
                             runCatching {
                                 // 与适配器同源算一次「实际会发什么」：落库后能在统计页分辨
                                 // 「选了但没生效」「被降级」这些静默问题。
@@ -791,6 +839,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 并行执行本批已批准的工具。先统一记录 checkpoint（editFile/writeFile 修改前快照），
                         // 再并行执行；mode 切换检查在结果收集后于主协程串行处理（planApproval 单例）。
                         val toolCalls = effect.toolCalls
+                        val toolStartedAt = ConcurrentHashMap<String, Long>()
                         toolCalls.forEach { toolCall ->
                             if (toolCall.name == "editFile" || toolCall.name == "writeFile") {
                                 (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
@@ -808,6 +857,16 @@ class StatefulAgentWorkflow @Inject constructor(
                                 val pathLocks = ConcurrentHashMap<String, Mutex>()
                                 toolCalls.map { toolCall ->
                                     async {
+                                        toolStartedAt[toolCall.id] = SystemClock.elapsedRealtime()
+                                        pluginHookDispatcher.dispatchToolStarted(
+                                            sessionId = hookSessionId,
+                                            runId = hookRunId,
+                                            callId = toolCall.id,
+                                            toolName = toolCall.name,
+                                            mode = currentContext.mode.name,
+                                            scope = hookScope,
+                                            agentName = hookAgentName
+                                        )
                                         val run: suspend () -> ToolRunResult = {
                                             val tool = toolRegistry.getTool(toolCall.name)
                                             if (tool is StreamingAgentTool) {
@@ -863,6 +922,22 @@ class StatefulAgentWorkflow @Inject constructor(
                                 }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
+                        }
+
+                        batchResults.forEach { result ->
+                            val startedAt = toolStartedAt.remove(result.id)
+                            val duration = startedAt?.let { (SystemClock.elapsedRealtime() - it).toInt() } ?: 0
+                            pluginHookDispatcher.dispatchToolFinished(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                callId = result.id,
+                                toolName = result.toolName,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                status = if (result.isError) "error" else "success",
+                                durationMs = duration
+                            )
                         }
 
                         // 本轮内到达的后台任务/子代理完成通知：搭在本批最后一条工具结果上立即送达，
@@ -947,6 +1022,8 @@ class StatefulAgentWorkflow @Inject constructor(
             sessionId = hookSessionId,
             runId = hookRunId,
             mode = hookMode,
+            scope = hookScope,
+            agentName = hookAgentName,
             status = status,
             toolCalls = hookToolCalls,
             errorCode = code

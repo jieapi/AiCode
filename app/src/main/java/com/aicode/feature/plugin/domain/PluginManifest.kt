@@ -59,8 +59,21 @@ data class PluginToolRef(
 object PluginHookEvents {
     const val AGENT_RUN_STARTED = "agent.run.started"
     const val AGENT_RUN_FINISHED = "agent.run.finished"
+    const val AGENT_REQUEST_STARTED = "agent.request.started"
+    const val AGENT_REQUEST_FINISHED = "agent.request.finished"
+    const val AGENT_TOOL_STARTED = "agent.tool.started"
+    const val AGENT_TOOL_FINISHED = "agent.tool.finished"
+    const val AGENT_COMPACTION = "agent.compaction"
 
-    val ALL = setOf(AGENT_RUN_STARTED, AGENT_RUN_FINISHED)
+    val ALL = setOf(
+        AGENT_RUN_STARTED,
+        AGENT_RUN_FINISHED,
+        AGENT_REQUEST_STARTED,
+        AGENT_REQUEST_FINISHED,
+        AGENT_TOOL_STARTED,
+        AGENT_TOOL_FINISHED,
+        AGENT_COMPACTION
+    )
 }
 
 /** `contributes.hooks` 声明的一条生命周期 hook。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
