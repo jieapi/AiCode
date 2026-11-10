@@ -14,12 +14,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,6 +54,8 @@ class TerminalSessionManager @Inject constructor(
     private companion object {
         const val TAG = "TerminalSessionManager"
         const val TRANSCRIPT_ROWS = 2000
+        /** 每个标签的原始输出流容量（块数）；消费端不跟随时丢弃最旧块，不在内存里无界累积。 */
+        const val OUTPUT_CHANNEL_CAPACITY = 64
         // 无视图挂载时用于「就地启动」会话的默认终端尺寸；视图挂载后会按真实尺寸 resize。
         const val DEFAULT_COLUMNS = 80
         const val DEFAULT_ROWS = 24
@@ -77,6 +84,9 @@ class TerminalSessionManager @Inject constructor(
     override val tabFinishedEvents: SharedFlow<TabFinishedEvent> = _tabFinishedEvents.asSharedFlow()
 
     private val idCounter = AtomicInteger(0)
+
+    /** 每个标签的原始输出有界队列，由 [tabOutput] 暴露给日志消费端。 */
+    private val outputChannels = ConcurrentHashMap<String, Channel<ByteArray>>()
 
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -111,7 +121,7 @@ class TerminalSessionManager @Inject constructor(
         val shellCommand = buildInteractiveCommand()
         FileLogger.i(TAG, "交互 shell 命令（$id）：$shellCommand")
         val (session, client) = try {
-            buildSession(shellCommand)
+            buildSession(id, shellCommand)
         } catch (e: Exception) {
             FileLogger.e(TAG, "创建交互终端会话失败（$id）", e)
             containerEngine.logContainerDiagnostics("创建交互终端会话失败")
@@ -188,7 +198,7 @@ class TerminalSessionManager @Inject constructor(
         val afterCommand = if (notify) "; exit \$ec" else "; exec ${containerEngine.defaultShell()}"
         val shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
             "$command; ec=\$?; echo \"[command exited: \$ec]\"$afterCommand"
-        val (session, client) = buildSession(shellCommand)
+        val (session, client) = buildSession(id, shellCommand)
         addTab(
             TerminalTab(
                 id = id,
@@ -263,6 +273,8 @@ class TerminalSessionManager @Inject constructor(
         }.getOrNull() ?: ""
     }
 
+    override fun tabOutput(id: String): Flow<ByteArray>? = outputChannels[id]?.receiveAsFlow()
+
     /** 列出全部标签的摘要（id/标题/是否后台/运行状态/命令），供 AI 选目标。 */
     override fun listTabs(): List<TabInfo> = _tabs.value.map {
         TabInfo(
@@ -283,6 +295,7 @@ class TerminalSessionManager @Inject constructor(
     override fun closeTab(id: String): Boolean {
         val tab = tab(id) ?: return false
         runCatching { tab.session.finishIfRunning() }
+        outputChannels.remove(id)?.close()
         tab.view = null
         val remaining = _tabs.value.filterNot { it.id == id }
         _tabs.value = remaining
@@ -358,6 +371,7 @@ class TerminalSessionManager @Inject constructor(
                     if (current.runState is RunState.Running) {
                         val exitCode = extractExitCode(getTabOutput(tabId) ?: "") ?: 0
                         current.runState = RunState.Finished(exitCode)
+                        outputChannels.remove(tabId)?.close()
                         bumpRevision()
                         FileLogger.i(TAG, "兜底：标签 $tabId 检测到退出标记，强制收尾 exit=$exitCode")
                         if (current.isBackground) maybeStopKeepalive(current)
@@ -398,7 +412,7 @@ class TerminalSessionManager @Inject constructor(
      * client 的 viewProvider/onFinished 都以 session 为键回查 [_tabs]：会话与标签一一对应，
      * 故无需把 tab 引用提前注入 client（避免「构造 client 时 tab 还不存在」的先有鸡先有蛋）。
      */
-    private fun buildSession(shellCommand: String): Pair<TerminalSession, AppTerminalSessionClient> {
+    private fun buildSession(tabId: String, shellCommand: String): Pair<TerminalSession, AppTerminalSessionClient> {
         val workspace = workspaceRepository.currentPath()
         val invocation = containerEngine.buildProotInvocation(shellCommand, workspace)
         FileLogger.i(
@@ -414,6 +428,7 @@ class TerminalSessionManager @Inject constructor(
             onFinished = { finished ->
                 _tabs.value.firstOrNull { it.session === finished }?.let { target ->
                     target.runState = RunState.Finished(finished.exitStatus)
+                    outputChannels.remove(target.id)?.close()
                     bumpRevision()
                     FileLogger.i(TAG, "终端标签 ${target.id} 会话结束 exit=${finished.exitStatus}")
                     if (target.isBackground) maybeStopKeepalive(target)
@@ -438,6 +453,12 @@ class TerminalSessionManager @Inject constructor(
             client
         )
         session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
+        val outputChannel = Channel<ByteArray>(OUTPUT_CHANNEL_CAPACITY, BufferOverflow.DROP_OLDEST)
+        outputChannels.remove(tabId)?.close()
+        outputChannels[tabId] = outputChannel
+        session.setRawOutputListener { _, data, length ->
+            outputChannel.trySend(data.copyOf(length))
+        }
         FileLogger.i(TAG, "PTY 会话已创建：pid=${session.pid} 运行中=${session.isRunning}")
         return session to client
     }

@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
+import com.aicode.feature.plugin.domain.ToolOutputFormatter
+import com.aicode.feature.plugin.domain.ToolRunPhase
+import com.aicode.feature.plugin.domain.ToolRunState
 import com.aicode.feature.settings.domain.model.ActionSubmitElement
 import com.aicode.feature.settings.domain.parser.AdaptiveCardParser
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
@@ -13,6 +16,10 @@ import com.aicode.feature.workspace.domain.ProjectToolItem
 import com.aicode.feature.workspace.domain.ProjectToolsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +41,14 @@ class ProjectToolsViewModel @Inject constructor(
 
     /** 当前工作区已启用的工具配置列表 */
     val projectTools: StateFlow<List<ProjectToolItem>> = projectToolsRepository.tools
+
+    private val _runState = MutableStateFlow(ToolRunState())
+    /** 当前工具的运行状态与日志，供详情页运行面板观察。 */
+    val runState: StateFlow<ToolRunState> = _runState.asStateFlow()
+
+    private var outputJob: Job? = null
+    private var stopRequested = false
+    private var runToken = 0
 
     /** 所有已安装并启用的插件所贡献的工作区工具列表 */
     val activePluginTools: StateFlow<List<PluginWorkspaceTool>> = pluginManager.plugins.combine(
@@ -83,7 +98,8 @@ class ProjectToolsViewModel @Inject constructor(
     }
 
     /**
-     * 执行工具：根据当前参数插值命令模板，拉起终端后台标签执行。
+     * 执行工具：根据当前参数插值命令模板，拉起终端后台标签执行，
+     * 并把输出、退出码与停止操作接到 [runState]。
      */
     fun executeTool(
         tool: PluginWorkspaceTool,
@@ -91,6 +107,7 @@ class ProjectToolsViewModel @Inject constructor(
         templateOverride: String? = null,
         onSuccess: ((tabId: String) -> Unit)? = null
     ) {
+        if (_runState.value.phase == ToolRunPhase.RUNNING) return
         viewModelScope.launch {
             val submitAction = tool.cardRoot?.body?.filterIsInstance<ActionSubmitElement>()?.firstOrNull()
             val template = templateOverride ?: submitAction?.commandTemplate ?: "echo 'No action configured for ${tool.localId}'"
@@ -103,14 +120,111 @@ class ProjectToolsViewModel @Inject constructor(
             val command = AdaptiveCardParser.interpolate(template, params)
             FileLogger.i("ProjectToolsVM", "执行插件工具[${tool.key}]: $command")
 
-            // 3. 在终端启动共享后台标签并执行
-            val tabId = terminalSessionProvider.startBackgroundCommand(
-                command = command,
-                title = title,
-                notify = false
-            )
+            // 3. 在终端启动共享后台标签并执行（保活：命令结束后标签仍可继续输入）
+            val tabId = try {
+                terminalSessionProvider.startBackgroundCommand(
+                    command = command,
+                    title = title,
+                    notify = false
+                )
+            } catch (e: Exception) {
+                FileLogger.e("ProjectToolsVM", "启动插件工具命令失败", e)
+                _runState.value = ToolRunState(phase = ToolRunPhase.FAILED, command = command)
+                return@launch
+            }
 
             onSuccess?.invoke(tabId)
+            startOutputCollection(command, tabId)
         }
+    }
+
+    /** 停止当前运行：先发 Ctrl-C，超时仍未结束再关闭标签。 */
+    fun stopCurrentRun() {
+        val current = _runState.value
+        val tabId = current.tabId ?: return
+        if (current.phase != ToolRunPhase.RUNNING) return
+        stopRequested = true
+        _runState.value = current.copy(phase = ToolRunPhase.CANCELLED)
+        terminalSessionProvider.writeBytesToTab(tabId, 0x03)
+        val token = runToken
+        viewModelScope.launch {
+            delay(STOP_TIMEOUT_MS)
+            if (token == runToken && stopRequested && _runState.value.exitCode == null) {
+                terminalSessionProvider.closeTab(tabId)
+                outputJob?.cancel()
+            }
+        }
+    }
+
+    private fun startOutputCollection(command: String, tabId: String) {
+        outputJob?.cancel()
+        stopRequested = false
+        val token = ++runToken
+        _runState.value = ToolRunState(phase = ToolRunPhase.RUNNING, command = command, tabId = tabId)
+
+        val flow = terminalSessionProvider.tabOutput(tabId)
+        if (flow == null) {
+            _runState.value = _runState.value.copy(phase = ToolRunPhase.CANCELLED)
+            return
+        }
+
+        outputJob = viewModelScope.launch(Dispatchers.Default) {
+            val formatter = ToolOutputFormatter()
+            try {
+                flow.collect { bytes ->
+                    formatter.feed(bytes)
+                    publishProgress(token, formatter, tabId, command)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.e("ProjectToolsVM", "读取插件工具输出失败", e)
+            }
+            formatter.finish()
+            if (token != runToken) return@launch
+            val exit = formatter.exitCode
+            val phase = when {
+                stopRequested -> ToolRunPhase.CANCELLED
+                exit == null -> ToolRunPhase.CANCELLED
+                exit == 0 -> ToolRunPhase.SUCCESS
+                else -> ToolRunPhase.FAILED
+            }
+            _runState.value = _runState.value.copy(
+                phase = phase,
+                exitCode = exit,
+                lines = formatter.snapshot()
+            )
+        }
+    }
+
+    private fun publishProgress(
+        token: Int,
+        formatter: ToolOutputFormatter,
+        tabId: String,
+        command: String
+    ) {
+        if (token != runToken) return
+        val exit = formatter.exitCode
+        if (exit == null) {
+            _runState.value = _runState.value.copy(lines = formatter.snapshot())
+            return
+        }
+        _runState.value = ToolRunState(
+            phase = when {
+                stopRequested -> ToolRunPhase.CANCELLED
+                exit == 0 -> ToolRunPhase.SUCCESS
+                else -> ToolRunPhase.FAILED
+            },
+            lines = formatter.snapshot(),
+            exitCode = exit,
+            tabId = tabId,
+            command = command
+        )
+        // 命令已结束，标签随后进入保活 shell，后续输出属于用户交互，不再写入运行日志。
+        outputJob?.cancel()
+    }
+
+    private companion object {
+        const val STOP_TIMEOUT_MS = 3_000L
     }
 }
