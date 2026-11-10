@@ -361,7 +361,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ## 12. 当前实现范围
 
-上面的格式是完整草案；宿主现在只实现了声明式贡献和 AI 工具运行时的一小部分，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10）。
+上面的格式是完整草案；宿主现在只实现了声明式贡献、AI 工具运行时与 MCP 注册，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已真机验证；第四切片（MCP）已实现，冒烟编译与插件单测通过，待真机验证。
 
 ### 第一切片（已提交）：技能与子代理
 
@@ -399,6 +399,18 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
 | 未验证 | 设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
 
+### 第四切片（已实现，编译/单测通过，待真机验证）：MCP 服务器
+
+| 项 | 行为 |
+| --- | --- |
+| 能力 | `mcp.register` 与 `mcp.connect`，`scope` 只有 `ids`，两项都必须逐项覆盖 `contributes.mcp` 的 ID |
+| 贡献 | `contributes.mcp[]`，每项 `{id, file}`，`file` 为包内 `.json` |
+| 文件格式 | 沿用现有 `{"mcpServers": {...}}`，支持 HTTP（`url`）与 stdio（`command`/`args`/`env`），由 `McpConfigParser` 解析 |
+| 命名空间 | server 名生成 `plugin__<插件ID>__<贡献ID>__<原server名>`，用户同名配置优先 |
+| 连接 | 两项权限都授予且插件生效时才加入 `McpManager`；停用、撤权、卸载会重连并移除工具 |
+| 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
+| 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
+
 ### 校验规则（实现里的硬规则）
 
 - 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` 与 `tools.register`。
@@ -426,4 +438,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`mcp`、`pages`、`workspacePanel`、`configuration`、`hooks`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`pages`、`workspacePanel`、`configuration`、`hooks`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

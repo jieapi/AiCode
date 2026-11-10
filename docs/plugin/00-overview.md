@@ -135,7 +135,8 @@ App 按现有规则判断
 | 贡献：工作区工具（声明式页面 + 命令模板） | 已提交（`c0223c8e`），未真机验证 | `contributes.workspaceTools`、`workspace.tools`、`PluginContentLoader.loadWorkspaceTool`、`ProjectToolsRepository` |
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
 | 贡献：AI 工具（`runtime` + `tools.register` + JavaScript 沙箱 handler） | 已实现，冒烟编译与插件单测通过，已真机验证（2026-11-10） | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
-| MCP、通用页面与配置、hooks、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
+| 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
+| 通用页面与配置、hooks、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 实现范围的精确说明（哪些字段会被接受、哪些会被拒绝、各项限额）见 [10-plugin-format.md](10-plugin-format.md) 第 12 节。
@@ -150,7 +151,7 @@ App 按现有规则判断
 | 1 运行时与 UI 协议 PoC | 部分完成 | 已接入 JavaScriptSandbox，打通「加载 `dist/main.js` → handler → AI 工具」；取消、崩溃恢复、设备兼容矩阵仍待验证 |
 | 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、逐项授权已实现；在线索引未开始 |
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
-| 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具已实现；MCP、提供商未实现 |
+| 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
 | 6 生命周期、代审核与双向交互 | 未开始 | 依赖阶段 0 的 D12、D13、D14 |
 | 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
@@ -158,6 +159,8 @@ App 按现有规则判断
 ### 8.3 当前进度
 
 当前同时有两条链路：声明式工作区工具（页面 JSON + 命令模板，提交后发到终端标签，没有运行态回传）和 AI 工具（`runtime` + `dist/main.js`，在 JavaScriptSandbox 中调用 handler，结果回给模型）。AI 工具已冒烟编译并通过插件单测，尚未真机验证。
+
+2026-11-10：同日新增 MCP 切片——清单支持 `contributes.mcp` 与 `mcp.register` / `mcp.connect`；插件 MCP 文件复用 `McpConfigParser` 与现有 HTTP/stdio 链路，server 名加 `plugin__` 命名空间，用户同名配置优先；插件启停/卸载时 McpManager 重连并移除工具。已通过冒烟编译与插件单测，待真机验证。
 
 2026-11-10：新增 AI 工具切片——清单支持 `runtime`、`contributes.tools` 与 `tools.register`；运行时每个插件一个 isolate，宿主注入 `__aicodeInvoke` 调用 `globalThis.aicode.handlers`；工具按 `plugin__` 命名空间注册进 `ToolRegistry`，默认 ASK，执行前复核插件启用与授权。`assembleUniversalDebug` 通过，69 个插件单测通过。同日真机验证通过：AI 工具 echo 返回内容、长度与 `runtime: javascript` 正确；技能 project-notes 成功写入 `NOTES.md`；子代理 reviewer 完成只读审查。
 

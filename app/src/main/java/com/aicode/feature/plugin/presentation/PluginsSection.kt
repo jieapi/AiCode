@@ -32,6 +32,7 @@ import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.ui.AppSwitch
 import com.aicode.feature.plugin.domain.InstalledPlugin
+import com.aicode.feature.plugin.domain.PluginMcpServer
 import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.settings.presentation.component.SettingsDivider
@@ -51,12 +52,27 @@ internal fun InstalledPlugin.displayName(languageTag: String): String =
     manifest?.name?.resolve(languageTag) ?: id
 
 @Composable
+internal fun mcpDescription(server: PluginMcpServer): String {
+    val transport = stringResource(
+        if (server.config.isStdio) R.string.plugins_mcp_transport_stdio else R.string.plugins_mcp_transport_http
+    )
+    val target = if (server.config.isStdio) {
+        (listOfNotNull(server.config.command) + server.config.args).joinToString(" ")
+    } else {
+        server.config.url.orEmpty()
+    }
+    return if (target.isBlank()) transport else "$transport · $target"
+}
+
+@Composable
 internal fun PluginPermission.label(): String = stringResource(
     when (this) {
         PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
         PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
         PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
         PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
+        PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register
+        PluginPermission.MCP_CONNECT -> R.string.plugins_permission_mcp_connect
     }
 )
 
@@ -204,7 +220,8 @@ internal fun PluginDetailSection(
                 val agents = plugin.content.agents
                 val workspaceTools = plugin.content.workspaceTools
                 val aiTools = plugin.content.tools
-                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty()) {
+                val mcpServers = plugin.content.mcp
+                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty() && mcpServers.isEmpty()) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -238,13 +255,25 @@ internal fun PluginDetailSection(
                         it.description.resolve(languageTag),
                         PluginPermission.TOOLS_REGISTER
                     )
+                } + mcpServers.map {
+                    Triple(
+                        stringResource(R.string.plugins_content_mcp, it.originalName),
+                        mcpDescription(it),
+                        PluginPermission.MCP_CONNECT
+                    )
                 }
                 rows.forEachIndexed { index, (title, description, permission) ->
                     if (index > 0) SettingsDivider()
+                    val active = plugin.isActive && when (permission) {
+                        PluginPermission.MCP_CONNECT ->
+                            PluginPermission.MCP_REGISTER in plugin.granted &&
+                                PluginPermission.MCP_CONNECT in plugin.granted
+                        else -> permission in plugin.granted
+                    }
                     ContentRow(
                         title = title,
                         description = description,
-                        active = plugin.isActive && permission in plugin.granted
+                        active = active
                     )
                 }
             }

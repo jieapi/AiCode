@@ -26,14 +26,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -73,7 +68,6 @@ class McpConfigRepository @Inject constructor(
         const val DEFAULT_JSON = """{"mcpServers":{}}"""
         /** 项目级配置目录名，容器内即 `~/workspace/.aicode`。 */
         const val AICODE_DIR_NAME = ".aicode"
-        val JSON = Json { ignoreUnknownKeys = true; isLenient = true }
         val PRETTY_JSON = Json { prettyPrint = true }
     }
 
@@ -276,70 +270,7 @@ class McpConfigRepository @Inject constructor(
         return PRETTY_JSON.encodeToString(JsonObject.serializer(), root)
     }
 
-    fun parse(raw: String): List<McpServerConfig> {
-        val root = runCatching { JSON.parseToJsonElement(raw).jsonObject }.getOrElse {
-            FileLogger.w(TAG, "MCP 配置 JSON 解析失败: ${it.message}")
-            return emptyList()
-        }
-        val servers = (root["mcpServers"] as? JsonObject) ?: return emptyList()
-
-        return servers.mapNotNull { (name, element) ->
-            val obj = element as? JsonObject ?: return@mapNotNull null
-            val enabled = (obj["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true
-
-            val command = (obj["command"] as? JsonPrimitive)?.contentOrNull
-            val url = (obj["url"] as? JsonPrimitive)?.contentOrNull
-
-            val disabledTools = (obj["disabledTools"] as? JsonArray)?.mapNotNull {
-                (it as? JsonPrimitive)?.contentOrNull
-            }?.toSet() ?: emptySet()
-
-            when {
-                !command.isNullOrBlank() -> {
-                    val args = (obj["args"] as? JsonArray)?.mapNotNull {
-                        (it as? JsonPrimitive)?.contentOrNull
-                    } ?: emptyList()
-                    val env = (obj["env"] as? JsonObject)?.mapNotNull { (k, v) ->
-                        (v as? JsonPrimitive)?.contentOrNull?.let { k to it }
-                    }?.toMap() ?: emptyMap()
-                    McpServerConfig(
-                        name = name,
-                        command = command,
-                        args = args,
-                        env = env,
-                        enabled = enabled,
-                        disabledTools = disabledTools
-                    )
-                }
-                !url.isNullOrBlank() -> {
-                    val headers = (obj["headers"] as? JsonObject)?.mapNotNull { (k, v) ->
-                        (v as? JsonPrimitive)?.contentOrNull?.let { k to it }
-                    }?.toMap() ?: emptyMap()
-                    val auth = (obj["auth"] as? JsonObject)?.let { authObj ->
-                        McpAuthConfig(
-                            type = (authObj["type"] as? JsonPrimitive)?.contentOrNull ?: McpAuthConfig.TYPE_OAUTH,
-                            clientId = (authObj["clientId"] as? JsonPrimitive)?.contentOrNull,
-                            authServer = (authObj["authServer"] as? JsonPrimitive)?.contentOrNull,
-                            scopes = (authObj["scopes"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-                        )
-                    }
-                    McpServerConfig(
-                        name = name,
-                        url = url,
-                        headers = headers,
-                        enabled = enabled,
-                        disabledTools = disabledTools,
-                        auth = auth
-                    )
-                }
-                else -> {
-                    // 既无 url 也无 command，无法识别，跳过。
-                    FileLogger.i(TAG, "跳过无法识别的 MCP server（缺 url/command）: $name")
-                    null
-                }
-            }
-        }
-    }
+    fun parse(raw: String): List<McpServerConfig> = McpConfigParser.parse(raw, TAG)
 
     /** 合并全局与项目配置：全局按序在前，项目项覆盖同名，顺序 = 全局序 + 项目新增项。 */
     private fun merge(

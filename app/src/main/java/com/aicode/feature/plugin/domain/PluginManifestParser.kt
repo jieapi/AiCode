@@ -122,7 +122,8 @@ object PluginManifestParser {
                     agents = contributes.agents,
                     workspaceTools = contributes.workspaceTools,
                     runtime = runtime,
-                    tools = contributes.tools
+                    tools = contributes.tools,
+                    mcp = contributes.mcp
                 )
             )
         }
@@ -341,14 +342,17 @@ object PluginManifestParser {
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
             val workspaceTools: List<PluginWorkspaceToolRef>,
-            val tools: List<PluginToolRef>
+            val tools: List<PluginToolRef>,
+            val mcp: List<PluginMcpRef>
         )
 
         private fun readContributes(obj: JsonObject): Contributes? {
             val raw = obj["contributes"] ?: return null.also { missing("contributes") }
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
-            contributes.keys.filter { it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" }.forEach {
+            contributes.keys.filter {
+                it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" && it != "mcp"
+            }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
             }
@@ -356,11 +360,14 @@ object PluginManifestParser {
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
             val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
             val tools = readTools(contributes["tools"], "contributes.tools") ?: run { ok = false; emptyList() }
-            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty()) {
+            val mcpRefs = readContributionList(contributes["mcp"], "contributes.mcp", extension = ".json")
+                ?: run { ok = false; emptyList() }
+            val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty() && mcp.isEmpty()) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, tools) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, tools, mcp) else null
         }
 
         /** 缺省视为空列表；每项必须有合法局部 ID、标题、JSON Schema 文件与 handler 名。 */
@@ -470,7 +477,11 @@ object PluginManifestParser {
         }
 
         /** 缺省视为空列表；存在但格式不合法返回 null。 */
-        private fun readContributionList(raw: JsonElement?, path: String): List<PluginContributionRef>? {
+        private fun readContributionList(
+            raw: JsonElement?,
+            path: String,
+            extension: String = ".md"
+        ): List<PluginContributionRef>? {
             if (raw == null) return emptyList()
             val array = raw as? JsonArray ?: return null.also { invalid(path) }
             if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
@@ -491,7 +502,7 @@ object PluginManifestParser {
                 val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
                 val file = item["file"]?.stringOrNull()
                 if (id == null) { invalid("$itemPath.id"); ok = false }
-                if (file == null || !isSafeRelativePath(file) || !file.endsWith(".md", ignoreCase = true)) {
+                if (file == null || !isSafeRelativePath(file) || !file.endsWith(extension, ignoreCase = true)) {
                     invalid("$itemPath.file")
                     ok = false
                 }
@@ -513,6 +524,9 @@ object PluginManifestParser {
             checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents, permissions)
             checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { PluginContributionRef(it.id, it.pageFile) }, permissions)
             checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { PluginContributionRef(it.id, it.inputSchema) }, permissions)
+            val mcpRefs = contributes.mcp.map { PluginContributionRef(it.id, it.file) }
+            checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpRefs, permissions)
+            checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpRefs, permissions)
         }
 
         private fun checkCoverage(
