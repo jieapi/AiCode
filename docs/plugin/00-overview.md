@@ -1,6 +1,6 @@
 # 插件系统计划：总览
 
-状态：讨论稿 v0.7，2026-10-25。第一切片（声明式贡献：技能与子代理，本地导入）已在 `feat/plugin-system` 分支实现，其余仍为设计规划；进度见第 8 节。
+状态：讨论稿 v0.7，2026-10-25（进度更新至 2026-11-10）。技能与子代理、工作区工具、AI 工具与运行时、MCP 服务器、生命周期 hooks 第一版（只读）五个切片已在 `feat/plugin-system` 分支实现；hooks 已通过冒烟编译、插件单测与真机验证（2026-11-10）。其余仍为设计规划；进度见第 8 节。
 
 本文档用于持续讨论，不代表已经批准实施，也不代表下面的建议都已确定。后续直接修改对应主题文件，避免把尚未决定的事项写成既定约束。
 
@@ -106,7 +106,7 @@ App 按现有规则判断
 
 - 构建插件已明确为右抽屉入口、结构化页面/配置与插件业务逻辑；具体字段、组件清单、页面呈现容器与任务保留策略尚未定稿，不自行扩展为 App 内置构建配方或复杂任务图引擎。
 - 自由布局、动效、状态绑定、表单反馈已确认；是否开放任意 HTML/CSS、插件原生 View 或由代码任意返回 UI 树等其他渲染方式未确认。
-- 不确定 hooks 是否允许改写消息、工具参数、响应或模型配置；支持生命周期扩展不等于任意修改内部状态。
+- 第一个 hooks 切片只读：只给运行元数据，不允许改写消息、工具参数、响应或模型配置；后续是否提供 `transform`、能改哪些字段仍未确认，支持生命周期扩展不等于任意修改内部状态。
 - 不确定安装、启用和授权是全局、项目级还是会话级。
 - 多索引在线目录已确认；不另外预设账号、付费、评分、专用市场后端或多语言运行时。
 - 是否官方的认定尚未决定；推荐区分官方维护与官方索引收录，不把自定义索引的声明直接当可信身份。
@@ -119,7 +119,7 @@ App 按现有规则判断
 
 插件运行位置遵循 R02，宿主执行命令的目标遵循 R18，两者不冲突。现有全局 Skill、子代理等资源会跟随执行环境，这不等于插件包也必须上传到服务器。建议将插件贡献作为单独来源，既保留已有资源行为，也让插件本体保持在手机端；具体见架构和扩展章节。
 
-本目录是工程规划，不是面向使用者发布的功能文档。实施时必须同步使用文档、提示词和双语文案，并遵守项目的编译、测试、迁移与 RC 发布规则；第一切片已同步 `docs-site/docs/guide/plugins.md`、`docs-site/docs/advanced/plugin-development.md`、双语字符串与 `prompts/70-skills-and-mcp.md`。
+本目录是工程规划，不是面向使用者发布的功能文档。实施时必须同步使用文档、提示词和双语文案，并遵守项目的编译、测试、迁移与 RC 发布规则；第一切片已同步 `docs-site/docs/guide/plugins.md`、`docs-site/docs/advanced/plugin-development.md`、双语字符串与 `prompts/70-skills-and-mcp.md`，hooks 切片已同步这两页文档与同一提示词。
 
 ## 8. 实现进度
 
@@ -136,7 +136,8 @@ App 按现有规则判断
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
 | 贡献：AI 工具（`runtime` + `tools.register` + JavaScript 沙箱 handler） | 已实现，冒烟编译与插件单测通过，已真机验证（2026-11-10） | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
-| 通用页面与配置、hooks、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
+| 贡献：生命周期 hooks（只读；`agent.events` + `contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的 started/finished 派发 |
+| 通用页面与配置、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 实现范围的精确说明（哪些字段会被接受、哪些会被拒绝、各项限额）见 [10-plugin-format.md](10-plugin-format.md) 第 12 节。
@@ -153,12 +154,14 @@ App 按现有规则判断
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
-| 6 生命周期、代审核与双向交互 | 未开始 | 依赖阶段 0 的 D12、D13、D14 |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 第一个切片「只读 hooks」已实现并通过冒烟编译/单测，覆盖 `agent.run.started` / `agent.run.finished` 与元数据 payload（`runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`），已真机验证（2026-11-10）；`transform`、代审核与双向交互未开始，依赖阶段 0 的 D12、D13、D14 |
 | 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 ### 8.3 当前进度
 
 当前同时有两条链路：声明式工作区工具（页面 JSON + 命令模板，提交后发到终端标签，没有运行态回传）和 AI 工具（`runtime` + `dist/main.js`，在 JavaScriptSandbox 中调用 handler，结果回给模型）。AI 工具已冒烟编译并通过插件单测，尚未真机验证。
+
+2026-11-10：新增生命周期 hooks 第一切片（已通过冒烟编译、插件单测与真机验证）——清单支持 `contributes.hooks[]`（每项 `{id,event,handler}`，`handler` 为 `dist/main.js` 的 `globalThis.aicode.handlers` 键）与权限 `agent.events`（`scope.ids` 覆盖全部 hook id，`scope.events` 覆盖 hooks 使用的事件集合，必须同时申请）；hooks 需要 `runtime`。本切片只暴露 `agent.run.started` / `agent.run.finished`，payload 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`，`status` 为 `started` / `success` / `error` / `cancelled`，不含消息正文；宿主异步派发，失败只记日志、不阻塞 Agent；只读，不能修改请求或自动批准工具。
 
 2026-11-10：同日新增 MCP 切片——清单支持 `contributes.mcp` 与 `mcp.register` / `mcp.connect`；插件 MCP 文件复用 `McpConfigParser` 与现有 HTTP/stdio 链路，server 名加 `plugin__` 命名空间，用户同名配置优先；插件启停/卸载时 McpManager 重连并移除工具。已通过冒烟编译与插件单测，待真机验证。
 
@@ -208,7 +211,7 @@ App 按现有规则判断
 
 - 抽屉交互、工具数据对账、命令执行会话与安全前置都属于阶段 5；其中交互修正不依赖 JS 运行时，可先做。
 - 流式输出、构建进度、错误显示对应阶段 5 的退出条件「插件页面和配置可交互、反馈进度/日志/错误；非零退出不误报成功」。
-- 插件自定义构建配方、事件 handler 与状态绑定依赖阶段 1、3、4。
+- 插件自定义构建配方与状态绑定依赖阶段 1、3、4；生命周期事件 handler 已由只读 hooks 起步。
 - 在线安装、更新与官方标识属于阶段 7；用户文档与提示词同步在阶段 5 发布前完成。
 
 ### 8.6 维护规则

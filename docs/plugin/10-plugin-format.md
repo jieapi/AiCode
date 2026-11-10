@@ -147,7 +147,7 @@ community.workbench-kit-1.0.0.zip
 | `workspace.commands` | `target: currentWorkspace` | 路由到当前工作区后端，不承诺 shell 的文件/网络隔离 |
 | `terminal.sessions` | `target: currentWorkspace, access: owned` | 新建共享标签并操作自有句柄，不接管用户已有标签 |
 | `environment.prepare` | `ids: [环境ID]` | 仅用户手动准备的插件服务依赖；不自动安装解释器或系统工具 |
-| `agent.events` | `events: [事件名], data: metadata/content` | metadata 只给状态/关联信息；content 还须按事件契约和作用域授权，不能因监听事件就读取完整会话 |
+| `agent.events` | `ids: [hook ID], events: [事件名]` | 只覆盖声明的 hook 与事件；第一切片只给运行元数据，不能因监听事件读取会话内容；`data: metadata/content` 的区分尚未实现 |
 | `agent.transform` | `events: [事件名]` | 仅宿主明确支持的变更契约；字段未定的事件不能据此任意改写 |
 | `agent.permissionReview` | `tools: [工具匹配项]` | 只处理宿主 ASK；同意/拒绝/不处理，不修改自身授权 |
 | `notifications.post` / `shizuku.execute` | `target: device` | 均单独授权；Shizuku 具体操作粒度仍待定 |
@@ -167,7 +167,7 @@ community.workbench-kit-1.0.0.zip
 | `pages` | 数组 | `id/title/document/onOpen`；`onOpen` 可省略 |
 | `workspacePanel` | 单个对象，可省略 | `page` 引用页面，右抽屉按插件展示入口 |
 | `configuration` | 单个对象，可省略 | `page/defaults/saveHandler`，从设置内配置操作打开 |
-| `hooks` | 数组 | `id/event/mode/handler`，mode 为 `observe` 或获支持的 `transform` |
+| `hooks` | 数组 | `id/event/handler`；第一切片只有只读观察，`mode` 与 `transform` 未实现 |
 | `permissionReviewer` | 单个对象，可省略 | `handler`，必须已申请 `agent.permissionReview` |
 | `environments` | 数组 | `id/target/manager/prerequisites/inputs/lockFiles/checkHandler/prepareHandler` |
 | `services` | 数组 | `id/environment/environmentRef/startHandler/stopHandler/exports`，无依赖时可省略 environmentRef |
@@ -312,6 +312,8 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 示例的可选提供商依赖 `providers.register`、`providers.requests`、已手动准备的 gateway_deps 环境、其服务实际使用的命令/终端能力和需要时的自有凭据授权；未授权时不能仅因声明存在就启动服务。MCP 文件里的真实地址、上游转换和依赖检查由插件提供，宿主不包含这些业务。
 
+示例里的 hooks 与 `agent.events` 保留草案字段（`agent.request.before`、`mode`、`data`）；当前版本只接受 `agent.run.started` / `agent.run.finished`，hooks 项为 `{id, event, handler}`，以第 12 节为准。
+
 ## 9. 页面文件的结构连接示例
 
 下面仅固定页面外壳、状态引用和事件关联的草案，用于把清单与 UI 连起来；完整布局/组件属性与变更协议仍需在 UI 规范中细化，不代表当前 DIY 已支持。
@@ -361,7 +363,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ## 12. 当前实现范围
 
-上面的格式是完整草案；宿主现在只实现了声明式贡献、AI 工具运行时与 MCP 注册，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已真机验证；第四切片（MCP）已实现，冒烟编译与插件单测通过，待真机验证。
+上面的格式是完整草案；宿主现在只实现了声明式贡献、AI 工具运行时、MCP 注册与第一版只读 hooks，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已真机验证；第四切片（MCP）已实现，冒烟编译与插件单测通过，待真机验证；第五切片（只读 hooks）已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10）。
 
 ### 第一切片（已提交）：技能与子代理
 
@@ -397,7 +399,8 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 宿主生成 `plugin__<插件ID>__<工具ID>`（清洗并限长 64），不会与内置工具/MCP 重名 |
 | 授权 | 工具默认 ASK；PLAN 模式按 `EXTERNAL_TOOL` 拦截；执行前复核插件已启用且 `tools.register` 仍授权 |
 | 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
-| 未验证 | 设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
+| 已验证 | `agent.run.finished` 元数据（runId/sessionId/mode/status/toolCalls/errorCode）与 Hook → isolate 状态共享 |
+| 未验证 | started/finished 顺序、取消路径、设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
 
 ### 第四切片（已实现，编译/单测通过，待真机验证）：MCP 服务器
 
@@ -411,9 +414,23 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
 | 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
 
+### 第五切片（已实现，编译/单测/真机验证通过，2026-11-10）：生命周期 hooks 第一版（只读）
+
+| 项 | 行为 |
+| --- | --- |
+| 能力 | `agent.events`，`scope` 为 `{"ids": [...], "events": [...]}`；`ids` 要覆盖 `contributes.hooks` 的全部 id，`events` 要覆盖 hooks 使用的事件集合；必须同时申请 `agent.events` |
+| 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 为 `dist/main.js` 里 `globalThis.aicode.handlers` 的键 |
+| 运行时 | hooks 需要 `runtime`；没有运行时的包不能声明 hooks |
+| 事件 | 本切片只有 `agent.run.started` 与 `agent.run.finished` |
+| payload | 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`；`status` 为 `started` / `success` / `error` / `cancelled`；不含消息正文、工具参数或工具结果 |
+| 派发 | 宿主异步派发，handler 返回值被忽略；失败只记日志，不阻塞 Agent，不改变本轮结果 |
+| 边界 | 只读：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，不能影响工具授权与模式限制 |
+| 未验证 | 统一编译与真机验证尚未进行（另一任务在途） |
+
 ### 校验规则（实现里的硬规则）
 
-- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` 与 `tools.register`。
+- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` / `tools.register`、`contributes.mcp` / `mcp.register` / `mcp.connect`、`contributes.hooks` / `agent.events`。
+- hooks 的权限范围双向覆盖：`agent.events` 的 `scope.ids` 必须覆盖全部 hook id，`scope.events` 必须覆盖 hooks 实际使用的事件集合；只写 hooks 不申请权限，或只申请权限不声明 hooks，都会拒绝。
 - 权限范围与贡献逐项对应：每个贡献 ID 必须被对应注册权限的 `scope.ids` 覆盖，权限里也不能列出不存在的 ID；同类 ID 与同一权限不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。
@@ -438,4 +455,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`pages`、`workspacePanel`、`configuration`、`hooks`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的 `transform` 模式与可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
