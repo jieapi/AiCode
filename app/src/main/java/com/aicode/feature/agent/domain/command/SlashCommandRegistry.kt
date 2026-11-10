@@ -1,12 +1,14 @@
 package com.aicode.feature.agent.domain.command
 
 import android.content.Context
+import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicode.feature.plugin.domain.PluginManager
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,11 +53,17 @@ class SlashCommandRegistry @Inject constructor(
     /** `/` 菜单展示的命令列表。 */
     val commands: StateFlow<List<SlashCommand>> = _commands.asStateFlow()
 
+    private val refreshScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            CoroutineExceptionHandler { _, e ->
+                FileLogger.w(TAG, "斜杠命令刷新失败: ${e.javaClass.simpleName}")
+            }
+    )
+
     init {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        scope.launch { refresh() }
+        refreshScope.launch { refresh() }
         pluginManager?.let { pm ->
-            scope.launch {
+            refreshScope.launch {
                 pm.plugins.collect { refresh() }
             }
         }
@@ -127,6 +135,8 @@ class SlashCommandRegistry @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "SlashCommandRegistry"
+
         /**
          * 构造技能本轮指令：把技能正文里的 `$ARGUMENTS` 替换为 [args]；
          * 无占位且 [args] 非空时追加一行，保证用户输入不丢失。
