@@ -166,7 +166,7 @@ plugin-index/
       {"id": "workspace.commands", "required": true, "reason": "执行用户要求的项目命令", "scope": {"target": "currentWorkspace"}},
       {"id": "terminal.sessions", "required": true, "reason": "在共享标签显示任务输出", "scope": {"target": "currentWorkspace", "access": "owned"}},
       {"id": "environment.prepare", "required": false, "reason": "按用户操作准备本插件服务依赖", "scope": {"ids": ["gateway_deps"]}},
-      {"id": "agent.events", "required": false, "reason": "展示本轮运行状态", "scope": {"events": ["agent.request.before", "agent.run.finished"], "data": "metadata"}},
+      {"id": "agent.events", "required": false, "reason": "展示本轮运行状态", "scope": {"ids": ["before_request", "run_finished"], "events": ["agent.request.started", "agent.run.finished"], "data": "metadata"}},
       {"id": "agent.permissionReview", "required": false, "reason": "代审用户授权范围内的命令", "scope": {"tools": ["Bash", "terminal"]}},
       {"id": "credentials.use", "required": false, "reason": "处理交给本插件的上游凭据", "scope": {"access": "owned"}}
     ],

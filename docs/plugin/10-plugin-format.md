@@ -293,8 +293,8 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
     "workspacePanel": {"page": "build"},
     "configuration": {"page": "configuration", "defaults": "configuration/defaults.json", "saveHandler": "configuration.save"},
     "hooks": [
-      {"id": "before_request", "event": "agent.request.before", "mode": "observe", "handler": "hooks.beforeRequest"},
-      {"id": "run_finished", "event": "agent.run.finished", "mode": "observe", "handler": "hooks.runFinished"}
+      {"id": "before_request", "event": "agent.request.started", "handler": "hooks.beforeRequest"},
+      {"id": "run_finished", "event": "agent.run.finished", "handler": "hooks.runFinished"}
     ],
     "permissionReviewer": {"handler": "permissions.review"},
     "environments": [
@@ -312,7 +312,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 示例的可选提供商依赖 `providers.register`、`providers.requests`、已手动准备的 gateway_deps 环境、其服务实际使用的命令/终端能力和需要时的自有凭据授权；未授权时不能仅因声明存在就启动服务。MCP 文件里的真实地址、上游转换和依赖检查由插件提供，宿主不包含这些业务。
 
-示例里的 hooks 与 `agent.events` 保留草案字段（`agent.request.before`、`mode`、`data`）；当前版本只接受 `agent.run.started` / `agent.run.finished`，hooks 项为 `{id, event, handler}`，以第 12 节为准。
+示例里的 hooks 已按当前实现改成 `{id, event, handler}`；`agent.events` 的 `data` 等字段仍是后续草案。当前版本接受七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），以第 12 节为准。
 
 ## 9. 页面文件的结构连接示例
 
@@ -399,7 +399,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 宿主生成 `plugin__<插件ID>__<工具ID>`（清洗并限长 64），不会与内置工具/MCP 重名 |
 | 授权 | 工具默认 ASK；PLAN 模式按 `EXTERNAL_TOOL` 拦截；执行前复核插件已启用且 `tools.register` 仍授权 |
 | 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
-| 已验证 | `agent.run.finished` 元数据（runId/sessionId/mode/status/toolCalls/errorCode）与 Hook → isolate 状态共享 |
+| 已验证 | `agent.run.finished` 元数据与 Hook → isolate 状态共享（第一版两个事件）；扩到七个事件后仅编译/单测通过 |
 | 未验证 | started/finished 顺序、取消路径、设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
 
 ### 第四切片（已实现，编译/单测通过，待真机验证）：MCP 服务器
@@ -414,18 +414,18 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
 | 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
 
-### 第五切片（已实现，编译/单测/真机验证通过，2026-11-10）：生命周期 hooks 第一版（只读）
+### 第五切片（已实现）：生命周期 hooks（只读）
 
 | 项 | 行为 |
 | --- | --- |
 | 能力 | `agent.events`，`scope` 为 `{"ids": [...], "events": [...]}`；`ids` 要覆盖 `contributes.hooks` 的全部 id，`events` 要覆盖 hooks 使用的事件集合；必须同时申请 `agent.events` |
 | 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 为 `dist/main.js` 里 `globalThis.aicode.handlers` 的键 |
 | 运行时 | hooks 需要 `runtime`；没有运行时的包不能声明 hooks |
-| 事件 | 本切片只有 `agent.run.started` 与 `agent.run.finished` |
-| payload | 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`；`status` 为 `started` / `success` / `error` / `cancelled`；不含消息正文、工具参数或工具结果 |
-| 派发 | 宿主异步派发，handler 返回值被忽略；失败只记日志，不阻塞 Agent，不改变本轮结果 |
+| 事件 | `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction` |
+| payload | 公共字段 `runId`、`sessionId`、`mode`、`scope`（`main`/`subagent`）、`agentName`；run 事件带 `status`/`toolCalls`/`errorCode`；请求事件带 `requestId`/`usage`/`durationMs`/`stopReason`/`estimatedInputTokens`；工具事件带 `callId`/`toolName`/`status`/`durationMs`；压缩事件带 `compacted`/`estimatedInputTokens` |
+| 派发 | 宿主异步派发；handler 可返回 `{logs:[...]}` 写应用日志（最多 50 行、单行 500 字符），其余返回值被忽略；失败只记日志，不阻塞 Agent，不改变本轮结果 |
 | 边界 | 只读：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，不能影响工具授权与模式限制 |
-| 未验证 | 统一编译与真机验证尚未进行（另一任务在途） |
+| 未验证 | run 事件曾真机验证；扩展的请求/工具/压缩事件尚未真机验证 |
 
 ### 校验规则（实现里的硬规则）
 

@@ -212,12 +212,17 @@ globalThis.aicode = {
 
 ## 生命周期 hooks
 
-hooks 让插件在 Agent 每轮运行开始和结束时收到一次通知，用来记录日志或统计。当前只支持**只读观察**，事件只有两个：
+hooks 让插件在 Agent 运行的关键节点收到只读通知，用来记录日志或统计。当前只支持**只读观察**，事件有七个：
 
 | 事件 | 时机 |
 | --- | --- |
 | `agent.run.started` | 一轮对话开始处理时 |
 | `agent.run.finished` | 一轮对话结束时；成功、失败或被取消都会发出 |
+| `agent.request.started` | 一次模型请求即将发出时 |
+| `agent.request.finished` | 一次模型响应结束；成功、失败或取消都会发出 |
+| `agent.tool.started` | 一次工具调用真正开始执行时 |
+| `agent.tool.finished` | 一次工具调用结束；成功或失败 |
+| `agent.compaction` | 上下文被压缩时 |
 
 hooks 需要 `runtime` 和 `agent.events` 权限，`handler` 写 `dist/main.js` 里 `globalThis.aicode.handlers` 的键：
 
@@ -228,17 +233,18 @@ hooks 需要 `runtime` 和 `agent.events` 权限，`handler` 写 `dist/main.js` 
     {
       "id": "agent.events",
       "required": false,
-      "reason": "记录每轮运行的开始与结果",
+      "reason": "记录每轮运行、请求与工具状态",
       "scope": {
-        "ids": ["run-started", "run-finished"],
-        "events": ["agent.run.started", "agent.run.finished"]
+        "ids": ["run-started", "run-finished", "tool-finished"],
+        "events": ["agent.run.started", "agent.run.finished", "agent.tool.finished"]
       }
     }
   ],
   "contributes": {
     "hooks": [
       {"id": "run-started", "event": "agent.run.started", "handler": "hooks.runStarted"},
-      {"id": "run-finished", "event": "agent.run.finished", "handler": "hooks.runFinished"}
+      {"id": "run-finished", "event": "agent.run.finished", "handler": "hooks.runFinished"},
+      {"id": "tool-finished", "event": "agent.tool.finished", "handler": "hooks.toolFinished"}
     ]
   }
 }
@@ -247,39 +253,55 @@ hooks 需要 `runtime` 和 `agent.events` 权限，`handler` 写 `dist/main.js` 
 ```js
 globalThis.aicode = {
   handlers: {
-    "hooks.runStarted": (payload) => {
-      console.log("run started", payload.runId, payload.mode);
-    },
+    "hooks.runStarted": (payload) => ({ logs: [`run started ${payload.runId} mode=${payload.mode}`] }),
     "hooks.runFinished": (payload) => {
-      console.log("run finished", payload.runId, payload.status, payload.toolCalls);
-    }
+      const line = `run finished ${payload.status} toolCalls=${payload.toolCalls}`;
+      return { logs: [line] };
+    },
+    "hooks.toolFinished": (payload) => ({ logs: [`tool ${payload.toolName} ${payload.status} ${payload.durationMs}ms`] })
   }
 };
 ```
 
-`scope.ids` 要覆盖全部 hook 的 `id`，`scope.events` 要覆盖 hooks 用到的事件集合，两项都不能多写或漏写；没申请 `agent.events` 时写 `contributes.hooks` 会被拒绝安装。
+`scope.ids` 要覆盖全部 hook 的 `id`，`scope.events` 要覆盖 hooks 用到的事件集合，两项都不能多写或漏写；只声明事件而没有对应 hook、或只写 hooks 而不申请 `agent.events`，都会拒绝安装。
 
 ### 事件内容
 
-payload 只有运行元数据：
+所有事件都带这些公共字段：
 
 | 字段 | 说明 |
 | --- | --- |
-| `runId` | 本轮运行的标识，开始与结束事件成对出现 |
-| `sessionId` | 会话标识 |
-| `mode` | 本轮所处的模式 |
-| `status` | `started`、`success`、`error`、`cancelled`；开始事件固定为 `started` |
-| `toolCalls` | 本轮的工具调用次数 |
-| `errorCode` | 失败时的错误码；成功或被取消时为空 |
+| `runId` | 本轮运行的标识，同一次运行的各事件一致 |
+| `sessionId` | 会话标识；主会话与子代理会话各有一个 |
+| `scope` | `main` 或 `subagent` |
+| `agentName` | 子代理名称；主会话为 null |
+| `mode` | 事件发生时的模式：`BUILD`、`PLAN` 或 `AUTO` |
 
-payload 里**没有**消息正文、工具参数、工具结果和模型输出，插件拿不到你在对话里说了什么。
+各事件的专属字段：
+
+| 事件 | 额外字段 |
+| --- | --- |
+| `agent.run.started` | `status=started`、`toolCalls=0`、`errorCode=null` |
+| `agent.run.finished` | `status`（`success`/`error`/`cancelled`）、`toolCalls`、`errorCode` |
+| `agent.request.started` | `requestId`、`messageCount`、`toolCount`、`estimatedInputTokens` |
+| `agent.request.finished` | `requestId`、`status`（`success`/`error`/`cancelled`）、`inputTokens`、`outputTokens`、`toolCalls`、`durationMs`、`stopReason`、`errorCode` |
+| `agent.tool.started` | `callId`、`toolName` |
+| `agent.tool.finished` | `callId`、`toolName`、`status`（`success`/`error`）、`durationMs` |
+| `agent.compaction` | `compacted=true`、`estimatedInputTokens` |
+
+payload 里**没有**消息正文、工具参数、工具结果和模型输出，插件拿不到你在对话里说了什么，也看不到工具改了什么。
+
+### 调试输出
+
+handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（最多 50 行、单行 500 字符），其余返回值被忽略。这是 hooks 唯一的输出通道，没有文件、网络或 Android 接口。
 
 ### 边界
 
 - 宿主异步派发，hook 不进入 Agent 主流程：卡住或抛错只记日志，不阻塞这一轮对话，也不改变运行结果；
-- **只读**：handler 的返回值会被忽略，不能修改请求、消息、工具参数或响应，不能自动批准任何工具，也不能影响工具授权与模式限制；
+- **只读**：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，也不能影响工具授权与模式限制；
 - 本切片没有 `transform`：能改写内容的 hooks 属于后续能力，写进清单会被拒绝安装；
-- hook 与 AI 工具共用插件的 JavaScript 沙箱，同样没有 Android Context、文件或网络接口，设备不支持 JavaScriptEngine 时 hooks 不会触发。
+- hook 与 AI 工具共用插件的 JavaScript 沙箱，同样没有 Android Context、文件或网络接口，设备不支持 JavaScriptEngine 时 hooks 不会触发；
+- 单项调用超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
 
 ## 工作区工具页面
 

@@ -136,7 +136,7 @@ App 按现有规则判断
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
 | 贡献：AI 工具（`runtime` + `tools.register` + JavaScript 沙箱 handler） | 已实现，冒烟编译与插件单测通过，已真机验证（2026-11-10） | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
-| 贡献：生命周期 hooks（只读；`agent.events` + `contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的 started/finished 派发 |
+| 贡献：生命周期 hooks（只读；`agent.events` + `contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
 | 通用页面与配置、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
@@ -154,14 +154,14 @@ App 按现有规则判断
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
-| 6 生命周期、代审核与双向交互 | 部分完成 | 第一个切片「只读 hooks」已实现并通过冒烟编译/单测，覆盖 `agent.run.started` / `agent.run.finished` 与元数据 payload（`runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`），已真机验证（2026-11-10）；`transform`、代审核与双向交互未开始，依赖阶段 0 的 D12、D13、D14 |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），payload 含 `runId`、`sessionId`、`mode`、`scope`、`agentName` 与各事件专属字段，已真机验证 run 事件（2026-11-10）；`transform`、代审核与双向交互未开始，依赖阶段 0 的 D12、D13、D14 |
 | 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 ### 8.3 当前进度
 
 当前同时有两条链路：声明式工作区工具（页面 JSON + 命令模板，提交后发到终端标签，没有运行态回传）和 AI 工具（`runtime` + `dist/main.js`，在 JavaScriptSandbox 中调用 handler，结果回给模型）。AI 工具已冒烟编译并通过插件单测，尚未真机验证。
 
-2026-11-10：新增生命周期 hooks 第一切片（已通过冒烟编译、插件单测与真机验证）——清单支持 `contributes.hooks[]`（每项 `{id,event,handler}`，`handler` 为 `dist/main.js` 的 `globalThis.aicode.handlers` 键）与权限 `agent.events`（`scope.ids` 覆盖全部 hook id，`scope.events` 覆盖 hooks 使用的事件集合，必须同时申请）；hooks 需要 `runtime`。本切片只暴露 `agent.run.started` / `agent.run.finished`，payload 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`，`status` 为 `started` / `success` / `error` / `cancelled`，不含消息正文；宿主异步派发，失败只记日志、不阻塞 Agent；只读，不能修改请求或自动批准工具。
+2026-11-10：新增生命周期 hooks 第一切片（已通过冒烟编译、插件单测与真机验证）——清单支持 `contributes.hooks[]`（每项 `{id,event,handler}`，`handler` 为 `dist/main.js` 的 `globalThis.aicode.handlers` 键）与权限 `agent.events`（`scope.ids` 覆盖全部 hook id，`scope.events` 覆盖 hooks 使用的事件集合，必须同时申请）；hooks 需要 `runtime`。首个切片只暴露 `agent.run.started` / `agent.run.finished`，payload 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`，`status` 为 `started` / `success` / `error` / `cancelled`，不含消息正文；宿主异步派发，失败只记日志、不阻塞 Agent；只读，不能修改请求或自动批准工具。同日随后把只读事件扩到七个：新增 `agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`，payload 增加 `scope`（`main`/`subagent`）、`agentName`、请求与工具标识、usage 与耗时；hook 可返回 `{logs:[...]}` 写应用日志（上限 50 行、单行 500 字符）。扩展已通过冒烟编译与插件单测，真机验证待补。
 
 2026-11-10：同日新增 MCP 切片——清单支持 `contributes.mcp` 与 `mcp.register` / `mcp.connect`；插件 MCP 文件复用 `McpConfigParser` 与现有 HTTP/stdio 链路，server 名加 `plugin__` 命名空间，用户同名配置优先；插件启停/卸载时 McpManager 重连并移除工具。已通过冒烟编译与插件单测，待真机验证。
 
