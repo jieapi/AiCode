@@ -208,6 +208,20 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.tools }
     }
 
+    /** 当前生效的插件生命周期 hook：已启用且授予了 `agent.events`。 */
+    fun activeHooks(): List<PluginHook> {
+        ensureLoaded()
+        return _plugins.value
+            .filter { it.isActive && PluginPermission.AGENT_EVENTS in it.granted }
+            .flatMap { it.content.hooks }
+    }
+
+    /** 全部插件声明的生命周期 hook，不论插件是否启用或已授权；供设置页与调试展示。 */
+    fun allHooks(): List<PluginHook> {
+        ensureLoaded()
+        return _plugins.value.flatMap { it.content.hooks }
+    }
+
     /** 当前生效的插件 MCP server：注册与连接两项权限都已授予。 */
     fun activeMcpServers(): List<PluginMcpServer> {
         ensureLoaded()

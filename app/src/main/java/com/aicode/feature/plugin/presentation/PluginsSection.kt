@@ -71,6 +71,7 @@ internal fun PluginPermission.label(): String = stringResource(
         PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
         PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
         PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
+        PluginPermission.AGENT_EVENTS -> R.string.plugins_permission_agent_events
         PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register
         PluginPermission.MCP_CONNECT -> R.string.plugins_permission_mcp_connect
     }
@@ -220,8 +221,9 @@ internal fun PluginDetailSection(
                 val agents = plugin.content.agents
                 val workspaceTools = plugin.content.workspaceTools
                 val aiTools = plugin.content.tools
+                val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
-                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty() && mcpServers.isEmpty()) {
+                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty()) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -255,6 +257,12 @@ internal fun PluginDetailSection(
                         it.description.resolve(languageTag),
                         PluginPermission.TOOLS_REGISTER
                     )
+                } + hooks.map {
+                    Triple(
+                        stringResource(R.string.plugins_content_hook, it.event),
+                        it.handler,
+                        PluginPermission.AGENT_EVENTS
+                    )
                 } + mcpServers.map {
                     Triple(
                         stringResource(R.string.plugins_content_mcp, it.originalName),
@@ -268,6 +276,8 @@ internal fun PluginDetailSection(
                         PluginPermission.MCP_CONNECT ->
                             PluginPermission.MCP_REGISTER in plugin.granted &&
                                 PluginPermission.MCP_CONNECT in plugin.granted
+                        PluginPermission.AGENT_EVENTS ->
+                            PluginPermission.AGENT_EVENTS in plugin.granted
                         else -> permission in plugin.granted
                     }
                     ContentRow(

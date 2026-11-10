@@ -53,6 +53,17 @@ data class PluginTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 已解析的生命周期 hook；[runtimeEntry] 与工具共用插件 runtime 的入口文件。 */
+data class PluginHook(
+    val pluginId: String,
+    val localId: String,
+    val event: String,
+    val handler: String,
+    val runtimeEntry: File
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
 /** 已解析的插件 MCP server；config.name 已加上插件命名空间，避免覆盖用户配置。 */
 data class PluginMcpServer(
     val pluginId: String,
@@ -69,6 +80,7 @@ data class PluginContent(
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
     val runtime: PluginRuntimeEntry? = null,
     val tools: List<PluginTool> = emptyList(),
+    val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList()
 )
 
@@ -95,13 +107,14 @@ object PluginContentLoader {
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
         val workspaceTools = manifest.workspaceTools.map { loadWorkspaceTool(dir, manifest.id, it, errors) }
         val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
-        if (manifest.tools.isNotEmpty() && runtime == null) {
+        if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
+        val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools, mcp))
+            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools, hooks, mcp))
         } else {
             ContentLoadResult.Failed(errors)
         }
@@ -185,6 +198,21 @@ object PluginContentLoader {
             title = ref.title,
             description = ref.description,
             inputSchema = schema,
+            handler = ref.handler,
+            runtimeEntry = runtime.entryFile
+        )
+    }
+
+    private fun loadHook(
+        pluginId: String,
+        ref: PluginHookRef,
+        runtime: PluginRuntimeEntry?
+    ): PluginHook? {
+        if (runtime == null) return null
+        return PluginHook(
+            pluginId = pluginId,
+            localId = ref.id,
+            event = ref.event,
             handler = ref.handler,
             runtimeEntry = runtime.entryFile
         )

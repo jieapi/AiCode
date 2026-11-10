@@ -161,9 +161,9 @@ class PluginManifestParserTest {
     @Test
     fun unsupportedContribution_isRejected() {
         assertRejected(
-            base.replace("\"contributes\": {", "\"contributes\": {\"hooks\": [], "),
+            base.replace("\"contributes\": {", "\"contributes\": {\"providers\": [], "),
             PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
-            "hooks"
+            "providers"
         )
     }
 
@@ -272,6 +272,64 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun hooksContribution_isParsed() {
+        val manifest = success(hooksManifest())
+        assertEquals(PluginRuntimeRef("javascript", "dist/main.js"), manifest.runtime)
+        assertEquals(listOf(PluginHookRef("on-start", "agent.run.started", "hooks.onStart")), manifest.hooks)
+        assertEquals(listOf("on-start"), manifest.requestFor(PluginPermission.AGENT_EVENTS)?.ids)
+        assertEquals(listOf("agent.run.started"), manifest.requestFor(PluginPermission.AGENT_EVENTS)?.events)
+        assertEquals(1, manifest.contributionCount)
+    }
+
+    @Test
+    fun hooksRequireAgentEventsPermission() {
+        assertRejected(
+            hooksManifest(permissionsBlock = ""),
+            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
+            "hooks.on-start"
+        )
+    }
+
+    @Test
+    fun agentEventsScopeEvents_mustMatchHooks() {
+        assertRejected(
+            hooksManifest(
+                permissionsBlock = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-start"], "events": ["agent.run.finished"]}}"""
+            ),
+            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
+            "hooks.agent.run.started"
+        )
+    }
+
+    @Test
+    fun unknownHookEvent_isRejected() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "on-start", "event": "agent.run.paused", "handler": "hooks.onStart"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].event"
+        )
+    }
+
+    @Test
+    fun hooksRequireRuntime() {
+        assertRejected(hooksManifest(runtimeBlock = ""), PluginErrorCode.FIELD_MISSING, "runtime")
+    }
+
+    @Test
+    fun duplicateHookIds_areRejected() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "on-start", "event": "agent.run.started", "handler": "hooks.onStart"},
+                    {"id": "on-start", "event": "agent.run.finished", "handler": "hooks.onFinish"}"""
+            ),
+            PluginErrorCode.DUPLICATE_ID,
+            "contributes.hooks.on-start"
+        )
+    }
+
+    @Test
     fun mcpContribution_isParsed() {
         val manifest = success(mcpManifest())
         assertEquals(1, manifest.mcp.size)
@@ -292,6 +350,29 @@ class PluginManifestParserTest {
         assertTrue(!PluginManifestParser.isSafeRelativePath("a\u0000b"))
         assertTrue(!PluginManifestParser.isSafeRelativePath("x".repeat(PluginManifestParser.MAX_PATH_LENGTH + 1)))
     }
+
+    private fun hooksManifest(
+        runtimeBlock: String = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},",
+        permissionsBlock: String = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-start"], "events": ["agent.run.started"]}}""",
+        hooksBlock: String = """{"id": "on-start", "event": "agent.run.started", "handler": "hooks.onStart"}"""
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "community.hook-kit",
+          "name": "Hook Kit",
+          "version": "1.0.0",
+          "publisher": "community",
+          "repository": "https://example.com/community/hook-kit",
+          "description": "Hooks",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          $runtimeBlock
+          "permissions": [$permissionsBlock],
+          "contributes": {
+            "hooks": [$hooksBlock]
+          }
+        }
+    """.trimIndent()
 
     private fun mcpManifest(): String = """
         {

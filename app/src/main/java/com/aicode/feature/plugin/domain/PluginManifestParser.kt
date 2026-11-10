@@ -49,6 +49,7 @@ object PluginManifestParser {
     private val PERMISSION_KEYS = setOf("id", "required", "reason", "scope")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
+    private val HOOK_KEYS = setOf("id", "event", "handler")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -101,7 +102,8 @@ object PluginManifestParser {
             val permissions = readPermissions(obj)
             val contributes = readContributes(obj)
 
-            if (contributes != null && contributes.tools.isNotEmpty() && runtime == null) missing("runtime")
+            val needsRuntime = contributes != null && (contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty())
+            if (needsRuntime && runtime == null) missing("runtime")
             if (permissions != null && contributes != null) crossCheck(permissions, contributes)
             if (errors.isNotEmpty()) return ManifestParseResult.Failure(errors.toList())
 
@@ -123,6 +125,7 @@ object PluginManifestParser {
                     workspaceTools = contributes.workspaceTools,
                     runtime = runtime,
                     tools = contributes.tools,
+                    hooks = contributes.hooks,
                     mcp = contributes.mcp
                 )
             )
@@ -322,9 +325,15 @@ object PluginManifestParser {
                 ?: return null.also { invalid("$path.required") }
             val reason = parseLocalized(obj.getValue("reason"), "$path.reason", MAX_REASON) ?: return null
             val scope = obj.getValue("scope") as? JsonObject ?: return null.also { invalid("$path.scope") }
-            scope.keys.filter { it != "ids" }.forEach { err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.scope.$it") }
+            val agentEvents = permission == PluginPermission.AGENT_EVENTS
+            val allowedScopeKeys = if (agentEvents) setOf("ids", "events") else setOf("ids")
+            scope.keys.filter { it !in allowedScopeKeys }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.scope.$it")
+            }
             val ids = readLocalIds(scope["ids"], "$path.scope.ids") ?: return null
-            return PluginPermissionRequest(permission, required, reason, ids)
+            if (!agentEvents) return PluginPermissionRequest(permission, required, reason, ids)
+            val events = readEvents(scope["events"], "$path.scope.events") ?: return null
+            return PluginPermissionRequest(permission, required, reason, ids, events)
         }
 
         private fun readLocalIds(raw: JsonElement?, path: String): List<String>? {
@@ -338,11 +347,24 @@ object PluginManifestParser {
             return distinct
         }
 
+        /** `agent.events.scope.events`：非空、无重复且只能是宿主支持的事件。 */
+        private fun readEvents(raw: JsonElement?, path: String): List<String>? {
+            if (raw == null) return null.also { missing(path) }
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.isEmpty() || array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val events = array.map { it.stringOrNull() }
+            if (events.any { it == null || it !in PluginHookEvents.ALL }) return null.also { invalid(path) }
+            val distinct = events.filterNotNull()
+            if (distinct.toSet().size != distinct.size) return null.also { err(PluginErrorCode.DUPLICATE_ID, path) }
+            return distinct
+        }
+
         private class Contributes(
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
             val workspaceTools: List<PluginWorkspaceToolRef>,
             val tools: List<PluginToolRef>,
+            val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>
         )
 
@@ -351,7 +373,8 @@ object PluginManifestParser {
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
             contributes.keys.filter {
-                it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" && it != "mcp"
+                it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" &&
+                    it != "hooks" && it != "mcp"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -360,14 +383,17 @@ object PluginManifestParser {
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
             val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
             val tools = readTools(contributes["tools"], "contributes.tools") ?: run { ok = false; emptyList() }
+            val hooks = readHooks(contributes["hooks"], "contributes.hooks") ?: run { ok = false; emptyList() }
             val mcpRefs = readContributionList(contributes["mcp"], "contributes.mcp", extension = ".json")
                 ?: run { ok = false; emptyList() }
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
-            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty() && mcp.isEmpty()) {
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty() &&
+                hooks.isEmpty() && mcp.isEmpty()
+            ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, tools, mcp) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, tools, hooks, mcp) else null
         }
 
         /** 缺省视为空列表；每项必须有合法局部 ID、标题、JSON Schema 文件与 handler 名。 */
@@ -427,6 +453,43 @@ object PluginManifestParser {
                 }
             }
             return result
+        }
+
+        /** 缺省视为空列表；每项只允许 id/event/handler，event 必须在宿主支持的事件表内。 */
+        private fun readHooks(raw: JsonElement?, path: String): List<PluginHookRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginHookRef>()
+            var ok = true
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    ok = false
+                    return@forEachIndexed
+                }
+                item.keys.filter { it !in HOOK_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                    ok = false
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val event = item["event"]?.stringOrNull()?.takeIf { it in PluginHookEvents.ALL }
+                val handler = item["handler"]?.stringOrNull()?.trim()?.takeIf { HANDLER_NAME.matches(it) }
+                if (id == null) { invalid("$itemPath.id"); ok = false }
+                if (event == null) { invalid("$itemPath.event"); ok = false }
+                if (handler == null) { invalid("$itemPath.handler"); ok = false }
+                if (id != null && event != null && handler != null) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                        ok = false
+                    } else {
+                        result += PluginHookRef(id, event, handler)
+                    }
+                }
+            }
+            return if (ok) result else null
         }
 
         private fun readWorkspaceTools(raw: JsonElement?, path: String): List<PluginWorkspaceToolRef>? {
@@ -520,25 +583,44 @@ object PluginManifestParser {
 
         /** 每类贡献的局部 ID 必须被对应的注册权限逐项覆盖，权限范围里也不能有不存在的 ID。 */
         private fun crossCheck(permissions: List<PluginPermissionRequest>, contributes: Contributes) {
-            checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills, permissions)
-            checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents, permissions)
-            checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { PluginContributionRef(it.id, it.pageFile) }, permissions)
-            checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { PluginContributionRef(it.id, it.inputSchema) }, permissions)
-            val mcpRefs = contributes.mcp.map { PluginContributionRef(it.id, it.file) }
-            checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpRefs, permissions)
-            checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpRefs, permissions)
+            checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills.map { it.id }, permissions)
+            checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents.map { it.id }, permissions)
+            checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { it.id }, permissions)
+            checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { it.id }, permissions)
+            checkCoverage(PluginPermission.AGENT_EVENTS, "hooks", contributes.hooks.map { it.id }, permissions)
+            checkEventCoverage(
+                PluginPermission.AGENT_EVENTS,
+                "hooks",
+                contributes.hooks.map { it.event }.toSet(),
+                permissions
+            )
+            val mcpIds = contributes.mcp.map { it.id }
+            checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpIds, permissions)
+            checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpIds, permissions)
         }
 
         private fun checkCoverage(
             permission: PluginPermission,
             type: String,
-            contributions: List<PluginContributionRef>,
+            declaredIds: Collection<String>,
             permissions: List<PluginPermissionRequest>
         ) {
             val covered = permissions.firstOrNull { it.permission == permission }?.ids.orEmpty().toSet()
-            val declared = contributions.map { it.id }.toSet()
+            val declared = declaredIds.toSet()
             (declared - covered).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "$type.$it") }
             (covered - declared).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it") }
+        }
+
+        /** `agent.events` 的 events 也必须与 hooks 声明的事件集合完全一致。 */
+        private fun checkEventCoverage(
+            permission: PluginPermission,
+            type: String,
+            declaredEvents: Set<String>,
+            permissions: List<PluginPermissionRequest>
+        ) {
+            val covered = permissions.firstOrNull { it.permission == permission }?.events.orEmpty().toSet()
+            (declaredEvents - covered).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "$type.$it") }
+            (covered - declaredEvents).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it") }
         }
     }
 }

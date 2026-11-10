@@ -12,6 +12,7 @@ import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicode.feature.agent.data.remote.gemini.GeminiApi
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
 import com.aicode.feature.agent.domain.model.AgentContext
+import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
@@ -76,6 +77,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -121,6 +123,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val fileAccess: FileAccessProvider,
+    private val pluginHookDispatcher: PluginHookDispatcher,
     @param:ApplicationContext private val appContext: Context
 ) : AgentWorkflow {
 
@@ -492,7 +495,22 @@ class StatefulAgentWorkflow @Inject constructor(
         userRequest: String,
         context: AgentContext,
         tools: List<AgentTool>
-    ): Flow<AgentEvent> = channelFlow {
+    ): Flow<AgentEvent> {
+        val hookSessionId = context.sessionId
+        var hookRunId = ""
+        var hookStarted = false
+        var hookCompleted = false
+        var hookTerminalError = false
+        var hookErrorCode: String? = null
+        var hookToolCalls = 0
+        var hookMode = context.mode.name
+
+        return channelFlow {
+            if (hookSessionId != null) {
+                hookRunId = UUID.randomUUID().toString()
+                hookStarted = true
+                pluginHookDispatcher.dispatchRunStarted(hookSessionId, hookRunId, hookMode)
+            }
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
@@ -616,6 +634,7 @@ class StatefulAgentWorkflow @Inject constructor(
                             // 节流窗口内可能还压着最新累积文本：补发，保证 UI 尾巴拿到完整文本再交接落库。
                             stream.flush()
                             val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
+                            hookToolCalls += aiResponse.toolCalls.size
                             // 模型直出图片（Gemini 图像模型）不随流式增量到达，整块在 Final 里：
                             // 先把 base64 落盘到 ~/.aicode/generated-images/ 并构造 UI 附件（只存路径不存 base64），
                             // 再随 LlmResponse 把带 path 的 images 交 reduce 挂上 AssistantMessage 供下一回放。
@@ -902,8 +921,37 @@ class StatefulAgentWorkflow @Inject constructor(
             }
         }
         
-        state.error?.let { send(AgentEvent.Failed(it, state.errorCode)) }
+        state.error?.let {
+            hookTerminalError = true
+            hookErrorCode = state.errorCode
+            send(AgentEvent.Failed(it, state.errorCode))
+        }
+        hookMode = currentContext.mode.name
         send(AgentEvent.Completed)
+        hookCompleted = true
+    }.onCompletion { cause ->
+        if (!hookStarted || hookSessionId == null) return@onCompletion
+        val status = when {
+            hookCompleted -> if (hookTerminalError) "error" else "success"
+            cause is CancellationException -> "cancelled"
+            cause != null -> "error"
+            hookTerminalError -> "error"
+            else -> "success"
+        }
+        val code = if (status == "error" && hookErrorCode == null) {
+            cause?.javaClass?.simpleName
+        } else {
+            hookErrorCode
+        }
+        pluginHookDispatcher.dispatchRunFinished(
+            sessionId = hookSessionId,
+            runId = hookRunId,
+            mode = hookMode,
+            status = status,
+            toolCalls = hookToolCalls,
+            errorCode = code
+        )
+    }
     }
 
     /**

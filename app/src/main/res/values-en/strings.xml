@@ -2027,6 +2027,7 @@
     <string name="plugins_preview_behavior_notice">Skills and sub-agents are instructions that shape how the AI behaves. Their names and descriptions are also added to the system prompt.</string>
     <string name="plugins_preview_runtime_notice">This plugin contains runtime code. AI tools run in an isolated JavaScript sandbox, and each tool call still needs your approval.</string>
     <string name="plugins_preview_mcp_notice">This plugin registers MCP servers. HTTP servers use the network, and stdio servers start processes in the container or on the remote host. Only install it if you trust the author.</string>
+    <string name="plugins_preview_hook_notice">This plugin contains lifecycle hooks. It only receives run start/finish metadata and does not read message content.</string>
     <string name="plugins_preview_replace_notice">Version %1$s is installed. Continuing replaces it, and you need to confirm the permissions below again.</string>
     <string name="plugins_preview_identical_notice">This is the same file that is already installed (identical content).</string>
     <string name="plugins_preview_contents">What it provides</string>
@@ -2041,6 +2042,7 @@
     <string name="plugins_content_agent">Sub-agent · %1$s</string>
     <string name="plugins_content_tool">Workspace Tool · %1$s</string>
     <string name="plugins_content_ai_tool">AI Tool · %1$s</string>
+    <string name="plugins_content_hook">Lifecycle Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
@@ -2048,6 +2050,7 @@
     <string name="plugins_permission_agents_register">Register sub-agents</string>
     <string name="plugins_permission_workspace_tools">Register workspace tools</string>
     <string name="plugins_permission_tools_register">Register AI tools</string>
+    <string name="plugins_permission_agent_events">Receive lifecycle events</string>
     <string name="plugins_permission_mcp_register">Register MCP servers</string>
     <string name="plugins_permission_mcp_connect">Connect MCP servers</string>
 

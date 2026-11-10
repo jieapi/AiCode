@@ -146,6 +146,9 @@ private fun PluginPreviewSheet(
             if (manifest.runtime != null) {
                 Notice(stringResource(R.string.plugins_preview_runtime_notice))
             }
+            if (manifest.hooks.isNotEmpty()) {
+                Notice(stringResource(R.string.plugins_preview_hook_notice))
+            }
             if (manifest.mcp.isNotEmpty()) {
                 Notice(stringResource(R.string.plugins_preview_mcp_notice))
             }
@@ -273,6 +276,8 @@ private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
             R.string.plugins_content_ai_tool,
             it.title.resolve(currentLanguageTag())
         ) to it.description.resolve(currentLanguageTag())
+    } + preview.content.hooks.map {
+        stringResource(R.string.plugins_content_hook, it.event) to it.handler
     } + preview.content.mcp.map {
         stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
     }
