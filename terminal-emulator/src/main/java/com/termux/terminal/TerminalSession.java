@@ -60,6 +60,21 @@ public final class TerminalSession extends TerminalOutput {
 
     private final SessionBackend mBackend;
 
+    /**
+     * 原始输出监听：主线程在把字节喂给 emulator 前回调，供上层做日志与运行态监控。
+     * 实现必须立即拷贝 data（缓冲会被复用），且不应在此做耗时解析。
+     */
+    public interface RawOutputListener {
+        void onRawOutput(TerminalSession session, byte[] data, int length);
+    }
+
+    private volatile RawOutputListener mRawOutputListener;
+
+    /** 设置原始输出监听；传 null 取消。回调在主线程。 */
+    public void setRawOutputListener(RawOutputListener listener) {
+        mRawOutputListener = listener;
+    }
+
     private static final String LOG_TAG = "TerminalSession";
 
     /**
@@ -385,6 +400,14 @@ public final class TerminalSession extends TerminalOutput {
         public void handleMessage(Message msg) {
             int bytesRead = mProcessToTerminalIOQueue.read(mReceiveBuffer, false);
             if (bytesRead > 0) {
+                RawOutputListener listener = mRawOutputListener;
+                if (listener != null) {
+                    try {
+                        listener.onRawOutput(TerminalSession.this, mReceiveBuffer, bytesRead);
+                    } catch (Exception e) {
+                        mClient.logWarn(LOG_TAG, "原始输出监听异常: " + e);
+                    }
+                }
                 mEmulator.append(mReceiveBuffer, bytesRead);
                 notifyScreenUpdate();
             }

@@ -17,13 +17,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,6 +37,7 @@ private const val TAG = "RemoteTerminalSessionManager"
 private const val TRANSCRIPT_ROWS = 2000
 private const val DEFAULT_COLUMNS = 80
 private const val DEFAULT_ROWS = 24
+private const val OUTPUT_CHANNEL_CAPACITY = 64
 private const val EXIT_MARKER_PREFIX = "[command exited: "
 private const val EXIT_MARKER_POLL_MS = 1_000L
 private const val EXIT_MARKER_GRACE_MS = 1_500L
@@ -63,6 +69,9 @@ class RemoteTerminalSessionManager @Inject constructor(
     override val tabFinishedEvents: SharedFlow<TabFinishedEvent> = _tabFinishedEvents.asSharedFlow()
 
     private val idCounter = AtomicInteger(0)
+
+    /** 每个标签的原始输出有界队列，由 [tabOutput] 暴露给日志消费端。 */
+    private val outputChannels = ConcurrentHashMap<String, Channel<ByteArray>>()
 
     // 后台命令退出兜底监控（见 monitorBackgroundExit），随单例生命周期常驻。
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -127,6 +136,12 @@ class RemoteTerminalSessionManager @Inject constructor(
         val backend = SshShellBackend(shell)
         val termSession = TerminalSession(TRANSCRIPT_ROWS, AppRemoteSessionClient(), backend)
         termSession.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
+        val outputChannel = Channel<ByteArray>(OUTPUT_CHANNEL_CAPACITY, BufferOverflow.DROP_OLDEST)
+        outputChannels.remove(id)?.close()
+        outputChannels[id] = outputChannel
+        termSession.setRawOutputListener { _, data, length ->
+            outputChannel.trySend(data.copyOf(length))
+        }
         // shell 登录后默认在 home，先 cd 到当前工作区，与命令执行链路（RemoteSshEngine.buildCdCommand）保持一致：
         // 优先 ~/workspace 符号链接，失败回退到真实工作区路径。
         val wsPath = workspaceRepository.currentPath()
@@ -141,7 +156,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             val init = if (notify) {
                 "$command; ec=\$?; echo \"$EXIT_MARKER_PREFIX\$ec]\"; exit \$ec"
             } else {
-                "$command; exec /bin/sh"
+                "$command; ec=\$?; echo \"$EXIT_MARKER_PREFIX\$ec]\"; exec /bin/sh"
             }
             termSession.write(init + "\n")
         }
@@ -192,6 +207,8 @@ class RemoteTerminalSessionManager @Inject constructor(
         }.getOrNull() ?: ""
     }
 
+    override fun tabOutput(id: String): Flow<ByteArray>? = outputChannels[id]?.receiveAsFlow()
+
     override fun listTabs(): List<TabInfo> = _tabs.value.map {
         TabInfo(
             id = it.id,
@@ -205,6 +222,7 @@ class RemoteTerminalSessionManager @Inject constructor(
     override fun closeTab(id: String): Boolean {
         val tab = tab(id) ?: return false
         runCatching { tab.session.finishIfRunning() }
+        outputChannels.remove(id)?.close()
         tab.view = null
         val remaining = _tabs.value.filterNot { it.id == id }
         _tabs.value = remaining
@@ -278,6 +296,7 @@ class RemoteTerminalSessionManager @Inject constructor(
                     if (tab2.runState is RunState.Running) {
                         val exitCode = extractExitCode(getTabOutput(tabId) ?: "") ?: 0
                         tab2.runState = RunState.Finished(exitCode)
+                        outputChannels.remove(tabId)?.close()
                         bumpRevision()
                         FileLogger.i(TAG, "兜底：远程标签 $tabId 检测到退出标记，强制收尾 exit=$exitCode")
                         if (tab2.notifyOnExit && !tab2.finishedNotified) {
@@ -323,6 +342,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             _tabs.value.firstOrNull { it.session === finishedSession }?.let { target ->
                 val exitCode = extractExitCode(getTabOutput(target.id) ?: "") ?: 0
                 target.runState = RunState.Finished(exitCode)
+                outputChannels.remove(target.id)?.close()
                 bumpRevision()
                 if (target.notifyOnExit && !target.finishedNotified) {
                     target.finishedNotified = true

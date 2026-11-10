@@ -21,21 +21,27 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
+import com.aicode.core.theme.semanticColors
 import com.aicode.feature.agent.presentation.component.AdaptiveCardView
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
+import com.aicode.feature.plugin.domain.ToolRunPhase
+import com.aicode.feature.plugin.domain.ToolRunState
 import com.aicode.feature.plugin.presentation.drawer.resolveToolIcon
 import com.aicode.feature.settings.domain.model.AdaptiveCardRoot
 import com.aicode.feature.settings.presentation.component.SettingsGroup
@@ -53,8 +59,10 @@ fun ToolDetailScreen(
     tool: PluginWorkspaceTool,
     savedParams: Map<String, Any> = emptyMap(),
     languageTag: String = "zh-CN",
-    onBack: () -> Unit,
-    onExecute: (actionId: String, commandTemplate: String?, params: Map<String, Any>) -> Unit
+    runState: ToolRunState = ToolRunState(),
+    onExecute: (actionId: String, commandTemplate: String?, params: Map<String, Any>) -> Unit,
+    onStop: () -> Unit = {},
+    onBack: () -> Unit
 ) {
     val formState = remember(savedParams) {
         val map = mutableStateMapOf<String, Any>()
@@ -162,6 +170,92 @@ fun ToolDetailScreen(
                     onExecute(actionId, template, values)
                 }
             )
+
+            ToolRunPanel(runState = runState, onStop = onStop)
+        }
+    }
+}
+
+/** 运行面板：状态、退出码、实时日志与停止。 */
+@Composable
+private fun ToolRunPanel(
+    runState: ToolRunState,
+    onStop: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    val noOutput = stringResource(R.string.plugin_tool_run_no_output)
+    val phaseText = when (runState.phase) {
+        ToolRunPhase.IDLE -> stringResource(R.string.plugin_tool_run_idle)
+        ToolRunPhase.RUNNING -> stringResource(R.string.plugin_tool_run_running)
+        ToolRunPhase.SUCCESS -> stringResource(R.string.plugin_tool_run_success)
+        ToolRunPhase.FAILED -> stringResource(R.string.plugin_tool_run_failed)
+        ToolRunPhase.CANCELLED -> stringResource(R.string.plugin_tool_run_cancelled)
+    }
+    val phaseColor = when (runState.phase) {
+        ToolRunPhase.RUNNING -> MaterialTheme.colorScheme.primary
+        ToolRunPhase.SUCCESS -> MaterialTheme.semanticColors.success
+        ToolRunPhase.FAILED -> MaterialTheme.colorScheme.error
+        ToolRunPhase.CANCELLED, ToolRunPhase.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    LaunchedEffect(runState.lines) {
+        if (runState.phase == ToolRunPhase.RUNNING) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
+
+    SettingsGroup {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.plugin_tool_run_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = phaseText,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = phaseColor
+                )
+                if (runState.phase == ToolRunPhase.RUNNING) {
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    TextButton(onClick = onStop) {
+                        Text(stringResource(R.string.plugin_tool_run_stop))
+                    }
+                }
+            }
+
+            runState.exitCode?.let { code ->
+                Text(
+                    text = stringResource(R.string.plugin_tool_run_exit_code, code),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(Radius.mdLarge)
+                    )
+                    .padding(Spacing.md)
+                    .verticalScroll(scrollState)
+            ) {
+                Text(
+                    text = runState.lines.ifEmpty { listOf(noOutput) }.joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

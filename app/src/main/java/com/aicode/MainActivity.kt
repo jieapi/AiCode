@@ -890,20 +890,19 @@ fun AppNavigation(
                 }
                 val tool by projectToolsViewModel.selectedTool.collectAsStateWithLifecycle()
                 val toolItem by projectToolsViewModel.selectedToolItem.collectAsStateWithLifecycle()
+                val runState by projectToolsViewModel.runState.collectAsStateWithLifecycle()
 
                 BackHandler { returnFromToolDetail() }
                 if (tool != null) {
                     ToolDetailScreen(
                         tool = tool!!,
                         savedParams = toolItem?.savedParams ?: emptyMap(),
+                        runState = runState,
                         onBack = returnFromToolDetail,
                         onExecute = { _, template, params ->
-                            reopenRightDrawerOnDetailBack = false
-                            projectToolsViewModel.executeTool(tool!!, params, template) {
-                                openWorkbench(WorkbenchPaneKind.TERMINAL)
-                            }
-                            navController.popBackStack()
-                        }
+                            projectToolsViewModel.executeTool(tool!!, params, template)
+                        },
+                        onStop = { projectToolsViewModel.stopCurrentRun() }
                     )
                 }
             }

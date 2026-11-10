@@ -2053,6 +2053,15 @@
     <string name="plugins_permission_mcp_register">注册 MCP 服务器</string>
     <string name="plugins_permission_mcp_connect">连接 MCP 服务器</string>
 
+    <string name="plugin_tool_run_title">运行</string>
+    <string name="plugin_tool_run_idle">未运行</string>
+    <string name="plugin_tool_run_running">运行中</string>
+    <string name="plugin_tool_run_success">成功</string>
+    <string name="plugin_tool_run_failed">失败</string>
+    <string name="plugin_tool_run_cancelled">已取消</string>
+    <string name="plugin_tool_run_exit_code">退出码 %1$d</string>
+    <string name="plugin_tool_run_stop">停止</string>
+    <string name="plugin_tool_run_no_output">暂无输出</string>
     <string name="plugin_tool_not_authorized">插件已停用或未授权，工具不再可用</string>
     <string name="plugin_tool_permission_title">确认调用插件工具</string>
     <string name="plugin_tool_permission_summary">AI 请求调用插件「%1$s」的工具「%2$s」</string>

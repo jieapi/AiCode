@@ -2054,6 +2054,15 @@
     <string name="plugins_permission_mcp_register">Register MCP servers</string>
     <string name="plugins_permission_mcp_connect">Connect MCP servers</string>
 
+    <string name="plugin_tool_run_title">Run</string>
+    <string name="plugin_tool_run_idle">Not started</string>
+    <string name="plugin_tool_run_running">Running</string>
+    <string name="plugin_tool_run_success">Succeeded</string>
+    <string name="plugin_tool_run_failed">Failed</string>
+    <string name="plugin_tool_run_cancelled">Cancelled</string>
+    <string name="plugin_tool_run_exit_code">Exit code %1$d</string>
+    <string name="plugin_tool_run_stop">Stop</string>
+    <string name="plugin_tool_run_no_output">No output yet</string>
     <string name="plugin_tool_not_authorized">The plugin is disabled or no longer authorized, so this tool is unavailable</string>
     <string name="plugin_tool_permission_title">Confirm plugin tool</string>
     <string name="plugin_tool_permission_summary">The AI wants to call tool \"%2$s\" from plugin \"%1$s\"</string>

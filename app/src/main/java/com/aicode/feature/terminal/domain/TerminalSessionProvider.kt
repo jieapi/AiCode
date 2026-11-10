@@ -1,5 +1,6 @@
 package com.aicode.feature.terminal.domain
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
@@ -34,6 +35,9 @@ interface TerminalSessionProvider {
 
     /** 按 id 读取终端内容（emulator 屏幕缓冲）。返回 null 表示无此标签。 */
     fun getTabOutput(id: String): String?
+
+    /** 订阅标签的原始输出；标签关闭或会话结束时流完成。返回 null 表示无此标签。 */
+    fun tabOutput(id: String): Flow<ByteArray>?
 
     /** 列出全部标签的摘要。 */
     fun listTabs(): List<TabInfo>
