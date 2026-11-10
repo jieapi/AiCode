@@ -2024,6 +2024,7 @@
     <string name="plugins_preview_title">安装插件</string>
     <string name="plugins_preview_local_notice">这是从本地文件导入的插件包，AiCode 无法核验它的来源。请只安装你信任的插件。</string>
     <string name="plugins_preview_behavior_notice">技能和子代理的内容会作为指令影响 AI 的行为，它们的名称与描述还会进入系统提示词。</string>
+    <string name="plugins_preview_runtime_notice">这个插件包含运行时代码：AI 工具会在独立的 JavaScript 沙箱中执行，工具调用仍需要你授权。</string>
     <string name="plugins_preview_replace_notice">已安装 %1$s 版。继续会整体替换它，下面的权限需要重新确认。</string>
     <string name="plugins_preview_identical_notice">已安装的就是这个文件（内容完全一致）。</string>
     <string name="plugins_preview_contents">将提供的内容</string>
@@ -2037,9 +2038,22 @@
     <string name="plugins_content_skill">技能 · %1$s</string>
     <string name="plugins_content_agent">子代理 · %1$s</string>
     <string name="plugins_content_tool">工作区工具 · %1$s</string>
+    <string name="plugins_content_ai_tool">AI 工具 · %1$s</string>
     <string name="plugins_permission_skills_register">注册技能</string>
     <string name="plugins_permission_agents_register">注册子代理</string>
     <string name="plugins_permission_workspace_tools">注册工作区工具</string>
+    <string name="plugins_permission_tools_register">注册 AI 工具</string>
+
+    <string name="plugin_tool_not_authorized">插件已停用或未授权，工具不再可用</string>
+    <string name="plugin_tool_permission_title">确认调用插件工具</string>
+    <string name="plugin_tool_permission_summary">AI 请求调用插件「%1$s」的工具「%2$s」</string>
+    <string name="plugin_tool_permission_details">插件：%1$s\n工具：%2$s\n参数：%3$s</string>
+    <string name="plugin_runtime_unsupported">当前设备的 WebView 不支持 JavaScript 插件运行时</string>
+    <string name="plugin_runtime_timeout">插件工具执行超时</string>
+    <string name="plugin_runtime_terminated">插件运行时已终止，请重试</string>
+    <string name="plugin_runtime_failed">插件运行时执行失败</string>
+    <string name="plugin_handler_error">插件 handler 返回错误</string>
+    <string name="plugin_invalid_result">插件 handler 返回了无效结果</string>
 
     <string name="plugins_enable">启用插件</string>
     <string name="plugins_enable_hint">关闭后，它提供的技能和子代理都不再生效。</string>

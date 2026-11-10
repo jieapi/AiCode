@@ -2,12 +2,13 @@ package com.aicode.feature.plugin.domain
 
 /**
  * 宿主认识的插件能力。清单只能申请这里列出的能力，插件无法自定义新权限。
- * 本构建只实现“注册技能 / 注册子代理”两项声明式能力；其余能力在对应功能落地前一律按不支持拒绝。
+ * 本构建实现技能、子代理、工作区工具与 AI 工具四项；其余能力在对应功能落地前一律按不支持拒绝。
  */
 enum class PluginPermission(val id: String) {
     SKILLS_REGISTER("skills.register"),
     AGENTS_REGISTER("agents.register"),
-    WORKSPACE_TOOLS("workspace.tools");
+    WORKSPACE_TOOLS("workspace.tools"),
+    TOOLS_REGISTER("tools.register");
 
     companion object {
         fun fromId(id: String): PluginPermission? = entries.firstOrNull { it.id == id }
@@ -35,6 +36,18 @@ data class PluginWorkspaceToolRef(
     val pageFile: String
 )
 
+/** 插件业务逻辑入口：发布包里已打包的 JavaScript 文件，由隔离运行时加载。 */
+data class PluginRuntimeRef(val type: String, val entry: String)
+
+/** `contributes.tools` 声明的 AI 可调用工具。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
+data class PluginToolRef(
+    val id: String,
+    val title: LocalizedText,
+    val description: LocalizedText,
+    val inputSchema: String,
+    val handler: String
+)
+
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
  * 安装身份还取决于来源，清单里的 `id` / `publisher` 文本不是身份证明。
@@ -53,10 +66,12 @@ data class PluginManifest(
     val permissions: List<PluginPermissionRequest>,
     val skills: List<PluginContributionRef>,
     val agents: List<PluginContributionRef>,
-    val workspaceTools: List<PluginWorkspaceToolRef> = emptyList()
+    val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
+    val runtime: PluginRuntimeRef? = null,
+    val tools: List<PluginToolRef> = emptyList()
 ) {
     /** 清单声明的贡献总数。 */
-    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size
+    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size + tools.size
 
     fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
         permissions.firstOrNull { it.permission == permission }

@@ -1,22 +1,28 @@
 # 开发插件
 
 ::: warning 预览功能
-目前插件只能提供**技能**和**子代理**，只能从本地 `.zip` 导入。工具、MCP 服务器、自带页面和需要运行代码的能力还没有实现，写进清单会被拒绝安装。使用方法见[插件](/guide/plugins)。
+目前插件可以提供**技能**、**子代理**、**工作区工具**和**AI 工具**，只能从本地 `.zip` 导入。MCP 服务器、hooks、提供商、在线分发等还没有实现，写进清单会被拒绝安装。AI 工具的业务逻辑在独立的 JavaScript 沙箱中执行，不会进入宿主进程。使用方法见[插件](/guide/plugins)。
 :::
 
-一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是技能和子代理的 Markdown 文件。包里**不能也不会**运行任何代码。
+一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是 Markdown、页面 JSON、工具 schema，以及可选的 `dist/main.js` 业务入口。
 
 ## 目录结构
 
 ```text
 demo-kit/
 ├── plugin.json
+├── dist/
+│   └── main.js
+├── schemas/
+│   └── echo.input.json
 ├── skills/
 │   └── project-notes/
 │       └── SKILL.md
 └── agents/
     └── builder.md
 ```
+
+没有 `runtime` 的插件是纯声明式包，可以只放技能、子代理和工作区工具页面。
 
 `plugin.json` 必须直接位于压缩包根部，不能再套一层 `demo-kit/` 目录。
 
@@ -93,6 +99,8 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 | --- | --- | --- |
 | 技能 `contributes.skills` | `skills.register` | `{"ids": [技能 id…]}` |
 | 子代理 `contributes.agents` | `agents.register` | `{"ids": [子代理 id…]}` |
+| 工作区工具 `contributes.workspaceTools` | `workspace.tools` | `{"ids": [工具 id…]}` |
+| AI 工具 `contributes.tools` | `tools.register` | `{"ids": [工具 id…]}` |
 
 - `required: true`：使用者不同意就装不了，也无法在装好后正常工作；
 - `required: false`：使用者可以不开，不开时对应的内容不生效，插件的其余部分照常。**可选权限默认是关闭的**，所以别把核心功能放在可选权限后面。
@@ -123,6 +131,50 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 
 子代理同样由 AiCode 命名为 `插件ID:内容id`，派发时用这个完整名字。
 
+## AI 工具与运行时
+
+AI 工具需要 `runtime` 和 `tools.register`，包内放一个已打包的 JavaScript 入口。AiCode 在独立的 JavaScript 沙箱里加载入口，通过 `globalThis.aicode.handlers` 调用工具；沙箱没有 Android Context、文件或网络接口。
+
+```json
+{
+  "runtime": {"type": "javascript", "entry": "dist/main.js"},
+  "permissions": [
+    {"id": "tools.register", "required": true, "reason": "提供回显工具", "scope": {"ids": ["echo"]}}
+  ],
+  "contributes": {
+    "tools": [
+      {
+        "id": "echo",
+        "title": "回显",
+        "description": "把传入的文本原样回显",
+        "inputSchema": "schemas/echo.input.json",
+        "handler": "tools.echo"
+      }
+    ]
+  }
+}
+```
+
+`schemas/echo.input.json` 必须是顶层 `type: object` 的 JSON Schema。`dist/main.js` 导出 handler 表：
+
+```js
+globalThis.aicode = {
+  handlers: {
+    "tools.echo": (args) => ({ text: String(args.text ?? "") })
+  }
+};
+```
+
+- handler 可以返回字符串、数字、布尔、数组或对象；抛出的异常会作为工具错误返回给 AI；
+- 支持异步 handler 取决于设备 WebView 是否支持 Promise 返回；不支持时同步 handler 仍可用；
+- 工具对 AI 暴露的名字由宿主生成，形如 `plugin__community_demo-kit__echo`，不会和内置工具重名；
+- 每次调用仍走工具授权，PLAN 模式下按外部工具拦截；
+- 沙箱是弱隔离：设备不支持 JavaScriptEngine 时工具不会注册；运行超时或沙箱崩溃会返回错误，不能保证强制终止所有死循环。
+
+## 工作区工具页面
+
+工作区工具通过 `workspace.tools` 和 `contributes.workspaceTools` 声明，`pageFile` 指向包内 AdaptiveCard JSON。用户可以在右侧项目工具抽屉里添加并运行；页面里的 `submit` 按钮把 `commandTemplate` 插值后在终端标签执行。命令模板属于可执行内容，安装预览会显示工具条目，但最终命令仍需用户点击运行。
+
 ## 打包
 
 在目录里执行（注意最后的 `.`，确保 `plugin.json` 在压缩包根部）：
@@ -146,7 +198,7 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | --- | --- |
 | 压缩包大小 | 16 MiB |
 | 文件数量 | 512 个 |
-| 单个文件 | 4 MiB（技能 / 子代理的 Markdown 文件 512 KiB，`plugin.json` 256 KiB） |
+| 单个文件 | 4 MiB（技能 / 子代理的 Markdown 文件 512 KiB，`plugin.json` 256 KiB，运行时入口 512 KiB，工具 schema 256 KiB） |
 | 解压后总大小 | 32 MiB |
 | 路径 | 不能是绝对路径，不能含 `..`、`.`、空段或反斜杠，长度 ≤ 200，层级 ≤ 8 |
 | 重复文件 | 不允许，包括只有大小写不同的 |
@@ -160,6 +212,6 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | 压缩包根目录里没有 plugin.json | 打包时多套了一层目录 |
 | plugin.json 缺少 / 无效字段 | 提示里会写出具体路径，如 `permissions[0].scope.ids` |
 | 权限范围与提供的内容不一致 | `scope.ids` 与 `contributes` 的 id 不是同一组 |
-| 此版本不支持的字段 / 内容类型 / 权限 | 用了目前未实现的能力，如 `runtime`、`tools`、`workspace.commands` |
-| 内容无效 | 技能或子代理正文为空，或子代理写了 `provider` / `model` |
+| 此版本不支持的字段 / 内容类型 / 权限 | 用了目前未实现的能力，如 `mcp`、`hooks`、`providers`、`workspace.commands` |
+| 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object` |
 | 清单引用的文件不存在 | `file` 路径与压缩包里的实际路径不符，注意大小写 |
