@@ -143,6 +143,9 @@ private fun PluginPreviewSheet(
 
             Notice(stringResource(R.string.plugins_preview_local_notice))
             Notice(stringResource(R.string.plugins_preview_behavior_notice))
+            if (manifest.runtime != null) {
+                Notice(stringResource(R.string.plugins_preview_runtime_notice))
+            }
             preview.installedVersion?.let { installed ->
                 Notice(
                     stringResource(
@@ -257,6 +260,16 @@ private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
         stringResource(R.string.plugins_content_skill, it.skill.name) to it.skill.description
     } + preview.content.agents.map {
         stringResource(R.string.plugins_content_agent, it.definition.name) to it.definition.description
+    } + preview.content.workspaceTools.map {
+        stringResource(
+            R.string.plugins_content_tool,
+            it.title.resolve(currentLanguageTag())
+        ) to it.description.resolve(currentLanguageTag())
+    } + preview.content.tools.map {
+        stringResource(
+            R.string.plugins_content_ai_tool,
+            it.title.resolve(currentLanguageTag())
+        ) to it.description.resolve(currentLanguageTag())
     }
 
 /** 把领域层的错误码翻译成界面文案；[PluginError.detail] 是语言无关的定位信息，原样带入。 */

@@ -98,7 +98,7 @@ class PluginManifestParserTest {
     @Test
     fun unknownTopLevelField_isRejectedNotIgnored() {
         assertRejected(base.replace("\"license\"", "\"official\": true, \"license\""), PluginErrorCode.UNSUPPORTED_FIELD, "official")
-        assertRejected(PluginFixtures.manifest(extra = ",\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"}"), PluginErrorCode.UNSUPPORTED_FIELD, "runtime")
+        assertRejected(PluginFixtures.manifest(extra = ",\"autoUpdate\": true"), PluginErrorCode.UNSUPPORTED_FIELD, "autoUpdate")
     }
 
     @Test
@@ -161,9 +161,9 @@ class PluginManifestParserTest {
     @Test
     fun unsupportedContribution_isRejected() {
         assertRejected(
-            base.replace("\"contributes\": {", "\"contributes\": {\"tools\": [], "),
+            base.replace("\"contributes\": {", "\"contributes\": {\"mcp\": [], "),
             PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
-            "tools"
+            "mcp"
         )
     }
 
@@ -242,6 +242,36 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun toolsContribution_isParsed() {
+        val manifest = success(toolsManifest())
+        assertEquals(PluginRuntimeRef("javascript", "dist/main.js"), manifest.runtime)
+        assertEquals(1, manifest.tools.size)
+        assertEquals("echo", manifest.tools.single().id)
+        assertEquals("tools.echo", manifest.tools.single().handler)
+        assertEquals(setOf(PluginPermission.TOOLS_REGISTER), manifest.requiredPermissions)
+        assertEquals(1, manifest.contributionCount)
+    }
+
+    @Test
+    fun toolsRequireRuntime() {
+        assertRejected(toolsManifest(runtimeBlock = ""), PluginErrorCode.FIELD_MISSING, "runtime")
+    }
+
+    @Test
+    fun unknownRuntimeType_isRejected() {
+        assertRejected(
+            toolsManifest(runtimeBlock = "\"runtime\": {\"type\": \"lua\", \"entry\": \"dist/main.js\"},"),
+            PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
+            "runtime.type"
+        )
+    }
+
+    @Test
+    fun invalidToolHandler_isRejected() {
+        assertRejected(toolsManifest(handler = "bad handler"), PluginErrorCode.FIELD_INVALID, "contributes.tools[0].handler")
+    }
+
+    @Test
     fun pathHelper_matchesSpec() {
         assertTrue(PluginManifestParser.isSafeRelativePath("skills/a/SKILL.md"))
         assertTrue(!PluginManifestParser.isSafeRelativePath(""))
@@ -250,4 +280,30 @@ class PluginManifestParserTest {
         assertTrue(!PluginManifestParser.isSafeRelativePath("a\u0000b"))
         assertTrue(!PluginManifestParser.isSafeRelativePath("x".repeat(PluginManifestParser.MAX_PATH_LENGTH + 1)))
     }
+
+    private fun toolsManifest(
+        runtimeBlock: String = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},",
+        handler: String = "tools.echo"
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "community.tool-kit",
+          "name": "Tool Kit",
+          "version": "1.0.0",
+          "publisher": "community",
+          "repository": "https://example.com/community/tool-kit",
+          "description": "Tools",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          $runtimeBlock
+          "permissions": [
+            {"id": "tools.register", "required": true, "reason": "tools", "scope": {"ids": ["echo"]}}
+          ],
+          "contributes": {
+            "tools": [
+              {"id": "echo", "title": "Echo", "description": "Echo text", "inputSchema": "schemas/echo.json", "handler": "$handler"}
+            ]
+          }
+        }
+    """.trimIndent()
 }

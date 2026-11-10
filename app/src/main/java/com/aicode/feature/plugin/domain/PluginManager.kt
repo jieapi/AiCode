@@ -194,6 +194,20 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.workspaceTools }
     }
 
+    /** 当前生效的插件 AI 工具：已启用且授予了 `tools.register`。 */
+    fun activeTools(): List<PluginTool> {
+        ensureLoaded()
+        return _plugins.value
+            .filter { it.isActive && PluginPermission.TOOLS_REGISTER in it.granted }
+            .flatMap { it.content.tools }
+    }
+
+    /** 全部插件声明的 AI 工具，不论插件是否启用；供设置页与调试展示。 */
+    fun allTools(): List<PluginTool> {
+        ensureLoaded()
+        return _plugins.value.flatMap { it.content.tools }
+    }
+
     /** 读取并校验 [input] 中的插件包，通过后暂存等待 [install]。同一时刻只保留一个待确认的暂存包。 */
     suspend fun preview(input: InputStream): PluginPreviewResult = withContext(Dispatchers.IO) {
         mutex.withLock {

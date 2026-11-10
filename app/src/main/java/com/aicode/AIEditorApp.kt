@@ -17,6 +17,7 @@ import com.aicode.core.util.TombstoneParser
 import net.schmizz.sshj.common.SecurityUtils
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.agent.domain.mcp.McpManager
+import com.aicode.feature.plugin.runtime.PluginToolManager
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicode.feature.settings.data.repository.LogSettingsRepository
@@ -159,6 +160,10 @@ class AIEditorApp : Application(), Configuration.Provider {
     /** MCP 生命周期总管：启动即连接已配置的远程 server。 */
     @Inject
     lateinit var mcpManager: McpManager
+
+    /** 插件 AI 工具注册器：启动即把生效插件声明的工具同步进 ToolRegistry。 */
+    @Inject
+    lateinit var pluginToolManager: PluginToolManager
 
     /** MCP 配置仓库：启动即监听 mcp.json 外部直接编辑，改动数秒内刷新列表并触发重连。 */
     @Inject
@@ -392,6 +397,8 @@ class AIEditorApp : Application(), Configuration.Provider {
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。
         mcpManager.start()
+        // 插件 AI 工具：设备支持 JS 运行时后，把生效插件声明的工具注册进同一个 ToolRegistry。
+        pluginToolManager.start(appScope)
         // 权限规则由 App 启动即常驻订阅（AI 评估随时要读到最新规则）；MCP 配置与技能列表
         // 改由各自消费方（McpManager / 设置页）按需订阅，无需在这里拉起。
         appScope.launch { permissionRulesRepository.startWatching() }

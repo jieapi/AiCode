@@ -401,6 +401,12 @@ dependencies {
     // Core Android（1.17.0 起提供 NotificationCompat 的实时通知推广接口 setRequestPromotedOngoing）
     implementation("androidx.core:core:1.17.0")
 
+    // 插件运行时：在独立进程的 WebView JS 沙箱里执行插件包内已打包的 handler。
+    // minSdk 26 / compileSdk 34 起可用；实际能力（Promise、终止、堆上限）由设备 WebView 特性决定。
+    implementation("androidx.javascriptengine:javascriptengine:1.1.1")
+    // 把 JavaScriptEngine 的 ListenableFuture 接进协程（await），版本与项目 coroutines 对齐。
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     // 迁移测试：MigrationTestHelper + Robolectric（在 JVM 上跑 Room 迁移，需真实 resources）

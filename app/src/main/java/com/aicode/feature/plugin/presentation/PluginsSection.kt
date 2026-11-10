@@ -56,6 +56,7 @@ internal fun PluginPermission.label(): String = stringResource(
         PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
         PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
         PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
+        PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
     }
 )
 
@@ -201,8 +202,9 @@ internal fun PluginDetailSection(
             SettingsGroup {
                 val skills = plugin.content.skills
                 val agents = plugin.content.agents
-                val tools = plugin.content.workspaceTools
-                if (skills.isEmpty() && agents.isEmpty() && tools.isEmpty()) {
+                val workspaceTools = plugin.content.workspaceTools
+                val aiTools = plugin.content.tools
+                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty()) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -224,11 +226,17 @@ internal fun PluginDetailSection(
                         it.definition.description,
                         PluginPermission.AGENTS_REGISTER
                     )
-                } + tools.map {
+                } + workspaceTools.map {
                     Triple(
                         stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)),
                         it.description.resolve(languageTag),
                         PluginPermission.WORKSPACE_TOOLS
+                    )
+                } + aiTools.map {
+                    Triple(
+                        stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)),
+                        it.description.resolve(languageTag),
+                        PluginPermission.TOOLS_REGISTER
                     )
                 }
                 rows.forEachIndexed { index, (title, description, permission) ->

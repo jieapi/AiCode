@@ -7,6 +7,10 @@ import com.aicode.feature.agent.domain.subagent.AgentDefinitionParser
 import com.aicode.feature.settings.domain.model.AdaptiveCardRoot
 import com.aicode.feature.settings.domain.parser.AdaptiveCardParser
 import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 模型与使用者看到的贡献名：`<插件ID>:<局部ID>`。命名空间由宿主生成，
@@ -31,10 +35,28 @@ data class PluginWorkspaceTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 已校验存在性的插件业务入口文件。 */
+data class PluginRuntimeEntry(val type: String, val entryFile: File)
+
+/** 已解析的 AI 工具贡献：schema 已读入，handler 留给运行时按需调用。 */
+data class PluginTool(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val description: LocalizedText,
+    val inputSchema: JsonObject,
+    val handler: String,
+    val runtimeEntry: File
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
-    val workspaceTools: List<PluginWorkspaceTool> = emptyList()
+    val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
+    val runtime: PluginRuntimeEntry? = null,
+    val tools: List<PluginTool> = emptyList()
 )
 
 sealed interface ContentLoadResult {
@@ -48,6 +70,8 @@ sealed interface ContentLoadResult {
  */
 object PluginContentLoader {
     const val MAX_CONTENT_BYTES = 512 * 1024
+    const val MAX_SCHEMA_BYTES = 256 * 1024
+    const val MAX_RUNTIME_BYTES = 512 * 1024
 
     private val WHITESPACE = Regex("\\s+")
 
@@ -56,7 +80,64 @@ object PluginContentLoader {
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
         val workspaceTools = manifest.workspaceTools.map { loadWorkspaceTool(dir, manifest.id, it, errors) }
-        return if (errors.isEmpty()) ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools)) else ContentLoadResult.Failed(errors)
+        val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
+        if (manifest.tools.isNotEmpty() && runtime == null) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
+        }
+        val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
+        return if (errors.isEmpty()) {
+            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools))
+        } else {
+            ContentLoadResult.Failed(errors)
+        }
+    }
+
+    private fun loadRuntimeEntry(
+        dir: File,
+        ref: PluginRuntimeRef,
+        errors: MutableList<PluginError>
+    ): PluginRuntimeEntry? {
+        val file = File(dir, ref.entry)
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.entry)
+            return null
+        }
+        if (file.length() > MAX_RUNTIME_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.entry}: too large")
+            return null
+        }
+        return PluginRuntimeEntry(ref.type, file)
+    }
+
+    private fun loadTool(
+        dir: File,
+        pluginId: String,
+        ref: PluginToolRef,
+        runtime: PluginRuntimeEntry?,
+        errors: MutableList<PluginError>
+    ): PluginTool? {
+        if (runtime == null) return null
+        val text = readFileText(dir, ref.inputSchema, MAX_SCHEMA_BYTES, errors) ?: return null
+        val schema = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
+        if (schema == null) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.inputSchema}: not object")
+            return null
+        }
+        val type = (schema["type"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        if (type != "object") {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.inputSchema}: type")
+            return null
+        }
+        return PluginTool(
+            pluginId = pluginId,
+            localId = ref.id,
+            title = ref.title,
+            description = ref.description,
+            inputSchema = schema,
+            handler = ref.handler,
+            runtimeEntry = runtime.entryFile
+        )
     }
 
     private fun loadWorkspaceTool(
@@ -132,15 +213,23 @@ object PluginContentLoader {
         return PluginAgent(ref.id, definition)
     }
 
-    private fun readText(dir: File, ref: PluginContributionRef, errors: MutableList<PluginError>): String? {
-        val file = File(dir, ref.file)
+    private fun readText(dir: File, ref: PluginContributionRef, errors: MutableList<PluginError>): String? =
+        readFileText(dir, ref.file, MAX_CONTENT_BYTES, errors)
+
+    private fun readFileText(
+        dir: File,
+        relativePath: String,
+        maxBytes: Int,
+        errors: MutableList<PluginError>
+    ): String? {
+        val file = File(dir, relativePath)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
         if (!inside || !file.isFile) {
-            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.file)
+            errors += PluginError(PluginErrorCode.FILE_MISSING, relativePath)
             return null
         }
-        if (file.length() > MAX_CONTENT_BYTES) {
-            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.file}: too large")
+        if (file.length() > maxBytes) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "$relativePath: too large")
             return null
         }
         return file.readText(Charsets.UTF_8)

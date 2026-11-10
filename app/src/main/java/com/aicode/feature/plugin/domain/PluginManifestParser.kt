@@ -42,15 +42,18 @@ object PluginManifestParser {
 
     private val TOP_LEVEL_KEYS = setOf(
         "manifestVersion", "id", "name", "version", "publisher", "repository",
-        "description", "license", "engines", "permissions", "contributes"
+        "description", "license", "engines", "runtime", "permissions", "contributes"
     )
     private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
+    private val RUNTIME_KEYS = setOf("type", "entry")
     private val PERMISSION_KEYS = setOf("id", "required", "reason", "scope")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
+    private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
     private val LOCAL_ID = Regex("^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    private val HANDLER_NAME = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
     private val LANGUAGE_TAG = Regex("^[a-z]{2,3}(-[a-z0-9]{2,8})*$")
 
     private const val MAX_NAME = 80
@@ -94,9 +97,11 @@ object PluginManifestParser {
             val description = readLocalized(obj, "description", MAX_DESCRIPTION, allowNewlines = true)
             val license = readText(obj, "license", MAX_LICENSE)
             val engines = readEngines(obj)
+            val runtime = readRuntime(obj)
             val permissions = readPermissions(obj)
             val contributes = readContributes(obj)
 
+            if (contributes != null && contributes.tools.isNotEmpty() && runtime == null) missing("runtime")
             if (permissions != null && contributes != null) crossCheck(permissions, contributes)
             if (errors.isNotEmpty()) return ManifestParseResult.Failure(errors.toList())
 
@@ -115,7 +120,9 @@ object PluginManifestParser {
                     permissions = requireNotNull(permissions),
                     skills = requireNotNull(contributes).skills,
                     agents = contributes.agents,
-                    workspaceTools = contributes.workspaceTools
+                    workspaceTools = contributes.workspaceTools,
+                    runtime = runtime,
+                    tools = contributes.tools
                 )
             )
         }
@@ -248,6 +255,34 @@ object PluginManifestParser {
             return apiText to uiText
         }
 
+        /** 缺省视为纯声明式包；存在时必须指定当前支持的运行时类型与包内入口。 */
+        private fun readRuntime(obj: JsonObject): PluginRuntimeRef? {
+            val raw = obj["runtime"] ?: return null
+            val runtime = raw as? JsonObject ?: return null.also { invalid("runtime") }
+            runtime.keys.filter { it !in RUNTIME_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "runtime.$it")
+            }
+            val type = runtime["type"]?.stringOrNull()?.trim()
+            if (type == null) {
+                if (runtime["type"] == null) missing("runtime.type") else invalid("runtime.type")
+                return null
+            }
+            if (type != "javascript") {
+                err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, "runtime.type")
+                return null
+            }
+            val entry = runtime["entry"]?.stringOrNull()?.trim()
+            if (entry == null) {
+                if (runtime["entry"] == null) missing("runtime.entry") else invalid("runtime.entry")
+                return null
+            }
+            if (!isSafeRelativePath(entry) || !entry.endsWith(".js", ignoreCase = true)) {
+                invalid("runtime.entry")
+                return null
+            }
+            return PluginRuntimeRef(type, entry)
+        }
+
         private fun readPermissions(obj: JsonObject): List<PluginPermissionRequest>? {
             val raw = obj["permissions"] ?: return null.also { missing("permissions") }
             val array = raw as? JsonArray ?: return null.also { invalid("permissions") }
@@ -305,25 +340,86 @@ object PluginManifestParser {
         private class Contributes(
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
-            val workspaceTools: List<PluginWorkspaceToolRef>
+            val workspaceTools: List<PluginWorkspaceToolRef>,
+            val tools: List<PluginToolRef>
         )
 
         private fun readContributes(obj: JsonObject): Contributes? {
             val raw = obj["contributes"] ?: return null.also { missing("contributes") }
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
-            contributes.keys.filter { it != "skills" && it != "agents" && it != "workspaceTools" }.forEach {
+            contributes.keys.filter { it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
             }
             val skills = readContributionList(contributes["skills"], "contributes.skills") ?: run { ok = false; emptyList() }
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
             val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
-            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty()) {
+            val tools = readTools(contributes["tools"], "contributes.tools") ?: run { ok = false; emptyList() }
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty()) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, tools) else null
+        }
+
+        /** 缺省视为空列表；每项必须有合法局部 ID、标题、JSON Schema 文件与 handler 名。 */
+        private fun readTools(raw: JsonElement?, path: String): List<PluginToolRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginToolRef>()
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    return@forEachIndexed
+                }
+                item.keys.filter { it !in TOOL_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val titleRaw = item["title"]
+                val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
+                val descRaw = item["description"]
+                val description = if (descRaw != null) {
+                    parseLocalized(descRaw, "$itemPath.description", MAX_DESCRIPTION)
+                } else {
+                    LocalizedText.single("")
+                }
+                val inputSchema = item["inputSchema"]?.stringOrNull()
+                val handler = item["handler"]?.stringOrNull()?.trim()
+                var valid = true
+                if (id == null) { invalid("$itemPath.id"); valid = false }
+                if (title == null) { invalid("$itemPath.title"); valid = false }
+                if (inputSchema == null || !isSafeRelativePath(inputSchema) || !inputSchema.endsWith(".json", ignoreCase = true)) {
+                    invalid("$itemPath.inputSchema")
+                    valid = false
+                }
+                if (handler == null || !HANDLER_NAME.matches(handler)) {
+                    invalid("$itemPath.handler")
+                    valid = false
+                }
+                if (description == null) {
+                    invalid("$itemPath.description")
+                    valid = false
+                }
+                if (valid && id != null && title != null && inputSchema != null && handler != null && description != null) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                    } else {
+                        result += PluginToolRef(
+                            id = id,
+                            title = title,
+                            description = description,
+                            inputSchema = inputSchema,
+                            handler = handler
+                        )
+                    }
+                }
+            }
+            return result
         }
 
         private fun readWorkspaceTools(raw: JsonElement?, path: String): List<PluginWorkspaceToolRef>? {
@@ -416,6 +512,7 @@ object PluginManifestParser {
             checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills, permissions)
             checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents, permissions)
             checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { PluginContributionRef(it.id, it.pageFile) }, permissions)
+            checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { PluginContributionRef(it.id, it.inputSchema) }, permissions)
         }
 
         private fun checkCoverage(

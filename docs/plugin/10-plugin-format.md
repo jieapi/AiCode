@@ -361,7 +361,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ## 12. 当前实现范围
 
-上面的格式是完整草案；宿主现在只实现了其中**声明式**的一层，其余一律在安装时明确拒绝，不静默忽略。下面的第一切片已提交；第二切片是当前工作区的在途代码，未提交、未真机验证。
+上面的格式是完整草案；宿主现在只实现了声明式贡献和 AI 工具运行时的一小部分，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10）。
 
 ### 第一切片（已提交）：技能与子代理
 
@@ -375,7 +375,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | `repository` | 必须是不带账号、查询、片段的 `https` 地址；只作为插件自述展示，**不核验** |
 | 安装路径 | 设置 → 插件 → 「＋」选择本地 `.zip`。这是目前唯一的安装路径，没有在线索引 |
 
-### 第二切片（在途）：工作区工具
+### 第二切片（已提交，`c0223c8e`）：工作区工具
 
 | 项 | 行为 |
 | --- | --- |
@@ -385,9 +385,23 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 数据 | 当前项目已启用的工具与参数保存在 `<workspace>/.aicode/tools.json`；插件启停、安装、卸载时重新读取该文件，不会自动移除或刷新已添加条目 |
 | UI | 右侧项目工具抽屉、全部工具页、工具详情页；提交只把命令模板发到终端标签，没有输出流与运行状态 |
 
+### 第三切片（已实现，已真机验证 2026-11-10）：AI 工具与运行时
+
+| 项 | 行为 |
+| --- | --- |
+| 顶层字段 | 新增可选 `runtime`，只接受 `{"type": "javascript", "entry": "<包内 .js>"}` |
+| 能力 | `tools.register`，`scope` 只有 `ids`，必须与 `contributes.tools` 的 ID 逐项对应 |
+| 贡献 | `contributes.tools[]`，每项 `{id, title, description, inputSchema, handler}`；`inputSchema` 为包内 `.json`，`handler` 形如 `tools.echo` |
+| 运行时 | AndroidX JavaScriptSandbox 1.1.1；每个插件一个 isolate，共用 App 的单个 sandbox 进程 |
+| handler 协议 | 入口设置 `globalThis.aicode.handlers`，宿主注入 `__aicodeInvoke` 调用；参数用转义后的 JSON 字符串传入 |
+| 工具名 | 宿主生成 `plugin__<插件ID>__<工具ID>`（清洗并限长 64），不会与内置工具/MCP 重名 |
+| 授权 | 工具默认 ASK；PLAN 模式按 `EXTERNAL_TOOL` 拦截；执行前复核插件已启用且 `tools.register` 仍授权 |
+| 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
+| 未验证 | 设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
+
 ### 校验规则（实现里的硬规则）
 
-- 未知顶层字段、未实现的字段（含 `runtime`）、未实现的贡献类型与能力：整体拒绝。
+- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` 与 `tools.register`。
 - 权限范围与贡献逐项对应：每个贡献 ID 必须被对应注册权限的 `scope.ids` 覆盖，权限里也不能列出不存在的 ID；同类 ID 与同一权限不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。
@@ -412,4 +426,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`tools`、`mcp`、`pages`、`workspacePanel`、`configuration`、`hooks`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，`runtime` 与全部依赖 JS 运行时的能力，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具已有声明式页面与命令模板，但插件 handler、状态绑定、流式输出、进度与错误展示仍未实现，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`mcp`、`pages`、`workspacePanel`、`configuration`、`hooks`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
