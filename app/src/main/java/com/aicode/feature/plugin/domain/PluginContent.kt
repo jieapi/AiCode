@@ -1,5 +1,7 @@
 package com.aicode.feature.plugin.domain
 
+import com.aicode.feature.agent.domain.mcp.McpConfigParser
+import com.aicode.feature.agent.domain.mcp.McpServerConfig
 import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillParser
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
@@ -51,12 +53,23 @@ data class PluginTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 已解析的插件 MCP server；config.name 已加上插件命名空间，避免覆盖用户配置。 */
+data class PluginMcpServer(
+    val pluginId: String,
+    val localId: String,
+    val originalName: String,
+    val config: McpServerConfig
+) {
+    val key: String get() = "$pluginId:$localId:$originalName"
+}
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
     val runtime: PluginRuntimeEntry? = null,
-    val tools: List<PluginTool> = emptyList()
+    val tools: List<PluginTool> = emptyList(),
+    val mcp: List<PluginMcpServer> = emptyList()
 )
 
 sealed interface ContentLoadResult {
@@ -72,6 +85,7 @@ object PluginContentLoader {
     const val MAX_CONTENT_BYTES = 512 * 1024
     const val MAX_SCHEMA_BYTES = 256 * 1024
     const val MAX_RUNTIME_BYTES = 512 * 1024
+    const val MAX_MCP_BYTES = 256 * 1024
 
     private val WHITESPACE = Regex("\\s+")
 
@@ -85,12 +99,48 @@ object PluginContentLoader {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
+        val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools))
+            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools, mcp))
         } else {
             ContentLoadResult.Failed(errors)
         }
     }
+
+    private fun loadMcp(
+        dir: File,
+        pluginId: String,
+        ref: PluginMcpRef,
+        errors: MutableList<PluginError>
+    ): List<PluginMcpServer> {
+        val text = readFileText(dir, ref.file, MAX_MCP_BYTES, errors) ?: return emptyList()
+        val servers = McpConfigParser.parse(text, "PluginContent")
+        if (servers.isEmpty()) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.file}: no servers")
+            return emptyList()
+        }
+        val seen = mutableSetOf<String>()
+        return servers.mapNotNull { server ->
+            val namespaced = namespacedMcpName(pluginId, ref.id, server.name)
+            if (!seen.add(namespaced)) {
+                errors += PluginError(PluginErrorCode.DUPLICATE_ID, "${ref.file}:${server.name}")
+                return@mapNotNull null
+            }
+            PluginMcpServer(
+                pluginId = pluginId,
+                localId = ref.id,
+                originalName = server.name,
+                config = server.copy(name = namespaced)
+            )
+        }
+    }
+
+    private fun namespacedMcpName(pluginId: String, localId: String, serverName: String): String =
+        "plugin__${sanitizeMcpPart(pluginId)}__${sanitizeMcpPart(localId)}__${sanitizeMcpPart(serverName)}"
+
+    private fun sanitizeMcpPart(value: String): String = value.map { c ->
+        if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-') c else '_'
+    }.joinToString("").ifBlank { "server" }
 
     private fun loadRuntimeEntry(
         dir: File,

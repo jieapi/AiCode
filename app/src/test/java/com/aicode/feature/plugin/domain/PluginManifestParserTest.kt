@@ -161,9 +161,9 @@ class PluginManifestParserTest {
     @Test
     fun unsupportedContribution_isRejected() {
         assertRejected(
-            base.replace("\"contributes\": {", "\"contributes\": {\"mcp\": [], "),
+            base.replace("\"contributes\": {", "\"contributes\": {\"hooks\": [], "),
             PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
-            "mcp"
+            "hooks"
         )
     }
 
@@ -272,6 +272,18 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun mcpContribution_isParsed() {
+        val manifest = success(mcpManifest())
+        assertEquals(1, manifest.mcp.size)
+        assertEquals("project-context", manifest.mcp.single().id)
+        assertEquals("mcp/project-context.json", manifest.mcp.single().file)
+        assertEquals(
+            setOf(PluginPermission.MCP_REGISTER, PluginPermission.MCP_CONNECT),
+            manifest.requiredPermissions
+        )
+    }
+
+    @Test
     fun pathHelper_matchesSpec() {
         assertTrue(PluginManifestParser.isSafeRelativePath("skills/a/SKILL.md"))
         assertTrue(!PluginManifestParser.isSafeRelativePath(""))
@@ -280,6 +292,29 @@ class PluginManifestParserTest {
         assertTrue(!PluginManifestParser.isSafeRelativePath("a\u0000b"))
         assertTrue(!PluginManifestParser.isSafeRelativePath("x".repeat(PluginManifestParser.MAX_PATH_LENGTH + 1)))
     }
+
+    private fun mcpManifest(): String = """
+        {
+          "manifestVersion": 1,
+          "id": "community.mcp-kit",
+          "name": "MCP Kit",
+          "version": "1.0.0",
+          "publisher": "community",
+          "repository": "https://example.com/community/mcp-kit",
+          "description": "MCP",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          "permissions": [
+            {"id": "mcp.register", "required": true, "reason": "register", "scope": {"ids": ["project-context"]}},
+            {"id": "mcp.connect", "required": true, "reason": "connect", "scope": {"ids": ["project-context"]}}
+          ],
+          "contributes": {
+            "mcp": [
+              {"id": "project-context", "file": "mcp/project-context.json"}
+            ]
+          }
+        }
+    """.trimIndent()
 
     private fun toolsManifest(
         runtimeBlock: String = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},",

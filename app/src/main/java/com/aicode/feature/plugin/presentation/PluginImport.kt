@@ -146,6 +146,9 @@ private fun PluginPreviewSheet(
             if (manifest.runtime != null) {
                 Notice(stringResource(R.string.plugins_preview_runtime_notice))
             }
+            if (manifest.mcp.isNotEmpty()) {
+                Notice(stringResource(R.string.plugins_preview_mcp_notice))
+            }
             preview.installedVersion?.let { installed ->
                 Notice(
                     stringResource(
@@ -270,6 +273,8 @@ private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
             R.string.plugins_content_ai_tool,
             it.title.resolve(currentLanguageTag())
         ) to it.description.resolve(currentLanguageTag())
+    } + preview.content.mcp.map {
+        stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
     }
 
 /** 把领域层的错误码翻译成界面文案；[PluginError.detail] 是语言无关的定位信息，原样带入。 */

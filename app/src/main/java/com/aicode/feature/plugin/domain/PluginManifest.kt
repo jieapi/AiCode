@@ -8,7 +8,9 @@ enum class PluginPermission(val id: String) {
     SKILLS_REGISTER("skills.register"),
     AGENTS_REGISTER("agents.register"),
     WORKSPACE_TOOLS("workspace.tools"),
-    TOOLS_REGISTER("tools.register");
+    TOOLS_REGISTER("tools.register"),
+    MCP_REGISTER("mcp.register"),
+    MCP_CONNECT("mcp.connect");
 
     companion object {
         fun fromId(id: String): PluginPermission? = entries.firstOrNull { it.id == id }
@@ -48,6 +50,9 @@ data class PluginToolRef(
     val handler: String
 )
 
+/** `contributes.mcp` 声明的 MCP 配置文件；文件沿用现有 `{"mcpServers": {...}}` 结构。 */
+data class PluginMcpRef(val id: String, val file: String)
+
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
  * 安装身份还取决于来源，清单里的 `id` / `publisher` 文本不是身份证明。
@@ -68,10 +73,11 @@ data class PluginManifest(
     val agents: List<PluginContributionRef>,
     val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
     val runtime: PluginRuntimeRef? = null,
-    val tools: List<PluginToolRef> = emptyList()
+    val tools: List<PluginToolRef> = emptyList(),
+    val mcp: List<PluginMcpRef> = emptyList()
 ) {
     /** 清单声明的贡献总数。 */
-    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size + tools.size
+    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size + tools.size + mcp.size
 
     fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
         permissions.firstOrNull { it.permission == permission }

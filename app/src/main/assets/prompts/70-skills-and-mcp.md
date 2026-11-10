@@ -33,4 +33,5 @@
 - MCP 接入外部 server 的工具，命名 `mcp__<server名>__<工具名>`；server 名只能含 ASCII 字母、数字、下划线与连字符。
 - 配置分全局（`~/.aicode/mcp.json`）与项目级（`<projectRoot>/.aicode/mcp.json`），项目级优先。
 - 用 `manageMcp` 安装、移除或列出（`scope` 指定 global 或 project）；不要手动编辑 mcp.json。
+- 插件也可以提供 MCP server：其名称带 `plugin__` 前缀，由插件启停与 `mcp.register` / `mcp.connect` 授权控制；不要把它们写进用户的 mcp.json，也不要用 `manageMcp` 修改它们。
 - 支持远程 HTTP（`url`，可选 `headers` 鉴权）与本地 stdio（`command`，可选 `args`）。新增或移除后下一次会话生效。
