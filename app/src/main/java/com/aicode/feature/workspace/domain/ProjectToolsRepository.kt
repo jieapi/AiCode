@@ -4,6 +4,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginContent
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,11 +14,22 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * 项目已启用工具项条目（保存在 `<workspace>/.aicode/tools.json` 中）。
@@ -31,7 +43,7 @@ data class ProjectToolItem(
     val description: String = "",
     val icon: String = "play",
     val category: String = "通用",
-    val savedParams: Map<String, String> = emptyMap()
+    val savedParams: Map<String, JsonElement> = emptyMap()
 )
 
 @Serializable
@@ -46,7 +58,8 @@ internal data class ProjectToolsFile(
 @Singleton
 class ProjectToolsRepository @Inject constructor(
     private val projectAicodeRoot: ProjectAicodeRoot,
-    private val pluginManager: PluginManager
+    private val pluginManager: PluginManager,
+    private val workspaceRepository: WorkspaceRepository
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -59,6 +72,13 @@ class ProjectToolsRepository @Inject constructor(
         // 当插件启停或安装卸载时，自动对账更新
         scope.launch {
             pluginManager.plugins.collect { reload() }
+        }
+        // 切换工作区后 tools.json 换文件，必须跟着重读
+        scope.launch {
+            workspaceRepository.current
+                .map { it?.path }
+                .distinctUntilChanged()
+                .collect { reload() }
         }
     }
 
@@ -109,10 +129,7 @@ class ProjectToolsRepository @Inject constructor(
     suspend fun updateParams(toolKey: String, params: Map<String, Any>) = withContext(Dispatchers.IO) {
         val current = _tools.value.map { item ->
             if (item.toolKey == toolKey) {
-                val strParams = params.mapValues { (_, v) ->
-                    if (v is List<*>) v.filterNotNull().joinToString(",") else v.toString()
-                }
-                item.copy(savedParams = strParams)
+                item.copy(savedParams = params.mapValues { (_, value) -> value.toJsonElement() })
             } else item
         }
         save(current)
@@ -133,4 +150,33 @@ class ProjectToolsRepository @Inject constructor(
         private const val TAG = "ProjectToolsRepo"
         private const val CONFIG_FILE = "tools.json"
     }
+}
+
+/** 把持久化的 JSON 值还原成 UI 表单可直接持有的类型。 */
+fun Map<String, JsonElement>.toUiValues(): Map<String, Any> =
+    mapValues { (_, value) -> value.toUiValue() }
+
+private fun Any?.toJsonElement(): JsonElement = when (this) {
+    null -> JsonNull
+    is JsonElement -> this
+    is Boolean -> JsonPrimitive(this)
+    is Number -> JsonPrimitive(this)
+    is String -> JsonPrimitive(this)
+    is List<*> -> JsonArray(map { it.toJsonElement() })
+    is Map<*, *> -> JsonObject(entries.associate { (key, value) -> key.toString() to value.toJsonElement() })
+    else -> JsonPrimitive(toString())
+}
+
+private fun JsonElement.toUiValue(): Any = when (this) {
+    is JsonNull -> ""
+    is JsonPrimitive -> when {
+        isString -> content
+        booleanOrNull != null -> booleanOrNull!!
+        longOrNull != null -> longOrNull!!
+        doubleOrNull != null -> doubleOrNull!!
+        else -> contentOrNull ?: ""
+    }
+
+    is JsonArray -> map { it.toUiValue() }
+    is JsonObject -> entries.associate { (key, value) -> key to value.toUiValue() }
 }

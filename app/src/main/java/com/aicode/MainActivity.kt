@@ -98,6 +98,7 @@ import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsDrawer
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsViewModel
 import com.aicode.feature.plugin.presentation.drawer.ToolDetailScreen
+import com.aicode.feature.plugin.presentation.drawer.ToolUnavailableScreen
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import com.aicode.feature.git.presentation.component.GitScreen
@@ -125,6 +126,7 @@ import com.aicode.feature.settings.presentation.component.settingsPageBackground
 import com.aicode.feature.terminal.domain.TerminalKeepaliveService
 import com.aicode.feature.terminal.presentation.TerminalViewModel
 import com.aicode.feature.terminal.presentation.component.TerminalScreen
+import com.aicode.feature.workspace.domain.toUiValues
 import com.aicode.feature.workspace.presentation.WorkspaceViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -896,14 +898,20 @@ fun AppNavigation(
                 if (tool != null) {
                     ToolDetailScreen(
                         tool = tool!!,
-                        savedParams = toolItem?.savedParams ?: emptyMap(),
+                        savedParams = toolItem?.savedParams?.toUiValues() ?: emptyMap(),
                         runState = runState,
                         onBack = returnFromToolDetail,
                         onExecute = { _, template, params ->
                             projectToolsViewModel.executeTool(tool!!, params, template)
                         },
-                        onStop = { projectToolsViewModel.stopCurrentRun() }
+                        onStop = { projectToolsViewModel.stopCurrentRun() },
+                        onRemove = {
+                            projectToolsViewModel.removeToolFromProject(toolKey)
+                            returnFromToolDetail()
+                        }
                     )
+                } else {
+                    ToolUnavailableScreen(onBack = returnFromToolDetail)
                 }
             }
         }
@@ -935,7 +943,7 @@ fun AppNavigation(
                 },
                 onQuickRun = { tool, item ->
                     scope.launch { rightDrawerState.close() }
-                    projectToolsViewModel.executeTool(tool, item.savedParams) {
+                    projectToolsViewModel.executeTool(tool, item.savedParams.toUiValues()) {
                         openWorkbench(WorkbenchPaneKind.TERMINAL)
                     }
                 },

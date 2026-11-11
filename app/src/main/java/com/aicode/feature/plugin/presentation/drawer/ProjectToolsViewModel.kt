@@ -9,6 +9,17 @@ import com.aicode.feature.plugin.domain.ToolOutputFormatter
 import com.aicode.feature.plugin.domain.ToolRunPhase
 import com.aicode.feature.plugin.domain.ToolRunState
 import com.aicode.feature.settings.domain.model.ActionSubmitElement
+import com.aicode.feature.settings.domain.model.AdaptiveCardElement
+import com.aicode.feature.settings.domain.model.CardElement
+import com.aicode.feature.settings.domain.model.ColumnElement
+import com.aicode.feature.settings.domain.model.ColumnSetElement
+import com.aicode.feature.settings.domain.model.ContainerElement
+import com.aicode.feature.settings.domain.model.FlowRowElement
+import com.aicode.feature.settings.domain.model.GridElement
+import com.aicode.feature.settings.domain.model.RowElement
+import com.aicode.feature.settings.domain.model.ScrollRowElement
+import com.aicode.feature.settings.domain.model.TabElement
+import com.aicode.feature.settings.domain.model.TabSetElement
 import com.aicode.feature.settings.domain.parser.AdaptiveCardParser
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
@@ -109,7 +120,7 @@ class ProjectToolsViewModel @Inject constructor(
     ) {
         if (_runState.value.phase == ToolRunPhase.RUNNING) return
         viewModelScope.launch {
-            val submitAction = tool.cardRoot?.body?.filterIsInstance<ActionSubmitElement>()?.firstOrNull()
+            val submitAction = findSubmit(tool.cardRoot?.body.orEmpty())
             val template = templateOverride ?: submitAction?.commandTemplate ?: "echo 'No action configured for ${tool.localId}'"
             val title = submitAction?.terminalTitle ?: tool.title.resolve("default")
 
@@ -222,6 +233,27 @@ class ProjectToolsViewModel @Inject constructor(
         )
         // 命令已结束，标签随后进入保活 shell，后续输出属于用户交互，不再写入运行日志。
         outputJob?.cancel()
+    }
+
+    /** 页面里的 submit 可能包在 Card/TabSet/Container 里，快速运行不能只看 body 直接子级。 */
+    private fun findSubmit(elements: List<AdaptiveCardElement>): ActionSubmitElement? {
+        elements.forEach { element ->
+            when (element) {
+                is ActionSubmitElement -> return element
+                is ColumnSetElement -> findSubmit(element.columns.flatMap { it.items })?.let { return it }
+                is ColumnElement -> findSubmit(element.items)?.let { return it }
+                is ContainerElement -> findSubmit(element.items)?.let { return it }
+                is RowElement -> findSubmit(element.items)?.let { return it }
+                is FlowRowElement -> findSubmit(element.items)?.let { return it }
+                is ScrollRowElement -> findSubmit(element.items)?.let { return it }
+                is CardElement -> findSubmit(element.items)?.let { return it }
+                is GridElement -> findSubmit(element.items)?.let { return it }
+                is TabElement -> findSubmit(element.items)?.let { return it }
+                is TabSetElement -> findSubmit(element.tabs.flatMap { it.items })?.let { return it }
+                else -> Unit
+            }
+        }
+        return null
     }
 
     private companion object {
