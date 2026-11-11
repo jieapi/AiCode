@@ -101,6 +101,7 @@ fun ProjectToolsDrawer(
                         val pluginTool = pluginToolsMap[item.toolKey]
                         ToolListItemRow(
                             item = item,
+                            available = pluginTool != null,
                             onClick = {
                                 if (pluginTool != null) {
                                     onOpenToolDetail(pluginTool, item)
@@ -190,6 +191,7 @@ private fun ProjectHeaderCard(
 @Composable
 private fun ToolListItemRow(
     item: ProjectToolItem,
+    available: Boolean,
     onClick: () -> Unit,
     onRun: () -> Unit
 ) {
@@ -197,7 +199,7 @@ private fun ToolListItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.mdLarge))
-            .clickable(onClick = onClick),
+            .clickable(enabled = available, onClick = onClick),
         shape = RoundedCornerShape(Radius.mdLarge),
         color = MaterialTheme.semanticColors.cardSurface,
         tonalElevation = 1.dp
@@ -208,7 +210,7 @@ private fun ToolListItemRow(
                 .padding(horizontal = Spacing.md, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val iconColor = MaterialTheme.colorScheme.primary
+            val iconColor = if (available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -233,11 +235,20 @@ private fun ToolListItemRow(
                     text = item.title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (available) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (item.description.isNotBlank()) {
+                if (!available) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.plugin_tool_unavailable),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else if (item.description.isNotBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = item.description,
@@ -254,10 +265,13 @@ private fun ToolListItemRow(
             // 右侧「运行」快捷胶囊按钮
             Button(
                 onClick = onRun,
+                enabled = available,
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.primary
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 ),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 modifier = Modifier.height(34.dp)

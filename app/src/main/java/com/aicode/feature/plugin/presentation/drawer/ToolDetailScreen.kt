@@ -47,7 +47,7 @@ import com.aicode.feature.settings.domain.model.AdaptiveCardRoot
 import com.aicode.feature.settings.presentation.component.SettingsGroup
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
-import compose.icons.feathericons.MoreVertical
+import compose.icons.feathericons.Trash2
 
 /**
  * 界面 ②：工具详情（全屏页面）。
@@ -62,6 +62,7 @@ fun ToolDetailScreen(
     runState: ToolRunState = ToolRunState(),
     onExecute: (actionId: String, commandTemplate: String?, params: Map<String, Any>) -> Unit,
     onStop: () -> Unit = {},
+    onRemove: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val formState = remember(savedParams) {
@@ -91,10 +92,10 @@ fun ToolDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {}) {
+                    IconButton(onClick = onRemove) {
                         Icon(
-                            imageVector = FeatherIcons.MoreVertical,
-                            contentDescription = null,
+                            imageVector = FeatherIcons.Trash2,
+                            contentDescription = stringResource(R.string.plugin_tool_remove),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -172,6 +173,53 @@ fun ToolDetailScreen(
             )
 
             ToolRunPanel(runState = runState, onStop = onStop)
+        }
+    }
+}
+
+/** 工具不存在（插件停用、卸载或更新后不再提供）时的空态页。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ToolUnavailableScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = stringResource(R.string.plugin_tool_not_found),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = FeatherIcons.ArrowLeft,
+                            contentDescription = stringResource(R.string.common_back),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
+                )
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(Spacing.xl),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = stringResource(R.string.plugin_tool_not_found_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

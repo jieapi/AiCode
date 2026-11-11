@@ -2063,6 +2063,10 @@
     <string name="plugin_tool_run_exit_code">Exit code %1$d</string>
     <string name="plugin_tool_run_stop">Stop</string>
     <string name="plugin_tool_run_no_output">No output yet</string>
+    <string name="plugin_tool_unavailable">Plugin disabled, tool unavailable</string>
+    <string name="plugin_tool_remove">Remove from project</string>
+    <string name="plugin_tool_not_found">Tool unavailable</string>
+    <string name="plugin_tool_not_found_hint">The plugin may be disabled, uninstalled, or no longer providing this tool.</string>
     <string name="plugin_tool_not_authorized">The plugin is disabled or no longer authorized, so this tool is unavailable</string>
     <string name="plugin_tool_permission_title">Confirm plugin tool</string>
     <string name="plugin_tool_permission_summary">The AI wants to call tool \"%2$s\" from plugin \"%1$s\"</string>

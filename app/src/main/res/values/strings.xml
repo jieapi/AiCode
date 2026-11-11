@@ -2062,6 +2062,10 @@
     <string name="plugin_tool_run_exit_code">退出码 %1$d</string>
     <string name="plugin_tool_run_stop">停止</string>
     <string name="plugin_tool_run_no_output">暂无输出</string>
+    <string name="plugin_tool_unavailable">插件已停用，工具不可用</string>
+    <string name="plugin_tool_remove">从项目移除</string>
+    <string name="plugin_tool_not_found">工具不可用</string>
+    <string name="plugin_tool_not_found_hint">插件可能已停用、卸载或不再提供这个工具。</string>
     <string name="plugin_tool_not_authorized">插件已停用或未授权，工具不再可用</string>
     <string name="plugin_tool_permission_title">确认调用插件工具</string>
     <string name="plugin_tool_permission_summary">AI 请求调用插件「%1$s」的工具「%2$s」</string>
