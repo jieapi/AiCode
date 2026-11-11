@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>演示套件配置</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 12px 16px 36px;
+    }
+    .demo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+    }
+    .demo-label {
+      color: var(--aicode-on-surface);
+      font-size: calc(15px * var(--aicode-font-scale));
+      font-weight: 500;
+    }
+    .demo-hint {
+      margin: 4px 0 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(13px * var(--aicode-font-scale));
+    }
+    .field-block {
+      padding: 12px 16px;
+    }
+    .field-title {
+      font-size: calc(13px * var(--aicode-font-scale));
+      color: var(--aicode-on-surface-variant);
+      margin-bottom: 6px;
+    }
+    .action-bar {
+      margin-top: 8px;
+      display: flex;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="closePage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">套件参数配置</h1>
+  </header>
+
+  <div class="page-content">
+    <aicode-group title="参数设置">
+      <div class="field-block">
+        <div class="field-title">默认作者昵称</div>
+        <aicode-input v-model="config.authorName" placeholder="例如：XiaoJingYu"></aicode-input>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="demo-row">
+        <div>
+          <div class="demo-label">启用详细日志记录</div>
+          <p class="demo-hint">生命周期 Hook 触发时在日志中记录更多诊断信息</p>
+        </div>
+        <aicode-switch v-model="config.detailedLogs"></aicode-switch>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="demo-row">
+        <div>
+          <div class="demo-label">自动保存审阅意见</div>
+          <p class="demo-hint">代码审阅子代理完成时自动在工作区保存摘要</p>
+        </div>
+        <aicode-switch v-model="config.autoSaveNotes"></aicode-switch>
+      </div>
+    </aicode-group>
+
+    <div class="action-bar">
+      <aicode-button variant="primary" style="flex: 1;" @click="save">保存并应用</aicode-button>
+    </div>
+  </div>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script>
+  (function () {
+    'use strict';
+    var DEFAULT_CONFIG = {
+      authorName: '',
+      detailedLogs: true,
+      autoSaveNotes: false
+    };
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          config: Object.assign({}, DEFAULT_CONFIG)
+        };
+      },
+      mounted: function () {
+        var self = this;
+        if (window.aicode && window.aicode.fs) {
+          aicode.fs.read('data://config.json').then(function (res) {
+            if (res && res.content) {
+              try {
+                self.config = Object.assign({}, DEFAULT_CONFIG, JSON.parse(res.content));
+              } catch (e) {}
+            }
+          }).catch(function () {});
+        }
+      },
+      methods: {
+        save: function () {
+          var self = this;
+          if (!window.aicode || !window.aicode.fs) {
+            alert('已保存');
+            return;
+          }
+          aicode.fs.write('data://config.json', JSON.stringify(self.config, null, 2)).then(function () {
+            aicode.toast('配置已成功保存！');
+          }).catch(function (err) {
+            aicode.toast('保存出错：' + err);
+          });
+        },
+        closePage: function () {
+          if (window.aicode && window.aicode.ui) {
+            aicode.ui.close().catch(function () {});
+          }
+        }
+      }
+    });
+
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>

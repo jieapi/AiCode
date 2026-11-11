@@ -313,9 +313,30 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 
 运行后宿主把终端原始输出清洗成日志回填到详情页的运行面板（最多保留最后 500 行），并从命令结束时打印的 `[command exited: N]` 标记识别退出码；非零退出显示为失败，不会误报成功。命令在保活标签里执行，结束后 shell 仍可继续使用，面板停止接收后续输出。
 
-## 设置页入口与 HTML 面板
+## 插件专属配置页面与设置页入口
 
-插件可以在设置页注册页面入口，用 HTML 写自己的界面。需要 `settings.pages` 权限和 `contributes.settingsPages`：
+插件可以使用 HTML/WebView 构建自己的界面，分为两种不同场景：
+
+### 1. 插件专属配置页面（`configPage`）
+
+如果插件需要提供自身参数配置（如填写 API Key、设置开关、选项调整等），可在 `contributes` 或顶层直接声明 `configPage`，指定包内的 HTML 相对路径：
+
+```json
+{
+  "id": "community.demo-kit",
+  "contributes": {
+    "configPage": "ui/config.html"
+  }
+}
+```
+
+- **位置独立**：该页面只在「设置 → 插件」点击该插件后的详情界面中展示，与 AiCode 固定的原生配置（启停、权限、卸载）通过分段控件无缝切换，**不会混入设置主菜单**；
+- **免额外权限**：属于插件自身的专属配置 UI，启用插件即可加载使用，不需要申请 `settings.pages` 权限；
+- **WebView 能力一致**：自动注入 App 全套主题 Token（CSS 变量、暗黑/浅色模式平滑同步），并提供 `window.aicode` 桥接接口读写私有数据目录（`data://`）。
+
+### 2. 设置主菜单入口（`settingsPages`）
+
+若插件希望在宿主主设置的某个分组下注册独立功能页面（如添加一个通用的记忆管理页、文档演示页等），使用 `contributes.settingsPages`，此时需要 `settings.pages` 权限：
 
 ```json
 {

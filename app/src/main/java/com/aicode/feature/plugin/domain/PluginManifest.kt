@@ -132,12 +132,13 @@ data class PluginManifest(
     val runtime: PluginRuntimeRef? = null,
     val tools: List<PluginToolRef> = emptyList(),
     val hooks: List<PluginHookRef> = emptyList(),
-    val mcp: List<PluginMcpRef> = emptyList()
+    val mcp: List<PluginMcpRef> = emptyList(),
+    val configPage: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
-            tools.size + hooks.size + mcp.size
+            tools.size + hooks.size + mcp.size + (if (configPage != null) 1 else 0)
 
     fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
         permissions.firstOrNull { it.permission == permission }

@@ -1,0 +1,81 @@
+{
+  "version": "1.5",
+  "body": [
+    {
+      "type": "textblock",
+      "text": "项目速览",
+      "size": "large",
+      "weight": "bolder"
+    },
+    {
+      "type": "textblock",
+      "text": "选择输出范围后点下面的按钮，会新开一个终端标签执行。选项没动过时使用默认值。",
+      "size": "small",
+      "isSubtle": true
+    },
+    {
+      "type": "factset",
+      "facts": [
+        {
+          "title": "工具 ID",
+          "value": "community.demo-kit:project-snapshot"
+        },
+        {
+          "title": "类别",
+          "value": "项目"
+        },
+        {
+          "title": "执行位置",
+          "value": "终端后台标签"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "inputselect",
+      "id": "scope",
+      "label": "输出范围",
+      "defaultValue": "summary",
+      "choices": [
+        {
+          "title": "简要（只列文件名）",
+          "value": "summary"
+        },
+        {
+          "title": "详细（含隐藏文件与权限）",
+          "value": "full"
+        }
+      ]
+    },
+    {
+      "type": "toggle",
+      "id": "gitInfo",
+      "label": "包含 Git 信息",
+      "hint": "当前分支与未提交改动",
+      "defaultValue": true
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "textblock",
+      "text": "将要执行",
+      "size": "small",
+      "weight": "bolder"
+    },
+    {
+      "type": "code",
+      "language": "bash",
+      "code": "SCOPE=<scope>  GIT_INFO=<gitInfo>\n打印工作目录、Git 分支、未提交改动与文件列表"
+    },
+    {
+      "type": "submit",
+      "id": "run",
+      "title": "在终端运行",
+      "terminalTitle": "项目速览",
+      "commandTemplate": "SCOPE=\"$scope\"; SCOPE=\"${SCOPE:-summary}\"\nGIT_INFO=\"$gitInfo\"; GIT_INFO=\"${GIT_INFO:-true}\"\necho \"── 项目速览 ──\"\necho \"工作目录：$(pwd)\"\nif [ \"$GIT_INFO\" = \"true\" ]; then\n  echo \"分支：$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 非 Git 仓库)\"\n  CHANGES=\"$(git status --short 2>/dev/null)\"\n  if [ -n \"$CHANGES\" ]; then\n    echo \"未提交改动：\"\n    echo \"$CHANGES\" | head -20\n  else\n    echo \"工作区干净\"\n  fi\nfi\nif [ \"$SCOPE\" = \"full\" ]; then\n  echo \"文件：\"\n  ls -la\nelse\n  echo \"文件：\"\n  ls\nfi"
+    }
+  ]
+}

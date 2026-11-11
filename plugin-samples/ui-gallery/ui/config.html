@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>插件配置</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 12px 16px 36px;
+    }
+    .demo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+    }
+    .demo-label {
+      color: var(--aicode-on-surface);
+      font-size: calc(15px * var(--aicode-font-scale));
+      font-weight: 500;
+    }
+    .demo-hint {
+      margin: 4px 0 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(13px * var(--aicode-font-scale));
+    }
+    .field-block {
+      padding: 12px 16px;
+    }
+    .field-title {
+      font-size: calc(13px * var(--aicode-font-scale));
+      color: var(--aicode-on-surface-variant);
+      margin-bottom: 6px;
+    }
+    .action-bar {
+      margin-top: 8px;
+      display: flex;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="closePage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">插件专属配置</h1>
+    <aicode-icon-button label="说明" @click="sheetOpen = true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+    </aicode-icon-button>
+  </header>
+
+  <div class="page-content">
+    <aicode-group title="服务接入凭证">
+      <div class="field-block">
+        <div class="field-title">API 端点 (Endpoint)</div>
+        <aicode-input v-model="config.endpoint" placeholder="https://api.example.com/v1"></aicode-input>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="field-block">
+        <div class="field-title">API 密钥 (Token)</div>
+        <aicode-input v-model="config.apiKey" placeholder="sk-..." type="password"></aicode-input>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="field-block">
+        <div class="field-title">运行环境</div>
+        <aicode-segmented v-model="config.environment" :options="envOptions"></aicode-segmented>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="行为偏好">
+      <div class="demo-row">
+        <div>
+          <div class="demo-label">自动同步配置</div>
+          <p class="demo-hint">每次启动插件时从远程更新规则</p>
+        </div>
+        <aicode-switch v-model="config.autoSync"></aicode-switch>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="demo-row">
+        <div>
+          <div class="demo-label">详细调试日志</div>
+          <p class="demo-hint">向应用日志打印完整的请求与响应包</p>
+        </div>
+        <aicode-switch v-model="config.verboseLog"></aicode-switch>
+      </div>
+    </aicode-group>
+
+    <div class="action-bar">
+      <aicode-button variant="primary" style="flex: 1;" @click="saveConfig">保存配置</aicode-button>
+      <aicode-button variant="secondary" @click="resetConfig">重置</aicode-button>
+    </div>
+
+    <p class="demo-hint" style="text-align: center; margin-top: 16px;">
+      此页面由清单 <code>contributes.configPage</code> 声明，仅在插件详情中展示，不占用宿主设置菜单。
+    </p>
+  </div>
+
+  <aicode-bottom-sheet v-model="sheetOpen" title="配置说明">
+    <p class="aicode-text">这是插件自主实现的配置面板，配置内容持久化存储于 <code>data://config.json</code>，完全属于插件私有存储，卸载插件时一并安全清除。</p>
+    <aicode-button variant="primary" @click="sheetOpen = false">我知道了</aicode-button>
+  </aicode-bottom-sheet>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script src="eruda.min.js"></script>
+<script>
+  if (window.eruda) {
+    window.eruda.init();
+  }
+</script>
+<script>
+  (function () {
+    'use strict';
+
+    var DEFAULT_CONFIG = {
+      endpoint: 'https://api.example.com/v1',
+      apiKey: '',
+      environment: 'prod',
+      autoSync: true,
+      verboseLog: false
+    };
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          config: Object.assign({}, DEFAULT_CONFIG),
+          sheetOpen: false
+        };
+      },
+      computed: {
+        envOptions: function () {
+          return [
+            { value: 'dev', label: '开发' },
+            { value: 'test', label: '测试' },
+            { value: 'prod', label: '生产' }
+          ];
+        }
+      },
+      mounted: function () {
+        this.loadConfig();
+      },
+      methods: {
+        loadConfig: function () {
+          var self = this;
+          if (!window.aicode || !window.aicode.fs) return;
+          aicode.fs.read('data://config.json').then(function (res) {
+            if (res && res.content) {
+              try {
+                self.config = Object.assign({}, DEFAULT_CONFIG, JSON.parse(res.content));
+              } catch (e) {}
+            }
+          }).catch(function () {});
+        },
+        saveConfig: function () {
+          var self = this;
+          if (!window.aicode || !window.aicode.fs) {
+            alert('保存成功 (演示模式)');
+            return;
+          }
+          var json = JSON.stringify(self.config, null, 2);
+          aicode.fs.write('data://config.json', json).then(function () {
+            aicode.toast('配置已成功保存！');
+          }).catch(function (err) {
+            aicode.toast('保存失败：' + (err.message || err));
+          });
+        },
+        resetConfig: function () {
+          this.config = Object.assign({}, DEFAULT_CONFIG);
+          if (window.aicode && window.aicode.toast) {
+            aicode.toast('已重置为默认值');
+          }
+        },
+        closePage: function () {
+          if (window.aicode && window.aicode.ui) {
+            aicode.ui.close().catch(function () {});
+          }
+        }
+      }
+    });
+
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>

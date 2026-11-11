@@ -42,7 +42,7 @@ object PluginManifestParser {
 
     private val TOP_LEVEL_KEYS = setOf(
         "manifestVersion", "id", "name", "version", "publisher", "repository",
-        "description", "license", "engines", "runtime", "permissions", "contributes"
+        "description", "license", "engines", "runtime", "permissions", "contributes", "configPage"
     )
     private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
     private val RUNTIME_KEYS = setOf("type", "entry")
@@ -128,7 +128,8 @@ object PluginManifestParser {
                     runtime = runtime,
                     tools = contributes.tools,
                     hooks = contributes.hooks,
-                    mcp = contributes.mcp
+                    mcp = contributes.mcp,
+                    configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage")
                 )
             )
         }
@@ -368,7 +369,8 @@ object PluginManifestParser {
             val settingsPages: List<PluginSettingsPageRef>,
             val tools: List<PluginToolRef>,
             val hooks: List<PluginHookRef>,
-            val mcp: List<PluginMcpRef>
+            val mcp: List<PluginMcpRef>,
+            val configPage: String?
         )
 
         private fun readContributes(obj: JsonObject): Contributes? {
@@ -377,7 +379,7 @@ object PluginManifestParser {
             var ok = true
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
-                    it != "tools" && it != "hooks" && it != "mcp"
+                    it != "tools" && it != "hooks" && it != "mcp" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -392,13 +394,23 @@ object PluginManifestParser {
             val mcpRefs = readContributionList(contributes["mcp"], "contributes.mcp", extension = ".json")
                 ?: run { ok = false; emptyList() }
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
+            val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty()
+                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, configPage) else null
+        }
+
+        private fun readConfigPage(raw: JsonElement?, path: String): String? {
+            if (raw == null) return null
+            val value = raw.stringOrNull() ?: return null.also { invalid(path) }
+            if (value.isBlank() || !isSafeRelativePath(value)) return null.also { invalid(path) }
+            val lower = value.lowercase()
+            if (!lower.endsWith(".html") && !lower.endsWith(".htm")) return null.also { invalid(path) }
+            return value
         }
 
         /** 缺省视为空列表；每项必须有合法局部 ID、标题、JSON Schema 文件与 handler 名。 */

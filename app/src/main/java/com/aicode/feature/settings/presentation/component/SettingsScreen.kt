@@ -430,8 +430,10 @@ fun SettingsScreen(
     val pluginZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) pluginsViewModel.import(uri)
     }
-    // 进入设置后预热最近打开的插件页：提前创建并加载 WebView，打开入口时直接 attach。
+    // 进入设置后预热最近打开的插件页：提前创建 WebView，打开入口时直接 attach。
     // 设置页首帧之后再执行，避免 Chromium 拉起阻塞进入动画。
+    // 不在这里加载页面：此时 WebView 还没挂到窗口，0×0 视口会让页面按错误尺寸完成首次布局
+    // （vh 等视口单位会被固定成 0），加载交给页面挂载后的 PluginWebPanelScreen。
     val pluginThemeDark = PluginThemeTokens.isDark(MaterialTheme.colorScheme)
     val pluginThemeFontScale = LocalConfiguration.current.fontScale
     val pluginColorScheme = MaterialTheme.colorScheme
@@ -474,7 +476,6 @@ fun SettingsScreen(
             webView.addJavascriptInterface(bridge, "__aicodeBridge")
             PluginWebViewCache.put(target.key, webView)
             PluginWebViewCache.putBridge(target.key, bridge)
-            webView.loadUrl(PluginWebViewFactory.pageUrl(target))
         }.onFailure { e ->
             FileLogger.w("SettingsScreen", "插件页预热失败", e)
         }
@@ -1386,9 +1387,11 @@ fun SettingsScreen(
                         selectedPluginId = it.id
                         section = SettingsSection.PluginDetail
                     },
-                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) }
+                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) },
+                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) }
                 )
                 SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     PluginDetailSection(
                         plugin = plugin,
                         onToggleEnabled = { pluginsViewModel.setEnabled(plugin.id, it) },
@@ -1397,6 +1400,19 @@ fun SettingsScreen(
                         },
                         onUninstall = {
                             pluginsViewModel.uninstall(plugin.id)
+                            section = SettingsSection.Plugins
+                        },
+                        bridgeFactory = { page, post, onClosePage ->
+                            pluginsViewModel.createWebBridge(
+                                page = page,
+                                pluginVersion = page.pluginVersion,
+                                languageTag = pluginLanguageTag,
+                                theme = { if (isDark) "dark" else "light" },
+                                onClosePage = onClosePage,
+                                post = post
+                            )
+                        },
+                        onClosePage = {
                             section = SettingsSection.Plugins
                         }
                     )
