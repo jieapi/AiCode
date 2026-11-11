@@ -6,6 +6,7 @@ import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.widget.Toast
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -26,6 +27,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /** 桥调用错误；[code] 是页面侧可判断的稳定错误码。 */
@@ -51,6 +53,9 @@ class PluginWebBridge(
     private val workspaceName: String,
     private val fileAccess: FileAccessProvider,
     private val homeResolver: PathHomeResolver,
+    private val commandEngine: CommandEngine,
+    private val workspacePath: () -> String,
+    private val execAllowed: () -> Boolean,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -67,9 +72,10 @@ class PluginWebBridge(
         val params = root["params"] as? JsonObject ?: JsonObject(emptyMap())
         scope.launch {
             val reply = try {
+                val data = dispatch(method, params)
                 buildJsonObject {
                     put("ok", true)
-                    put("data", dispatch(method, params))
+                    put("data", data)
                 }
             } catch (e: BridgeException) {
                 errorReply(e.code, e.message ?: method)
@@ -95,7 +101,7 @@ class PluginWebBridge(
         this.post = post
     }
 
-    private fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
+    private suspend fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
         "context" -> buildJsonObject {
             put("pluginId", page.pluginId)
             put("pageId", page.localId)
@@ -121,7 +127,24 @@ class PluginWebBridge(
         "fs.list" -> list(params.str("path"))
         "fs.delete" -> delete(params.str("path"))
         "fs.stat" -> stat(params.str("path"))
+        "bash" -> bash(params)
         else -> throw BridgeException("METHOD_UNKNOWN", "unknown method: $method")
+    }
+
+    /** 一次性 Shell 命令：在插件页面所属工作区执行，输出与退出码原样返回。 */
+    private suspend fun bash(params: JsonObject): JsonElement {
+        if (!execAllowed()) throw BridgeException("PERMISSION_DENIED", "workspace.exec not granted")
+        val command = params.str("command")
+        if (command.isBlank()) throw BridgeException("PARAM_INVALID", "empty command")
+        if (command.length > MAX_COMMAND_CHARS) throw BridgeException("PARAM_INVALID", "command too long")
+        val timeoutSeconds = (params["timeout"] as? JsonPrimitive)?.longOrNull ?: DEFAULT_BASH_TIMEOUT_SECONDS
+        val timeoutMs = timeoutSeconds.coerceIn(1L, MAX_BASH_TIMEOUT_SECONDS) * 1000L
+        val result = commandEngine.runCommandSyncWithExit(command, workspacePath(), timeoutMs)
+        return buildJsonObject {
+            put("output", result.output)
+            put("exitCode", result.exitCode)
+            put("truncated", result.outputTruncated)
+        }
     }
 
     private fun read(path: String): JsonElement {
@@ -306,7 +329,9 @@ class PluginWebBridge(
     }
 
     private fun deliver(id: String, payload: JsonObject) {
-        post("window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})")
+        val script = "window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})"
+        // 预热时 WebView 还没 attach，View.post 会一直排队；直接走主线程 Handler，不依赖窗口。
+        mainHandler.post { post(script) }
     }
 
     private fun jsString(value: String): String = buildString {
@@ -342,5 +367,8 @@ class PluginWebBridge(
         const val MAX_READ_BYTES = 512L * 1024
         const val MAX_WRITE_BYTES = 1024L * 1024
         const val MAX_LIST_ENTRIES = 500
+        const val MAX_COMMAND_CHARS = 4000
+        const val DEFAULT_BASH_TIMEOUT_SECONDS = 30L
+        const val MAX_BASH_TIMEOUT_SECONDS = 300L
     }
 }

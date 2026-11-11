@@ -1,0 +1,57 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.runtime-env",
+  "name": {
+    "zh-CN": "运行环境",
+    "en": "Runtime"
+  },
+  "version": "1.0.0",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "zh-CN": "在设置中查看当前执行环境已安装的 Java、Python、Node.js 等常用运行时与工具版本。",
+    "en": "Inspect installed runtimes and tools such as Java, Python and Node.js in the current execution environment."
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": ">=1.1.0 <2.0.0"
+  },
+  "permissions": [
+    {
+      "id": "settings.pages",
+      "required": true,
+      "reason": {
+        "zh-CN": "在设置中添加入口并打开运行环境页面",
+        "en": "Add an entry in Settings and open the runtime page"
+      },
+      "scope": {
+        "ids": ["runtime"]
+      }
+    },
+    {
+      "id": "workspace.exec",
+      "required": true,
+      "reason": {
+        "zh-CN": "执行版本检测命令",
+        "en": "Run version detection commands"
+      },
+      "scope": {
+        "ids": ["runtime"]
+      }
+    }
+  ],
+  "contributes": {
+    "settingsPages": [
+      {
+        "id": "runtime",
+        "title": {
+          "zh-CN": "运行环境",
+          "en": "Runtime"
+        },
+        "anchor": "settings.environment",
+        "page": "ui/runtime.html",
+        "icon": "package"
+      }
+    ]
+  }
+}

@@ -112,6 +112,7 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 - `required: true`：使用者不同意就装不了，也无法在装好后正常工作；
 - `required: false`：使用者可以不开，不开时对应的内容不生效，插件的其余部分照常。**可选权限默认是关闭的**，所以别把核心功能放在可选权限后面。
 - 内容的 `id` 以字母开头，只含字母、数字、下划线、连字符。
+- `workspace.exec` 不是内容注册权限：它让设置页页面可以调用 `aicode.bash` 执行一次性命令，`scope.ids` 填使用该能力的设置页 id，必须来自自己的 `contributes.settingsPages`。
 
 ## 技能文件
 
@@ -366,10 +367,13 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 | `aicode.fs.delete(path)` | 删除文件或目录 |
 | `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
 | `aicode.toast(message)` | 轻提示 |
+| `aicode.bash(command, options)` | 在当前工作区执行一次性 Shell 命令，返回 `{ output, exitCode, truncated }` |
 | `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
 
 返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
+
+`aicode.bash` 需要清单里的 `workspace.exec` 权限。命令在插件页面所属工作区执行，返回 stdout/stderr 合并输出、退出码与是否被截断；`options.timeout` 以秒计，默认 30、上限 300。它适合版本检测、状态查询这类短命令，不要用来启动常驻进程或交互式程序；命令执行环境的初始化由终端页负责，未初始化时返回的退出码为 `null`，输出里会带引导提示。
 
 路径必须以虚拟根开头：
 
@@ -430,6 +434,8 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 
 超出任何一项都会拒绝整个包。
 
+`workspace.exec` 让页面在当前工作区执行命令，能力与你在容器或 SSH 里执行脚本相近：命令以当前运行环境的用户身份运行，可能修改文件或安装依赖。只给信任来源的插件授予这项权限。
+
 ## 导入失败时的排查
 
 | 提示 | 常见原因 |
@@ -443,5 +449,6 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | `settingsPages` 的 `anchor` 无效 | 只能取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` |
 | `settingsPages` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
 | `settings.pages` 范围与页面不一致 | `scope.ids` 要覆盖全部 `settingsPages` 的 id，多写没声明的 id 也会被拒绝 |
+| `workspace.exec` 范围与页面不一致 | `scope.ids` 填的页面 id 必须来自自己的 `contributes.settingsPages`，多写没声明的 id 会被拒绝 |
 | 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object`、MCP 文件没有有效 server |
 | 清单引用的文件不存在 | `file` 路径与压缩包里的实际路径不符，注意大小写 |

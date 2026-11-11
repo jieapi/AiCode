@@ -70,6 +70,7 @@ internal fun PluginPermission.label(): String = stringResource(
         PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
         PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
         PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
+        PluginPermission.WORKSPACE_EXEC -> R.string.plugins_permission_workspace_exec
         PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
         PluginPermission.AGENT_EVENTS -> R.string.plugins_permission_agent_events
         PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register

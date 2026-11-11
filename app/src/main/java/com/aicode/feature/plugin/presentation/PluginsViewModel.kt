@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
@@ -55,7 +56,8 @@ class PluginsViewModel @Inject constructor(
     private val manager: PluginManager,
     private val fileAccess: FileAccessProvider,
     private val pathHomeResolver: PathHomeResolver,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val commandEngine: CommandEngine
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -163,6 +165,12 @@ class PluginsViewModel @Inject constructor(
             workspaceName = workspaceName,
             fileAccess = fileAccess,
             homeResolver = pathHomeResolver,
+            commandEngine = commandEngine,
+            workspacePath = { workspaceRepository.currentPath() },
+            execAllowed = {
+                plugins.value.firstOrNull { it.id == page.pluginId }
+                    ?.let { plugin -> plugin.isActive && PluginPermission.WORKSPACE_EXEC in plugin.granted } == true
+            },
             theme = theme,
             onClosePage = onClosePage,
             post = post

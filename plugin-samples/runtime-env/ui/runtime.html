@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>运行环境</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 24px;
+    }
+    .runtime-intro,
+    .runtime-hint {
+      margin: 8px 4px 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(13px * var(--aicode-font-scale));
+      line-height: 1.6;
+    }
+    .runtime-hint {
+      margin: 8px 4px 24px;
+    }
+    .aicode-error {
+      margin: 8px 4px 0;
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="closePage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">运行环境</h1>
+    <aicode-icon-button label="重新检测" @click="detectAll">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+    </aicode-icon-button>
+  </header>
+
+  <div class="page-content">
+    <p class="runtime-intro">检测当前执行环境（本地容器或远程 SSH）中已安装的常用运行时与工具。</p>
+    <p v-if="error" class="aicode-error">{{ error }}</p>
+
+    <aicode-group v-for="group in groups" :key="group.title" :title="group.title">
+      <template v-for="(tool, index) in group.tools" :key="tool.key">
+        <div v-if="index > 0" class="aicode-divider"></div>
+        <aicode-row
+          :title="tool.label"
+          :subtitle="subtitle(tool)"
+          :badge="badge(tool)"
+          :badge-kind="badgeKind(tool)"
+          icon="file"
+          :chevron="false"></aicode-row>
+      </template>
+    </aicode-group>
+
+    <p class="runtime-hint">检测命令在工作区执行，只读取版本信息，不会修改环境。容器未初始化时请先进入终端完成初始化。</p>
+  </div>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script>
+  (function () {
+    'use strict';
+
+    function tool(key, label, command) {
+      return { key: key, label: label, command: command, state: 'pending', version: '', message: '' };
+    }
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          groups: [
+            {
+              title: '语言运行时',
+              tools: [
+                tool('java', 'Java', 'command -v java >/dev/null 2>&1 && java -version 2>&1 | head -n 1'),
+                tool('python3', 'Python', 'command -v python3 >/dev/null 2>&1 && python3 --version 2>&1'),
+                tool('node', 'Node.js', 'command -v node >/dev/null 2>&1 && node --version 2>&1'),
+                tool('php', 'PHP', 'command -v php >/dev/null 2>&1 && php -v 2>&1 | head -n 1'),
+                tool('go', 'Go', 'command -v go >/dev/null 2>&1 && go version 2>&1'),
+                tool('rustc', 'Rust', 'command -v rustc >/dev/null 2>&1 && rustc --version 2>&1')
+              ]
+            },
+            {
+              title: '构建与包管理',
+              tools: [
+                tool('git', 'Git', 'command -v git >/dev/null 2>&1 && git --version 2>&1'),
+                tool('npm', 'npm', 'command -v npm >/dev/null 2>&1 && npm --version 2>&1'),
+                tool('cargo', 'Cargo', 'command -v cargo >/dev/null 2>&1 && cargo --version 2>&1'),
+                tool('gcc', 'GCC', 'command -v gcc >/dev/null 2>&1 && gcc --version 2>&1 | head -n 1'),
+                tool('make', 'Make', 'command -v make >/dev/null 2>&1 && make --version 2>&1 | head -n 1')
+              ]
+            },
+            {
+              title: '容器与网络',
+              tools: [
+                tool('docker', 'Docker', 'command -v docker >/dev/null 2>&1 && docker --version 2>&1'),
+                tool('curl', 'curl', 'command -v curl >/dev/null 2>&1 && curl --version 2>&1 | head -n 1'),
+                tool('zip', 'zip', 'command -v zip >/dev/null 2>&1 && zip -v 2>&1 | head -n 1')
+              ]
+            }
+          ],
+          loading: false,
+          error: ''
+        };
+      },
+
+      methods: {
+        closePage: function () {
+          aicode.ui.close().catch(function () {});
+        },
+        firstLine: function (text) {
+          var value = String(text == null ? '' : text).trim();
+          if (!value) return '';
+          return value.split(/\r?\n/)[0].trim();
+        },
+        detectAll: async function () {
+          if (this.loading) return;
+          this.loading = true;
+          this.error = '';
+          for (var g = 0; g < this.groups.length; g++) {
+            for (var t = 0; t < this.groups[g].tools.length; t++) {
+              var item = this.groups[g].tools[t];
+              item.state = 'pending';
+              item.version = '';
+              item.message = '';
+            }
+          }
+          try {
+            for (var group = 0; group < this.groups.length; group++) {
+              for (var index = 0; index < this.groups[group].tools.length; index++) {
+                await this.detect(this.groups[group].tools[index]);
+              }
+            }
+          } finally {
+            this.loading = false;
+          }
+        },
+        detect: async function (item) {
+          try {
+            var result = await aicode.bash(item.command, { timeout: 20 });
+            if (result.exitCode === 0) {
+              item.state = 'installed';
+              item.version = this.firstLine(result.output) || '已安装';
+            } else if (result.exitCode === null) {
+              item.state = 'error';
+              item.message = this.firstLine(result.output) || '执行环境未就绪';
+            } else {
+              item.state = 'missing';
+            }
+          } catch (e) {
+            item.state = 'error';
+            item.message = (e && e.message) || String(e);
+            if (e && e.code === 'PERMISSION_DENIED') {
+              this.error = '需要授予「执行 Shell 命令」权限后重新检测。';
+            }
+          }
+        },
+        subtitle: function (item) {
+          if (item.state === 'pending') return '检测中…';
+          if (item.state === 'installed') return item.version || '已安装';
+          if (item.state === 'missing') return '未检测到命令';
+          return item.message || '检测失败';
+        },
+        badge: function (item) {
+          if (item.state === 'installed') return '已安装';
+          if (item.state === 'missing') return '未安装';
+          if (item.state === 'pending') return '…';
+          return '失败';
+        },
+        badgeKind: function (item) {
+          return item.state === 'installed' ? 'enabled' : '';
+        }
+      },
+
+      mounted: function () {
+        if (aicode.ui && aicode.ui.onBack) {
+          aicode.ui.onBack(function () { return false; });
+        }
+        this.detectAll();
+      }
+    });
+
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>

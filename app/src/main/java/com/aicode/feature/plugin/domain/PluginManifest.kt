@@ -8,6 +8,8 @@ enum class PluginPermission(val id: String) {
     SKILLS_REGISTER("skills.register"),
     AGENTS_REGISTER("agents.register"),
     WORKSPACE_TOOLS("workspace.tools"),
+    /** 在插件页面执行一次性 Shell 命令；scope.ids 为使用该能力的设置页 id。 */
+    WORKSPACE_EXEC("workspace.exec"),
     TOOLS_REGISTER("tools.register"),
     AGENT_EVENTS("agent.events"),
     MCP_REGISTER("mcp.register"),

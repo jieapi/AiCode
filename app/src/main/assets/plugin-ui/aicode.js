@@ -76,6 +76,13 @@
         return Promise.resolve();
       }
     },
+    // 在当前工作区执行一次性 Shell 命令，返回 { output, exitCode, truncated }。
+    // 需要插件获得 workspace.exec 授权；环境检测等短命令使用，不适合常驻进程。
+    bash: function (command, options) {
+      var params = { command: String(command) };
+      if (options && options.timeout != null) params.timeout = Number(options.timeout);
+      return call('bash', params);
+    },
     fs: {
       read: function (path) {
         return call('fs.read', { path: String(path) });
