@@ -47,6 +47,14 @@
       }
     },
     {
+      "id": "workspace.exec",
+      "required": true,
+      "reason": "执行 git 命令以展示仓库状态与文件列表",
+      "scope": {
+        "ids": ["project-snapshot"]
+      }
+    },
+    {
       "id": "tools.register",
       "required": true,
       "reason": "提供由 AI 调用的「回显」与「上次运行」工具，验证插件运行时与 Hook",
@@ -125,7 +133,7 @@
         },
         "icon": "terminal",
         "category": "项目",
-        "pageFile": "pages/project-snapshot.json"
+        "pageFile": "pages/project-snapshot.html"
       }
     ],
     "configPage": "pages/config.html"

@@ -6,8 +6,6 @@ import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillParser
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionParser
-import com.aicode.feature.settings.domain.model.AdaptiveCardRoot
-import com.aicode.feature.settings.domain.parser.AdaptiveCardParser
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -31,7 +29,9 @@ data class PluginWorkspaceTool(
     val description: LocalizedText,
     val icon: String,
     val category: String,
-    val cardRoot: AdaptiveCardRoot?
+    val pageFile: String,
+    val installDir: File,
+    val pluginVersion: String
 ) {
     /** 唯一的全局工具键名：`<插件ID>:<局部ID>` */
     val key: String get() = pluginContributionName(pluginId, localId)
@@ -122,7 +122,9 @@ object PluginContentLoader {
         val errors = mutableListOf<PluginError>()
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
-        val workspaceTools = manifest.workspaceTools.map { loadWorkspaceTool(dir, manifest.id, it, errors) }
+        val workspaceTools = manifest.workspaceTools.map {
+            loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
         val settingsPages = manifest.settingsPages.mapNotNull { loadSettingsPage(dir, manifest.id, it, errors) }
         val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
@@ -240,19 +242,21 @@ object PluginContentLoader {
     private fun loadWorkspaceTool(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         ref: PluginWorkspaceToolRef,
         errors: MutableList<PluginError>
     ): PluginWorkspaceTool {
         val file = File(dir, ref.pageFile)
-        val card = if (file.isFile && file.length() <= MAX_CONTENT_BYTES) {
-            val text = runCatching { file.readText() }.getOrNull()
-            text?.let { AdaptiveCardParser.parseAdaptiveCard(it) }
-        } else null
-
-        if (card == null && ref.pageFile.isNotBlank() && !file.exists()) {
-            errors.add(PluginError(PluginErrorCode.FILE_MISSING, ref.pageFile))
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        val isHtml = ref.pageFile.endsWith(".html", ignoreCase = true) ||
+            ref.pageFile.endsWith(".htm", ignoreCase = true)
+        if (!isHtml) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.pageFile}: workspace tool page must be html")
+        } else if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.pageFile)
+        } else if (file.length() > MAX_CONTENT_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.pageFile}: too large")
         }
-
         return PluginWorkspaceTool(
             pluginId = pluginId,
             localId = ref.id,
@@ -260,7 +264,9 @@ object PluginContentLoader {
             description = ref.description,
             icon = ref.icon,
             category = ref.category,
-            cardRoot = card
+            pageFile = ref.pageFile,
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 

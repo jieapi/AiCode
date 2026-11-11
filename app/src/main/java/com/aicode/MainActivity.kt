@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,6 +96,8 @@ import com.aicode.feature.browser.presentation.BrowserScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
 import com.aicode.feature.plugin.presentation.PluginWebViewCache
+import com.aicode.feature.plugin.presentation.PluginsViewModel
+import com.aicode.feature.plugin.presentation.currentLanguageTag
 import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsDrawer
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsViewModel
@@ -127,7 +130,6 @@ import com.aicode.feature.settings.presentation.component.settingsPageBackground
 import com.aicode.feature.terminal.domain.TerminalKeepaliveService
 import com.aicode.feature.terminal.presentation.TerminalViewModel
 import com.aicode.feature.terminal.presentation.component.TerminalScreen
-import com.aicode.feature.workspace.domain.toUiValues
 import com.aicode.feature.workspace.presentation.WorkspaceViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -390,6 +392,7 @@ fun AppNavigation(
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
+    val pluginsViewModel: PluginsViewModel = hiltViewModel()
     val rightDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     // ── 首次启动引导 ──
@@ -893,20 +896,25 @@ fun AppNavigation(
                     projectToolsViewModel.selectToolByKey(toolKey)
                 }
                 val tool by projectToolsViewModel.selectedTool.collectAsStateWithLifecycle()
-                val toolItem by projectToolsViewModel.selectedToolItem.collectAsStateWithLifecycle()
-                val runState by projectToolsViewModel.runState.collectAsStateWithLifecycle()
 
                 BackHandler { returnFromToolDetail() }
                 if (tool != null) {
+                    val languageTag = currentLanguageTag()
+                    val pageDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     ToolDetailScreen(
                         tool = tool!!,
-                        savedParams = toolItem?.savedParams?.toUiValues() ?: emptyMap(),
-                        runState = runState,
-                        onBack = returnFromToolDetail,
-                        onExecute = { _, template, params ->
-                            projectToolsViewModel.executeTool(tool!!, params, template)
+                        languageTag = languageTag,
+                        bridgeFactory = { page, post, onClose ->
+                            pluginsViewModel.createWebBridge(
+                                page = page,
+                                pluginVersion = page.pluginVersion,
+                                languageTag = languageTag,
+                                theme = { if (pageDark) "dark" else "light" },
+                                onClosePage = onClose,
+                                post = post
+                            )
                         },
-                        onStop = { projectToolsViewModel.stopCurrentRun() },
+                        onBack = returnFromToolDetail,
                         onRemove = {
                             projectToolsViewModel.removeToolFromProject(toolKey)
                             returnFromToolDetail()
@@ -940,14 +948,8 @@ fun AppNavigation(
                 onOpenToolDetail = { tool, item ->
                     reopenRightDrawerOnDetailBack = true
                     scope.launch { rightDrawerState.close() }
-                    projectToolsViewModel.selectTool(tool, item)
+                    projectToolsViewModel.selectTool(tool)
                     navController.navigate("plugin_tool_detail/${tool.key}")
-                },
-                onQuickRun = { tool, item ->
-                    scope.launch { rightDrawerState.close() }
-                    projectToolsViewModel.executeTool(tool, item.savedParams.toUiValues()) {
-                        openWorkbench(WorkbenchPaneKind.TERMINAL)
-                    }
                 },
                 onOpenAllTools = {
                     scope.launch { rightDrawerState.close() }

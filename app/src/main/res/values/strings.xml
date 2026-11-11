@@ -2148,7 +2148,6 @@
     <string name="plugins_add_parameter">添加参数</string>
 
     <string name="plugins_current_project">当前项目</string>
-    <string name="plugins_quick_run">运行</string>
     <string name="plugins_no_project_tools">当前项目尚未添加任何工具</string>
     <string name="plugins_add_tool">添加工具</string>
     <string name="plugins_all_tools">全部工具</string>

@@ -47,7 +47,8 @@ fun PluginWebPanelScreen(
     page: PluginSettingsPage,
     onClosePage: () -> Unit,
     bridgeFactory: (post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    applySystemBarInsets: Boolean = true
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -107,7 +108,11 @@ fun PluginWebPanelScreen(
     }
 
     LaunchedEffect(webView, pageUrl, viewportReady) {
-        if (viewportReady && !PluginWebViewCache.isLoaded(page.key, pageUrl)) {
+        if (
+            viewportReady &&
+            !PluginWebViewCache.isLoaded(page.key, pageUrl) &&
+            !PluginWebViewCache.isLoading(page.key, pageUrl)
+        ) {
             webView.loadUrl(pageUrl)
         }
     }
@@ -141,8 +146,13 @@ fun PluginWebPanelScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .then(
+                if (applySystemBarInsets) {
+                    Modifier.statusBarsPadding().navigationBarsPadding()
+                } else {
+                    Modifier
+                }
+            )
     ) {
         AndroidView(
             factory = { webView },

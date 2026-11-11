@@ -531,9 +531,13 @@ object PluginManifestParser {
                 val icon = item["icon"]?.stringOrNull() ?: "play"
                 val category = item["category"]?.stringOrNull() ?: "通用"
                 val pageFile = item["pageFile"]?.stringOrNull()
+                val isHtmlPage = pageFile != null && (
+                    pageFile.endsWith(".html", ignoreCase = true) ||
+                        pageFile.endsWith(".htm", ignoreCase = true)
+                    )
                 if (id == null) { invalid("$itemPath.id"); ok = false }
                 if (title == null) { invalid("$itemPath.title"); ok = false }
-                if (pageFile == null || !isSafeRelativePath(pageFile) || !pageFile.endsWith(".json", ignoreCase = true)) {
+                if (pageFile == null || !isSafeRelativePath(pageFile) || !isHtmlPage) {
                     invalid("$itemPath.pageFile")
                     ok = false
                 }
@@ -665,11 +669,11 @@ object PluginManifestParser {
             val mcpIds = contributes.mcp.map { it.id }
             checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpIds, permissions)
             checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpIds, permissions)
-            // 执行权限不注册内容，scope.ids 只允许指向自己的设置页，避免声明不存在的页面。
+            // 执行权限不注册内容，scope.ids 只允许指向自己的设置页或工具页，避免声明不存在的页面。
             checkScopeSubset(
                 PluginPermission.WORKSPACE_EXEC,
                 "settingsPages",
-                contributes.settingsPages.map { it.id },
+                contributes.settingsPages.map { it.id } + contributes.workspaceTools.map { it.id },
                 permissions
             )
         }

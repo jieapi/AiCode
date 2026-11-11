@@ -1,5 +1,6 @@
 package com.aicode.feature.plugin.presentation
 
+import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
+import com.aicode.core.util.FileLogger
 import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.SegmentedTabs
 import com.aicode.core.ui.SwipeToDeleteRow
@@ -64,6 +69,7 @@ import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ExternalLink
 import compose.icons.feathericons.Package
 import compose.icons.feathericons.Search
+import kotlinx.coroutines.delay
 
 /** 当前界面语言标签，用于挑选插件自带的多语言文本。 */
 @Composable
@@ -445,7 +451,60 @@ internal fun PluginDetailSection(
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
     val hasConfigPage = configPage != null && bridgeFactory != null
-    var selectedTab by rememberSaveable(plugin.id) { mutableIntStateOf(0) }
+    var selectedTab by remember(plugin.id) { mutableIntStateOf(0) }
+
+    val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
+    val semantic = MaterialTheme.semanticColors
+    val fontScale = LocalConfiguration.current.fontScale
+    val themeDark = PluginThemeTokens.isDark(colorScheme)
+    val themeVariables = remember(colorScheme, semantic, fontScale) {
+        PluginThemeTokens.variables(colorScheme, semantic, fontScale)
+    }
+    val pageBackground = semantic.pageBackground.toArgb()
+
+    // 详情页打开后预热专属配置页：切到「插件配置」时直接复用已加载页面，避免首次进入现建 WebView 的白屏。
+    // WebView 尚未挂到窗口，先按屏幕尺寸布局再加载，否则页面会按 0×0 视口完成首次布局。
+    LaunchedEffect(plugin.id, hasConfigPage) {
+        if (!hasConfigPage) return@LaunchedEffect
+        val url = PluginWebViewFactory.pageUrl(configPage)
+        delay(200)
+        if (PluginWebViewCache.isLoaded(configPage.key, url)) return@LaunchedEffect
+        runCatching {
+            val webView = PluginWebViewCache.take(configPage.key) ?: PluginWebViewFactory.create(
+                context = context,
+                page = configPage,
+                dark = themeDark,
+                backgroundColor = pageBackground,
+                themeVariables = { themeVariables },
+                onPageFinished = { view ->
+                    PluginWebViewCache.markLoaded(configPage.key, url)
+                    view.evaluateJavascript(PluginThemeTokens.applyScript(themeVariables), null)
+                },
+                onMainFrameError = { PluginWebViewCache.clearLoading(configPage.key) }
+            )
+            if (PluginWebViewCache.takeBridge(configPage.key) == null) {
+                val bridge = bridgeFactory(
+                    configPage,
+                    { script -> runCatching { webView.evaluateJavascript(script, null) } },
+                    onClosePage
+                )
+                webView.addJavascriptInterface(bridge, "__aicodeBridge")
+                PluginWebViewCache.putBridge(configPage.key, bridge)
+            }
+            PluginWebViewCache.put(configPage.key, webView)
+            PluginWebViewCache.markLoading(configPage.key, url)
+            val metrics = context.resources.displayMetrics
+            webView.measure(
+                View.MeasureSpec.makeMeasureSpec(metrics.widthPixels, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(metrics.heightPixels, View.MeasureSpec.EXACTLY)
+            )
+            webView.layout(0, 0, metrics.widthPixels, metrics.heightPixels)
+            webView.loadUrl(url)
+        }.onFailure { error ->
+            FileLogger.w("PluginsSection", "插件配置页预热失败", error)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (hasConfigPage) {
@@ -481,7 +540,8 @@ internal fun PluginDetailSection(
                 bridgeFactory = { post, onClose ->
                     bridgeFactory(configPage, post, onClose)
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                applySystemBarInsets = false
             )
         }
     }
