@@ -2149,7 +2149,6 @@
     <string name="plugins_add_parameter">Add Parameter</string>
 
     <string name="plugins_current_project">Current Project</string>
-    <string name="plugins_quick_run">Run</string>
     <string name="plugins_no_project_tools">No tools added to current project</string>
     <string name="plugins_add_tool">Add Tool</string>
     <string name="plugins_all_tools">All Tools</string>

@@ -18,6 +18,10 @@
       line-height: 1.5;
       -webkit-text-size-adjust: 100%;
     }
+    .page-topbar {
+      display: flex;
+      justify-content: flex-end;
+    }
     .page-content {
       display: flex;
       flex-direction: column;
@@ -61,26 +65,17 @@
 </head>
 <body>
 <div id="app" class="aicode-page" v-cloak>
-  <header class="aicode-page-header">
-    <aicode-icon-button label="返回" @click="closePage">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <line x1="19" y1="12" x2="5" y2="12"></line>
-        <polyline points="12 19 5 12 12 5"></polyline>
-      </svg>
-    </aicode-icon-button>
-    <h1 class="aicode-page-title">插件专属配置</h1>
-    <aicode-icon-button label="说明" @click="sheetOpen = true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="12" y1="16" x2="12" y2="12"></line>
-        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-      </svg>
-    </aicode-icon-button>
-  </header>
-
   <div class="page-content">
+    <div class="page-topbar">
+      <aicode-icon-button label="说明" @click="sheetOpen = true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </aicode-icon-button>
+    </div>
     <aicode-group title="服务接入凭证">
       <div class="field-block">
         <div class="field-title">API 端点 (Endpoint)</div>
@@ -201,11 +196,6 @@
           this.config = Object.assign({}, DEFAULT_CONFIG);
           if (window.aicode && window.aicode.toast) {
             aicode.toast('已重置为默认值');
-          }
-        },
-        closePage: function () {
-          if (window.aicode && window.aicode.ui) {
-            aicode.ui.close().catch(function () {});
           }
         }
       }

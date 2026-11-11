@@ -21,15 +21,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
 
 /**
  * 项目已启用工具项条目（保存在 `<workspace>/.aicode/tools.json` 中）。
@@ -42,8 +33,7 @@ data class ProjectToolItem(
     val title: String,
     val description: String = "",
     val icon: String = "play",
-    val category: String = "通用",
-    val savedParams: Map<String, JsonElement> = emptyMap()
+    val category: String = "通用"
 )
 
 @Serializable
@@ -125,16 +115,6 @@ class ProjectToolsRepository @Inject constructor(
         save(current)
     }
 
-    /** 保存工具配置的参数。 */
-    suspend fun updateParams(toolKey: String, params: Map<String, Any>) = withContext(Dispatchers.IO) {
-        val current = _tools.value.map { item ->
-            if (item.toolKey == toolKey) {
-                item.copy(savedParams = params.mapValues { (_, value) -> value.toJsonElement() })
-            } else item
-        }
-        save(current)
-    }
-
     private fun save(items: List<ProjectToolItem>) {
         runCatching {
             val file = configFile()
@@ -150,33 +130,4 @@ class ProjectToolsRepository @Inject constructor(
         private const val TAG = "ProjectToolsRepo"
         private const val CONFIG_FILE = "tools.json"
     }
-}
-
-/** 把持久化的 JSON 值还原成 UI 表单可直接持有的类型。 */
-fun Map<String, JsonElement>.toUiValues(): Map<String, Any> =
-    mapValues { (_, value) -> value.toUiValue() }
-
-private fun Any?.toJsonElement(): JsonElement = when (this) {
-    null -> JsonNull
-    is JsonElement -> this
-    is Boolean -> JsonPrimitive(this)
-    is Number -> JsonPrimitive(this)
-    is String -> JsonPrimitive(this)
-    is List<*> -> JsonArray(map { it.toJsonElement() })
-    is Map<*, *> -> JsonObject(entries.associate { (key, value) -> key.toString() to value.toJsonElement() })
-    else -> JsonPrimitive(toString())
-}
-
-private fun JsonElement.toUiValue(): Any = when (this) {
-    is JsonNull -> ""
-    is JsonPrimitive -> when {
-        isString -> content
-        booleanOrNull != null -> booleanOrNull!!
-        longOrNull != null -> longOrNull!!
-        doubleOrNull != null -> doubleOrNull!!
-        else -> contentOrNull ?: ""
-    }
-
-    is JsonArray -> map { it.toUiValue() }
-    is JsonObject -> entries.associate { (key, value) -> key to value.toUiValue() }
 }

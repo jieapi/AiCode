@@ -1,76 +1,67 @@
 package com.aicode.feature.plugin.presentation.drawer
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aicode.R
-import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
-import com.aicode.core.theme.semanticColors
-import com.aicode.feature.agent.presentation.component.AdaptiveCardView
+import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
-import com.aicode.feature.plugin.domain.ToolRunPhase
-import com.aicode.feature.plugin.domain.ToolRunState
-import com.aicode.feature.plugin.presentation.drawer.resolveToolIcon
-import com.aicode.feature.settings.domain.model.AdaptiveCardRoot
-import com.aicode.feature.settings.presentation.component.SettingsGroup
+import com.aicode.feature.plugin.presentation.PluginWebBridge
+import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Trash2
 
 /**
  * 界面 ②：工具详情（全屏页面）。
- * 顶部展示工具摘要 Header，核心交互区直接由通用结构化 UI 引擎 [AdaptiveCardView] 绘制插件声明的节点树。
+ *
+ * 页面统一由插件自己的 HTML 实现，宿主只提供标题栏与返回/移除操作，
+ * WebView 容器与设置页、插件配置页共用 [PluginWebPanelScreen]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ToolDetailScreen(
     tool: PluginWorkspaceTool,
-    savedParams: Map<String, Any> = emptyMap(),
+    bridgeFactory: (
+        page: PluginSettingsPage,
+        post: (String) -> Unit,
+        onClosePage: () -> Unit
+    ) -> PluginWebBridge,
     languageTag: String = "zh-CN",
-    runState: ToolRunState = ToolRunState(),
-    onExecute: (actionId: String, commandTemplate: String?, params: Map<String, Any>) -> Unit,
-    onStop: () -> Unit = {},
     onRemove: () -> Unit = {},
     onBack: () -> Unit
 ) {
-    val formState = remember(savedParams) {
-        val map = mutableStateMapOf<String, Any>()
-        map.putAll(savedParams)
-        map
+    val page = remember(tool.key, tool.installDir) {
+        tool.installDir?.let { dir ->
+            PluginSettingsPage(
+                pluginId = tool.pluginId,
+                localId = tool.localId,
+                title = tool.title,
+                anchor = "",
+                pageFile = tool.pageFile,
+                icon = tool.icon,
+                installDir = dir,
+                pluginVersion = tool.pluginVersion
+            )
+        }
     }
-    val cardRoot = tool.cardRoot ?: AdaptiveCardRoot()
 
     Scaffold(
         topBar = {
@@ -108,71 +99,30 @@ fun ToolDetailScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
-            // 顶部摘要卡片（大图标 + 标题 + 详细说明）
-            SettingsGroup {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(Spacing.lg),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(Radius.mdLarge)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = resolveToolIcon(tool.icon),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(Spacing.md))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = tool.title.resolve(languageTag),
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        val desc = tool.description.resolve(languageTag)
-                        if (desc.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = desc,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 核心交互与表单区：直接由通用 AdaptiveCardView 绘制
-            AdaptiveCardView(
-                card = cardRoot,
-                isExpanded = true,
-                formState = formState,
-                onSubmit = { actionId, template, values ->
-                    onExecute(actionId, template, values)
-                }
+        if (page != null) {
+            PluginWebPanelScreen(
+                page = page,
+                onClosePage = onBack,
+                bridgeFactory = { post, onClose -> bridgeFactory(page, post, onClose) },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                applySystemBarInsets = false
             )
-
-            ToolRunPanel(runState = runState, onStop = onStop)
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(Spacing.xl),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = stringResource(R.string.plugin_tool_not_found_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -220,90 +170,6 @@ fun ToolUnavailableScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-    }
-}
-
-/** 运行面板：状态、退出码、实时日志与停止。 */
-@Composable
-private fun ToolRunPanel(
-    runState: ToolRunState,
-    onStop: () -> Unit
-) {
-    val scrollState = rememberScrollState()
-    val noOutput = stringResource(R.string.plugin_tool_run_no_output)
-    val phaseText = when (runState.phase) {
-        ToolRunPhase.IDLE -> stringResource(R.string.plugin_tool_run_idle)
-        ToolRunPhase.RUNNING -> stringResource(R.string.plugin_tool_run_running)
-        ToolRunPhase.SUCCESS -> stringResource(R.string.plugin_tool_run_success)
-        ToolRunPhase.FAILED -> stringResource(R.string.plugin_tool_run_failed)
-        ToolRunPhase.CANCELLED -> stringResource(R.string.plugin_tool_run_cancelled)
-    }
-    val phaseColor = when (runState.phase) {
-        ToolRunPhase.RUNNING -> MaterialTheme.colorScheme.primary
-        ToolRunPhase.SUCCESS -> MaterialTheme.semanticColors.success
-        ToolRunPhase.FAILED -> MaterialTheme.colorScheme.error
-        ToolRunPhase.CANCELLED, ToolRunPhase.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    LaunchedEffect(runState.lines) {
-        if (runState.phase == ToolRunPhase.RUNNING) {
-            scrollState.scrollTo(scrollState.maxValue)
-        }
-    }
-
-    SettingsGroup {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.plugin_tool_run_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = phaseText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = phaseColor
-                )
-                if (runState.phase == ToolRunPhase.RUNNING) {
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    TextButton(onClick = onStop) {
-                        Text(stringResource(R.string.plugin_tool_run_stop))
-                    }
-                }
-            }
-
-            runState.exitCode?.let { code ->
-                Text(
-                    text = stringResource(R.string.plugin_tool_run_exit_code, code),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(Radius.mdLarge)
-                    )
-                    .padding(Spacing.md)
-                    .verticalScroll(scrollState)
-            ) {
-                Text(
-                    text = runState.lines.ifEmpty { listOf(noOutput) }.joinToString("\n"),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
     }
 }

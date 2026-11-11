@@ -19,6 +19,7 @@ internal object PluginWebViewCache {
     private var key: String? = null
     private var webView: WebView? = null
     private var loadedUrl: String? = null
+    private var loadingUrl: String? = null
     private var bridge: PluginWebBridge? = null
 
     /** 最近打开过的插件页 key；缓存清空后仍保留，供进入设置时预热。 */
@@ -32,6 +33,16 @@ internal object PluginWebViewCache {
     fun takeBridge(pageKey: String): PluginWebBridge? = bridge?.takeIf { key == pageKey }
 
     fun isLoaded(pageKey: String, url: String): Boolean = key == pageKey && loadedUrl == url
+
+    fun isLoading(pageKey: String, url: String): Boolean = key == pageKey && loadingUrl == url
+
+    fun markLoading(pageKey: String, url: String) {
+        if (key == pageKey) loadingUrl = url
+    }
+
+    fun clearLoading(pageKey: String) {
+        if (key == pageKey) loadingUrl = null
+    }
 
     fun put(pageKey: String, view: WebView) {
         lastPageKey = pageKey
@@ -48,6 +59,7 @@ internal object PluginWebViewCache {
         key = pageKey
         webView = view
         loadedUrl = null
+        loadingUrl = null
     }
 
     fun putBridge(pageKey: String, value: PluginWebBridge) {
@@ -57,7 +69,10 @@ internal object PluginWebViewCache {
     }
 
     fun markLoaded(pageKey: String, url: String) {
-        if (key == pageKey) loadedUrl = url
+        if (key == pageKey) {
+            loadedUrl = url
+            loadingUrl = null
+        }
     }
 
     /** 页面离开时只从父容器摘掉，保留实例与已加载内容。 */
@@ -75,5 +90,6 @@ internal object PluginWebViewCache {
         webView = null
         key = null
         loadedUrl = null
+        loadingUrl = null
     }
 }

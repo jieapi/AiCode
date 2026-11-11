@@ -47,8 +47,10 @@ internal object PluginWebViewFactory {
             settings.allowContentAccess = false
             settings.domStorageEnabled = false
             settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
+            settings.loadWithOverviewMode = false
+            settings.setSupportZoom(false)
             settings.builtInZoomControls = false
+            settings.displayZoomControls = false
             setBackgroundColor(backgroundColor)
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(

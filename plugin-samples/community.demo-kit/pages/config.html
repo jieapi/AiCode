@@ -59,17 +59,6 @@
 </head>
 <body>
 <div id="app" class="aicode-page" v-cloak>
-  <header class="aicode-page-header">
-    <aicode-icon-button label="返回" @click="closePage">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round" stroke-linejoin="round">
-        <line x1="19" y1="12" x2="5" y2="12"></line>
-        <polyline points="12 19 5 12 12 5"></polyline>
-      </svg>
-    </aicode-icon-button>
-    <h1 class="aicode-page-title">套件参数配置</h1>
-  </header>
-
   <div class="page-content">
     <aicode-group title="参数设置">
       <div class="field-block">
@@ -142,11 +131,6 @@
           }).catch(function (err) {
             aicode.toast('保存出错：' + err);
           });
-        },
-        closePage: function () {
-          if (window.aicode && window.aicode.ui) {
-            aicode.ui.close().catch(function () {});
-          }
         }
       }
     });

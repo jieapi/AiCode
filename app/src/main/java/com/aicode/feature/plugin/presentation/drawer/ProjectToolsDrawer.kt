@@ -66,7 +66,6 @@ fun ProjectToolsDrawer(
     languageTag: String = "zh-CN",
     listState: LazyListState = rememberLazyListState(),
     onOpenToolDetail: (PluginWorkspaceTool, ProjectToolItem?) -> Unit,
-    onQuickRun: (PluginWorkspaceTool, ProjectToolItem) -> Unit,
     onOpenAllTools: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -105,11 +104,6 @@ fun ProjectToolsDrawer(
                             onClick = {
                                 if (pluginTool != null) {
                                     onOpenToolDetail(pluginTool, item)
-                                }
-                            },
-                            onRun = {
-                                if (pluginTool != null) {
-                                    onQuickRun(pluginTool, item)
                                 }
                             }
                         )
@@ -192,8 +186,7 @@ private fun ProjectHeaderCard(
 private fun ToolListItemRow(
     item: ProjectToolItem,
     available: Boolean,
-    onClick: () -> Unit,
-    onRun: () -> Unit
+    onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -258,29 +251,6 @@ private fun ToolListItemRow(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.width(Spacing.xs))
-
-            // 右侧「运行」快捷胶囊按钮
-            Button(
-                onClick = onRun,
-                enabled = available,
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                modifier = Modifier.height(34.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.plugins_quick_run),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
     }
