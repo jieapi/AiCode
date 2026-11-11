@@ -671,7 +671,7 @@ html {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: 85vh;
+  max-height: 85%;
   overflow: hidden;
   border-radius: 28px 28px 0 0;
   background: var(--aicode-surface);
@@ -725,7 +725,7 @@ html {
 
 .aicode-dialog {
   width: min(100%, 420px);
-  max-height: 80vh;
+  max-height: 100%;
   overflow: auto;
   padding: 24px;
   border-radius: 28px;

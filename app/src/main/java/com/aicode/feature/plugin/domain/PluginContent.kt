@@ -97,7 +97,8 @@ data class PluginContent(
     val runtime: PluginRuntimeEntry? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
-    val mcp: List<PluginMcpServer> = emptyList()
+    val mcp: List<PluginMcpServer> = emptyList(),
+    val configPage: PluginSettingsPage? = null
 )
 
 sealed interface ContentLoadResult {
@@ -130,8 +131,9 @@ object PluginContentLoader {
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
         val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
+        val configPage = manifest.configPage?.let { loadConfigPage(dir, manifest.id, it, errors) }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp))
+            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp, configPage))
         } else {
             ContentLoadResult.Failed(errors)
         }
@@ -286,6 +288,34 @@ object PluginContentLoader {
             anchor = ref.anchor,
             pageFile = ref.page,
             icon = ref.icon,
+            installDir = dir
+        )
+    }
+
+    /** 插件专属配置页 HTML 只校验存在性与大小，不解析内容；页面由宿主 WebView 加载。 */
+    private fun loadConfigPage(
+        dir: File,
+        pluginId: String,
+        relativePath: String,
+        errors: MutableList<PluginError>
+    ): PluginSettingsPage? {
+        val file = File(dir, relativePath)
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, relativePath)
+            return null
+        }
+        if (file.length() > MAX_CONTENT_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "$relativePath: too large")
+            return null
+        }
+        return PluginSettingsPage(
+            pluginId = pluginId,
+            localId = "config",
+            title = LocalizedText(mapOf("default" to "Configuration", "zh-CN" to "插件配置", "en" to "Configuration")),
+            anchor = "",
+            pageFile = relativePath,
+            icon = "settings",
             installDir = dir
         )
     }

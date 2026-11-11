@@ -2,45 +2,22 @@
   "manifestVersion": 1,
   "id": "demo.gallery",
   "name": {
-    "zh-CN": "组件演示",
-    "en": "UI Gallery"
+    "zh-CN": "UI与配置演示",
+    "en": "UI & Config Demo"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "demo",
   "repository": "https://github.com/jieapi/AiCode",
   "description": {
-    "zh-CN": "演示宿主提供的 Vue WebView 组件：列表行、徽章、开关、输入框、分段按钮、底部弹窗与对话框。",
-    "en": "Demonstrates host-provided Vue WebView components: rows, badges, switches, inputs, segmented buttons, bottom sheets and dialogs."
+    "zh-CN": "演示插件专属配置页面（configPage）及宿主 Vue 组件库，支持配置的读取与持久化保存。",
+    "en": "Demonstrates plugin configuration page (configPage) and host Vue UI components with persistence."
   },
   "license": "MIT",
   "engines": {
     "pluginApi": ">=1.1.0 <2.0.0"
   },
-  "permissions": [
-    {
-      "id": "settings.pages",
-      "required": true,
-      "reason": {
-        "zh-CN": "在设置中添加入口并打开组件演示页面",
-        "en": "Add an entry in Settings and open the UI gallery page"
-      },
-      "scope": {
-        "ids": ["gallery"]
-      }
-    }
-  ],
+  "permissions": [],
   "contributes": {
-    "settingsPages": [
-      {
-        "id": "gallery",
-        "title": {
-          "zh-CN": "组件演示",
-          "en": "UI Gallery"
-        },
-        "anchor": "settings.help",
-        "page": "ui/gallery.html",
-        "icon": "settings"
-      }
-    ]
+    "configPage": "ui/config.html"
   }
 }

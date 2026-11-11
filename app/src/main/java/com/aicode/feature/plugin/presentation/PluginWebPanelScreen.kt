@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import com.aicode.R
 import com.aicode.core.theme.Spacing
@@ -64,6 +65,7 @@ fun PluginWebPanelScreen(
         if (cached != null) PluginWebViewCache.takeBridge(page.key) else null
     }
     var failed by remember(page.key) { mutableStateOf(false) }
+    var viewportReady by remember(page.key) { mutableStateOf(false) }
     // 返回键派发给页面后要等 JS 结果；期间重复触发不再派发，避免连续退出。
     var backDispatching by remember(page.key) { mutableStateOf(false) }
 
@@ -104,8 +106,8 @@ fun PluginWebPanelScreen(
         )
     }
 
-    LaunchedEffect(webView, pageUrl) {
-        if (!PluginWebViewCache.isLoaded(page.key, pageUrl)) {
+    LaunchedEffect(webView, pageUrl, viewportReady) {
+        if (viewportReady && !PluginWebViewCache.isLoaded(page.key, pageUrl)) {
             webView.loadUrl(pageUrl)
         }
     }
@@ -144,7 +146,11 @@ fun PluginWebPanelScreen(
     ) {
         AndroidView(
             factory = { webView },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { size ->
+                    if (size.width > 0 && size.height > 0) viewportReady = true
+                }
         )
 
         if (failed) {

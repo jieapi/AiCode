@@ -1,0 +1,133 @@
+{
+  "manifestVersion": 1,
+  "id": "community.demo-kit",
+  "name": {
+    "default": "Demo Kit",
+    "zh-CN": "插件演示套件"
+  },
+  "version": "1.1.0",
+  "publisher": "community",
+  "repository": "https://github.com/example/demo-kit",
+  "description": {
+    "default": "A demo plugin with a skill, a read-only sub-agent, a structured workspace tool, two AI tools and a read-only lifecycle hook.",
+    "zh-CN": "演示插件系统的完整能力：一个技能、一个只读审查子代理、一个带结构化页面的项目工具、两个 AI 工具，以及一个只读生命周期 Hook。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0",
+    "structuredUi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "permissions": [
+    {
+      "id": "skills.register",
+      "required": true,
+      "reason": "提供「项目笔记」技能，把讨论结论整理进 NOTES.md",
+      "scope": {
+        "ids": ["project-notes"]
+      }
+    },
+    {
+      "id": "agents.register",
+      "required": true,
+      "reason": "提供「只读审查」子代理，提交前复核改动",
+      "scope": {
+        "ids": ["reviewer"]
+      }
+    },
+    {
+      "id": "workspace.tools",
+      "required": true,
+      "reason": "提供「项目速览」工具，在右侧工具抽屉中一键运行",
+      "scope": {
+        "ids": ["project-snapshot"]
+      }
+    },
+    {
+      "id": "tools.register",
+      "required": true,
+      "reason": "提供由 AI 调用的「回显」与「上次运行」工具，验证插件运行时与 Hook",
+      "scope": {
+        "ids": ["echo", "last-run"]
+      }
+    },
+    {
+      "id": "agent.events",
+      "required": true,
+      "reason": "监听 Agent 运行结束事件，只保存运行元数据用于演示",
+      "scope": {
+        "ids": ["run-log"],
+        "events": ["agent.run.finished"]
+      }
+    }
+  ],
+  "contributes": {
+    "skills": [
+      {
+        "id": "project-notes",
+        "file": "skills/project-notes/SKILL.md"
+      }
+    ],
+    "agents": [
+      {
+        "id": "reviewer",
+        "file": "agents/reviewer.md"
+      }
+    ],
+    "hooks": [
+      {
+        "id": "run-log",
+        "event": "agent.run.finished",
+        "handler": "hooks.runFinished"
+      }
+    ],
+    "tools": [
+      {
+        "id": "echo",
+        "title": {
+          "default": "Echo",
+          "zh-CN": "回显"
+        },
+        "description": {
+          "default": "Echo the provided text back. Use it to verify that the plugin runtime is working.",
+          "zh-CN": "把传入的文本原样回显，用于验证插件运行时是否接通。"
+        },
+        "inputSchema": "schemas/echo.input.json",
+        "handler": "tools.echo"
+      },
+      {
+        "id": "last-run",
+        "title": {
+          "default": "Last Run",
+          "zh-CN": "上次运行"
+        },
+        "description": {
+          "default": "Return the metadata stored by the run-finished hook.",
+          "zh-CN": "返回 run-finished Hook 保存的上次运行元数据，用于验证 Hook 是否触发。"
+        },
+        "inputSchema": "schemas/last-run.input.json",
+        "handler": "tools.lastRun"
+      }
+    ],
+    "workspaceTools": [
+      {
+        "id": "project-snapshot",
+        "title": {
+          "default": "Project Snapshot",
+          "zh-CN": "项目速览"
+        },
+        "description": {
+          "default": "Show the current branch, pending changes and file list in a terminal tab.",
+          "zh-CN": "在终端标签中查看当前分支、未提交改动与文件列表。"
+        },
+        "icon": "terminal",
+        "category": "项目",
+        "pageFile": "pages/project-snapshot.json"
+      }
+    ],
+    "configPage": "pages/config.html"
+  }
+}
