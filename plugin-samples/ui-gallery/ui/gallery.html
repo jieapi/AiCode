@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>组件演示</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 24px;
+    }
+    .demo-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+    }
+    .demo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+    }
+    .demo-label {
+      color: var(--aicode-on-surface);
+      font-size: calc(15px * var(--aicode-font-scale));
+    }
+    .demo-hint {
+      margin: 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(13px * var(--aicode-font-scale));
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="closePage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">组件演示</h1>
+    <aicode-icon-button label="说明" @click="sheetOpen = true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+    </aicode-icon-button>
+  </header>
+
+  <div class="page-content">
+    <aicode-group title="列表行">
+      <aicode-row title="默认行" subtitle="图标 + 标题 + 副标题 + 右箭头" @click="toast('点击了默认行')" />
+      <aicode-divider></aicode-divider>
+      <aicode-row title="带徽章" subtitle="插件标签与启用状态" badge="插件" badge-kind="plugin"
+        @click="toast('点击了带徽章行')" />
+      <aicode-divider></aicode-divider>
+      <aicode-row title="文件图标" subtitle="icon=\"file\"" icon="file" @click="toast('点击了文件行')" />
+      <aicode-divider></aicode-divider>
+      <aicode-swipe-row @delete="toast('左滑删除：示例行')">
+        <aicode-row title="左滑删除" subtitle="向左滑动露出删除按钮" />
+      </aicode-swipe-row>
+    </aicode-group>
+
+    <aicode-group title="徽章">
+      <div class="demo-inline">
+        <aicode-badge text="默认"></aicode-badge>
+        <aicode-badge text="插件" kind="plugin"></aicode-badge>
+        <aicode-badge text="已启用" kind="enabled"></aicode-badge>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="开关">
+      <div class="demo-row">
+        <span class="demo-label">启用示例</span>
+        <aicode-switch v-model="switchOn"></aicode-switch>
+      </div>
+      <aicode-divider></aicode-divider>
+      <div class="demo-row">
+        <span class="demo-label">禁用示例</span>
+        <aicode-switch :model-value="true" :disabled="true"></aicode-switch>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="输入">
+      <aicode-field label="名称">
+        <aicode-input v-model="name" placeholder="输入名称"></aicode-input>
+      </aicode-field>
+      <aicode-field label="描述">
+        <aicode-input v-model="description" placeholder="输入描述"></aicode-input>
+      </aicode-field>
+      <aicode-divider></aicode-divider>
+      <div class="demo-row">
+        <span class="demo-label">分段按钮</span>
+        <aicode-segmented v-model="scope" :options="scopeOptions"></aicode-segmented>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="正文">
+      <div class="aicode-outlined-field aicode-outlined-field-body">
+        <aicode-textarea v-model="content" placeholder="输入正文"></aicode-textarea>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="按钮">
+      <div class="demo-inline">
+        <aicode-button variant="primary" @click="dialogOpen = true">主要按钮</aicode-button>
+        <aicode-button @click="toast('普通按钮')">普通按钮</aicode-button>
+        <aicode-button variant="danger" @click="toast('危险按钮')">危险按钮</aicode-button>
+      </div>
+    </aicode-group>
+
+    <aicode-group title="空态">
+      <aicode-empty text="这里没有内容"></aicode-empty>
+    </aicode-group>
+
+    <aicode-group title="Markdown">
+      <aicode-markdown :text="markdown"></aicode-markdown>
+    </aicode-group>
+
+    <aicode-group title="底部弹窗与对话框">
+      <aicode-row title="打开底部弹窗" subtitle="AicodeBottomSheet" @click="sheetOpen = true" />
+      <aicode-divider></aicode-divider>
+      <aicode-row title="打开确认对话框" subtitle="AicodeDialog" @click="dialogOpen = true" />
+    </aicode-group>
+
+    <p class="demo-hint">页面里所有组件都来自宿主注入的 AicodeUI，插件不需要打包 Vue 或组件代码。</p>
+  </div>
+
+  <aicode-bottom-sheet v-model="sheetOpen" title="底部弹窗">
+    <p class="aicode-text">这是宿主提供的底部弹窗组件：遮罩点击关闭、顶部拖拽手柄、内容区可滚动，尺寸与设置页的
+      AdaptiveModalBottomSheet 一致。</p>
+    <aicode-button variant="primary" @click="sheetOpen = false">关闭</aicode-button>
+  </aicode-bottom-sheet>
+
+  <aicode-dialog v-model="dialogOpen" title="确认操作"
+    message="这是宿主提供的确认对话框，样式与 App 的 AlertDialog 一致。"
+    confirm-text="确定" cancel-text="取消" @confirm="toast('已确认')"></aicode-dialog>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script>
+  (function () {
+    'use strict';
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          switchOn: true,
+          name: '',
+          description: '',
+          content: '',
+          scope: 'project',
+          sheetOpen: false,
+          dialogOpen: false,
+          markdown: '# 标题\n\n- 列表项\n- **粗体**\n\n```\ncode\n```'
+        };
+      },
+      computed: {
+        scopeOptions: function () {
+          return [
+            { value: 'project', label: '当前项目' },
+            { value: 'global', label: '全局' }
+          ];
+        }
+      },
+      methods: {
+        closePage: function () {
+          aicode.ui.close().catch(function () {});
+        },
+        toast: function (message) {
+          aicode.toast(message);
+        }
+      }
+    });
+
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>

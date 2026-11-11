@@ -37,6 +37,21 @@ data class PluginWorkspaceTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 设置页入口：页面文件已校验存在于 [installDir]，由宿主 WebView 加载。 */
+data class PluginSettingsPage(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val anchor: String,
+    val pageFile: String,
+    val icon: String,
+    val installDir: File,
+    val pluginVersion: String = "",
+    val dataDir: File? = null
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
 /** 已校验存在性的插件业务入口文件。 */
 data class PluginRuntimeEntry(val type: String, val entryFile: File)
 
@@ -78,6 +93,7 @@ data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
+    val settingsPages: List<PluginSettingsPage> = emptyList(),
     val runtime: PluginRuntimeEntry? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
@@ -106,6 +122,7 @@ object PluginContentLoader {
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
         val agents = manifest.agents.mapNotNull { loadAgent(dir, manifest.id, it, errors) }
         val workspaceTools = manifest.workspaceTools.map { loadWorkspaceTool(dir, manifest.id, it, errors) }
+        val settingsPages = manifest.settingsPages.mapNotNull { loadSettingsPage(dir, manifest.id, it, errors) }
         val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
@@ -114,7 +131,7 @@ object PluginContentLoader {
         val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, runtime, tools, hooks, mcp))
+            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp))
         } else {
             ContentLoadResult.Failed(errors)
         }
@@ -242,6 +259,34 @@ object PluginContentLoader {
             icon = ref.icon,
             category = ref.category,
             cardRoot = card
+        )
+    }
+
+    /** 设置页 HTML 只校验存在性与大小，不解析内容；页面由宿主 WebView 加载。 */
+    private fun loadSettingsPage(
+        dir: File,
+        pluginId: String,
+        ref: PluginSettingsPageRef,
+        errors: MutableList<PluginError>
+    ): PluginSettingsPage? {
+        val file = File(dir, ref.page)
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.page)
+            return null
+        }
+        if (file.length() > MAX_CONTENT_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.page}: too large")
+            return null
+        }
+        return PluginSettingsPage(
+            pluginId = pluginId,
+            localId = ref.id,
+            title = ref.title,
+            anchor = ref.anchor,
+            pageFile = ref.page,
+            icon = ref.icon,
+            installDir = dir
         )
     }
 

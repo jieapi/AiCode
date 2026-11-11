@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>记忆管理</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 24px;
+    }
+    .selection-active .page-content { padding-bottom: 96px; }
+    .view {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .aicode-icon-button.active {
+      background: var(--aicode-surface-variant);
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" :class="{ 'selection-active': selectionMode }" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="handleBack">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">{{ pageTitle }}</h1>
+    <aicode-icon-button v-if="view === 'list'" label="多选" :class="{ active: selectionMode }"
+      @click="toggleSelectionMode">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="9 11 12 14 22 4"></polyline>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+      </svg>
+    </aicode-icon-button>
+    <aicode-icon-button v-if="view === 'list'" label="新建" @click="openEdit(null)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </aicode-icon-button>
+    <aicode-icon-button v-if="view === 'detail'" label="编辑" @click="editCurrent">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+      </svg>
+    </aicode-icon-button>
+    <button v-if="view === 'edit'" class="aicode-text-button" :disabled="saving" @click="save">保存</button>
+  </header>
+
+  <div class="page-content">
+    <section v-show="view === 'list'" class="view">
+      <aicode-group title="全局记忆" v-model:expanded="globalExpanded">
+        <template v-if="globalItems.length">
+          <template v-for="(item, index) in globalItems" :key="item.fileName">
+            <div v-if="index > 0" class="aicode-divider"></div>
+            <aicode-swipe-row :disabled="selectionMode" @delete="deleteItem(item)">
+              <aicode-row
+                :title="item.name"
+                :subtitle="item.description || '（无描述）'"
+                :badge="scopeLabel(item.scope)"
+                :selectable="selectionMode"
+                :selected="isSelected(item)"
+                @click="handleRowClick(item)" />
+            </aicode-swipe-row>
+          </template>
+        </template>
+        <aicode-empty v-else text="暂无全局记忆" />
+      </aicode-group>
+
+      <aicode-group title="项目记忆" v-model:expanded="projectExpanded">
+        <template v-if="projectItems.length">
+          <template v-for="(item, index) in projectItems" :key="item.fileName">
+            <div v-if="index > 0" class="aicode-divider"></div>
+            <aicode-swipe-row :disabled="selectionMode" @delete="deleteItem(item)">
+              <aicode-row
+                :title="item.name"
+                :subtitle="item.description || '（无描述）'"
+                :badge="scopeLabel(item.scope)"
+                :selectable="selectionMode"
+                :selected="isSelected(item)"
+                @click="handleRowClick(item)" />
+            </aicode-swipe-row>
+          </template>
+        </template>
+        <aicode-empty v-else text="当前项目暂无项目记忆" />
+      </aicode-group>
+    </section>
+
+    <section v-show="view === 'detail'" class="view">
+      <aicode-group title="信息" :collapsible="false">
+        <div class="aicode-info-row">
+          <span>范围</span>
+          <span>{{ currentItem ? scopeLabel(currentItem.scope) : '' }}</span>
+        </div>
+        <div class="aicode-divider aicode-divider-flat"></div>
+        <div class="aicode-info-row">
+          <span>文件</span>
+          <span>{{ currentItem ? currentItem.fileName : '' }}</span>
+        </div>
+      </aicode-group>
+      <aicode-group title="摘要" :collapsible="false">
+        <p class="aicode-text">{{ currentItem ? (currentItem.description || '（无描述）') : '' }}</p>
+      </aicode-group>
+      <aicode-group title="指令正文" :collapsible="false">
+        <aicode-markdown :text="currentItem ? currentItem.content : ''" />
+      </aicode-group>
+    </section>
+
+    <section v-show="view === 'edit'" class="view">
+      <aicode-group title="基本信息" :collapsible="false">
+        <aicode-field label="名称">
+          <aicode-input v-model="form.name" :disabled="!!editingItem"
+            placeholder="例如 project-conventions" />
+        </aicode-field>
+        <aicode-field label="描述">
+          <aicode-input v-model="form.description" placeholder="一句话摘要，会注入系统提示词" />
+        </aicode-field>
+        <div class="aicode-scope-row">
+          <span class="aicode-scope-label">作用域</span>
+          <aicode-segmented v-model="form.scope" :options="scopeOptions" :disabled="!!editingItem" />
+        </div>
+      </aicode-group>
+      <aicode-group title="指令正文" :collapsible="false">
+        <div class="aicode-outlined-field aicode-outlined-field-body">
+          <aicode-textarea v-model="form.content" placeholder="记忆的具体内容" />
+        </div>
+      </aicode-group>
+      <p v-if="error" class="aicode-error">{{ error }}</p>
+    </section>
+  </div>
+
+  <div v-if="selectionMode" class="aicode-selection-bar">
+    <span>已选 {{ selected.length }} 项</span>
+    <aicode-button compact @click="toggleSelectAll">{{ allSelected ? '取消全选' : '全选' }}</aicode-button>
+    <aicode-button compact variant="danger" :disabled="!selected.length" @click="batchDelete">
+      {{ batchConfirm ? '确认删除' : '删除' }}
+    </aicode-button>
+  </div>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script>
+  (function () {
+    'use strict';
+
+    var GLOBAL_ROOT = 'aicode://memory';
+    var PROJECT_ROOT = 'workspace://.aicode/memory';
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          view: 'list',
+          globalExpanded: true,
+          projectExpanded: true,
+          globalItems: [],
+          projectItems: [],
+          currentItem: null,
+          editingItem: null,
+          form: { name: '', description: '', content: '', scope: 'global' },
+          selectionMode: false,
+          selected: [],
+          saving: false,
+          error: '',
+          batchConfirm: false,
+          batchTimer: null
+        };
+      },
+
+      computed: {
+        pageTitle: function () {
+          if (this.view === 'edit') return this.editingItem ? '编辑记忆' : '新建记忆';
+          if (this.view === 'detail') return this.currentItem ? this.currentItem.name : '记忆管理';
+          return '记忆管理';
+        },
+        allItems: function () {
+          return this.globalItems.concat(this.projectItems);
+        },
+        allSelected: function () {
+          return this.allItems.length > 0 && this.selected.length === this.allItems.length;
+        },
+        scopeOptions: function () {
+          return [
+            { value: 'project', label: '当前项目' },
+            { value: 'global', label: '全局' }
+          ];
+        }
+      },
+
+      methods: {
+        rootFor: function (scope) {
+          return scope === 'project' ? PROJECT_ROOT : GLOBAL_ROOT;
+        },
+        scopeLabel: function (scope) {
+          return scope === 'project' ? '项目' : '全局';
+        },
+        keyFor: function (item) {
+          return item.scope + ':' + item.fileName;
+        },
+        sanitizeName: function (raw) {
+          var chars = Array.from(String(raw));
+          var cleaned = chars.map(function (ch) {
+            return /[\p{L}\p{N}_-]/u.test(ch) ? ch : '-';
+          }).join('').replace(/^-+|-+$/g, '');
+          return cleaned || 'memory';
+        },
+        yamlScalar: function (value) {
+          return '"' + String(value == null ? '' : value).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+        },
+        formatMemory: function (name, description, content) {
+          return '---\nname: ' + this.yamlScalar(name) + '\ndescription: ' + this.yamlScalar(description) +
+            '\n---\n' + content;
+        },
+        unquote: function (value) {
+          var text = String(value == null ? '' : value).trim();
+          if (text.length >= 2 && text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') {
+            return text.slice(1, -1).replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+          }
+          return text;
+        },
+        parseMemory: function (text, fileName, scope) {
+          var name = fileName.replace(/\.md$/i, '');
+          var description = '';
+          var body = text || '';
+          var match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(body);
+          if (match) {
+            var front = match[1];
+            var nameMatch = /^name:\s*(.+)$/m.exec(front);
+            var descMatch = /^description:\s*(.+)$/m.exec(front);
+            if (nameMatch) name = this.unquote(nameMatch[1]);
+            if (descMatch) description = this.unquote(descMatch[1]);
+            body = body.slice(match[0].length);
+          }
+          return {
+            name: name,
+            description: description,
+            content: body.trim(),
+            fileName: fileName,
+            scope: scope
+          };
+        },
+        listScope: async function (scope) {
+          var root = this.rootFor(scope);
+          try {
+            var result = await aicode.fs.list(root);
+            var files = (result.entries || []).filter(function (entry) {
+              return !entry.isDir && /\.md$/i.test(entry.name);
+            });
+            var loaded = [];
+            for (var i = 0; i < files.length; i++) {
+              var read = await aicode.fs.read(root + '/' + files[i].name);
+              loaded.push(this.parseMemory(read.content, files[i].name, scope));
+            }
+            loaded.sort(function (a, b) {
+              return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+            });
+            return loaded;
+          } catch (e) {
+            return [];
+          }
+        },
+        loadAll: async function () {
+          var globalItems = await this.listScope('global');
+          var projectItems = await this.listScope('project');
+          this.globalItems = globalItems;
+          this.projectItems = projectItems;
+          var keys = {};
+          this.allItems.forEach(function (item) {
+            keys[item.scope + ':' + item.fileName] = true;
+          });
+          this.selected = this.selected.filter(function (key) {
+            return !!keys[key];
+          });
+        },
+        isSelected: function (item) {
+          return this.selected.indexOf(this.keyFor(item)) >= 0;
+        },
+        toggleSelected: function (item) {
+          var key = this.keyFor(item);
+          var index = this.selected.indexOf(key);
+          if (index >= 0) {
+            this.selected.splice(index, 1);
+          } else {
+            this.selected.push(key);
+          }
+        },
+        toggleSelectionMode: function () {
+          this.selectionMode = !this.selectionMode;
+          this.selected = [];
+          this.batchConfirm = false;
+          if (this.batchTimer) {
+            clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+          }
+        },
+        toggleSelectAll: function () {
+          if (this.allSelected) {
+            this.selected = [];
+          } else {
+            this.selected = this.allItems.map(function (item) {
+              return item.scope + ':' + item.fileName;
+            });
+          }
+        },
+        handleRowClick: function (item) {
+          if (this.selectionMode) {
+            this.toggleSelected(item);
+            return;
+          }
+          this.openDetail(item);
+        },
+        openDetail: function (item) {
+          this.currentItem = item;
+          this.view = 'detail';
+        },
+        openEdit: function (item) {
+          this.editingItem = item;
+          this.form = {
+            name: item ? item.name : '',
+            description: item ? item.description : '',
+            content: item ? item.content : '',
+            scope: item ? item.scope : 'global'
+          };
+          this.error = '';
+          this.view = 'edit';
+        },
+        editCurrent: function () {
+          if (this.currentItem) this.openEdit(this.currentItem);
+        },
+        handleBack: function () {
+          if (this.view === 'list') {
+            aicode.ui.close().catch(function () {});
+            return;
+          }
+          if (this.view === 'edit') {
+            if (this.editingItem) {
+              this.openDetail(this.editingItem);
+            } else {
+              this.view = 'list';
+            }
+            return;
+          }
+          if (this.view === 'detail') {
+            this.view = 'list';
+          }
+        },
+        save: async function () {
+          this.error = '';
+          var name = this.form.name.trim();
+          if (!name) {
+            this.error = '请填写记忆名称';
+            return;
+          }
+          var targetScope = this.editingItem ? this.editingItem.scope : this.form.scope;
+          var fileName = this.editingItem ? this.editingItem.fileName : this.sanitizeName(name) + '.md';
+          var text = this.formatMemory(name, this.form.description.trim(), this.form.content);
+          this.saving = true;
+          try {
+            await aicode.fs.write(this.rootFor(targetScope) + '/' + fileName, text);
+            await aicode.toast('已保存');
+            this.editingItem = null;
+            this.currentItem = null;
+            await this.loadAll();
+            this.view = 'list';
+          } catch (e) {
+            this.error = (e && e.message) || String(e);
+          } finally {
+            this.saving = false;
+          }
+        },
+        deleteItem: async function (item) {
+          try {
+            await aicode.fs.delete(this.rootFor(item.scope) + '/' + item.fileName);
+            await aicode.toast('已删除');
+            await this.loadAll();
+          } catch (e) {
+            await aicode.toast('删除失败：' + ((e && e.message) || e));
+          }
+        },
+        batchDelete: async function () {
+          if (!this.selected.length) return;
+          if (!this.batchConfirm) {
+            this.batchConfirm = true;
+            var self = this;
+            this.batchTimer = setTimeout(function () {
+              self.batchConfirm = false;
+              self.batchTimer = null;
+            }, 3000);
+            return;
+          }
+          if (this.batchTimer) {
+            clearTimeout(this.batchTimer);
+            this.batchTimer = null;
+          }
+          this.batchConfirm = false;
+          var targets = this.allItems.filter(function (item) {
+            return self.selected.indexOf(item.scope + ':' + item.fileName) >= 0;
+          });
+          for (var i = 0; i < targets.length; i++) {
+            try {
+              await aicode.fs.delete(this.rootFor(targets[i].scope) + '/' + targets[i].fileName);
+            } catch (e) {
+              await aicode.toast('删除失败：' + ((e && e.message) || e));
+            }
+          }
+          await aicode.toast('已删除');
+          this.selected = [];
+          this.selectionMode = false;
+          await this.loadAll();
+        }
+      },
+
+      mounted: function () {
+        this.loadAll();
+      }
+    });
+
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>

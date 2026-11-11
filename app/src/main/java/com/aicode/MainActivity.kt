@@ -94,6 +94,7 @@ import com.aicode.feature.editor.presentation.EditorLeaveGuard
 import com.aicode.feature.browser.presentation.BrowserScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
+import com.aicode.feature.plugin.presentation.PluginWebViewCache
 import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsDrawer
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsViewModel
@@ -341,6 +342,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         browserManager.detachHiddenHost()
+        PluginWebViewCache.clear()
         super.onDestroy()
     }
 

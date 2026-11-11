@@ -439,4 +439,76 @@ class PluginManifestParserTest {
           }
         }
     """.trimIndent()
+
+    private fun settingsManifest(
+        anchor: String = "settings.ai",
+        page: String = "ui/memory.html",
+        permissionId: String = "memory",
+        pluginApi: String = ">=1.1.0 <2.0.0"
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "demo.memory",
+          "name": "Memory",
+          "version": "1.0.0",
+          "publisher": "demo",
+          "repository": "https://example.com/demo/memory",
+          "description": "Memory demo",
+          "license": "MIT",
+          "engines": {"pluginApi": "$pluginApi"},
+          "permissions": [
+            {"id": "settings.pages", "required": true, "reason": "设置页", "scope": {"ids": ["$permissionId"]}}
+          ],
+          "contributes": {
+            "settingsPages": [
+              {"id": "memory", "title": "记忆", "anchor": "$anchor", "page": "$page"}
+            ]
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun settingsPage_isParsedWithDefaultIcon() {
+        val m = success(settingsManifest())
+        assertEquals(listOf("memory"), m.settingsPages.map { it.id })
+        assertEquals("settings.ai", m.settingsPages.single().anchor)
+        assertEquals("ui/memory.html", m.settingsPages.single().page)
+        assertEquals("book", m.settingsPages.single().icon)
+        assertEquals(setOf(PluginPermission.SETTINGS_PAGES), m.requiredPermissions)
+    }
+
+    @Test
+    fun settingsPage_rejectsUnknownAnchor() {
+        assertRejected(
+            settingsManifest(anchor = "settings.nowhere"),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.settingsPages[0].anchor"
+        )
+    }
+
+    @Test
+    fun settingsPage_rejectsNonHtmlPage() {
+        assertRejected(
+            settingsManifest(page = "ui/memory.json"),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.settingsPages[0].page"
+        )
+    }
+
+    @Test
+    fun settingsPage_permissionScopeMustMatch() {
+        assertRejected(
+            settingsManifest(permissionId = "other"),
+            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
+            "settingsPages.memory"
+        )
+    }
+
+    @Test
+    fun settingsPage_requiresCompatiblePluginApi() {
+        assertRejected(
+            settingsManifest(pluginApi = "^2.0.0"),
+            PluginErrorCode.API_INCOMPATIBLE
+        )
+    }
 }

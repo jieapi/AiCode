@@ -1,0 +1,726 @@
+/*
+ * AiCode 插件页面组件库。
+ *
+ * 尺寸与排版对齐设置页的 Compose 组件：
+ * 顶栏 64dp / 标题 22sp，分组标题 13sp，卡片圆角 14dp 无边框，
+ * 行高 11dp 上下、图标方块 36dp、标题 16sp、副标题 14sp、分隔线左右 16dp。
+ * 颜色与间距来自 /__aicode/theme.css 注入的 CSS 变量。
+ */
+
+/* ── 页面与顶栏 ── */
+.aicode-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--aicode-page-bg);
+  color: var(--aicode-on-surface);
+}
+
+.aicode-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 0 8px;
+  background: var(--aicode-page-bg);
+}
+
+.aicode-page-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: calc(22px * var(--aicode-font-scale));
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aicode-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 24px;
+  background: transparent;
+  color: var(--aicode-on-surface);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.aicode-icon-button:active {
+  background: var(--aicode-surface-variant);
+}
+
+.aicode-icon-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ── 分组与卡片 ── */
+.aicode-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.aicode-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aicode-space-sm);
+  width: 100%;
+  padding: 8px 8px 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--aicode-on-surface-variant);
+  font: inherit;
+  font-size: calc(13px * var(--aicode-font-scale));
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aicode-group-header .aicode-chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--aicode-subtle-text);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.aicode-group-header[data-expanded="false"] .aicode-chevron {
+  transform: rotate(0deg);
+}
+
+.aicode-card {
+  overflow: hidden;
+  background: var(--aicode-card-surface);
+  border: none;
+  border-radius: 14px;
+}
+
+/* ── 列表行 ── */
+.aicode-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 4px 11px 16px;
+  border: none;
+  background: transparent;
+  color: var(--aicode-on-surface);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.aicode-row:active {
+  background: var(--aicode-surface-variant);
+}
+
+.aicode-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  margin-right: 12px;
+  border-radius: 8px;
+  background: var(--aicode-surface-variant);
+  color: var(--aicode-on-surface-variant);
+}
+
+.aicode-row-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.aicode-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.aicode-row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aicode-on-surface);
+  font-size: calc(16px * var(--aicode-font-scale));
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.aicode-row-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aicode-row-subtitle {
+  overflow: hidden;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.aicode-row-chevron {
+  flex: none;
+  margin-left: 8px;
+  color: var(--aicode-subtle-text);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.aicode-divider {
+  height: 0.5px;
+  margin: 0 16px;
+  background: var(--aicode-subtle-border);
+}
+
+.aicode-divider-flat {
+  margin: 0 16px;
+}
+
+/* ── 徽章 ── */
+.aicode-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--aicode-surface-variant);
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(11px * var(--aicode-font-scale));
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.aicode-badge-plugin {
+  background: var(--aicode-primary-soft);
+  color: var(--aicode-primary);
+}
+
+.aicode-badge-enabled {
+  background: var(--aicode-tertiary-soft);
+  color: var(--aicode-tertiary);
+}
+
+/* ── 信息行与文本 ── */
+.aicode-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--aicode-space-md);
+  padding: 12px 16px;
+  font-size: calc(14px * var(--aicode-font-scale));
+}
+
+.aicode-info-row > span:first-child {
+  color: var(--aicode-on-surface-variant);
+}
+
+.aicode-info-row > span:last-child {
+  text-align: right;
+  word-break: break-all;
+}
+
+.aicode-text {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Markdown ── */
+.aicode-markdown {
+  padding: 12px 16px;
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.aicode-markdown h1,
+.aicode-markdown h2,
+.aicode-markdown h3,
+.aicode-markdown h4 {
+  margin: 14px 0 6px;
+  font-size: calc(16px * var(--aicode-font-scale));
+  line-height: 1.4;
+}
+
+.aicode-markdown h1:first-child,
+.aicode-markdown h2:first-child,
+.aicode-markdown h3:first-child {
+  margin-top: 0;
+}
+
+.aicode-markdown p {
+  margin: 6px 0;
+}
+
+.aicode-markdown ul,
+.aicode-markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.aicode-markdown li {
+  margin: 2px 0;
+}
+
+.aicode-markdown pre {
+  margin: 8px 0;
+  padding: 10px;
+  overflow: auto;
+  background: var(--aicode-surface-variant);
+  border-radius: 8px;
+}
+
+.aicode-markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--aicode-surface-variant);
+  font-family: var(--aicode-font-mono);
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
+.aicode-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+/* ── 空态 ── */
+.aicode-empty {
+  padding: 12px 16px;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.5;
+  text-align: left;
+}
+
+/* ── 表单 ── */
+.aicode-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
+.aicode-input,
+.aicode-select,
+.aicode-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--aicode-subtle-border);
+  border-radius: 8px;
+  background: var(--aicode-surface-variant);
+  color: var(--aicode-on-surface);
+  font: inherit;
+  font-size: calc(15px * var(--aicode-font-scale));
+}
+
+.aicode-input:disabled,
+.aicode-select:disabled {
+  opacity: 0.6;
+}
+
+.aicode-textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.aicode-input:focus,
+.aicode-select:focus,
+.aicode-textarea:focus {
+  outline: 2px solid var(--aicode-primary);
+  outline-offset: 1px;
+}
+
+/* ── 按钮 ── */
+.aicode-button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--aicode-subtle-border);
+  border-radius: 8px;
+  background: var(--aicode-surface-variant);
+  color: var(--aicode-on-surface);
+  font: inherit;
+  font-size: calc(15px * var(--aicode-font-scale));
+  cursor: pointer;
+}
+
+.aicode-button:disabled {
+  opacity: 0.5;
+}
+
+.aicode-button-primary {
+  border-color: transparent;
+  background: var(--aicode-primary);
+  color: var(--aicode-on-primary);
+}
+
+.aicode-button-danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--aicode-error);
+}
+
+.aicode-button-compact {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
+.aicode-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aicode-error {
+  margin: 0;
+  color: var(--aicode-error);
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
+/* ── 顶栏文字按钮（如「保存」） ── */
+.aicode-text-button {
+  min-height: 48px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--aicode-primary);
+  font: inherit;
+  font-size: calc(16px * var(--aicode-font-scale));
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.aicode-text-button:disabled {
+  opacity: 0.5;
+}
+
+/* ── 浮动标签输入框（对齐 OutlinedTextField） ── */
+.aicode-outlined-field {
+  position: relative;
+  margin: 18px 16px 12px;
+}
+
+.aicode-outlined-field > label {
+  position: absolute;
+  top: -7px;
+  left: 10px;
+  z-index: 1;
+  padding: 0 4px;
+  background: var(--aicode-card-surface);
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(12px * var(--aicode-font-scale));
+  line-height: 14px;
+}
+
+.aicode-outlined-field .aicode-input,
+.aicode-outlined-field .aicode-textarea,
+.aicode-outlined-field .aicode-select {
+  border: 1px solid var(--aicode-subtle-border);
+  border-radius: 8px;
+  background: transparent;
+  padding: 14px 12px 12px;
+  font-size: calc(15px * var(--aicode-font-scale));
+}
+
+.aicode-outlined-field-body {
+  margin: 16px;
+}
+
+.aicode-outlined-field-body .aicode-textarea {
+  min-height: 220px;
+}
+
+/* ── 作用域分段按钮 ── */
+.aicode-scope-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aicode-space-md);
+  padding: 4px 16px 16px;
+}
+
+.aicode-scope-label {
+  flex: none;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(14px * var(--aicode-font-scale));
+}
+
+.aicode-segmented {
+  display: flex;
+  gap: 8px;
+}
+
+.aicode-segment {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--aicode-subtle-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aicode-on-surface);
+  font: inherit;
+  font-size: calc(14px * var(--aicode-font-scale));
+  cursor: pointer;
+}
+
+.aicode-segment[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--aicode-surface-variant);
+}
+
+.aicode-segment:disabled {
+  opacity: 0.5;
+}
+
+/* ── 多选 ── */
+.aicode-checkbox {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  margin-right: 12px;
+  border: 2px solid var(--aicode-outline);
+  border-radius: 6px;
+}
+
+.aicode-checkbox[data-checked="true"] {
+  border-color: var(--aicode-primary);
+  background: var(--aicode-primary);
+}
+
+.aicode-checkbox[data-checked="true"]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--aicode-on-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.aicode-selection-bar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--aicode-subtle-border);
+  border-radius: 14px;
+  background: var(--aicode-card-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.aicode-selection-bar > span {
+  flex: 1;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
+/* ── 左滑删除 ── */
+.aicode-swipe-row {
+  position: relative;
+  overflow: hidden;
+  background: var(--aicode-card-surface);
+}
+
+.aicode-swipe-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  border: none;
+  background: var(--aicode-error);
+  color: #fff;
+  font: inherit;
+  font-size: calc(14px * var(--aicode-font-scale));
+  cursor: pointer;
+}
+
+.aicode-swipe-content {
+  position: relative;
+  background: var(--aicode-card-surface);
+  touch-action: pan-y;
+  transition: transform 0.15s ease;
+}
+
+/* ── 页面切换 ── */
+@keyframes aicode-view-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.aicode-view-enter {
+  animation: aicode-view-in 0.18s ease;
+}
+
+/* ── 开关（对齐 AppSwitch 42×24） ── */
+.aicode-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--aicode-switch-track, #e2e8f0);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.aicode-switch[aria-checked="true"] {
+  background: var(--aicode-primary);
+}
+
+.aicode-switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.aicode-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--aicode-switch-thumb, #ffffff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+  transition: left 0.2s ease;
+}
+
+.aicode-switch[aria-checked="true"] .aicode-switch-thumb {
+  left: 20px;
+}
+
+/* ── 底部弹窗（对齐 AdaptiveModalBottomSheet） ── */
+.aicode-sheet-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.aicode-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 85vh;
+  overflow: hidden;
+  border-radius: 28px 28px 0 0;
+  background: var(--aicode-surface);
+  color: var(--aicode-on-surface);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.aicode-sheet-handle {
+  width: 32px;
+  height: 4px;
+  flex: none;
+  margin: 8px auto 0;
+  border-radius: 2px;
+  background: var(--aicode-outline);
+  opacity: 0.4;
+}
+
+.aicode-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: var(--aicode-space-md);
+  padding: 16px;
+  flex: none;
+}
+
+.aicode-sheet-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--aicode-on-surface);
+  font-size: calc(18px * var(--aicode-font-scale));
+  font-weight: 600;
+}
+
+.aicode-sheet-body {
+  padding: 0 16px 24px;
+  overflow: auto;
+}
+
+/* ── 对话框（对齐 AlertDialog） ── */
+.aicode-dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.aicode-dialog {
+  width: min(100%, 420px);
+  max-height: 80vh;
+  overflow: auto;
+  padding: 24px;
+  border-radius: 28px;
+  background: var(--aicode-surface);
+  color: var(--aicode-on-surface);
+}
+
+.aicode-dialog-title {
+  margin: 0 0 12px;
+  font-size: calc(18px * var(--aicode-font-scale));
+  font-weight: 600;
+}
+
+.aicode-dialog-message {
+  margin: 0 0 20px;
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.6;
+}
+
+.aicode-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

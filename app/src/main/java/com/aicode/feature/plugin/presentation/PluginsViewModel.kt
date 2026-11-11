@@ -13,8 +13,13 @@ import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
+import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.PathHomeResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +52,10 @@ sealed interface PluginImportState {
 @HiltViewModel
 class PluginsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val manager: PluginManager
+    private val manager: PluginManager,
+    private val fileAccess: FileAccessProvider,
+    private val pathHomeResolver: PathHomeResolver,
+    private val workspaceRepository: WorkspaceRepository
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -129,6 +137,36 @@ class PluginsViewModel @Inject constructor(
 
     fun uninstall(id: String) {
         viewModelScope.launch { manager.uninstall(id) }
+    }
+
+    /** 插件专属数据目录；设置页入口与桥必须使用同一落点。 */
+    fun dataDirFor(pluginId: String): File = manager.dataDirFor(pluginId)
+
+    /** 为插件设置页构造宿主桥；页面销毁时调用方负责 [PluginWebBridge.close]。 */
+    fun createWebBridge(
+        page: PluginSettingsPage,
+        pluginVersion: String,
+        languageTag: String,
+        theme: () -> String,
+        onClosePage: () -> Unit,
+        post: (String) -> Unit
+    ): PluginWebBridge {
+        val workspaceName = workspaceRepository.currentPath()
+            .trimEnd('/')
+            .substringAfterLast('/')
+            .ifBlank { "workspace" }
+        return PluginWebBridge(
+            context = context,
+            page = page,
+            pluginVersion = pluginVersion,
+            languageTag = languageTag,
+            workspaceName = workspaceName,
+            fileAccess = fileAccess,
+            homeResolver = pathHomeResolver,
+            theme = theme,
+            onClosePage = onClosePage,
+            post = post
+        )
     }
 
     private companion object {

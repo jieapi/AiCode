@@ -57,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -94,8 +95,13 @@ import com.aicode.feature.agent.domain.skill.SkillImportError
 import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
+import com.aicode.feature.plugin.domain.PluginPermission
+import com.aicode.feature.plugin.domain.PluginSettingsAnchors
+import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.presentation.PluginDetailSection
 import com.aicode.feature.plugin.presentation.PluginImportHost
+import com.aicode.feature.plugin.presentation.PluginThemeTokens
+import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
 import com.aicode.feature.plugin.presentation.PluginsSection
 import com.aicode.feature.plugin.presentation.PluginsViewModel
 import com.aicode.feature.plugin.presentation.currentLanguageTag
@@ -173,6 +179,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentEditor(R.string.settings_subagents),
     Plugins(R.string.settings_plugins),
     PluginDetail(R.string.settings_plugins),
+    PluginPage(R.string.settings_plugin_page_title),
     Container(R.string.settings_container),
     ContainerDownloads(R.string.container_download_image),
     Proxy(R.string.proxy_title),
@@ -402,6 +409,19 @@ fun SettingsScreen(
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val pluginLanguageTag = currentLanguageTag()
+    var activePluginPage by remember { mutableStateOf<PluginSettingsPage?>(null) }
+    // 直接从插件快照算入口，不走 PluginManager.ensureLoaded：组合期间不能同步读盘。
+    val pluginPages = remember(plugins) {
+        plugins.filter { it.isActive && PluginPermission.SETTINGS_PAGES in it.granted }
+            .flatMap { plugin ->
+                plugin.content.settingsPages.map { page ->
+                    page.copy(
+                        pluginVersion = plugin.record.version,
+                        dataDir = pluginsViewModel.dataDirFor(plugin.id)
+                    )
+                }
+            }
+    }
     val pluginZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) pluginsViewModel.import(uri)
     }
@@ -442,6 +462,7 @@ fun SettingsScreen(
         SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.PluginDetail -> SettingsSection.Plugins
+        SettingsSection.PluginPage -> if (expanded) null else SettingsSection.Menu
         SettingsSection.ContainerDownloads -> SettingsSection.Container
         else -> if (expanded) null else SettingsSection.Menu
     }
@@ -478,6 +499,17 @@ fun SettingsScreen(
     // 在详情页卸载插件（或记录消失）后回到列表，别停在一个空页面。
     LaunchedEffect(selectedPlugin, section) {
         if (section == SettingsSection.PluginDetail && selectedPlugin == null) section = SettingsSection.Plugins
+    }
+
+    // 插件停用 / 卸载后入口消失，当前停留的插件页要退回菜单。
+    LaunchedEffect(pluginPages, section) {
+        if (section == SettingsSection.PluginPage) {
+            val active = activePluginPage
+            if (active == null || pluginPages.none { it.key == active.key }) {
+                activePluginPage = null
+                section = SettingsSection.Menu
+            }
+        }
     }
 
     // 首次（或公告内容更新后）进入「容器与镜像」页自动弹出使用说明；哈希比对在 ViewModel 完成。
@@ -523,6 +555,11 @@ fun SettingsScreen(
                 )
             },
             onRerunOnboarding = onRerunOnboarding,
+            pluginPages = pluginPages,
+            onOpenPluginPage = { page ->
+                activePluginPage = page
+                section = SettingsSection.PluginPage
+            },
             onOpen = {
                 if (it == SettingsSection.Log) {
                     logReturnSection = SettingsSection.Menu
@@ -658,6 +695,37 @@ fun SettingsScreen(
                 )
             }
 
+            current == SettingsSection.PluginPage -> {
+                val page = activePluginPage
+                if (page == null) {
+                    SettingsDetailPlaceholder()
+                } else {
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    BackHandler {
+                        activePluginPage = null
+                        section = SettingsSection.Menu
+                    }
+                    PluginWebPanelScreen(
+                        page = page,
+                        onClosePage = {
+                            activePluginPage = null
+                            section = SettingsSection.Menu
+                        },
+                        bridgeFactory = { post, onClosePage ->
+                            pluginsViewModel.createWebBridge(
+                                page = page,
+                                pluginVersion = page.pluginVersion,
+                                languageTag = pluginLanguageTag,
+                                theme = { if (isDark) "dark" else "light" },
+                                onClosePage = onClosePage,
+                                post = post
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
             current == SettingsSection.RemoteServers ->
                 com.aicode.feature.workspace.presentation.remote.RemoteServerScreen(
                     onNavigateBack = { section = SettingsSection.Menu }
@@ -676,6 +744,7 @@ fun SettingsScreen(
                 SettingsSection.SkillDetail -> "SkillDetail:${selectedSkill?.name.orEmpty()}"
                 SettingsSection.SubAgentDetail -> "SubAgentDetail:${selectedSubAgent?.name.orEmpty()}"
                 SettingsSection.PluginDetail -> "PluginDetail:${selectedPluginId.orEmpty()}"
+                SettingsSection.PluginPage -> "PluginPage:${activePluginPage?.key.orEmpty()}"
                 SettingsSection.PromptDetail -> "PromptDetail:${selectedPrompt?.number ?: 0}"
                 else -> current.name
             }
@@ -696,6 +765,8 @@ fun SettingsScreen(
                             selectedSubAgent?.name ?: stringResource(current.titleRes)
                         } else if (current == SettingsSection.PluginDetail) {
                             selectedPlugin?.displayName(pluginLanguageTag) ?: stringResource(current.titleRes)
+                        } else if (current == SettingsSection.PluginPage) {
+                            activePluginPage?.title?.resolve(pluginLanguageTag) ?: stringResource(current.titleRes)
                         } else if (expanded && current == SettingsSection.Menu) {
                             // 大屏左栏顶部已经写着「设置」，右栏空态不再重复
                             ""
@@ -1287,6 +1358,7 @@ fun SettingsScreen(
                     onSelectMirror = { viewModel.setUpdateCheckMirror(it) },
                     onCheckUpdate = { viewModel.checkUpdate(manual = true) }
                 )
+                SettingsSection.PluginPage -> {} // 已在外层全屏分支处理
             }
         }
     }
@@ -1710,8 +1782,11 @@ internal fun SettingsMenu(
     onOpenLanguageSheet: () -> Unit,
     onOpenManual: () -> Unit,
     onRerunOnboarding: () -> Unit,
+    pluginPages: List<PluginSettingsPage>,
+    onOpenPluginPage: (PluginSettingsPage) -> Unit,
     onOpen: (SettingsSection) -> Unit
 ) {
+    val pluginLanguageTag = currentLanguageTag()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1786,6 +1861,7 @@ internal fun SettingsMenu(
                     )
                 }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.GENERAL, pluginLanguageTag, onOpenPluginPage)
         }
 
         // ── AI 配置 ──
@@ -1833,6 +1909,7 @@ internal fun SettingsMenu(
                 title = stringResource(SettingsSection.Prompts.titleRes),
                 onClick = { onOpen(SettingsSection.Prompts) }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.AI, pluginLanguageTag, onOpenPluginPage)
         }
 
         // ── 运行环境 ──
@@ -1855,6 +1932,7 @@ internal fun SettingsMenu(
                 title = stringResource(SettingsSection.RemoteServers.titleRes),
                 onClick = { onOpen(SettingsSection.RemoteServers) }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.ENVIRONMENT, pluginLanguageTag, onOpenPluginPage)
         }
 
         // ── 权限与后台 ──
@@ -1877,6 +1955,7 @@ internal fun SettingsMenu(
                 title = stringResource(SettingsSection.BackgroundRun.titleRes),
                 onClick = { onOpen(SettingsSection.BackgroundRun) }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.PERMISSIONS, pluginLanguageTag, onOpenPluginPage)
         }
 
         // ── 数据与诊断 ──
@@ -1905,6 +1984,7 @@ internal fun SettingsMenu(
                 title = stringResource(SettingsSection.Log.titleRes),
                 onClick = { onOpen(SettingsSection.Log) }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.DATA, pluginLanguageTag, onOpenPluginPage)
         }
 
         // ── 帮助与关于 ──
@@ -1927,9 +2007,36 @@ internal fun SettingsMenu(
                 title = stringResource(SettingsSection.About.titleRes),
                 onClick = { onOpen(SettingsSection.About) }
             )
+            PluginSettingsRows(pluginPages, PluginSettingsAnchors.HELP, pluginLanguageTag, onOpenPluginPage)
         }
     }
 
+}
+
+/** 插件注册的设置页入口行：按锚点追加到对应分组末尾，副标题标明来源。 */
+@Composable
+private fun PluginSettingsRows(
+    pages: List<PluginSettingsPage>,
+    anchor: String,
+    languageTag: String,
+    onOpen: (PluginSettingsPage) -> Unit
+) {
+    pages.filter { it.anchor == anchor }.forEach { page ->
+        SettingsDivider()
+        SettingsRow(
+            icon = resolvePluginPageIcon(page.icon),
+            title = page.title.resolve(languageTag),
+            subtitle = stringResource(R.string.plugins_ext_entry_subtitle, page.pluginId),
+            onClick = { onOpen(page) }
+        )
+    }
+}
+
+private fun resolvePluginPageIcon(icon: String): ImageVector = when (icon.lowercase()) {
+    "book", "memory", "brain" -> FeatherIcons.Book
+    "file", "text" -> FeatherIcons.FileText
+    "settings" -> FeatherIcons.Sliders
+    else -> FeatherIcons.Package
 }
 
 /** 导入结果弹窗：导入中显示转圈；完成时展示成功数量与逐个跳过原因（整体失败则直接报错误）。 */

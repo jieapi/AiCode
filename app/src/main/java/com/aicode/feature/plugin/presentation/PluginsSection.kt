@@ -74,6 +74,7 @@ internal fun PluginPermission.label(): String = stringResource(
         PluginPermission.AGENT_EVENTS -> R.string.plugins_permission_agent_events
         PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register
         PluginPermission.MCP_CONNECT -> R.string.plugins_permission_mcp_connect
+        PluginPermission.SETTINGS_PAGES -> R.string.plugins_permission_settings_pages
     }
 )
 
@@ -220,10 +221,13 @@ internal fun PluginDetailSection(
                 val skills = plugin.content.skills
                 val agents = plugin.content.agents
                 val workspaceTools = plugin.content.workspaceTools
+                val settingsPages = plugin.content.settingsPages
                 val aiTools = plugin.content.tools
                 val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
-                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty()) {
+                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
+                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty()
+                ) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -250,6 +254,12 @@ internal fun PluginDetailSection(
                         stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)),
                         it.description.resolve(languageTag),
                         PluginPermission.WORKSPACE_TOOLS
+                    )
+                } + settingsPages.map {
+                    Triple(
+                        stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)),
+                        it.anchor,
+                        PluginPermission.SETTINGS_PAGES
                     )
                 } + aiTools.map {
                     Triple(

@@ -104,6 +104,7 @@ class PluginManager internal constructor(
 
     private val installedDir = File(rootDir, "installed")
     private val stagingDir = File(rootDir, "staging")
+    private val dataRoot = File(rootDir, "data")
     private val store = PluginRegistryStore(File(rootDir, "registry.json"))
     private val reader = PluginPackageReader()
 
@@ -193,6 +194,9 @@ class PluginManager internal constructor(
         ensureLoaded()
         return _plugins.value.flatMap { it.content.workspaceTools }
     }
+
+    /** 插件专属数据目录，对应桥里的 `data://` 根。 */
+    fun dataDirFor(pluginId: String): File = File(dataRoot, pluginId)
 
     /** 当前生效的插件 AI 工具：已启用且授予了 `tools.register`。 */
     fun activeTools(): List<PluginTool> {
@@ -365,6 +369,7 @@ class PluginManager internal constructor(
         current.filter { it.id != id }.also { next ->
             store.save(next.map { it.record })
             File(installedDir, id).deleteRecursively()
+            dataDirFor(id).deleteRecursively()
         }
     }
 

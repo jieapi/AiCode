@@ -12,7 +12,7 @@ import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
 object PluginApi {
-    val VERSION = SemVer(1, 0, 0)
+    val VERSION = SemVer(1, 1, 0)
 }
 
 sealed interface ManifestParseResult {
@@ -50,6 +50,7 @@ object PluginManifestParser {
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler")
+    private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -123,6 +124,7 @@ object PluginManifestParser {
                     skills = requireNotNull(contributes).skills,
                     agents = contributes.agents,
                     workspaceTools = contributes.workspaceTools,
+                    settingsPages = contributes.settingsPages,
                     runtime = runtime,
                     tools = contributes.tools,
                     hooks = contributes.hooks,
@@ -363,6 +365,7 @@ object PluginManifestParser {
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
             val workspaceTools: List<PluginWorkspaceToolRef>,
+            val settingsPages: List<PluginSettingsPageRef>,
             val tools: List<PluginToolRef>,
             val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>
@@ -373,8 +376,8 @@ object PluginManifestParser {
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
             contributes.keys.filter {
-                it != "skills" && it != "agents" && it != "workspaceTools" && it != "tools" &&
-                    it != "hooks" && it != "mcp"
+                it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
+                    it != "tools" && it != "hooks" && it != "mcp"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -382,18 +385,20 @@ object PluginManifestParser {
             val skills = readContributionList(contributes["skills"], "contributes.skills") ?: run { ok = false; emptyList() }
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
             val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
+            val settingsPages = readSettingsPages(contributes["settingsPages"], "contributes.settingsPages")
+                ?: run { ok = false; emptyList() }
             val tools = readTools(contributes["tools"], "contributes.tools") ?: run { ok = false; emptyList() }
             val hooks = readHooks(contributes["hooks"], "contributes.hooks") ?: run { ok = false; emptyList() }
             val mcpRefs = readContributionList(contributes["mcp"], "contributes.mcp", extension = ".json")
                 ?: run { ok = false; emptyList() }
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
-            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && tools.isEmpty() &&
-                hooks.isEmpty() && mcp.isEmpty()
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
+                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty()
             ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, tools, hooks, mcp) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp) else null
         }
 
         /** 缺省视为空列表；每项必须有合法局部 ID、标题、JSON Schema 文件与 handler 名。 */
@@ -539,6 +544,56 @@ object PluginManifestParser {
             return if (ok) result else null
         }
 
+        /** 缺省视为空列表；每项必须有局部 ID、标题、已知锚点与包内 HTML 页面。 */
+        private fun readSettingsPages(raw: JsonElement?, path: String): List<PluginSettingsPageRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginSettingsPageRef>()
+            var ok = true
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    ok = false
+                    return@forEachIndexed
+                }
+                item.keys.filter { it !in SETTINGS_PAGE_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                    ok = false
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val titleRaw = item["title"]
+                val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
+                val anchor = item["anchor"]?.stringOrNull()?.takeIf { it in PluginSettingsAnchors.ALL }
+                val page = item["page"]?.stringOrNull()
+                val icon = item["icon"]?.stringOrNull()?.trim() ?: "book"
+                if (id == null) { invalid("$itemPath.id"); ok = false }
+                if (title == null) { invalid("$itemPath.title"); ok = false }
+                if (anchor == null) { invalid("$itemPath.anchor"); ok = false }
+                if (page == null || !isSafeRelativePath(page) ||
+                    !(page.endsWith(".html", ignoreCase = true) || page.endsWith(".htm", ignoreCase = true))
+                ) {
+                    invalid("$itemPath.page")
+                    ok = false
+                }
+                if (icon.isEmpty() || icon.length > 32) {
+                    invalid("$itemPath.icon")
+                    ok = false
+                }
+                if (ok && id != null && title != null && anchor != null && page != null) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                        ok = false
+                    } else {
+                        result += PluginSettingsPageRef(id, title, anchor, page, icon)
+                    }
+                }
+            }
+            return if (ok) result else null
+        }
+
         /** 缺省视为空列表；存在但格式不合法返回 null。 */
         private fun readContributionList(
             raw: JsonElement?,
@@ -586,6 +641,7 @@ object PluginManifestParser {
             checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills.map { it.id }, permissions)
             checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents.map { it.id }, permissions)
             checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { it.id }, permissions)
+            checkCoverage(PluginPermission.SETTINGS_PAGES, "settingsPages", contributes.settingsPages.map { it.id }, permissions)
             checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { it.id }, permissions)
             checkCoverage(PluginPermission.AGENT_EVENTS, "hooks", contributes.hooks.map { it.id }, permissions)
             checkEventCoverage(

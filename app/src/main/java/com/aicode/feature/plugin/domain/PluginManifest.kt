@@ -11,7 +11,8 @@ enum class PluginPermission(val id: String) {
     TOOLS_REGISTER("tools.register"),
     AGENT_EVENTS("agent.events"),
     MCP_REGISTER("mcp.register"),
-    MCP_CONNECT("mcp.connect");
+    MCP_CONNECT("mcp.connect"),
+    SETTINGS_PAGES("settings.pages");
 
     companion object {
         fun fromId(id: String): PluginPermission? = entries.firstOrNull { it.id == id }
@@ -32,6 +33,30 @@ data class PluginPermissionRequest(
 
 /** `contributes` 里指向包内 Markdown 文件的一条贡献。[file] 相对于包根目录。 */
 data class PluginContributionRef(val id: String, val file: String)
+
+/**
+ * 设置页入口可挂载的宿主分组。插件只能取这里的值，不能自定义插入位置，
+ * 避免第三方入口打乱设置页布局；新增分组属于宿主插件 API 变更。
+ */
+object PluginSettingsAnchors {
+    const val GENERAL = "settings.general"
+    const val AI = "settings.ai"
+    const val ENVIRONMENT = "settings.environment"
+    const val PERMISSIONS = "settings.permissions"
+    const val DATA = "settings.data"
+    const val HELP = "settings.help"
+
+    val ALL = setOf(GENERAL, AI, ENVIRONMENT, PERMISSIONS, DATA, HELP)
+}
+
+/** `contributes.settingsPages` 声明的设置页入口；[page] 是包内 HTML 相对路径。 */
+data class PluginSettingsPageRef(
+    val id: String,
+    val title: LocalizedText,
+    val anchor: String,
+    val page: String,
+    val icon: String = "book"
+)
 
 /** `contributes.workspaceTools` 声明的工作区工具项，包含入口元数据与页面定义文件引用。 */
 data class PluginWorkspaceToolRef(
@@ -101,13 +126,16 @@ data class PluginManifest(
     val skills: List<PluginContributionRef>,
     val agents: List<PluginContributionRef>,
     val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
+    val settingsPages: List<PluginSettingsPageRef> = emptyList(),
     val runtime: PluginRuntimeRef? = null,
     val tools: List<PluginToolRef> = emptyList(),
     val hooks: List<PluginHookRef> = emptyList(),
     val mcp: List<PluginMcpRef> = emptyList()
 ) {
     /** 清单声明的贡献总数。 */
-    val contributionCount: Int get() = skills.size + agents.size + workspaceTools.size + tools.size + hooks.size + mcp.size
+    val contributionCount: Int
+        get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
+            tools.size + hooks.size + mcp.size
 
     fun requestFor(permission: PluginPermission): PluginPermissionRequest? =
         permissions.firstOrNull { it.permission == permission }

@@ -2044,6 +2044,7 @@
     <string name="plugins_content_ai_tool">AI Tool · %1$s</string>
     <string name="plugins_content_hook">Lifecycle Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
+    <string name="plugins_content_settings_page">Settings page · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
     <string name="plugins_permission_skills_register">Register skills</string>
@@ -2053,6 +2054,11 @@
     <string name="plugins_permission_agent_events">Receive lifecycle events</string>
     <string name="plugins_permission_mcp_register">Register MCP servers</string>
     <string name="plugins_permission_mcp_connect">Connect MCP servers</string>
+    <string name="plugins_permission_settings_pages">Provide pages in Settings</string>
+    <string name="plugins_ext_entry_subtitle">Plugin %1$s</string>
+    <string name="settings_plugin_page_title">Plugin page</string>
+    <string name="plugin_web_page_failed">Page failed to load</string>
+    <string name="plugin_web_page_retry">Retry</string>
 
     <string name="plugin_tool_run_title">Run</string>
     <string name="plugin_tool_run_idle">Not started</string>

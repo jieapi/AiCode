@@ -1,7 +1,7 @@
 # 开发插件
 
 ::: warning 预览功能
-目前插件可以提供**技能**、**子代理**、**工作区工具**、**AI 工具**、**MCP 服务器**和**只读的生命周期 hooks**（观察每轮运行开始与结束），只能从本地 `.zip` 导入。提供商、代审核、在线分发等还没有实现，写进清单会被拒绝安装。hooks 是第一版，只接收运行元数据，看不到消息正文，也不能改动请求或替你批准工具。AI 工具与 hooks 的业务逻辑在独立的 JavaScript 沙箱中执行；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
+目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**只读的生命周期 hooks**（观察每轮运行开始与结束），只能从本地 `.zip` 导入。提供商、代审核、在线分发等还没有实现，写进清单会被拒绝安装。hooks 是第一版，只接收运行元数据，看不到消息正文，也不能改动请求或替你批准工具。AI 工具与 hooks 的业务逻辑在独立的 JavaScript 沙箱中执行；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
 :::
 
 一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是 Markdown、页面 JSON、工具 schema，以及可选的 `dist/main.js` 业务入口。
@@ -20,8 +20,10 @@ demo-kit/
 ├── skills/
 │   └── project-notes/
 │       └── SKILL.md
-└── agents/
-    └── builder.md
+├── agents/
+│   └── builder.md
+└── ui/
+    └── memory.html
 ```
 
 没有 `runtime` 的插件是纯声明式包，可以只放技能、子代理和工作区工具页面。
@@ -73,7 +75,7 @@ demo-kit/
 | `version` | 是 | 语义化版本，如 `1.0.0`、`1.1.0-beta.1` |
 | `repository` | 是 | 你的源码仓库，必须是 `https://` 地址，不能带账号、`?` 或 `#`。AiCode 只展示它，**不核验** |
 | `license` | 是 | 许可证名称，如 `MIT` |
-| `engines.pluginApi` | 是 | 需要的插件接口版本范围，目前宿主提供 `1.0.0`，写 `^1.0.0` |
+| `engines.pluginApi` | 是 | 需要的插件接口版本范围，目前宿主提供 `1.1.0`；设置页入口需要 `>=1.1.0 <2.0.0`，旧插件写 `^1.0.0` 仍然可用 |
 | `permissions` | 是 | 要向使用者申请的权限，见下 |
 | `contributes` | 是 | 提供的内容，至少一项 |
 
@@ -102,6 +104,7 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 | 技能 `contributes.skills` | `skills.register` | `{"ids": [技能 id…]}` |
 | 子代理 `contributes.agents` | `agents.register` | `{"ids": [子代理 id…]}` |
 | 工作区工具 `contributes.workspaceTools` | `workspace.tools` | `{"ids": [工具 id…]}` |
+| 设置页入口 `contributes.settingsPages` | `settings.pages` | `{"ids": [页面 id…]}` |
 | AI 工具 `contributes.tools` | `tools.register` | `{"ids": [工具 id…]}` |
 | MCP 服务器 `contributes.mcp` | `mcp.register` + `mcp.connect` | `{"ids": [MCP id…]}`，两项权限覆盖同一组 id |
 | 生命周期 hooks `contributes.hooks` | `agent.events` | `{"ids": [hook id…], "events": [事件名…]}`，`ids` 覆盖全部 hook，`events` 覆盖 hooks 用到的事件 |
@@ -309,6 +312,90 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 
 运行后宿主把终端原始输出清洗成日志回填到详情页的运行面板（最多保留最后 500 行），并从命令结束时打印的 `[command exited: N]` 标记识别退出码；非零退出显示为失败，不会误报成功。命令在保活标签里执行，结束后 shell 仍可继续使用，面板停止接收后续输出。
 
+## 设置页入口与 HTML 面板
+
+插件可以在设置页注册页面入口，用 HTML 写自己的界面。需要 `settings.pages` 权限和 `contributes.settingsPages`：
+
+```json
+{
+  "permissions": [
+    {
+      "id": "settings.pages",
+      "required": true,
+      "reason": "在设置中提供记忆管理页面",
+      "scope": { "ids": ["memory"] }
+    }
+  ],
+  "contributes": {
+    "settingsPages": [
+      {
+        "id": "memory",
+        "title": { "zh-CN": "记忆管理", "en": "Memory" },
+        "anchor": "settings.ai",
+        "page": "ui/memory.html",
+        "icon": "book"
+      }
+    ]
+  }
+}
+```
+
+`anchor` 只能取下列值，宿主按它把入口放进对应的设置分组：
+
+| 值 | 分组 |
+| --- | --- |
+| `settings.general` | 通用 |
+| `settings.ai` | AI 配置 |
+| `settings.environment` | 运行环境 |
+| `settings.permissions` | 权限与后台 |
+| `settings.data` | 数据与诊断 |
+| `settings.help` | 帮助与关于 |
+
+`page` 必须是包内的 `.html` / `.htm` 文件，最大 512 KiB。安装后设置页对应分组末尾会出现入口，副标题标明插件来源；停用或卸载插件后入口消失。
+
+### 页面里的宿主接口
+
+宿主向页面注入 `window.aicode`，所有方法返回 Promise：
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名 |
+| `aicode.fs.read(path)` | 读取文件，返回 `{ content, size }` |
+| `aicode.fs.write(path, content)` | 写入文件（原子写） |
+| `aicode.fs.list(path)` | 列出目录，返回 `{ entries: [{ name, isDir, size }] }` |
+| `aicode.fs.delete(path)` | 删除文件或目录 |
+| `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
+| `aicode.toast(message)` | 轻提示 |
+
+路径必须以虚拟根开头：
+
+| 根 | 位置 | 读写 |
+| --- | --- | --- |
+| `data://` | 插件自己的数据目录，卸载时清理 | 读写 |
+| `plugin://` | 插件安装目录 | 只读 |
+| `workspace://` | 当前工作区 | 读写 |
+| `aicode://` | 全局 `.aicode` 目录 | 读写 |
+
+单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。
+
+### 主题与样式
+
+页面引用宿主动态生成的 `/__aicode/theme.css`，它提供跟随 App 主题的 CSS 变量：
+
+```html
+<link rel="stylesheet" href="/__aicode/theme.css">
+<script src="/__aicode/aicode.js"></script>
+```
+
+可用变量包括 `--aicode-bg`、`--aicode-surface`、`--aicode-on-surface`、`--aicode-primary`、`--aicode-error`、`--aicode-success`、`--aicode-warning`、`--aicode-radius-*`、`--aicode-space-*`、`--aicode-font-scale`。深浅色切换时宿主直接更新变量，页面不会重新加载。
+
+### 限制
+
+- 页面资源只能从插件包经虚拟域加载，外部链接会被宿主拦截；
+- 页面里的 JavaScript 与插件 AI 工具的沙箱是两套环境：页面有 DOM 与桥，AI 工具 handler 没有 DOM，两边不能直接互相调用；
+- 宿主只对已启用且授予 `settings.pages` 的插件注入桥；插件停用后入口消失，页面请求会被拒绝；
+- 设置页入口最多按声明顺序展示，超出宿主限制的入口会被忽略。
+
 ## 打包
 
 在目录里执行（注意最后的 `.`，确保 `plugin.json` 在压缩包根部）：
@@ -349,5 +436,8 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 | 此版本不支持的字段 / 内容类型 / 权限 | 用了目前未实现的能力，如 `providers`、`workspace.commands`、`permissionReviewer` |
 | `agent.events` 权限范围与 hooks 不一致 | `scope.ids` 要覆盖所有 hook 的 `id`，`scope.events` 要覆盖 hooks 使用的事件；多写没声明的 id 或事件同样会被拒绝 |
 | hooks 声明了 handler 却没有运行时 | 带 handler 的贡献都需要 `runtime`，在清单里补上 `dist/main.js` 入口 |
+| `settingsPages` 的 `anchor` 无效 | 只能取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` |
+| `settingsPages` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
+| `settings.pages` 范围与页面不一致 | `scope.ids` 要覆盖全部 `settingsPages` 的 id，多写没声明的 id 也会被拒绝 |
 | 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object`、MCP 文件没有有效 server |
 | 清单引用的文件不存在 | `file` 路径与压缩包里的实际路径不符，注意大小写 |
