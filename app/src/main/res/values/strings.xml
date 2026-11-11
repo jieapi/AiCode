@@ -2043,6 +2043,7 @@
     <string name="plugins_content_ai_tool">AI 工具 · %1$s</string>
     <string name="plugins_content_hook">生命周期 Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
+    <string name="plugins_content_settings_page">设置页 · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
     <string name="plugins_permission_skills_register">注册技能</string>
@@ -2052,6 +2053,11 @@
     <string name="plugins_permission_agent_events">接收生命周期事件</string>
     <string name="plugins_permission_mcp_register">注册 MCP 服务器</string>
     <string name="plugins_permission_mcp_connect">连接 MCP 服务器</string>
+    <string name="plugins_permission_settings_pages">在设置中提供页面</string>
+    <string name="plugins_ext_entry_subtitle">插件 %1$s</string>
+    <string name="settings_plugin_page_title">插件页面</string>
+    <string name="plugin_web_page_failed">页面加载失败</string>
+    <string name="plugin_web_page_retry">重试</string>
 
     <string name="plugin_tool_run_title">运行</string>
     <string name="plugin_tool_run_idle">未运行</string>

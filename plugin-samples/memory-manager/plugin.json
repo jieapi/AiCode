@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.memory",
+  "name": {
+    "zh-CN": "记忆管理",
+    "en": "Memory"
+  },
+  "version": "1.0.0",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "zh-CN": "在设置中管理现有的全局与项目记忆，直接读写 ~/.aicode/memory 与工作区 .aicode/memory。",
+    "en": "Manage existing global and project memories in Settings by reading and writing ~/.aicode/memory and the workspace .aicode/memory."
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": ">=1.1.0 <2.0.0"
+  },
+  "permissions": [
+    {
+      "id": "settings.pages",
+      "required": true,
+      "reason": {
+        "zh-CN": "在设置中添加入口并打开记忆管理页面",
+        "en": "Add an entry in Settings and open the memory page"
+      },
+      "scope": {
+        "ids": ["memory"]
+      }
+    }
+  ],
+  "contributes": {
+    "settingsPages": [
+      {
+        "id": "memory",
+        "title": {
+          "zh-CN": "记忆管理",
+          "en": "Memory"
+        },
+        "anchor": "settings.ai",
+        "page": "ui/memory.html",
+        "icon": "book"
+      }
+    ]
+  }
+}

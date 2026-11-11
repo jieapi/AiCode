@@ -24,6 +24,7 @@
 - 清单里形如 `<插件ID>:<名称>` 的技能由用户安装的插件提供：只读，没有同目录脚本，也不在 skills 目录里；由用户在「设置 → 插件」管理，不要修改或重新安装。可用子代理清单里同样形态的名称也来自插件。
 - 工具名以 `plugin__` 开头的是插件 AI 工具，由插件运行时执行；调用仍按普通工具走权限与授权，不要把它当成内置工具或 MCP 工具。
 - 插件还可以声明只读的生命周期 hooks：当前支持 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`。宿主异步通知插件，payload 只有 `runId`、`sessionId`、`scope`、`agentName`、`mode`、请求/工具标识与计数、usage 这类运行元数据，不含消息正文、工具参数或结果；hook 可返回 `{logs:[...]}` 写应用日志，但不能修改请求、工具参数或响应，也不能自动批准任何工具，失败只记日志、不影响本轮对话。
+- 插件还可以在设置页注册 HTML 页面入口（`settings.pages`）：装好后入口出现在设置对应分组，页面里的文件读写通过宿主桥执行。它不是 AI 可调用的工具，不要尝试用工具打开或操作设置页；用户问入口在哪时，引导到设置里对应的分组。
 
 ## 安装技能
 - 用户要求安装技能时：未提供来源，先用 `websearch` 查找（优先官方文档、作者仓库、可信 GitHub 或含 `SKILL.md` 的目录），核对后再安装；有多个候选时请用户确认。
