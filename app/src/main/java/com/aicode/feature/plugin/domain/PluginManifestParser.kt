@@ -653,6 +653,25 @@ object PluginManifestParser {
             val mcpIds = contributes.mcp.map { it.id }
             checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpIds, permissions)
             checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpIds, permissions)
+            // 执行权限不注册内容，scope.ids 只允许指向自己的设置页，避免声明不存在的页面。
+            checkScopeSubset(
+                PluginPermission.WORKSPACE_EXEC,
+                "settingsPages",
+                contributes.settingsPages.map { it.id },
+                permissions
+            )
+        }
+
+        private fun checkScopeSubset(
+            permission: PluginPermission,
+            type: String,
+            declaredIds: Collection<String>,
+            permissions: List<PluginPermissionRequest>
+        ) {
+            val covered = permissions.firstOrNull { it.permission == permission }?.ids.orEmpty().toSet()
+            (covered - declaredIds.toSet()).forEach {
+                err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it")
+            }
         }
 
         private fun checkCoverage(

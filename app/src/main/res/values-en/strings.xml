@@ -2050,6 +2050,7 @@
     <string name="plugins_permission_skills_register">Register skills</string>
     <string name="plugins_permission_agents_register">Register sub-agents</string>
     <string name="plugins_permission_workspace_tools">Register workspace tools</string>
+    <string name="plugins_permission_workspace_exec">Run shell commands</string>
     <string name="plugins_permission_tools_register">Register AI tools</string>
     <string name="plugins_permission_agent_events">Receive lifecycle events</string>
     <string name="plugins_permission_mcp_register">Register MCP servers</string>

@@ -21,6 +21,12 @@ internal object PluginWebViewCache {
     private var loadedUrl: String? = null
     private var bridge: PluginWebBridge? = null
 
+    /** 最近打开过的插件页 key；缓存清空后仍保留，供进入设置时预热。 */
+    var lastPageKey: String? = null
+        private set
+
+    val hasCachedWebView: Boolean get() = webView != null
+
     fun take(pageKey: String): WebView? = webView?.takeIf { key == pageKey }
 
     fun takeBridge(pageKey: String): PluginWebBridge? = bridge?.takeIf { key == pageKey }
@@ -28,6 +34,7 @@ internal object PluginWebViewCache {
     fun isLoaded(pageKey: String, url: String): Boolean = key == pageKey && loadedUrl == url
 
     fun put(pageKey: String, view: WebView) {
+        lastPageKey = pageKey
         // 同一页面复用实例时保留已加载标记与桥，否则下次打开会误判为未加载而重新加载。
         if (key == pageKey && webView === view) return
         if (webView !== view) {

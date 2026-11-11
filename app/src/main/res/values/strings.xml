@@ -2049,6 +2049,7 @@
     <string name="plugins_permission_skills_register">注册技能</string>
     <string name="plugins_permission_agents_register">注册子代理</string>
     <string name="plugins_permission_workspace_tools">注册工作区工具</string>
+    <string name="plugins_permission_workspace_exec">执行 Shell 命令</string>
     <string name="plugins_permission_tools_register">注册 AI 工具</string>
     <string name="plugins_permission_agent_events">接收生命周期事件</string>
     <string name="plugins_permission_mcp_register">注册 MCP 服务器</string>

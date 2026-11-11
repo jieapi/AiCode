@@ -57,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -95,6 +96,7 @@ import com.aicode.feature.agent.domain.skill.SkillImportError
 import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
+import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginSettingsAnchors
 import com.aicode.feature.plugin.domain.PluginSettingsPage
@@ -102,10 +104,13 @@ import com.aicode.feature.plugin.presentation.PluginDetailSection
 import com.aicode.feature.plugin.presentation.PluginImportHost
 import com.aicode.feature.plugin.presentation.PluginThemeTokens
 import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
+import com.aicode.feature.plugin.presentation.PluginWebViewCache
+import com.aicode.feature.plugin.presentation.PluginWebViewFactory
 import com.aicode.feature.plugin.presentation.PluginsSection
 import com.aicode.feature.plugin.presentation.PluginsViewModel
 import com.aicode.feature.plugin.presentation.currentLanguageTag
 import com.aicode.feature.plugin.presentation.displayName
+import kotlinx.coroutines.delay
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.BarChart2
@@ -425,6 +430,55 @@ fun SettingsScreen(
     val pluginZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) pluginsViewModel.import(uri)
     }
+    // 进入设置后预热最近打开的插件页：提前创建并加载 WebView，打开入口时直接 attach。
+    // 设置页首帧之后再执行，避免 Chromium 拉起阻塞进入动画。
+    val pluginThemeDark = PluginThemeTokens.isDark(MaterialTheme.colorScheme)
+    val pluginThemeFontScale = LocalConfiguration.current.fontScale
+    val pluginColorScheme = MaterialTheme.colorScheme
+    val pluginSemanticColors = MaterialTheme.semanticColors
+    val pluginThemeVariables = remember(pluginColorScheme, pluginSemanticColors, pluginThemeFontScale) {
+        PluginThemeTokens.variables(pluginColorScheme, pluginSemanticColors, pluginThemeFontScale)
+    }
+    val pluginThemeBackground = MaterialTheme.semanticColors.pageBackground.toArgb()
+    LaunchedEffect(pluginsLoaded, pluginPages) {
+        if (!pluginsLoaded || pluginPages.isEmpty() || PluginWebViewCache.hasCachedWebView) return@LaunchedEffect
+        val target = PluginWebViewCache.lastPageKey
+            ?.let { key -> pluginPages.firstOrNull { it.key == key } }
+            ?: pluginPages.first()
+        delay(200)
+        // 预热等待期间用户可能已打开插件页，此时不要再替换掉正在显示的实例。
+        if (PluginWebViewCache.hasCachedWebView) return@LaunchedEffect
+        runCatching {
+            val webView = PluginWebViewFactory.create(
+                context = context,
+                page = target,
+                dark = pluginThemeDark,
+                backgroundColor = pluginThemeBackground,
+                themeVariables = { pluginThemeVariables },
+                onPageFinished = { view ->
+                    PluginWebViewCache.markLoaded(target.key, PluginWebViewFactory.pageUrl(target))
+                    view.evaluateJavascript(PluginThemeTokens.applyScript(pluginThemeVariables), null)
+                },
+                onMainFrameError = {}
+            )
+            val bridge = pluginsViewModel.createWebBridge(
+                page = target,
+                pluginVersion = target.pluginVersion,
+                languageTag = pluginLanguageTag,
+                theme = { if (pluginThemeDark) "dark" else "light" },
+                onClosePage = {},
+                post = { script ->
+                    runCatching { webView.evaluateJavascript(script, null) }
+                }
+            )
+            webView.addJavascriptInterface(bridge, "__aicodeBridge")
+            PluginWebViewCache.put(target.key, webView)
+            PluginWebViewCache.putBridge(target.key, bridge)
+            webView.loadUrl(PluginWebViewFactory.pageUrl(target))
+        }.onFailure { e ->
+            FileLogger.w("SettingsScreen", "插件页预热失败", e)
+        }
+    }
     var selectedSubAgent by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     var subAgentToDelete by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     // 子代理编辑目标：null 表示新建一个；编辑现有定义时指向被编辑的条目。
@@ -698,7 +752,9 @@ fun SettingsScreen(
             current == SettingsSection.PluginPage -> {
                 val page = activePluginPage
                 if (page == null) {
-                    SettingsDetailPlaceholder()
+                    // 移动端退出插件页时 old 分支还在退场动画里，此时 activePluginPage 已清空；
+                    // 不渲染大屏「从左侧选择」占位，避免返回瞬间闪一下空态。
+                    if (expanded) SettingsDetailPlaceholder()
                 } else {
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     PluginWebPanelScreen(
