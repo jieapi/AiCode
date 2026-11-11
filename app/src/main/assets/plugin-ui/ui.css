@@ -7,6 +7,11 @@
  * 颜色与间距来自 /__aicode/theme.css 注入的 CSS 变量。
  */
 
+/* WebView 默认的点击高亮是浅蓝色，与 App 的灰/主题色反馈不一致；按压态由各组件自己给。 */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* ── 页面与顶栏 ── */
 .aicode-page {
   display: flex;
@@ -96,6 +101,13 @@
   color: var(--aicode-subtle-text);
   transform: rotate(90deg);
   transition: transform 0.15s ease;
+}
+
+.aicode-group-header:active,
+.aicode-segment:active,
+.aicode-button:active,
+.aicode-text-button:active {
+  filter: brightness(0.96);
 }
 
 .aicode-group-header[data-expanded="false"] .aicode-chevron {
@@ -549,7 +561,7 @@
   font-size: calc(13px * var(--aicode-font-scale));
 }
 
-/* ── 左滑删除 ── */
+/* ── 左滑删除（尺寸与动画对齐 SwipeToDeleteRow） ── */
 .aicode-swipe-row {
   position: relative;
   overflow: hidden;
@@ -558,26 +570,41 @@
 
 .aicode-swipe-action {
   position: absolute;
-  top: 0;
+  top: 2px;
   right: 0;
-  bottom: 0;
+  bottom: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 80px;
-  border: none;
-  background: var(--aicode-error);
+  gap: 6px;
+  width: 104px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid #F87171;
+  border-radius: 10px;
+  background: #EF4444;
   color: #fff;
   font: inherit;
   font-size: calc(14px * var(--aicode-font-scale));
+  font-weight: 600;
   cursor: pointer;
+  transform-origin: right center;
+}
+
+.aicode-swipe-action:active {
+  filter: brightness(0.94);
+}
+
+.aicode-swipe-action svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 
 .aicode-swipe-content {
   position: relative;
   background: var(--aicode-card-surface);
   touch-action: pan-y;
-  transition: transform 0.15s ease;
 }
 
 /* ── 页面切换 ── */

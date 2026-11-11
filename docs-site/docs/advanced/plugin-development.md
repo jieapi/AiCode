@@ -366,6 +366,10 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 | `aicode.fs.delete(path)` | 删除文件或目录 |
 | `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
 | `aicode.toast(message)` | 轻提示 |
+| `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
+| `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
+
+返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
 
 路径必须以虚拟根开头：
 

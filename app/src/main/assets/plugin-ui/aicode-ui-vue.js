@@ -344,6 +344,14 @@
     }
   });
 
+  var TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="3 6 5 6 21 6"></polyline>' +
+    '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+
+  // 与 App 的 SwipeToDeleteRow 一致：露出 112、按钮 104。
+  var SWIPE_REVEAL = 112;
+
   var AicodeSwipeRow = defineComponent({
     name: 'AicodeSwipeRow',
     props: {
@@ -353,52 +361,67 @@
     emits: ['delete'],
     setup: function (props, context) {
       var offset = Vue.ref(0);
-      var opened = Vue.ref(false);
+      var transition = Vue.ref('none');
       var startX = 0;
       var startY = 0;
-      var swiping = false;
-      var currentOffset = 0;
+      var startOffset = 0;
+      var horizontal = false;
+      var settleTimer = null;
+      var deleteTimer = null;
+
+      function clamp(value) {
+        return Math.max(-SWIPE_REVEAL * 1.15, Math.min(0, value));
+      }
+
+      function animateTo(target, spec) {
+        transition.value = spec;
+        offset.value = target;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(function () {
+          transition.value = 'none';
+          settleTimer = null;
+        }, 320);
+      }
 
       function close() {
-        offset.value = 0;
-        opened.value = false;
+        animateTo(0, 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)');
       }
 
       function onTouchStart(event) {
         if (props.disabled || !event.touches.length) return;
         startX = event.touches[0].clientX;
         startY = event.touches[0].clientY;
-        swiping = false;
+        startOffset = offset.value;
+        horizontal = false;
+        transition.value = 'none';
       }
 
       function onTouchMove(event) {
         if (props.disabled || !event.touches.length) return;
         var dx = event.touches[0].clientX - startX;
         var dy = event.touches[0].clientY - startY;
-        if (!swiping && Math.abs(dx) > Math.abs(dy) && dx < 0) {
-          swiping = true;
+        if (!horizontal) {
+          if (Math.abs(dx) < 6 || Math.abs(dx) <= Math.abs(dy)) return;
+          horizontal = dx < 0 || startOffset < 0;
+          if (!horizontal) return;
         }
-        if (!swiping) return;
         event.preventDefault();
-        currentOffset = Math.max(-80, Math.min(0, dx));
-        offset.value = currentOffset;
+        offset.value = clamp(startOffset + dx);
       }
 
       function onTouchEnd() {
-        if (!swiping) return;
-        swiping = false;
-        if (currentOffset < -40) {
-          offset.value = -80;
-          opened.value = true;
+        if (!horizontal) return;
+        horizontal = false;
+        if (offset.value < -SWIPE_REVEAL / 2) {
+          // 展开带一点点回弹，对齐 App 的 spring(DampingRatioLowBouncy)。
+          animateTo(-SWIPE_REVEAL, 'transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1)');
         } else {
-          offset.value = 0;
-          opened.value = false;
+          animateTo(0, 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)');
         }
-        currentOffset = 0;
       }
 
       function onClickCapture(event) {
-        if (opened.value) {
+        if (offset.value < -10) {
           event.stopPropagation();
           event.preventDefault();
           close();
@@ -406,24 +429,57 @@
       }
 
       function onDeleteClick() {
-        close();
-        context.emit('delete');
+        if (props.disabled) return;
+        transition.value = 'transform 0.18s ease-out';
+        offset.value = 0;
+        if (deleteTimer) clearTimeout(deleteTimer);
+        deleteTimer = setTimeout(function () {
+          deleteTimer = null;
+          context.emit('delete');
+        }, 180);
       }
 
+      Vue.watch(function () {
+        return props.disabled;
+      }, function (disabled) {
+        if (disabled && offset.value !== 0) {
+          transition.value = 'none';
+          offset.value = 0;
+        }
+      });
+
+      Vue.onUnmounted(function () {
+        if (settleTimer) clearTimeout(settleTimer);
+        if (deleteTimer) clearTimeout(deleteTimer);
+      });
+
       return function () {
+        var progress = Math.min(1, Math.max(0, -offset.value / SWIPE_REVEAL));
         return h('div', { class: 'aicode-swipe-row' }, [
-          h('button', {
+          props.disabled ? null : h('button', {
             class: 'aicode-swipe-action',
             type: 'button',
+            'aria-label': props.actionText,
+            style: {
+              opacity: String(Math.min(1, progress * 1.2)),
+              transform: 'scale(' + (0.4 + 0.6 * progress) + ', ' + (0.7 + 0.3 * progress) + ')'
+            },
             onClick: onDeleteClick
-          }, props.actionText),
+          }, [
+            h('span', { class: 'aicode-swipe-icon', innerHTML: TRASH_ICON }),
+            h('span', null, props.actionText)
+          ]),
           h('div', {
             class: 'aicode-swipe-content',
-            style: { transform: offset.value ? 'translateX(' + offset.value + 'px)' : '' },
+            style: {
+              transform: offset.value ? 'translateX(' + offset.value + 'px)' : '',
+              transition: transition.value
+            },
             onClickCapture: onClickCapture,
             onTouchstart: onTouchStart,
             onTouchmove: onTouchMove,
-            onTouchend: onTouchEnd
+            onTouchend: onTouchEnd,
+            onTouchcancel: onTouchEnd
           }, context.slots.default ? context.slots.default() : [])
         ]);
       };

@@ -142,7 +142,7 @@ class PluginsViewModel @Inject constructor(
     /** 插件专属数据目录；设置页入口与桥必须使用同一落点。 */
     fun dataDirFor(pluginId: String): File = manager.dataDirFor(pluginId)
 
-    /** 为插件设置页构造宿主桥；页面销毁时调用方负责 [PluginWebBridge.close]。 */
+    /** 为插件设置页构造宿主桥；桥与 WebView 一起缓存，由 [PluginWebViewCache] 统一释放。 */
     fun createWebBridge(
         page: PluginSettingsPage,
         pluginVersion: String,

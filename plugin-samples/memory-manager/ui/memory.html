@@ -41,7 +41,7 @@
 <body>
 <div id="app" class="aicode-page" :class="{ 'selection-active': selectionMode }" v-cloak>
   <header class="aicode-page-header">
-    <aicode-icon-button label="返回" @click="handleBack">
+    <aicode-icon-button label="返回" @click="handleBackButton">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -86,7 +86,7 @@
                 :badge="scopeLabel(item.scope)"
                 :selectable="selectionMode"
                 :selected="isSelected(item)"
-                @click="handleRowClick(item)" />
+                @click="handleRowClick(item)"></aicode-row>
             </aicode-swipe-row>
           </template>
         </template>
@@ -104,7 +104,7 @@
                 :badge="scopeLabel(item.scope)"
                 :selectable="selectionMode"
                 :selected="isSelected(item)"
-                @click="handleRowClick(item)" />
+                @click="handleRowClick(item)"></aicode-row>
             </aicode-swipe-row>
           </template>
         </template>
@@ -355,20 +355,24 @@
           if (this.currentItem) this.openEdit(this.currentItem);
         },
         handleBack: function () {
-          if (this.view === 'list') {
-            aicode.ui.close().catch(function () {});
-            return;
-          }
+          if (this.view === 'list') return false;
           if (this.view === 'edit') {
             if (this.editingItem) {
               this.openDetail(this.editingItem);
             } else {
               this.view = 'list';
             }
-            return;
+            return true;
           }
           if (this.view === 'detail') {
             this.view = 'list';
+            return true;
+          }
+          return false;
+        },
+        handleBackButton: function () {
+          if (!this.handleBack()) {
+            aicode.ui.close().catch(function () {});
           }
         },
         save: async function () {
@@ -438,6 +442,9 @@
       },
 
       mounted: function () {
+        if (aicode.ui && aicode.ui.onBack) {
+          aicode.ui.onBack(this.handleBack);
+        }
         this.loadAll();
       }
     });

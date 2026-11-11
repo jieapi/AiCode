@@ -75,15 +75,15 @@
 
   <div class="page-content">
     <aicode-group title="列表行">
-      <aicode-row title="默认行" subtitle="图标 + 标题 + 副标题 + 右箭头" @click="toast('点击了默认行')" />
+      <aicode-row title="默认行" subtitle="图标 + 标题 + 副标题 + 右箭头" @click="toast('点击了默认行')"></aicode-row>
       <aicode-divider></aicode-divider>
       <aicode-row title="带徽章" subtitle="插件标签与启用状态" badge="插件" badge-kind="plugin"
-        @click="toast('点击了带徽章行')" />
+        @click="toast('点击了带徽章行')"></aicode-row>
       <aicode-divider></aicode-divider>
-      <aicode-row title="文件图标" subtitle="icon=\"file\"" icon="file" @click="toast('点击了文件行')" />
+      <aicode-row title="文件图标" subtitle='icon="file"' icon="file" @click="toast('点击了文件行')"></aicode-row>
       <aicode-divider></aicode-divider>
       <aicode-swipe-row @delete="toast('左滑删除：示例行')">
-        <aicode-row title="左滑删除" subtitle="向左滑动露出删除按钮" />
+        <aicode-row title="左滑删除" subtitle="向左滑动露出删除按钮"></aicode-row>
       </aicode-swipe-row>
     </aicode-group>
 
@@ -144,9 +144,9 @@
     </aicode-group>
 
     <aicode-group title="底部弹窗与对话框">
-      <aicode-row title="打开底部弹窗" subtitle="AicodeBottomSheet" @click="sheetOpen = true" />
+      <aicode-row title="打开底部弹窗" subtitle="AicodeBottomSheet" @click="sheetOpen = true"></aicode-row>
       <aicode-divider></aicode-divider>
-      <aicode-row title="打开确认对话框" subtitle="AicodeDialog" @click="dialogOpen = true" />
+      <aicode-row title="打开确认对话框" subtitle="AicodeDialog" @click="dialogOpen = true"></aicode-row>
     </aicode-group>
 
     <p class="demo-hint">页面里所有组件都来自宿主注入的 AicodeUI，插件不需要打包 Vue 或组件代码。</p>

@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,7 +70,12 @@ fun PluginWebPanelScreen(
     val backgroundColor = semantic.pageBackground.toArgb()
     val pageUrl = PAGE_BASE_URL + page.pageFile
     val cached = remember(page.key) { PluginWebViewCache.take(page.key) }
+    val cachedBridge = remember(page.key) {
+        if (cached != null) PluginWebViewCache.takeBridge(page.key) else null
+    }
     var failed by remember(page.key) { mutableStateOf(false) }
+    // 返回键派发给页面后要等 JS 结果；期间重复触发不再派发，避免连续退出。
+    var backDispatching by remember(page.key) { mutableStateOf(false) }
 
     val assetLoader = remember(page.installDir) {
         WebViewAssetLoader.Builder()
@@ -116,13 +123,27 @@ fun PluginWebPanelScreen(
     }
 
     val bridge = remember(webView, page.key) {
-        bridgeFactory({ script ->
+        cachedBridge ?: bridgeFactory({ script ->
             webView.post { runCatching { webView.evaluateJavascript(script, null) } }
-        }, onClosePage)
+        }, onClosePage).also { created ->
+            PluginWebViewCache.putBridge(page.key, created)
+            // 注入对象只在页面下次加载时出现；这里先注入，LaunchedEffect 随后 loadUrl。
+            webView.addJavascriptInterface(created, "__aicodeBridge")
+        }
+    }
+
+    // 缓存复用时页面持有的是同一个桥实例，回调要换成当前组合的。
+    SideEffect {
+        bridge.updateCallbacks(
+            theme = { if (dark) "dark" else "light" },
+            onClosePage = onClosePage,
+            post = { script ->
+                webView.post { runCatching { webView.evaluateJavascript(script, null) } }
+            }
+        )
     }
 
     LaunchedEffect(webView, pageUrl) {
-        webView.addJavascriptInterface(bridge, "__aicodeBridge")
         if (!PluginWebViewCache.isLoaded(page.key, pageUrl)) {
             webView.loadUrl(pageUrl)
         }
@@ -134,9 +155,22 @@ fun PluginWebPanelScreen(
         webView.evaluateJavascript(PluginThemeTokens.applyScript(variables), null)
     }
 
+    // 返回优先级：WebView 自身历史（hash 路由等）→ 页面注册的页面内返回 → 退出插件页。
+    BackHandler {
+        if (backDispatching) return@BackHandler
+        if (webView.canGoBack()) {
+            webView.goBack()
+            return@BackHandler
+        }
+        backDispatching = true
+        webView.evaluateJavascript(BACK_DISPATCH_SCRIPT) { result ->
+            backDispatching = false
+            if (result != "true") onClosePage()
+        }
+    }
+
     DisposableEffect(webView) {
         onDispose {
-            bridge.close()
             PluginWebViewCache.release(webView)
         }
     }
@@ -228,3 +262,6 @@ private fun webViewThemeRes(dark: Boolean): Int =
     if (dark) R.style.Theme_AICode_WebView_Dark else R.style.Theme_AICode_WebView
 
 private const val PAGE_BASE_URL = "https://appassets.androidplatform.net/plugin/"
+
+private const val BACK_DISPATCH_SCRIPT =
+    "(function(){try{return window.__aicodeBack&&window.__aicodeBack()===true}catch(e){return false}})()"

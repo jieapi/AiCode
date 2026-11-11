@@ -701,10 +701,6 @@ fun SettingsScreen(
                     SettingsDetailPlaceholder()
                 } else {
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                    BackHandler {
-                        activePluginPage = null
-                        section = SettingsSection.Menu
-                    }
                     PluginWebPanelScreen(
                         page = page,
                         onClosePage = {

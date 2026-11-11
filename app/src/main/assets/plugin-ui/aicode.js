@@ -4,6 +4,19 @@
   var pending = {};
   var nextId = 1;
 
+  var backHandler = null;
+
+  // 宿主返回键派发入口：页面注册的处理器同步返回 true 表示已消费，宿主不再退出插件页。
+  window.__aicodeBack = function () {
+    if (typeof backHandler !== 'function') return false;
+    try {
+      return backHandler() === true;
+    } catch (e) {
+      console.error('aicode: back handler failed', e);
+      return false;
+    }
+  };
+
   window.__aicodeResolve = function (id, payload) {
     var entry = pending[id];
     if (!entry) return;
@@ -56,6 +69,11 @@
     ui: {
       close: function () {
         return call('ui.close');
+      },
+      // 注册页面内返回：系统返回手势 / 返回键先交给它，返回 true 时宿主不退出插件页。
+      onBack: function (handler) {
+        backHandler = typeof handler === 'function' ? handler : null;
+        return Promise.resolve();
       }
     },
     fs: {

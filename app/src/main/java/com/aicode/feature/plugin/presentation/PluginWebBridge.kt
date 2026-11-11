@@ -51,9 +51,9 @@ class PluginWebBridge(
     private val workspaceName: String,
     private val fileAccess: FileAccessProvider,
     private val homeResolver: PathHomeResolver,
-    private val theme: () -> String,
-    private val onClosePage: () -> Unit,
-    private val post: (String) -> Unit
+    @Volatile private var theme: () -> String,
+    @Volatile private var onClosePage: () -> Unit,
+    @Volatile private var post: (String) -> Unit
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -83,6 +83,16 @@ class PluginWebBridge(
 
     fun close() {
         scope.cancel()
+    }
+
+    /**
+     * WebView 缓存复用时页面持有的是同一个桥实例（注入对象只能在页面加载时出现），
+     * 重新进入页面要把回调换成当前组合的。
+     */
+    fun updateCallbacks(theme: () -> String, onClosePage: () -> Unit, post: (String) -> Unit) {
+        this.theme = theme
+        this.onClosePage = onClosePage
+        this.post = post
     }
 
     private fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
