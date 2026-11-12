@@ -1,7 +1,7 @@
 # 开发插件
 
 ::: warning 预览功能
-目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**生命周期 hooks**，只能从本地 `.zip` 导入。hooks 分两种：只读观察只接收运行元数据；可写 hook 可在工具执行前拒绝调用或改写参数（改写后重新走完整权限判断），也可改写工具成功结果的数据。只读观察看不到消息正文、工具参数或结果；可写 hook 会拿到对应调用的参数或结果，只安装你信任的插件。提供商、代审核、在线分发等还没有实现，写进清单会被拒绝安装。AI 工具与 hooks 的业务逻辑在容器内的插件子进程中运行（`node` 或 `python3`）；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
+目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**生命周期 hooks**，只能从本地 `.zip` 导入。hooks 分三种：只读观察只接收运行元数据；可写 hook 可在工具执行前拒绝调用或改写参数（改写后重新走完整权限判断），也可改写工具成功结果的数据，或在每次 provider HTTP 请求发出前改写 URL、headers 与 body；代审核 hook 可在宿主准备弹窗确认时批准或拒绝普通 ASK 调用。只读观察看不到消息正文、工具参数或结果；可写 hook 会拿到对应调用的参数或结果，HTTP hook 还会拿到明文鉴权头与请求体，代审核 hook 能批准原本需要你确认的调用，只安装你信任的插件。提供商、在线分发等还没有实现，写进清单会被拒绝安装。AI 工具与 hooks 的业务逻辑在容器内的插件子进程中运行（`node` 或 `python3`）；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
 :::
 
 一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是 Markdown、页面 JSON、工具 schema，以及可选的 `dist/main.js` 业务入口。
@@ -168,11 +168,25 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 ```
 
 - `type` 支持 `javascript`（用 `node` 启动）与 `python`（用 `python3` 启动）；可用 `command` 覆盖启动命令。
+- 可选 `resident: true`：进程不参与 10 分钟空闲回收，首次启动后常驻；插件停用、卸载、版本替换或 App 进程结束仍会关闭。常驻进程会持续占用内存与容器资源。
 - 可选 `dependencies` 声明依赖输入文件：
   ```json
   "dependencies": {"tool": "npm", "file": "package.json"}
   ```
   在插件详情页点「准备依赖」会在插件目录执行 `npm ci`/`npm install` 或 `python3 -m venv` + `pip install`。容器缺少 node/npm 或 python3 时只提示去终端「环境安装」，不会自动装系统包。
+
+常驻插件可在 App 启动时初始化进程：
+
+```json
+{
+  "runtime": {"type": "javascript", "entry": "dist/main.js", "resident": true},
+  "contributes": {
+    "hooks": [{"id": "boot", "event": "app.started", "handler": "hooks.boot"}]
+  }
+}
+```
+
+`app.started` 只在 App 主进程启动完成时派发一次，payload 含 `launchId`、`startedAt`、`appVersion`、`process`。handler 应在完成初始化后尽快返回，需要常驻的服务请在进程内自行后台化；观察 hook 单次超时 30 秒，超时会关闭该插件进程。容器未初始化或缺少 node/python 时 hook 会失败并记日志；之后再调用工具或 hook 仍会按需启动进程。
 
 ### 进程协议
 
@@ -215,22 +229,35 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 
 ## 生命周期 hooks
 
-hooks 有两种模式：
+hooks 有三种模式：
 
 - **`observe`（默认）**：只读通知，宿主异步派发，适合记录日志或统计；
-- **`transform`**：可写，宿主在固定拦截点等待结果，校验通过后应用；失败、超时或格式错误都保持原值继续。
+- **`transform`**：可写，宿主在固定拦截点等待结果，校验通过后应用；失败、超时或格式错误都保持原值继续；
+- **`review`**：代审核，只在宿主判断需要使用者确认（ASK）后运行，返回 allow/deny/pass。
 
-可写 hook 目前只支持两个事件，且必须显式写 `"mode": "transform"`：
+`transform` hook 目前支持三个事件，且必须显式写 `"mode": "transform"`：
 
 | 事件 | 时机 | 可返回的变更 |
 | --- | --- | --- |
 | `agent.tool.before` | 工具执行前、权限判定前 | `decision: "deny"` 阻止执行；`arguments` 改写参数 |
 | `agent.tool.after` | 工具成功结束后 | `data` 改写成功结果的数据 |
+| `agent.http.before` | 每次实际发出 provider HTTP 请求前 | `url`、`headers`、`body` 改写请求 |
 
-只读观察事件有七个：
+代审核事件必须显式写 `"mode": "review"`：
+
+| 事件 | 时机 | 可返回的决定 |
+| --- | --- | --- |
+| `agent.permission.review` | 宿主判定为 ASK 后、弹出用户确认前 | `allow` / `deny` / `pass` |
+
+::: warning 高权限能力
+`agent.http.before` 的 payload 包含明文 `Authorization` / `x-api-key` 等鉴权头和完整请求体（可能含对话内容）。启用这类插件等于把这些信息交给它；只安装可信来源。
+:::
+
+只读观察事件有八个：
 
 | 事件 | 时机 |
 | --- | --- |
+| `app.started` | App 主进程启动完成时；用于常驻插件初始化 |
 | `agent.run.started` | 一轮对话开始处理时 |
 | `agent.run.finished` | 一轮对话结束时；成功、失败或被取消都会发出 |
 | `agent.request.started` | 一次模型请求即将发出时 |
@@ -248,7 +275,8 @@ hooks 需要 `runtime`，`handler` 是进程 handler 表里的键（与 AI 工�
     "hooks": [
       {"id": "run-finished", "event": "agent.run.finished", "handler": "hooks.runFinished"},
       {"id": "guard-bash", "event": "agent.tool.before", "handler": "hooks.guardBash", "mode": "transform"},
-      {"id": "redact-result", "event": "agent.tool.after", "handler": "hooks.redactResult", "mode": "transform"}
+      {"id": "redact-result", "event": "agent.tool.after", "handler": "hooks.redactResult", "mode": "transform"},
+      {"id": "review", "event": "agent.permission.review", "handler": "hooks.reviewPermission", "mode": "review"}
     ]
   }
 }
@@ -267,7 +295,13 @@ const handlers = {
   },
   "hooks.redactResult": (payload) => ({
     data: { text: String(payload.data?.text ?? "").replace(/ghp_[A-Za-z0-9]+/g, "***") }
-  })
+  }),
+  "hooks.reviewPermission": (payload) => {
+    if (payload.toolName === "bash" && payload.arguments.command === "ls") {
+      return { decision: "allow", reason: "只读列目录" };
+    }
+    return { decision: "pass" };
+  }
 };
 ```
 
@@ -296,8 +330,11 @@ const handlers = {
 | `agent.tool.started` | `callId`、`toolName` |
 | `agent.tool.finished` | `callId`、`toolName`、`status`（`success`/`error`）、`durationMs` |
 | `agent.compaction` | `compacted=true`、`estimatedInputTokens` |
+| `app.started` | `launchId`、`startedAt`、`appVersion`、`process`（无 run/session 公共字段） |
 | `agent.tool.before` | `callId`、`toolName`、`arguments` |
 | `agent.tool.after` | `callId`、`toolName`、`status=success`、`data` |
+| `agent.http.before` | `url`、`method`、`headers`、`body`（不带头部的公共字段） |
+| `agent.permission.review` | `callId`、`toolName`、`arguments` |
 
 只读事件的 payload 里**没有**消息正文、工具参数、工具结果和模型输出；可写事件会提供它要处理的参数或结果快照。
 
@@ -322,11 +359,43 @@ const handlers = {
 - 只能改 `data`；`status`、图片附件、文件卡片与错误结果不可改，失败的工具调用不会触发该事件；
 - 宿主把改写后的结果同时用于界面展示与回放给模型。
 
-多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个看到前一个改写后的值。单次调用上限 10 秒，一次拦截合计上限 20 秒；超时、异常或返回值格式不合法时跳过该 hook 并保持当前值，**不会因此自动放行或自动拒绝**。
+`agent.http.before`：
+
+```json
+{
+  "url": "https://gateway.example/v1/chat/completions",
+  "headers": {"Authorization": "Bearer new-token", "X-Route": "team-a"},
+  "body": "{\"model\":\"gpt-4o\",\"messages\":[]}"
+}
+```
+
+- `url` 必须是 http/https 地址，最长 4096 字符；不返回则保持原 URL；
+- `headers` 是完整替换表（不是增量合并），最多 64 项，值为字符串；`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Expect`、`Upgrade` 不允许改写；
+- `body` 必须是合法 JSON 对象文本，最大 4 MiB；方法固定为 `POST`，插件不能改请求方法；
+- 该 hook 挂在共享 OkHttp 客户端上，覆盖对话、标题生成、上下文压缩、模型列表/测试与图片请求；**每次实际发送都会执行**，网络重试或换 Key 会重复触发，插件应保持幂等；
+- `body` 就是该 provider 的完整请求 JSON，因此系统提示词、消息列表、工具定义与模型参数都在可改写范围内；
+- 宿主只校验 JSON 对象、大小与字段白名单，不校验 provider 语义：改写消息可能破坏工具调用配对或 Anthropic 签名，改工具名可能与宿主 `ToolRegistry` 不一致，改提示词不会同步更新 token 估算与压缩决策；
+- 该 hook 也作用于标题生成与上下文压缩请求，插件需自行根据 body 内容区分请求类型；
+- 超时、异常或返回值格式不合法时保持原请求继续。
+
+`agent.permission.review`：
+
+```json
+{"decision": "allow", "reason": "只读命令，允许本次执行"}
+```
+
+- `decision` 只能是 `allow`、`deny` 或 `pass`；缺省按 `pass`；
+- `allow` 只批准当前一次调用，不写入“始终允许”规则，也不改变后续调用；
+- `deny` 只拒绝当前工具调用，返回错误码 `PLUGIN_REVIEW_DENIED`，其他工具继续审批与执行；
+- `pass` 继续询问下一个代审核插件，全部不处理才进入原有用户确认 UI；
+- 插件不能改工具参数，也不能覆盖宿主已经做出的 DENY、ALLOW/自动放行或 PLAN 模式限制；
+- 第一版只代审普通 ASK：带“不可记忆”标记的高危请求（Shizuku、`elevate` 提权、配置修改、删除子代理、危险 rm）与 `planMode` 模式切换仍由本人确认；插件也不能代审自己提供的工具。
+
+多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个看到前一个改写后的值。单次调用上限 10 秒，一次拦截合计上限 20 秒；超时、异常或返回值格式不合法时跳过该 hook 并保持当前值，**不会因此自动放行或自动拒绝**。代审核同样是顺序执行、首个 allow/deny 生效；超时或异常按 `pass` 继续，最终无人处理时回到用户确认。
 
 ### 调试输出
 
-handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（最多 50 行、单行 500 字符）。可写 hook 的 `decision`、`arguments`、`data` 与 `logs` 可以同时返回。
+handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（最多 50 行、单行 500 字符）。可写 hook 的 `decision`、`arguments`、`data`、`url`、`headers`、`body` 与 `logs` 可以同时返回；代审核的 `decision`、`reason` 与 `logs` 可以同时返回。
 
 ### 边界
 
@@ -334,6 +403,8 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 - **不能提权**：可写 hook 只能拒绝或缩小调用，不能批准工具、不能把宿主拒绝改成允许、不能绕过 PLAN 模式或权限策略；
 - 改写参数后必须重新走完整权限判断；审批后不会悄悄改写参数；
 - `agent.tool.after` 只处理成功结果，不能把错误改成成功，也不能伪造附件或图片；
+- `agent.http.before` 能看到并改写鉴权头；它不能改请求方法，也不能把请求改成非 JSON；改写后的响应解析仍按原 provider 格式，插件需自行保证 body 与目标端点兼容；
+- `agent.permission.review` 能批准原本需要用户确认的调用，属于高权限能力；它不能改参数、不能覆盖宿主 DENY/PLAN、不能写入永久允许规则，也不能代审自己的工具；
 - hook 与 AI 工具共用同一个插件进程；进程拥有容器内的文件与命令能力，可写 hook 能读取对应工具的参数与结果，只安装可信插件；
 - 单项观察 hook 超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
 

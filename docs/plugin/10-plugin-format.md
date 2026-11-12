@@ -142,7 +142,7 @@ community.workbench-kit-1.0.0.zip
 | `pages` | 数组 | `id/title/document/onOpen`；`onOpen` 可省略 |
 | `workspacePanel` | 单个对象，可省略 | `page` 引用页面，右抽屉按插件展示入口 |
 | `configuration` | 单个对象，可省略 | `page/defaults/saveHandler`，从设置内配置操作打开 |
-| `hooks` | 数组 | `id/event/handler/mode`；缺省 `observe`，工具前后事件必须显式 `mode: "transform"` |
+| `hooks` | 数组 | `id/event/handler/mode`；缺省 `observe`，transform/review 事件必须显式声明对应 mode |
 | `permissionReviewer` | 单个对象，可省略 | `handler`，必须已申请 `agent.permissionReview` |
 | `environments` | 数组 | `id/target/manager/prerequisites/inputs/lockFiles/checkHandler/prepareHandler` |
 | `services` | 数组 | `id/environment/environmentRef/startHandler/stopHandler/exports`，无依赖时可省略 environmentRef |
@@ -270,7 +270,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 示例的可选提供商依赖 `providers.register`、`providers.requests`、已手动准备的 gateway_deps 环境、其服务实际使用的命令/终端能力和需要时的自有凭据授权；未授权时不能仅因声明存在就启动服务。MCP 文件里的真实地址、上游转换和依赖检查由插件提供，宿主不包含这些业务。
 
-示例里的 hooks 已按当前实现改成 `{id, event, handler}`；`agent.hooks` 的 `data` 等字段仍是后续草案。当前版本接受七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），以第 12 节为准。
+示例里的 hooks 已按当前实现改成 `{id, event, handler}`；`agent.hooks` 的 `data` 等字段仍是后续草案。当前版本接受八个只读事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）与三个等待型事件，以第 12 节为准。
 
 ## 9. 页面文件的结构连接示例
 
@@ -364,11 +364,11 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 顶层字段 | `runtime` 接受 `{type, entry, command?, dependencies?}`；`type` 为 `javascript`（node）或 `python`（python3）；`dependencies` 为 `{tool: npm|pip, file}` |
+| 顶层字段 | `runtime` 接受 `{type, entry, command?, dependencies?, resident?}`；`type` 为 `javascript`（node）或 `python`（python3）；`dependencies` 为 `{tool: npm|pip, file}`；`resident: true` 不参与空闲回收 |
 | 运行位置 | 本地容器内子进程，cwd 为插件安装目录；SSH 模式下仍在手机端 |
 | 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`；插件可发 `host.fs.*`、`host.bash`、`host.notify` 与 `plugin.event` |
 | 依赖 | 详情页手动「准备依赖」：npm `npm ci`/`npm install`，pip 创建 `.venv`；缺少运行时只提示，不自动装系统包 |
-| 生命周期 | 按插件版本惰性启动，空闲 10 分钟回收，停用/卸载关闭；单次调用 120s，hook 30s |
+| 生命周期 | 按插件版本惰性启动，空闲 10 分钟回收（`runtime.resident: true` 跳过），停用/卸载/版本替换关闭；单次调用 120s，观察 hook 30s，等待型 hook 10s/合计 20s |
 | 事件 | `plugin.event` 推送到同插件已打开的页面（`aicode.events.on`），不跨插件转发 |
 | 安全 | 启用即信任；进程拥有容器内文件、网络与命令能力；host API 不构成安全边界 |
 | 旧实现 | 本文第三切片的 JavaScriptSandbox/isolate 记录为历史，不再使用 |
@@ -392,29 +392,31 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 生效 | 插件启用即生效，没有逐项权限系统 |
 | 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 是插件进程 handler 表里的键，由 `hook.invoke` 调用 |
 | 运行时 | hooks 需要 `runtime`；没有运行时的包不能声明 hooks |
-| 事件 | `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction` |
-| payload | 公共字段 `runId`、`sessionId`、`mode`、`scope`（`main`/`subagent`）、`agentName`；run 事件带 `status`/`toolCalls`/`errorCode`；请求事件带 `requestId`/`usage`/`durationMs`/`stopReason`/`estimatedInputTokens`；工具事件带 `callId`/`toolName`/`status`/`durationMs`；压缩事件带 `compacted`/`estimatedInputTokens` |
+| 事件 | `app.started`、`agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction` |
+| payload | `app.started` 为 `launchId`/`startedAt`/`appVersion`/`process`，无 run/session 字段；其余事件公共字段 `runId`、`sessionId`、`mode`、`scope`（`main`/`subagent`）、`agentName`；run 事件带 `status`/`toolCalls`/`errorCode`；请求事件带 `requestId`/`usage`/`durationMs`/`stopReason`/`estimatedInputTokens`；工具事件带 `callId`/`toolName`/`status`/`durationMs`；压缩事件带 `compacted`/`estimatedInputTokens` |
 | 派发 | 宿主异步派发；handler 可返回 `{logs:[...]}` 写应用日志（最多 50 行、单行 500 字符），其余返回值被忽略；失败只记日志，不阻塞 Agent，不改变本轮结果 |
 | 边界 | 只读：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，不能影响工具授权与模式限制 |
 | 未验证 | run 事件曾真机验证；扩展的请求/工具/压缩事件尚未真机验证 |
 
-### 第五切片补充（已实现）：可写 hooks（工具前后）
+### 第五切片补充（已实现）：可写与代审核 hooks
 
 | 项 | 行为 |
 | --- | --- |
 | 贡献 | `contributes.hooks[]` 增加可选 `mode`；`observe` 为缺省，`transform` 必须显式声明 |
-| 事件 | `agent.tool.before`、`agent.tool.after` 只接受 `mode: "transform"`；七个只读事件不接受 `transform` |
+| 事件 | `agent.tool.before`、`agent.tool.after`、`agent.http.before` 只接受 `mode: "transform"`；`agent.permission.review` 只接受 `review`；八个只读事件只接受 `observe` |
 | `agent.tool.before` | 在工具权限判定前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny", reason?, arguments?}`。拒绝时工具错误码 `PLUGIN_HOOK_DENIED`；参数改写后重新走完整权限判断 |
 | `agent.tool.after` | 仅成功执行后同步等待；payload 含 `callId`、`toolName`、`status=success`、`data`；返回 `{data}`，只能改 `data`，不能改状态、图片、附件或错误结果 |
+| `agent.http.before` | 挂在 AgentModule 共享 OkHttpClient 上，每次实际发出 provider 请求前同步等待；payload 含 `url`、`method`、`headers`、`body`；返回 `{url?, headers?, body?}`。body 是该 provider 的完整请求 JSON，系统提示词/消息/工具定义/模型参数均可改，但宿主不校验 provider 语义、工具注册一致性、签名或预算。覆盖对话、标题、压缩、模型列表/测试与图片请求；headers 含明文鉴权头 |
+| `agent.permission.review` | `mode: "review"`，只在宿主判定为 ASK 后、弹窗前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny"|"pass", reason?}`。首个 allow/deny 生效，pass 继续；allow 只批准当前调用、不写记忆规则；deny 错误码 `PLUGIN_REVIEW_DENIED`。高危不可记忆 ASK、`planMode` 与自身工具不代审；超时/异常/格式错误按 pass，最终回退 UI |
 | 顺序与预算 | 按插件 ID 升序、清单内顺序执行；单 hook 10 秒、合计 20 秒；超时/异常/格式错误保持原值继续，不自动批准 |
-| 校验 | 只接受白名单字段；`arguments` 必须是 JSON 对象，`data` 可为任意 JSON；变更 JSON 上限 256 KiB；拒绝理由截断到 500 字符 |
-| 边界 | 不能改工具名、不能批准工具、不能把宿主 DENY 改成 ALLOW、不能绕过 PLAN 与权限策略；审批后不悄悄改写参数 |
+| 校验 | 只接受白名单字段；`arguments` 必须是 JSON 对象，`data` 可为任意 JSON；变更 JSON 上限 256 KiB；拒绝理由截断到 500 字符。HTTP：URL 限 http/https 且 ≤4096 字符，headers ≤64 项且禁止 Host/Content-Length/Transfer-Encoding/Connection/Expect/Upgrade，body 必须是 JSON 对象且 ≤4 MiB；方法固定 POST |
+| 边界 | 不能改工具名、不能批准工具、不能把宿主 DENY 改成 ALLOW、不能绕过 PLAN 与权限策略；审批后不悄悄改写参数。HTTP hook 不能改方法与非 JSON body，改写后的响应仍按原 provider 格式解析；重试/换 Key 会重复执行 |
 | 未验证 | 冒烟编译与插件单测通过后需补真机验证 |
 
 ### 校验规则（实现里的硬规则）
 
 - 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools`、`contributes.mcp`、`contributes.hooks`（`observe` / `transform`）。
-- hooks 声明的事件必须来自宿主支持的事件集合；`mode: "transform"` 只能用于 `agent.tool.before` / `agent.tool.after`，这两个事件也必须显式声明 `transform`；同类贡献 ID 不得重复。
+- hooks 声明的事件必须来自宿主支持的事件集合；事件与 mode 一一对应：`agent.tool.before` / `agent.tool.after` / `agent.http.before` 必须 `transform`，`agent.permission.review` 必须 `review`，其余只读事件必须 `observe`；同类贡献 ID 不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。
 - ZIP：压缩包 ≤ 16 MiB、≤ 512 个条目、单条目 ≤ 4 MiB、解压总量 ≤ 32 MiB；重复条目（含仅大小写不同）拒绝；清单 ≤ 256 KiB 且必须在根目录。限额在流式读取时执行，不信任条目自报的大小。所有条目都按普通文件写出，ZIP 里的符号链接与权限位被忽略。
@@ -438,4 +440,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的请求/消息 transform 与更多可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的响应 transform 与更多可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

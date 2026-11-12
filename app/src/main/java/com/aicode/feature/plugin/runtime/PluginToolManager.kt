@@ -45,6 +45,9 @@ class PluginToolManager @Inject constructor(
     }
 
     private fun sync(plugins: List<InstalledPlugin>) {
+        plugins.filter { it.isActive }.forEach { plugin ->
+            plugin.content.runtime?.let { runtime.closeOtherVersions(plugin.id, plugin.record.version) }
+        }
         val desired = plugins
             .filter { it.isActive }
             .flatMap { plugin ->

@@ -1,6 +1,6 @@
 # 插件系统计划：权限、代审核与双向交互
 
-状态：讨论稿。代审核、显式插件权限、提供商注册、结构化页面/配置、tips、通知、Shizuku 和 Bash/terminal 能力是已确认需求；命令在已授权范围内直接执行，权限粒度与异常策略等建议仍可修改。
+状态：部分实现。代审核第一版已按 `agent.permission.review` 接入普通 ASK 三态流程；显式插件权限、提供商注册、结构化页面/配置、tips、通知、Shizuku 和 Bash/terminal 能力仍是设计规划；异常策略与高危 ASK 覆盖范围仍可修改。
 
 ## 1. 三类授权必须分开
 
@@ -54,7 +54,7 @@ AI ToolCall（完整参数）
        └─ 不处理：继续下一个；全部不处理或无适用插件才进入 UI
 ```
 
-这是用户明确的行为顺序。普通生命周期 hook 不能把它隐式改成“所有调用先由插件决定”，或让插件把宿主 DENY 改成 ALLOW。代审核不包含改参数；评估前通用工具变换 hook 是否开放仍待单独确认，即使未来允许，变换后的调用也必须重新经过完整宿主判断。
+这是用户明确的行为顺序。普通生命周期 hook 不能把它隐式改成“所有调用先由插件决定”，或让插件把宿主 DENY 改成 ALLOW。代审核不包含改参数；`agent.tool.before` 与代审核是两个独立入口，前者改写后的调用重新走完整宿主判断。第一版实现：只处理 `rememberDisabledReason == null` 且非 `planMode` 的普通 ASK，带不可记忆标记的高危请求仍由本人确认；插件不能代审自己提供的工具；按插件 ID 升序。
 
 ### 3.1 现有代码中的最小接入点
 
@@ -75,7 +75,7 @@ AI ToolCall（完整参数）
 
 ### 3.3 已确认的多插件顺序
 
-1. 按使用者设置的顺序逐个询问，不并行竞争结果。
+1. 按插件 ID 升序逐个询问（使用者自定义排序尚未实现），不并行竞争结果。
 2. 返回不处理则继续下一个。
 3. 首个同意或拒绝立即生效，后续插件不再参与该次审核。
 4. 全部不处理，或没有适用插件时，进入现有 UI。
@@ -88,7 +88,7 @@ AI ToolCall（完整参数）
 
 现有 `USER_REJECTED` 会取消整批并结束本轮，而策略拒绝只拒绝对应工具，见 [StatefulAgentWorkflow.kt:410](../../app/src/main/java/com/aicode/feature/agent/domain/workflow/StatefulAgentWorkflow.kt:410)。实施时插件拒绝应进入单调用拒绝路径，并保留独立的拒绝来源，不能直接套用 `USER_REJECTED`；用户亲自在 UI 拒绝的现有行为不随之改变。
 
-Shizuku、`elevate` 一次性提权、修改 MCP 等配置，以及删除子代理等请求可能进入 ASK。代审核授权是否覆盖它们需要明确，不能用“不可记忆”这一标志推断“必须本人批准”或“插件都能批准”。现有 Shizuku 的特殊判断见 [ToolPermissionPolicyEngine.kt:151](../../app/src/main/java/com/aicode/feature/agent/domain/permission/ToolPermissionPolicyEngine.kt:151)。
+Shizuku、`elevate` 一次性提权、修改 MCP 等配置，以及删除子代理等请求可能进入 ASK。第一版明确不交给代审核：这些请求带 `rememberDisabledReason`，仍走本人确认；“不可记忆”只作为第一版的保守排除条件，不代表所有不可记忆请求都必须本人批准，后续是否开放需单独确认。现有 Shizuku 的特殊判断见 [ToolPermissionPolicyEngine.kt:151](../../app/src/main/java/com/aicode/feature/agent/domain/permission/ToolPermissionPolicyEngine.kt:151)。
 
 “插件自行执行 Shizuku”与“插件代审 AI 的 Shizuku 调用”是两个不同的能力范围，不自动互相授权。
 

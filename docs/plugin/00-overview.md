@@ -138,7 +138,10 @@ App 按现有规则判断
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
 | 贡献：生命周期 hooks（只读；`contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
 | 贡献：可写 hooks（`mode: "transform"`；`agent.tool.before` / `agent.tool.after`，可拒绝/改参数/改成功结果 data） | 已实现，冒烟编译与单测待本次验证 | `PluginHookDispatcher.beforeToolCall/afterToolCall`、`PluginHookTransform`、`StatefulAgentWorkflow` 的权限与批次结果路径 |
-| 通用页面与配置、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
+| 贡献：HTTP 请求 hooks（`agent.http.before`，可改写 URL/headers/body） | 已实现，冒烟编译与单测待本次验证 | `PluginHttpHookInterceptor`、`PluginHookDispatcher.beforeHttpRequest`、`PluginHookTransform.parseHttp` |
+| 贡献：代审核 hooks（`agent.permission.review`，普通 ASK 三态 allow/deny/pass） | 已实现，冒烟编译与单测待本次验证 | `PluginHookDispatcher.reviewPermission`、`PluginHookTransform.parseReview`、`StatefulAgentWorkflow.requestPermissionIfNeeded` |
+| 启动事件与常驻运行时（`app.started`、`runtime.resident`） | 已实现，冒烟编译与单测待本次验证 | `AIEditorApp.onCreate`、`PluginHookDispatcher.dispatchAppStarted`、`PluginRuntimeManager.pruneIdle` |
+| 通用页面与配置、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 实现范围的精确说明（哪些字段会被接受、哪些会被拒绝、各项限额）见 [10-plugin-format.md](10-plugin-format.md) 第 12 节。
@@ -155,12 +158,18 @@ App 按现有规则判断
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
-| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 第一版已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`；单 hook 10 秒、合计 20 秒，失败按未改动继续。代审核与请求级 transform 未开始，依赖阶段 0 的 D12、D13、D14 |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已实现普通 ASK 的 allow/deny/pass；高危不可记忆 ASK（Shizuku、elevate、配置修改、删除子代理、危险 rm）、`planMode` 与插件自身工具不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform 未开始，依赖 D12、D13、D14 |
 | 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 ### 8.3 当前进度
 
 当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。声明式工作区工具仍只有 HTML 页面，没有运行态回传。
+
+2026-11-12：新增 `app.started` 启动事件与 `runtime.resident`（PluginApi 1.5.0）——App 主进程 onCreate 完成后派发一次，payload 为 `launchId`/`startedAt`/`appVersion`/`process`；声明该事件的插件会在此时拉起容器内进程。`runtime.resident: true` 的进程跳过 10 分钟空闲回收，停用/卸载/版本替换与 App 进程结束仍会关闭。容器未就绪时启动 hook 失败只记日志，后续调用仍按需启动。
+
+2026-11-12：新增 `agent.permission.review` 代审核（PluginApi 1.4.0）——`mode: "review"`，只在宿主权限判定为 ASK 后、弹出确认前运行；返回 `allow`/`deny`/`pass`，首个 allow/deny 生效，pass 继续下一个，全部不处理回退 UI。allow 只批准当前调用、不写入永久允许规则；deny 错误码 `PLUGIN_REVIEW_DENIED`，只影响当前工具。超时/异常/格式错误按 pass。第一版只处理 `rememberDisabledReason == null` 且非 `planMode` 的普通 ASK，Shizuku、elevate、配置修改、删除子代理与危险 rm 仍由本人确认；插件不能代审自己提供的工具；按插件 ID 升序、单 hook 10 秒/合计 20 秒。
+
+2026-11-12：新增 `agent.http.before` HTTP 请求 hook（PluginApi 1.3.0）——挂在 AgentModule 共享 OkHttpClient 上，覆盖对话、标题、压缩、模型列表/测试与图片请求；payload 为 `url`、`method`、`headers`、`body`，可返回 `{url?, headers?, body?}`。URL 限 http/https、headers 最多 64 项且禁止改 Host/Content-Length 等受控头、body 必须是 JSON 对象且 ≤4 MiB；方法固定 POST。每次实际发送都会执行，重试与换 Key 会重复触发；失败、超时或格式错误保持原请求。headers 含明文鉴权头，属于高权限能力。
 
 2026-11-12：新增可写 hooks 第一版——清单 `contributes.hooks[]` 增加 `mode`（缺省 `observe`，可写必须显式 `transform`），新增 `agent.tool.before` 与 `agent.tool.after`。`agent.tool.before` 在权限判定前运行，可返回 `{decision:"deny",reason}` 或 `{arguments}`；改写参数后重新走完整权限判断，拒绝返回 `PLUGIN_HOOK_DENIED`。`agent.tool.after` 只处理成功结果，可返回 `{data}` 改写 `data`，不能改状态、图片或附件。插件按 ID 升序、清单顺序执行，单 hook 10 秒、合计 20 秒，超时/异常/格式错误保持原值继续；转换结果有 256 KiB 上限，只接受白名单字段。插件详情把可写 hook 标注为「可写 Hook」。
 

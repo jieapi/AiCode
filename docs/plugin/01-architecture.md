@@ -96,7 +96,7 @@
 - 进程 cwd 是插件安装目录 `~/.aicode/plugins/installed/<id>`，可直接读取包内文件、`node_modules` 与 `.venv`。
 - 宿主与插件通过 stdin/stdout 的 NDJSON JSON-RPC 通信：宿主发 `tool.invoke`/`hook.invoke`，插件可发 `host.fs.*`、`host.bash` 与 `plugin.event`。
 - 依赖由设置页手动「准备依赖」：npm 执行 `npm ci`/`npm install`，pip 创建 `.venv`；缺少 node/python 时只提示，不自动安装系统包。
-- 生命周期：按插件版本惰性启动、空闲 10 分钟回收、崩溃不自动无限重启；停用/卸载立即关闭。
+- 生命周期：按插件版本惰性启动，或由 `app.started` 在 App 启动时拉起；默认空闲 10 分钟回收，`runtime.resident: true` 跳过回收；崩溃不自动无限重启；停用/卸载/版本替换立即关闭。
 - 安全边界变为「启用即信任」：进程与 Bash 同级，拥有容器内文件、网络与命令能力。host API 的路径限制只约束这些接口，不约束进程自身。
 - SSH 模式下插件进程仍跑本地容器，与 MCP stdio 一致；插件包与依赖不上传远端。
 

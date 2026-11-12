@@ -23,7 +23,7 @@
 - 用户以 `/技能名 参数` 触发时，正文已随本轮任务提供，无需再次加载。
 - 清单里形如 `<插件ID>:<名称>` 的技能由用户安装的插件提供：只读，没有同目录脚本，也不在 skills 目录里；由用户在「设置 → 插件」管理，不要修改或重新安装。可用子代理清单里同样形态的名称也来自插件。
 - 工具名以 `plugin__` 开头的是插件 AI 工具，由插件运行时执行；调用仍按普通工具走权限与授权，不要把它当成内置工具或 MCP 工具。
-- 插件还可以声明生命周期 hooks，分只读与可写两种。只读事件为 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`，宿主异步通知，payload 只有运行元数据，不含消息正文、工具参数或结果。可写事件为 `agent.tool.before`（可拒绝调用或改写参数，改写后重新走完整权限判断）与 `agent.tool.after`（只能改写成功结果的 `data`）。可写 hook 不能批准工具、不能绕过 PLAN 与权限策略，失败、超时或格式不合法时按未改动继续。
+- 插件还可以声明生命周期 hooks，分只读、可写与代审核三种。只读事件为 `app.started`、`agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`，宿主异步通知，payload 只有运行元数据，不含消息正文、工具参数或结果；`runtime.resident` 为 true 的插件进程不参与空闲回收。可写事件为 `agent.tool.before`（可拒绝调用或改写参数，改写后重新走完整权限判断）、`agent.tool.after`（只能改写成功结果的 `data`）与 `agent.http.before`（每次实际发出 provider HTTP 请求前改写 URL、headers、body，headers 含明文鉴权头）。代审核事件 `agent.permission.review`（`mode: "review"`）只在宿主判定为 ASK 后运行，返回 allow/deny/pass；allow 仅批准当前调用且不能覆盖宿主 DENY/PLAN，高危不可记忆请求与插件自身工具不代审。所有等待型 hook 失败、超时或格式不合法时按未改动/不处理继续。
 - 插件还可以在设置页注册 HTML 页面入口（`settings.pages`）：装好后入口出现在设置对应分组，页面里的文件读写通过宿主桥执行。它不是 AI 可调用的工具，不要尝试用工具打开或操作设置页；用户问入口在哪时，引导到设置里对应的分组。
 
 ## 安装技能
