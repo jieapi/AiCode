@@ -48,6 +48,7 @@ private class BridgeException(val code: String, override val message: String) : 
 class PluginWebBridge(
     private val context: Context,
     private val page: PluginSettingsPage,
+    private val dataDir: File,
     private val pluginVersion: String,
     private val languageTag: String,
     private val workspaceName: String,
@@ -61,7 +62,6 @@ class PluginWebBridge(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val dataDir: File = page.dataDir ?: File(context.filesDir, "plugins/data/${page.pluginId}")
 
     @JavascriptInterface
     fun postMessage(payload: String) {
@@ -425,6 +425,6 @@ class PluginWebBridge(
         const val MAX_COMMAND_CHARS = 4000
         const val DEFAULT_BASH_TIMEOUT_SECONDS = 30L
         const val MAX_BASH_TIMEOUT_SECONDS = 300L
-        val HOST_PROTECTED = setOf("permissions.json", "mcp.json", "skills", "agents", "prompts.custom", "docs")
+        val HOST_PROTECTED = setOf("plugins", "permissions.json", "mcp.json", "skills", "agents", "prompts.custom", "docs")
     }
 }

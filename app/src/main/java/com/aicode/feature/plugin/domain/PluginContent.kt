@@ -46,8 +46,7 @@ data class PluginSettingsPage(
     val pageFile: String,
     val icon: String,
     val installDir: File,
-    val pluginVersion: String = "",
-    val dataDir: File? = null
+    val pluginVersion: String = ""
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }

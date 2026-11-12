@@ -2,6 +2,7 @@ package com.aicode.feature.plugin.domain
 
 import android.content.Context
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.plugin.data.ExtractedPackage
@@ -78,26 +79,31 @@ sealed interface PluginInstallResult {
 /**
  * 插件的安装、启停与贡献聚合。
  *
- * 插件包与安装记录都保存在手机端 `filesDir/plugins`，该目录没有绑定进 PRoot 容器，也不经
- * [com.aicode.feature.workspace.domain.FileAccessProvider]，不随 SSH 模式迁到远端。
+ * 插件包与数据保存在容器内全局配置目录 `~/.aicode/plugins`（宿主侧为 [ContainerInstaller.aicodeDir]，
+ * 由 PRoot 绑定到容器内 `/root/.aicode`），本地容器里的命令可以直接访问插件文件与将来的依赖。
+ * 安装记录留在宿主私有目录，不随包进入容器，避免容器内进程改写启停状态。SSH 模式下插件仍只在手机端。
  */
 @Singleton
 class PluginManager internal constructor(
-    rootDir: File,
+    private val rootDir: File,
     private val hostApi: SemVer,
-    private val clock: () -> Long
+    private val clock: () -> Long,
+    private val registryFile: File = File(rootDir, "registry.json"),
+    private val legacyRootDir: File? = null
 ) {
     @Inject
-    constructor(@ApplicationContext context: Context) : this(
-        File(context.filesDir, "plugins"),
+    constructor(@ApplicationContext context: Context, installer: ContainerInstaller) : this(
+        File(installer.aicodeDir, PLUGINS_DIR),
         PluginApi.VERSION,
-        System::currentTimeMillis
+        System::currentTimeMillis,
+        File(context.filesDir, REGISTRY_FILE),
+        File(context.filesDir, PLUGINS_DIR)
     )
 
     private val installedDir = File(rootDir, "installed")
     private val stagingDir = File(rootDir, "staging")
     private val dataRoot = File(rootDir, "data")
-    private val store = PluginRegistryStore(File(rootDir, "registry.json"))
+    private val store = PluginRegistryStore(registryFile)
     private val reader = PluginPackageReader()
 
     private val mutex = Mutex()
@@ -132,9 +138,10 @@ class PluginManager internal constructor(
         if (loaded) return
         synchronized(loadLock) {
             if (loaded) return
+            migrateLegacyRoot()
             // 进程重启后不可能存在进行中的安装，暂存目录里的都是残留
             stagingDir.deleteRecursively()
-            val records = store.load()
+            val records = loadRecords()
             publish(records.map { loadInstalled(it) })
             sweepOrphans(records.map { it.id }.toSet())
             loaded = true
@@ -415,6 +422,49 @@ class PluginManager internal constructor(
         }
     }
 
+    /**
+     * 旧版本把插件放在 `filesDir/plugins`，安装记录也在包目录内。迁移后包进容器，记录留宿主私有。
+     * 迁移失败时保留旧目录，下次启动重试；这里不删除尚未确认搬走的数据。
+     */
+    private fun migrateLegacyRoot() {
+        val legacy = legacyRootDir ?: return
+        // renameTo 要求目标父目录存在，插件可能先于容器初始化被访问。
+        rootDir.parentFile?.mkdirs()
+        if (!rootDir.exists() && legacy.isDirectory) {
+            if (!legacy.renameTo(rootDir)) {
+                FileLogger.w(TAG, "插件目录迁移失败，继续使用旧目录: ${legacy.absolutePath}")
+                return
+            }
+        }
+        val insideRegistry = File(rootDir, "registry.json")
+        val source = when {
+            insideRegistry.isFile -> insideRegistry
+            File(legacy, "registry.json").isFile -> File(legacy, "registry.json")
+            else -> null
+        }
+        if (!registryFile.exists() && source != null) {
+            registryFile.parentFile?.mkdirs()
+            if (!source.renameTo(registryFile)) {
+                // 目标目录不可写或跨挂载点时 rename 会失败；先保证记录还能读到，再等下次清理。
+                runCatching { source.copyTo(registryFile, overwrite = true) }
+                    .onFailure { FileLogger.w(TAG, "插件安装记录迁移失败: ${source.absolutePath}", it) }
+            }
+        }
+        // 迁移后包目录不该再留一份记录，否则容器内进程可以改写它。
+        if (registryFile.exists() && insideRegistry.isFile) insideRegistry.delete()
+        if (legacy.isDirectory && legacy.listFiles().isNullOrEmpty()) legacy.delete()
+    }
+
+    /**
+     * 记录尚未搬到宿主私有目录时（迁移未完成），退回到包目录里的副本读取，
+     * 避免把已安装插件当成孤儿清掉。
+     */
+    private fun loadRecords(): List<PluginRecord> {
+        if (registryFile.isFile) return store.load()
+        val inside = File(rootDir, "registry.json")
+        return if (inside.isFile) PluginRegistryStore(inside).load() else emptyList()
+    }
+
     /** 没有安装记录的目录不具备任何授权，直接清掉（多半是安装中途崩溃留下的）。 */
     private fun sweepOrphans(knownIds: Set<String>) {
         installedDir.listFiles().orEmpty()
@@ -429,6 +479,8 @@ class PluginManager internal constructor(
     companion object {
         private const val TAG = "PluginManager"
         private const val REPLACED_SUFFIX = ".replaced"
+        private const val PLUGINS_DIR = "plugins"
+        private const val REGISTRY_FILE = "plugin-registry.json"
         const val ORIGIN_LOCAL = "local"
     }
 }
