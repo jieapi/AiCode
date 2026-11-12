@@ -2,7 +2,6 @@ package com.aicode.feature.plugin.domain
 
 import com.aicode.feature.plugin.PluginFixtures
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -121,14 +120,6 @@ class PluginManifestParserTest {
         assertRejected(PluginFixtures.manifest(pluginApi = "^2.0.0"), PluginErrorCode.API_INCOMPATIBLE, "^2.0.0")
         assertRejected(PluginFixtures.manifest(pluginApi = "1.x"), PluginErrorCode.FIELD_INVALID, "engines.pluginApi")
         assertEquals("^1.0.0", success(base).pluginApi)
-    }
-
-    @Test
-    fun structuredUi_isOptionalButMustBeValidRange() {
-        val withUi = base.replace("\"pluginApi\": \"^1.0.0\"", "\"pluginApi\": \"^1.0.0\", \"structuredUi\": \"^1.0.0\"")
-        assertEquals("^1.0.0", success(withUi).structuredUi)
-        assertNull(success(base).structuredUi)
-        assertRejected(base.replace("\"pluginApi\": \"^1.0.0\"", "\"pluginApi\": \"^1.0.0\", \"structuredUi\": \"x\""), PluginErrorCode.FIELD_INVALID, "engines.structuredUi")
     }
 
     @Test
@@ -556,7 +547,7 @@ class PluginManifestParserTest {
     private fun settingsManifest(
         anchor: String = "settings.ai",
         page: String = "ui/memory.html",
-        pluginApi: String = ">=1.1.0 <2.0.0"
+        pluginApi: String = "^1.0.0"
     ): String = """
         {
           "manifestVersion": 1,

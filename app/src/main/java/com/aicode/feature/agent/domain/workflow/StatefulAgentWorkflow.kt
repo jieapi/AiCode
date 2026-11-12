@@ -1598,9 +1598,9 @@ class StatefulAgentWorkflow @Inject constructor(
             ToolPermissionPolicyEngine.Verdict.ALLOW -> PermissionCheckResult(true)
             ToolPermissionPolicyEngine.Verdict.DENY -> PermissionCheckResult(false)
             ToolPermissionPolicyEngine.Verdict.ASK -> {
-                // 高危不可记忆的请求（Shizuku、elevate、配置修改、删除子代理、危险 rm）
-                // 与模式切换仍由本人确认，第一版不交给代审核插件。
-                if (eval.rememberDisabledReason == null && tool.name != "planMode") {
+                // 模式切换仍由本人确认；高危 ASK（Shizuku、elevate、配置修改、
+                // 删除子代理、危险 rm）同样进入代审核链。
+                if (tool.name != "planMode") {
                     val review = pluginHookDispatcher.reviewPermission(
                         runId = runId,
                         sessionId = sessionId,

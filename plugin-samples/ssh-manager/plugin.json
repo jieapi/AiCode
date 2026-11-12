@@ -15,7 +15,7 @@
   },
   "license": "MIT",
   "engines": {
-    "pluginApi": ">=1.5.0 <2.0.0"
+    "pluginApi": "^1.0.0"
   },
   "runtime": {
     "type": "javascript",
