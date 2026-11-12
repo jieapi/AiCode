@@ -43,10 +43,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -93,6 +101,7 @@ import com.aicode.feature.browser.presentation.BrowserScreen
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.credentials.presentation.component.CredentialScreen
 import com.aicode.feature.plugin.presentation.PluginWebViewCache
+import com.aicode.feature.plugin.presentation.PluginOverlayController
 import com.aicode.feature.plugin.presentation.PluginsViewModel
 import com.aicode.feature.plugin.presentation.currentLanguageTag
 import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
@@ -290,28 +299,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                        if (bgPath != null && bgAlpha > 0f) {
-                            val screen = LocalView.current
-                            val bitmap by produceState<ImageBitmap?>(initialValue = null, bgPath) {
-                                value = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                                    decodeBackgroundBitmap(
-                                        bgPath!!,
-                                        screen.width.coerceAtLeast(1),
-                                        screen.height.coerceAtLeast(1)
-                                    )
-                                }
-                            }
-                            bitmap?.let {
-                                Image(
-                                    bitmap = it,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .alpha(bgAlpha)
-                                )
-                            }
-                        }
+                        BackgroundImageOverlay(path = bgPath, imageAlpha = bgAlpha)
                         // beta 包全局水印，置于最上层，不拦截触摸。
                         BetaWatermark()
                     }
@@ -1207,6 +1195,68 @@ private val PREVIEWABLE_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", 
 
 /** 文件树里点击即调系统安装器的安装包格式。 */
 private val INSTALLABLE_APK_EXTS = setOf("apk", "apks", "xapk")
+
+/**
+ * 全局背景图。单独成 composable，拖拽插件弹层时只有这一层跟随矩形重绘，
+ * 不带动整棵导航树重组。
+ */
+@Composable
+private fun BackgroundImageOverlay(path: String?, imageAlpha: Float) {
+    val imagePath = path ?: return
+    if (imageAlpha <= 0f) return
+    val overlayState by PluginOverlayController.state.collectAsStateWithLifecycle()
+    if (overlayState.suppressBackground) return
+    val screen = LocalView.current
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, imagePath) {
+        value = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            decodeBackgroundBitmap(
+                imagePath,
+                screen.width.coerceAtLeast(1),
+                screen.height.coerceAtLeast(1)
+            )
+        }
+    }
+    bitmap?.let {
+        Image(
+            bitmap = it,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .backgroundWithOverlayHoles(overlayState.bounds, imageAlpha)
+        )
+    }
+}
+
+/**
+ * 画背景图时在插件弹层区域挖洞：弹层矩形内不绘制背景图，其余区域保持原样。
+ * 洞的坐标来自 WebView 的窗口位置与页面上报的 CSS 像素矩形。
+ */
+private fun Modifier.backgroundWithOverlayHoles(
+    bounds: List<PluginOverlayController.Bounds>,
+    imageAlpha: Float
+): Modifier = this
+    .graphicsLayer {
+        alpha = imageAlpha
+        if (bounds.isNotEmpty()) compositingStrategy = CompositingStrategy.Offscreen
+    }
+    .drawWithContent {
+        drawContent()
+        bounds.forEach { bound ->
+            val path = Path().apply {
+                addRoundRect(
+                    RoundRect(
+                        rect = Rect(bound.left, bound.top, bound.right, bound.bottom),
+                        topLeft = CornerRadius(bound.topRadius),
+                        topRight = CornerRadius(bound.topRadius),
+                        bottomRight = CornerRadius(bound.bottomRadius),
+                        bottomLeft = CornerRadius(bound.bottomRadius)
+                    )
+                )
+            }
+            drawPath(path, Color.Transparent, blendMode = BlendMode.Clear)
+        }
+    }
 
 /** 聊天区链接目标 → 归一化后的文件路径；判定为网址（非 `file` scheme）时返回 null。 */
 internal fun asChatFilePath(uri: String): String? {

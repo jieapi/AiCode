@@ -17,6 +17,18 @@
     "pluginApi": "^1.0.0"
   },
   "contributes": {
+    "settingsPages": [
+      {
+        "id": "gallery",
+        "title": {
+          "zh-CN": "组件演示",
+          "en": "UI Gallery"
+        },
+        "anchor": "settings.help",
+        "page": "pages/gallery.html",
+        "icon": "settings"
+      }
+    ],
     "configPage": "pages/config.html"
   }
 }

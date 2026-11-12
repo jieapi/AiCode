@@ -3,7 +3,7 @@
  *
  * 尺寸与排版对齐设置页的 Compose 组件：
  * 顶栏 64dp / 标题 22sp，分组标题 13sp，卡片圆角 14dp 无边框，
- * 行高 11dp 上下、图标方块 36dp、标题 16sp、副标题 14sp、分隔线左右 16dp。
+ * 行高 11dp 上下、图标 16dp、标题 16sp、副标题 14sp、分隔线左右 16dp。
  * 颜色与间距来自 /__aicode/theme.css 注入的 CSS 变量。
  */
 
@@ -83,7 +83,7 @@ html {
   justify-content: space-between;
   gap: var(--aicode-space-sm);
   width: 100%;
-  padding: 8px 8px 4px 12px;
+  padding: 16px 16px 8px 12px;
   border: none;
   background: transparent;
   color: var(--aicode-on-surface-variant);
@@ -91,6 +91,10 @@ html {
   font-size: calc(13px * var(--aicode-font-scale));
   font-weight: 400;
   text-align: left;
+  cursor: default;
+}
+
+.aicode-group-header[data-collapsible="true"] {
   cursor: pointer;
 }
 
@@ -126,7 +130,7 @@ html {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 11px 4px 11px 16px;
+  padding: 11px 16px;
   border: none;
   background: transparent;
   color: var(--aicode-on-surface);
@@ -143,18 +147,16 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 16px;
+  height: 16px;
   flex: none;
   margin-right: 12px;
-  border-radius: 8px;
-  background: var(--aicode-surface-variant);
-  color: var(--aicode-on-surface-variant);
+  color: var(--aicode-on-surface);
 }
 
 .aicode-row-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .aicode-row-main {
@@ -172,7 +174,7 @@ html {
   overflow: hidden;
   color: var(--aicode-on-surface);
   font-size: calc(16px * var(--aicode-font-scale));
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.4;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -194,11 +196,19 @@ html {
 }
 
 .aicode-row-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   flex: none;
-  margin-left: 8px;
+  margin-left: 4px;
   color: var(--aicode-subtle-text);
-  font-size: 20px;
-  line-height: 1;
+}
+
+.aicode-row-chevron svg {
+  width: 18px;
+  height: 18px;
 }
 
 .aicode-divider {
@@ -345,13 +355,14 @@ html {
 .aicode-select,
 .aicode-textarea {
   width: 100%;
-  padding: 10px 12px;
+  min-height: 56px;
+  padding: 16px 14px;
   border: 1px solid var(--aicode-subtle-border);
-  border-radius: 8px;
-  background: var(--aicode-surface-variant);
+  border-radius: var(--aicode-radius-md-large);
+  background: var(--aicode-card-surface);
   color: var(--aicode-on-surface);
   font: inherit;
-  font-size: calc(15px * var(--aicode-font-scale));
+  font-size: calc(14px * var(--aicode-font-scale));
 }
 
 .aicode-input:disabled,
@@ -457,10 +468,10 @@ html {
 .aicode-outlined-field .aicode-textarea,
 .aicode-outlined-field .aicode-select {
   border: 1px solid var(--aicode-subtle-border);
-  border-radius: 8px;
-  background: transparent;
-  padding: 14px 12px 12px;
-  font-size: calc(15px * var(--aicode-font-scale));
+  border-radius: var(--aicode-radius-md-large);
+  background: var(--aicode-card-surface);
+  padding: 16px 14px;
+  font-size: calc(14px * var(--aicode-font-scale));
 }
 
 .aicode-outlined-field-body {
@@ -486,29 +497,55 @@ html {
 }
 
 .aicode-segmented {
+  position: relative;
   display: flex;
-  gap: 8px;
+  width: 100%;
+  height: 42px;
+  padding: 3px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: var(--aicode-surface-variant);
+}
+
+.aicode-segmented-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  border-radius: 9px;
+  background: var(--aicode-card-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .aicode-segment {
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--aicode-subtle-border);
-  border-radius: 8px;
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  border-radius: 9px;
   background: transparent;
-  color: var(--aicode-on-surface);
+  color: var(--aicode-on-surface-variant);
   font: inherit;
   font-size: calc(14px * var(--aicode-font-scale));
+  font-weight: 400;
   cursor: pointer;
 }
 
 .aicode-segment[aria-pressed="true"] {
-  border-color: transparent;
-  background: var(--aicode-surface-variant);
+  color: var(--aicode-on-surface);
+  font-weight: 600;
 }
 
 .aicode-segment:disabled {
-  opacity: 0.5;
+  cursor: default;
+}
+
+.aicode-segmented-disabled {
+  opacity: 0.55;
 }
 
 /* ── 多选 ── */
@@ -657,6 +694,18 @@ html {
 }
 
 /* ── 底部弹窗（对齐 AdaptiveModalBottomSheet） ── */
+@keyframes aicode-sheet-mask-in {
+  from { opacity: 0; }
+}
+
+@keyframes aicode-sheet-in {
+  from { transform: translate3d(0, 100%, 0); }
+}
+
+@keyframes aicode-dialog-in {
+  from { opacity: 0; transform: scale(0.96); }
+}
+
 .aicode-sheet-mask {
   position: fixed;
   inset: 0;
@@ -664,10 +713,20 @@ html {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+}
+
+.aicode-sheet-scrim {
+  position: fixed;
+  inset: 0;
   background: rgba(0, 0, 0, 0.32);
+  animation: aicode-sheet-mask-in 0.2s ease;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
 }
 
 .aicode-sheet {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -677,13 +736,38 @@ html {
   background: var(--aicode-surface);
   color: var(--aicode-on-surface);
   padding-bottom: env(safe-area-inset-bottom);
+  animation: aicode-sheet-in 0.25s cubic-bezier(0.2, 0, 0, 1);
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform;
+}
+
+.aicode-sheet-dragging {
+  transition: none;
+}
+
+.aicode-sheet-grabber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  flex: none;
+  padding-top: 8px;
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.aicode-sheet-grabber:active {
+  cursor: grabbing;
 }
 
 .aicode-sheet-handle {
   width: 32px;
   height: 4px;
   flex: none;
-  margin: 8px auto 0;
+  margin: 0;
   border-radius: 2px;
   background: var(--aicode-outline);
   opacity: 0.4;
@@ -695,6 +779,9 @@ html {
   gap: var(--aicode-space-md);
   padding: 16px;
   flex: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .aicode-sheet-title {
@@ -709,6 +796,32 @@ html {
 .aicode-sheet-body {
   padding: 0 16px 24px;
   overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 600px) {
+  .aicode-sheet-mask {
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+
+  .aicode-sheet {
+    width: 100%;
+    max-width: 560px;
+    max-height: 85%;
+    padding-bottom: 0;
+    border-radius: 16px;
+    animation-name: aicode-dialog-in;
+  }
+
+  .aicode-sheet-grabber {
+    display: none;
+  }
+
+  .aicode-sheet-header {
+    touch-action: auto;
+  }
 }
 
 /* ── 对话框（对齐 AlertDialog） ── */

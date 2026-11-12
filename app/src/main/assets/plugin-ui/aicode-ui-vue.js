@@ -153,7 +153,7 @@
     name: 'AicodeGroup',
     props: {
       title: { type: String, default: '' },
-      collapsible: { type: Boolean, default: true },
+      collapsible: { type: Boolean, default: false },
       expanded: { type: Boolean, default: true }
     },
     emits: ['update:expanded'],
@@ -162,9 +162,10 @@
         var showChevron = props.collapsible;
         var expanded = props.expanded;
         return h('div', { class: 'aicode-group' }, [
-          h('button', {
+          props.title ? h('button', {
             class: 'aicode-group-header',
             type: 'button',
+            'data-collapsible': String(showChevron),
             'data-expanded': showChevron ? String(expanded) : 'true',
             'aria-expanded': showChevron ? String(expanded) : 'true',
             onClick: function () {
@@ -173,7 +174,7 @@
           }, [
             h('span', null, props.title),
             showChevron ? h('span', { class: 'aicode-chevron', innerHTML: CHEVRON }) : null
-          ]),
+          ]) : null,
           h('div', {
             class: 'aicode-card',
             hidden: showChevron && !expanded
@@ -190,7 +191,7 @@
       subtitle: { type: String, default: '' },
       badge: { type: String, default: '' },
       badgeKind: { type: String, default: '' },
-      icon: { type: String, default: 'book' },
+      icon: { type: String, default: '' },
       chevron: { type: Boolean, default: true },
       selectable: { type: Boolean, default: false },
       selected: { type: Boolean, default: false }
@@ -211,10 +212,12 @@
               'data-checked': String(!!props.selected)
             })
             : null,
-          h('span', {
-            class: 'aicode-row-icon',
-            innerHTML: ICONS[props.icon] || ICONS.book
-          }),
+          props.icon
+            ? h('span', {
+              class: 'aicode-row-icon',
+              innerHTML: ICONS[props.icon] || ICONS.book
+            })
+            : null,
           h('span', { class: 'aicode-row-main' }, [
             h('span', { class: 'aicode-row-title' }, [
               h('span', { class: 'aicode-row-title-text' }, props.title),
@@ -226,7 +229,7 @@
             ]),
             h('span', { class: 'aicode-row-subtitle' }, props.subtitle)
           ]),
-          props.chevron ? h('span', { class: 'aicode-row-chevron' }, '›') : null
+          props.chevron ? h('span', { class: 'aicode-row-chevron', innerHTML: CHEVRON }) : null
         ]);
       };
     }
@@ -257,17 +260,37 @@
     emits: ['update:modelValue'],
     setup: function (props, context) {
       return function () {
-        return h('div', { class: 'aicode-segmented' }, props.options.map(function (option) {
-          return h('button', {
+        var options = props.options || [];
+        var selectedIndex = 0;
+        options.forEach(function (option, index) {
+          if (option.value === props.modelValue) selectedIndex = index;
+        });
+        var children = [];
+        if (options.length) {
+          children.push(h('span', {
+            class: 'aicode-segmented-thumb',
+            style: {
+              width: 'calc((100% - 6px) / ' + options.length + ')',
+              transform: 'translateX(' + (selectedIndex * 100) + '%)'
+            }
+          }));
+        }
+        options.forEach(function (option, index) {
+          children.push(h('button', {
             class: 'aicode-segment',
             type: 'button',
+            role: 'tab',
+            'aria-selected': String(props.modelValue === option.value),
             'aria-pressed': String(props.modelValue === option.value),
             disabled: props.disabled,
             onClick: function () {
               if (!props.disabled) context.emit('update:modelValue', option.value);
             }
-          }, option.label);
-        }));
+          }, option.label));
+        });
+        return h('div', {
+          class: 'aicode-segmented' + (props.disabled ? ' aicode-segmented-disabled' : '')
+        }, children);
       };
     }
   });
@@ -607,6 +630,99 @@
     }
   });
 
+  // 弹窗类组件的返回键栈：后打开的先消费，页面自己的 onBack 仍可共存。
+  var overlayStack = [];
+  var overlayBackWired = false;
+  var overlayRequest = Promise.resolve();
+  var lastOverlaySignature = '';
+  var overlaySyncScheduled = false;
+
+  function topOverlayRect() {
+    for (var i = overlayStack.length - 1; i >= 0; i--) {
+      var provider = overlayStack[i].rect;
+      if (!provider) continue;
+      var rect = provider();
+      if (rect && rect.width > 0 && rect.height > 0) return rect;
+    }
+    return null;
+  }
+
+  // WebView 内部弹层挡不住宿主绘制在最上层的背景图；上报弹层矩形，让宿主在背景图上挖洞。
+  function syncOverlayBackground() {
+    var active = overlayStack.length > 0;
+    var rect = active ? topOverlayRect() : null;
+    var signature = active
+      ? (rect
+        ? [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width),
+          Math.round(rect.height), Math.round(rect.topRadius), Math.round(rect.bottomRadius)].join(',')
+        : 'no-rect')
+      : 'off';
+    if (signature === lastOverlaySignature) return;
+    if (!window.aicode || !window.aicode.ui || !window.aicode.ui.setOverlay) return;
+    lastOverlaySignature = signature;
+    overlayRequest = overlayRequest.then(function () {
+      return window.aicode.ui.setOverlay(active, rect);
+    }).catch(function () {
+      lastOverlaySignature = '';
+    });
+  }
+
+  function scheduleOverlaySync() {
+    if (overlaySyncScheduled) return;
+    overlaySyncScheduled = true;
+    requestAnimationFrame(function () {
+      overlaySyncScheduled = false;
+      syncOverlayBackground();
+    });
+  }
+
+  // 弹层滑入/滑出/回弹时矩形在动，短时间内持续跟随，避免背景图短暂叠到弹层上。
+  function trackOverlayMotion(duration) {
+    var until = Date.now() + duration;
+    setTimeout(function tick() {
+      syncOverlayBackground();
+      if (overlayStack.length && Date.now() < until) setTimeout(tick, 30);
+    }, 16);
+  }
+
+  window.addEventListener('resize', function () {
+    if (overlayStack.length) scheduleOverlaySync();
+  });
+
+  function ensureOverlayBack() {
+    if (overlayBackWired || !window.aicode || !window.aicode.ui || !window.aicode.ui.onBack) return;
+    overlayBackWired = true;
+    window.aicode.ui.onBack(function () {
+      var top = overlayStack[overlayStack.length - 1];
+      if (!top) return false;
+      top.close();
+      return true;
+    });
+  }
+
+  function pushOverlay(close, rectProvider) {
+    ensureOverlayBack();
+    for (var i = 0; i < overlayStack.length; i++) {
+      if (overlayStack[i].close === close) return;
+    }
+    overlayStack.push({ close: close, rect: rectProvider || null });
+    scheduleOverlaySync();
+  }
+
+  function removeOverlay(close) {
+    for (var i = overlayStack.length - 1; i >= 0; i--) {
+      if (overlayStack[i].close === close) {
+        overlayStack.splice(i, 1);
+        break;
+      }
+    }
+    scheduleOverlaySync();
+  }
+
+  function isWideViewport() {
+    return window.innerWidth >= 600;
+  }
+
   var AicodeBottomSheet = defineComponent({
     name: 'AicodeBottomSheet',
     props: {
@@ -615,27 +731,200 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
-      function close() {
-        context.emit('update:modelValue', false);
+      var shown = Vue.ref(false);
+      var closing = Vue.ref(false);
+      var dragging = Vue.ref(false);
+      var offset = Vue.ref(0);
+      var maskOpacity = Vue.ref(1);
+      var sheetRef = Vue.ref(null);
+      var closeTimer = null;
+      var drag = null;
+      var bodyOverflow = null;
+
+      function lockBody() {
+        if (bodyOverflow !== null) return;
+        bodyOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
       }
 
+      function sheetRect() {
+        var el = sheetRef.value;
+        if (!el) return null;
+        var rect = el.getBoundingClientRect();
+        var wide = isWideViewport();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          topRadius: wide ? 16 : 28,
+          bottomRadius: wide ? 16 : 0,
+          coversBottom: true
+        };
+      }
+
+      function unlockBody() {
+        if (bodyOverflow === null) return;
+        document.body.style.overflow = bodyOverflow;
+        bodyOverflow = null;
+      }
+
+      function requestClose() {
+        if (!shown.value || closing.value) return;
+        closing.value = true;
+        dragging.value = false;
+        drag = null;
+        var height = sheetRef.value ? sheetRef.value.offsetHeight : window.innerHeight * 0.5;
+        offset.value = isWideViewport() ? 0 : height;
+        maskOpacity.value = 0;
+        scheduleOverlaySync();
+        trackOverlayMotion(260);
+        closeTimer = setTimeout(function () {
+          closeTimer = null;
+          shown.value = false;
+          closing.value = false;
+          offset.value = 0;
+          maskOpacity.value = 1;
+          unlockBody();
+          removeOverlay(requestClose);
+          context.emit('update:modelValue', false);
+        }, 220);
+      }
+
+      Vue.watch(function () {
+        return props.modelValue;
+      }, function (open) {
+        if (open) {
+          if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+          }
+          closing.value = false;
+          offset.value = 0;
+          maskOpacity.value = 1;
+          shown.value = true;
+          lockBody();
+          pushOverlay(requestClose, sheetRect);
+          trackOverlayMotion(300);
+        } else if (shown.value && !closing.value) {
+          requestClose();
+        }
+      }, { immediate: true });
+
+      function startDrag(event) {
+        if (isWideViewport() || !shown.value || closing.value) return;
+        if (event.button != null && event.button !== 0) return;
+        if (event.target && event.target.closest && event.target.closest('button')) return;
+        drag = {
+          startY: event.clientY,
+          lastY: event.clientY,
+          lastTime: Date.now(),
+          velocity: 0,
+          moved: false
+        };
+        dragging.value = true;
+        offset.value = 0;
+        if (event.currentTarget.setPointerCapture && event.pointerId != null) {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch (e) {
+            // 忽略不支持指针捕获的 WebView。
+          }
+        }
+        event.preventDefault();
+      }
+
+      function moveDrag(event) {
+        if (!drag) return;
+        var now = Date.now();
+        var delta = event.clientY - drag.startY;
+        if (Math.abs(delta) > 4) drag.moved = true;
+        if (delta < 0) delta = 0;
+        offset.value = delta;
+        maskOpacity.value = Math.max(0, 1 - Math.max(0, delta) / 280);
+        scheduleOverlaySync();
+        var elapsed = now - drag.lastTime;
+        if (elapsed > 0) {
+          var instantaneous = (event.clientY - drag.lastY) / elapsed;
+          drag.velocity = drag.velocity * 0.6 + instantaneous * 0.4;
+          drag.lastY = event.clientY;
+          drag.lastTime = now;
+        }
+        event.preventDefault();
+      }
+
+      function endDrag() {
+        if (!drag) return;
+        var wasMoved = drag.moved;
+        var velocity = drag.velocity;
+        var delta = Math.max(0, offset.value);
+        drag = null;
+        dragging.value = false;
+        if (!wasMoved) {
+          requestClose();
+          return;
+        }
+        var height = sheetRef.value ? sheetRef.value.offsetHeight : window.innerHeight * 0.5;
+        if (delta > Math.min(140, height * 0.28) || velocity > 0.55) {
+          requestClose();
+        } else {
+          offset.value = 0;
+          maskOpacity.value = 1;
+          trackOverlayMotion(260);
+        }
+      }
+
+      Vue.onUnmounted(function () {
+        if (closeTimer) clearTimeout(closeTimer);
+        unlockBody();
+        removeOverlay(requestClose);
+      });
+
       return function () {
-        if (!props.modelValue) return null;
+        if (!shown.value) return null;
         return h('div', {
           class: 'aicode-sheet-mask',
+          role: 'dialog',
+          'aria-modal': 'true',
           onClick: function (event) {
-            if (event.target === event.currentTarget) close();
+            if (event.target === event.currentTarget) requestClose();
           }
         }, [
-          h('div', { class: 'aicode-sheet' }, [
-            h('div', { class: 'aicode-sheet-handle' }),
-            h('div', { class: 'aicode-sheet-header' }, [
+          h('div', {
+            class: 'aicode-sheet-scrim',
+            style: { opacity: maskOpacity.value }
+          }),
+          h('div', {
+            ref: sheetRef,
+            class: 'aicode-sheet' + (dragging.value ? ' aicode-sheet-dragging' : ''),
+            style: { transform: 'translate3d(0, ' + offset.value + 'px, 0)' }
+          }, [
+            h('div', {
+              class: 'aicode-sheet-grabber',
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': '下拉关闭',
+              onPointerdown: startDrag,
+              onPointermove: moveDrag,
+              onPointerup: endDrag,
+              onPointercancel: endDrag,
+              onKeydown: function (event) {
+                if (event.key === 'Enter' || event.key === ' ') requestClose();
+              }
+            }, [h('div', { class: 'aicode-sheet-handle' })]),
+            h('div', {
+              class: 'aicode-sheet-header',
+              onPointerdown: startDrag,
+              onPointermove: moveDrag,
+              onPointerup: endDrag,
+              onPointercancel: endDrag
+            }, [
               h('h2', { class: 'aicode-sheet-title' }, props.title),
               h('button', {
                 class: 'aicode-icon-button',
                 type: 'button',
                 'aria-label': '关闭',
-                onClick: close
+                onClick: requestClose
               }, '×')
             ]),
             h('div', { class: 'aicode-sheet-body' }, context.slots.default ? context.slots.default() : [])
@@ -656,9 +945,37 @@
     },
     emits: ['update:modelValue', 'confirm', 'cancel'],
     setup: function (props, context) {
+      var dialogRef = Vue.ref(null);
+
       function close() {
         context.emit('update:modelValue', false);
       }
+
+      function dialogRect() {
+        var el = dialogRef.value;
+        if (!el) return null;
+        var rect = el.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          topRadius: 28,
+          bottomRadius: 28,
+          coversBottom: false
+        };
+      }
+
+      Vue.watch(function () {
+        return props.modelValue;
+      }, function (open) {
+        if (open) pushOverlay(close, dialogRect);
+        else removeOverlay(close);
+      }, { immediate: true });
+
+      Vue.onUnmounted(function () {
+        removeOverlay(close);
+      });
 
       return function () {
         if (!props.modelValue) return null;
@@ -671,7 +988,7 @@
             }
           }
         }, [
-          h('div', { class: 'aicode-dialog' }, [
+          h('div', { ref: dialogRef, class: 'aicode-dialog' }, [
             props.title ? h('h2', { class: 'aicode-dialog-title' }, props.title) : null,
             props.message ? h('p', { class: 'aicode-dialog-message' }, props.message) : null,
             h('div', { class: 'aicode-dialog-actions' }, [
