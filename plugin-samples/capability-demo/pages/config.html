@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>能力演示</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      line-height: 1.6;
+      color: var(--aicode-text, #1f2328);
+      background: var(--aicode-background, #ffffff);
+    }
+    h2 { margin: 0 0 8px; font-size: 20px; }
+    p, li { color: var(--aicode-text-secondary, #59636e); }
+    button {
+      margin: 6px 8px 6px 0;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--aicode-primary, #0969da);
+      color: #ffffff;
+      font-size: 15px;
+    }
+    button:disabled { opacity: .55; }
+    pre {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      overflow: auto;
+      background: var(--aicode-surface, #f6f8fa);
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h2>能力演示</h2>
+  <p>先在「管理」页开启 Shizuku 权限，再点下面的按钮。提示条会出现在对话页底部。</p>
+  <button id="tip">显示提示条</button>
+  <button id="shizuku">执行 Shizuku 查询</button>
+  <button id="debug">打开调试控制台</button>
+  <pre id="output">尚未操作</pre>
+  <script src="/__aicode/aicode.js"></script>
+  <script src="eruda.min.js"></script>
+  <script>
+    if (window.eruda) {
+      eruda.init();
+    }
+  </script>
+  <script>
+    const output = document.getElementById('output');
+    console.log('[capability-demo] config page loaded', {
+      hasAicode: !!window.aicode,
+      hasTip: !!(window.aicode && window.aicode.tip),
+      hasShizuku: !!(window.aicode && window.aicode.shizuku),
+      hasEruda: !!window.eruda
+    });
+
+    window.addEventListener('error', (event) => {
+      output.textContent = '页面错误：' + (event.message || event);
+      if (window.eruda) eruda.show();
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      output.textContent = '未处理异常：' + ((event.reason && event.reason.message) || event.reason);
+      if (window.eruda) eruda.show();
+    });
+
+    if (!window.aicode) {
+      output.textContent = '页面 SDK 未加载：请安装最新 APK 后重试';
+    } else if (typeof aicode.tip !== 'function' || !aicode.shizuku) {
+      output.textContent = '当前 APK 缺少 tip / Shizuku 页面接口，请安装最新 APK';
+    } else {
+      aicode.context().then((context) => {
+        if (output.textContent === '尚未操作') {
+          output.textContent = '页面已连接：' + (context.pageId || context.pluginId || 'ok');
+        }
+      }).catch((error) => {
+        output.textContent = '页面连接失败：' + (error.message || error);
+      });
+    }
+
+    document.getElementById('tip').addEventListener('click', async () => {
+      console.log('[capability-demo] tip clicked');
+      try {
+        const result = await aicode.tip({
+          title: '能力演示',
+          text: '这条提示来自插件配置页，点「知道了」可以验证按钮回调。',
+          action: { label: '知道了', handler: 'tools.tipAction' }
+        });
+        output.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        output.textContent = '提示失败：' + (error.message || error);
+      }
+    });
+
+    document.getElementById('shizuku').addEventListener('click', async () => {
+      console.log('[capability-demo] shizuku clicked');
+      try {
+        const result = await aicode.shizuku.exec('settings get global zen_mode');
+        output.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        output.textContent = 'Shizuku 失败：' + (error.message || error);
+      }
+    });
+
+    document.getElementById('debug').addEventListener('click', () => {
+      if (window.eruda) {
+        eruda.show();
+      } else {
+        output.textContent = '调试控制台未加载：请安装最新 APK';
+      }
+    });
+  </script>
+</body>
+</html>

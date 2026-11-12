@@ -53,6 +53,7 @@ object PluginManifestParser {
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
     private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
+    private val SHIZUKU_KEYS = setOf("purpose")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -69,6 +70,7 @@ object PluginManifestParser {
     private const val MAX_LOCALES = 16
     private const val MAX_IDS_PER_TYPE = 64
     private const val MAX_PROVIDER_URL = 2048
+    private const val MAX_SHIZUKU_PURPOSE = 200
     const val MAX_PATH_LENGTH = 200
     const val MAX_PATH_DEPTH = 8
 
@@ -130,6 +132,7 @@ object PluginManifestParser {
                     hooks = contributes.hooks,
                     mcp = contributes.mcp,
                     providers = contributes.providers,
+                    shizuku = contributes.shizuku,
                     configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage")
                 )
             )
@@ -352,6 +355,7 @@ object PluginManifestParser {
             val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>,
             val providers: List<PluginProviderRef>,
+            val shizuku: PluginShizukuRef?,
             val configPage: String?
         )
 
@@ -361,7 +365,8 @@ object PluginManifestParser {
             var ok = true
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
-                    it != "tools" && it != "hooks" && it != "mcp" && it != "providers" && it != "configPage"
+                    it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
+                    it != "shizuku" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -378,14 +383,20 @@ object PluginManifestParser {
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
             val providers = readProviders(contributes["providers"], "contributes.providers")
                 ?: run { ok = false; emptyList() }
+            val shizuku = readShizuku(contributes["shizuku"], "contributes.shizuku")
+                ?: run {
+                    if (contributes["shizuku"] != null) ok = false
+                    null
+                }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() && configPage == null
+                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
+                shizuku == null && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, configPage) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, shizuku, configPage) else null
         }
 
         private fun readConfigPage(raw: JsonElement?, path: String): String? {
@@ -572,6 +583,21 @@ object PluginManifestParser {
                 }
             }
             return if (ok) result else null
+        }
+
+        /** 缺省表示不使用 Shizuku；声明只需给出用途。 */
+        private fun readShizuku(raw: JsonElement?, path: String): PluginShizukuRef? {
+            if (raw == null) return null
+            val obj = raw as? JsonObject ?: return null.also { invalid(path) }
+            obj.keys.filter { it !in SHIZUKU_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.$it")
+            }
+            val purpose = obj["purpose"]?.stringOrNull()?.trim()
+            if (purpose.isNullOrEmpty() || purpose.length > MAX_SHIZUKU_PURPOSE) {
+                invalid("$path.purpose")
+                return null
+            }
+            return PluginShizukuRef(purpose)
         }
 
         private fun readWorkspaceTools(raw: JsonElement?, path: String): List<PluginWorkspaceToolRef>? {

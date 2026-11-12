@@ -160,6 +160,12 @@ data class PluginProviderRef(
 )
 
 /**
+ * `contributes.shizuku` 声明插件使用 Shizuku。使用者单独授权后，插件可在 Android 系统
+ * 直接执行任意命令；声明只保留用途说明。
+ */
+data class PluginShizukuRef(val purpose: String)
+
+/**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
  * 安装身份还取决于来源，清单里的 `id` / `publisher` 文本不是身份证明。
  */
@@ -182,12 +188,14 @@ data class PluginManifest(
     val hooks: List<PluginHookRef> = emptyList(),
     val mcp: List<PluginMcpRef> = emptyList(),
     val providers: List<PluginProviderRef> = emptyList(),
+    val shizuku: PluginShizukuRef? = null,
     val configPage: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
-            tools.size + hooks.size + mcp.size + providers.size + (if (configPage != null) 1 else 0)
+            tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
+            (if (configPage != null) 1 else 0)
 }
 
 /** 安装与加载过程中的失败原因。UI 按 [PluginErrorCode] 取本地化文案，[detail] 是语言无关的定位信息。 */

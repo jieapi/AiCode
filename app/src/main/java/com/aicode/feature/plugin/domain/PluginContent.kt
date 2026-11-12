@@ -117,6 +117,12 @@ data class PluginProviderDefinition(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 已解析的 Shizuku 声明：仅用途说明，授权后可直接执行任意命令。 */
+data class PluginShizukuDefinition(
+    val pluginId: String,
+    val purpose: String
+)
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
@@ -127,6 +133,7 @@ data class PluginContent(
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
     val providers: List<PluginProviderDefinition> = emptyList(),
+    val shizuku: PluginShizukuDefinition? = null,
     val configPage: PluginSettingsPage? = null
 )
 
@@ -178,6 +185,12 @@ object PluginContentLoader {
         val configPage = manifest.configPage?.let {
             loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
         }
+        val shizuku = manifest.shizuku?.let {
+            PluginShizukuDefinition(
+                pluginId = manifest.id,
+                purpose = it.purpose
+            )
+        }
         return if (errors.isEmpty()) {
             ContentLoadResult.Ok(
                 PluginContent(
@@ -190,6 +203,7 @@ object PluginContentLoader {
                     hooks = hooks,
                     mcp = mcp,
                     providers = providers,
+                    shizuku = shizuku,
                     configPage = configPage
                 )
             )

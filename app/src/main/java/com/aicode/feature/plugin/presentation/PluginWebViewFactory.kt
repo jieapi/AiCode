@@ -3,12 +3,15 @@ package com.aicode.feature.plugin.presentation
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ContextThemeWrapper
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import com.aicode.R
+import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -55,6 +58,15 @@ internal object PluginWebViewFactory {
             settings.builtInZoomControls = false
             settings.displayZoomControls = false
             setBackgroundColor(backgroundColor)
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    FileLogger.d(
+                        "PluginWebView",
+                        "[${page.pluginId}] ${message.message()} (${message.sourceId()}:${message.lineNumber()})"
+                    )
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
                     view: WebView,
@@ -91,7 +103,7 @@ internal object PluginWebViewFactory {
             if (file != root && !file.path.startsWith(prefix)) return null
             if (!file.isFile) return null
             val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
-            return WebResourceResponse(mimeOf(path), null, ByteArrayInputStream(bytes))
+            return webResource(mimeOf(path), bytes)
         }
     }
 
@@ -109,11 +121,18 @@ internal object PluginWebViewFactory {
                 )
             }
             val bytes = runCatching {
-                context.assets.open("plugin-ui/$path").use { it.readBytes() }
+                val assetPath = if (path == "eruda.min.js") "scripts/eruda.min.js" else "plugin-ui/$path"
+                context.assets.open(assetPath).use { it.readBytes() }
             }.getOrNull() ?: return null
-            return WebResourceResponse(mimeOf(path), null, ByteArrayInputStream(bytes))
+            return webResource(mimeOf(path), bytes)
         }
     }
+
+    /** 插件页资源禁用缓存：APK 更新后 WebView 不能继续用旧版 aicode.js。 */
+    private fun webResource(mime: String, bytes: ByteArray): WebResourceResponse =
+        WebResourceResponse(mime, "utf-8", ByteArrayInputStream(bytes)).apply {
+            setResponseHeaders(mapOf("Cache-Control" to "no-store"))
+        }
 
     private fun mimeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
         "html", "htm" -> "text/html"

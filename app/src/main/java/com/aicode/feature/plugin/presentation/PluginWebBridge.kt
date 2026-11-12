@@ -14,6 +14,10 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginProcessException
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
+import com.aicode.feature.plugin.runtime.PluginShizukuException
+import com.aicode.feature.plugin.runtime.PluginShizukuRunner
+import com.aicode.feature.plugin.runtime.PluginTipException
+import com.aicode.feature.plugin.runtime.PluginTipManager
 import com.aicode.feature.plugin.runtime.PluginTerminalException
 import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.workspace.domain.FileAccessProvider
@@ -58,6 +62,8 @@ class PluginWebBridge(
     private val pluginManager: PluginManager,
     private val pluginRuntimeManager: PluginRuntimeManager,
     private val terminalRunner: PluginTerminalRunner,
+    private val shizukuRunner: PluginShizukuRunner,
+    private val tipManager: PluginTipManager,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -138,6 +144,8 @@ class PluginWebBridge(
         "fs.delete" -> hostPaths.delete(PluginHostPaths.requireString(params, "path"))
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
         "bash" -> bash(params)
+        "shizuku.exec" -> shizukuExec(params)
+        "tip" -> tip(params)
         "plugin.invoke" -> invokePlugin(params)
         "terminal.run" -> terminalRun(params)
         "terminal.poll" -> terminalPoll(params)
@@ -176,8 +184,30 @@ class PluginWebBridge(
         }
     }
 
-    /** 新建共享终端标签；后续通过 terminal.poll 读取输出。 */
-    private suspend fun terminalRun(params: JsonObject): JsonElement {
+    /** 页面请求一条对话内提示；动作按钮会回调页面所属插件的 handler。 */
+    private fun tip(params: JsonObject): JsonElement = try {
+        tipManager.show(page.pluginId, params)
+    } catch (e: PluginTipException) {
+        throw PluginHostException(e.code, e.message.orEmpty())
+    }
+
+    /** 通过 Shizuku 在宿主 Android 系统上执行命令；范围由插件的清单声明限制。 */    private suspend fun shizukuExec(params: JsonObject): JsonElement {
+        val command = PluginHostPaths.requireString(params, "command")
+        val timeoutSeconds = (params["timeout"] as? JsonPrimitive)?.longOrNull
+            ?: DEFAULT_SHIZUKU_TIMEOUT_SECONDS
+        return try {
+            val result = shizukuRunner.exec(page.pluginId, command, timeoutSeconds)
+            buildJsonObject {
+                put("output", result.output)
+                put("exitCode", result.exitCode)
+                put("truncated", result.truncated)
+            }
+        } catch (e: PluginShizukuException) {
+            throw PluginHostException(e.code, e.message.orEmpty())
+        }
+    }
+
+    /** 新建共享终端标签；后续通过 terminal.poll 读取输出。 */    private suspend fun terminalRun(params: JsonObject): JsonElement {
         val command = PluginHostPaths.requireString(params, "command").trim()
         val title = (params["title"] as? JsonPrimitive)?.contentOrNull
             ?.trim()
@@ -287,6 +317,7 @@ class PluginWebBridge(
         const val UI_INVOKE_TIMEOUT_MS = 60_000L
         const val MAX_INVOKE_ARGS_CHARS = 256 * 1024
         const val MAX_TERMINAL_TITLE_CHARS = 120
+        const val DEFAULT_SHIZUKU_TIMEOUT_SECONDS = 120L
         val HANDLER_NAME = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
     }
 }

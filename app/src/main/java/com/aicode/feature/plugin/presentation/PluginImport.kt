@@ -148,6 +148,9 @@ private fun PluginPreviewSheet(
             if (manifest.mcp.isNotEmpty()) {
                 Notice(stringResource(R.string.plugins_preview_mcp_notice))
             }
+            if (manifest.shizuku != null) {
+                Notice(stringResource(R.string.plugins_preview_shizuku_notice))
+            }
             preview.installedVersion?.let { installed ->
                 Notice(
                     stringResource(
@@ -239,7 +242,11 @@ private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
         stringResource(R.string.plugins_content_hook, it.event) to it.handler
     } + preview.content.mcp.map {
         stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
-    }
+    } + listOfNotNull(
+        preview.content.shizuku?.let {
+            stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
+        }
+    )
 
 /** 把领域层的错误码翻译成界面文案；[PluginError.detail] 是语言无关的定位信息，原样带入。 */
 @Composable

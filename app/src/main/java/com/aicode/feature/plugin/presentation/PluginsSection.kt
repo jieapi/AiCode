@@ -52,6 +52,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.SegmentedTabs
 import com.aicode.core.ui.SwipeToDeleteRow
+import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHookModes
 import com.aicode.feature.plugin.domain.PluginMcpServer
@@ -102,20 +103,15 @@ internal fun PluginsSection(
     loaded: Boolean,
     onOpenDetail: (InstalledPlugin) -> Unit,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
-    onUninstall: (InstalledPlugin) -> Unit = {}
+    onUninstall: (InstalledPlugin) -> Unit = {},
+    devMode: Boolean = false,
+    devRootPath: String = "",
+    devProjects: List<PluginDevProject> = emptyList(),
+    onSetDevMode: (Boolean) -> Unit = {},
+    onRefreshDevProjects: () -> Unit = {},
+    onInstallDevProject: (PluginDevProject) -> Unit = {}
 ) {
     if (!loaded) return
-    if (plugins.isEmpty()) {
-        SettingsEmptyState(
-            icon = FeatherIcons.Package,
-            title = stringResource(R.string.plugins_empty_title),
-            hint = stringResource(R.string.plugins_empty_hint),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = Spacing.xl, vertical = 48.dp)
-        )
-        return
-    }
 
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -143,6 +139,28 @@ internal fun PluginsSection(
             contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
+            item(key = "developer", contentType = "developer") {
+                PluginDeveloperSection(
+                    devMode = devMode,
+                    devRootPath = devRootPath,
+                    projects = devProjects,
+                    onSetDevMode = onSetDevMode,
+                    onRefresh = onRefreshDevProjects,
+                    onInstall = onInstallDevProject
+                )
+            }
+            if (plugins.isEmpty() && !devMode) {
+                item(key = "empty", contentType = "empty") {
+                    SettingsEmptyState(
+                        icon = FeatherIcons.Package,
+                        title = stringResource(R.string.plugins_empty_title),
+                        hint = stringResource(R.string.plugins_empty_hint),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.xl, vertical = 48.dp)
+                    )
+                }
+            }
             if (plugins.size >= 3) {
                 item(key = "search", contentType = "search") {
                     ModelSearchField(
@@ -154,7 +172,7 @@ internal fun PluginsSection(
                 }
             }
 
-            if (filteredPlugins.isEmpty()) {
+            if (filteredPlugins.isEmpty() && plugins.isNotEmpty()) {
                 item(key = "search-empty", contentType = "empty") {
                     Box(
                         modifier = Modifier
@@ -429,7 +447,10 @@ internal fun PluginDetailSection(
     bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
     onClosePage: () -> Unit = {},
     dependencyState: PluginDependencyUiState? = null,
-    onPrepareDependencies: () -> Unit = {}
+    onPrepareDependencies: () -> Unit = {},
+    shizukuGranted: Boolean = false,
+    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
@@ -466,6 +487,7 @@ internal fun PluginDetailSection(
                 },
                 onMainFrameError = { PluginWebViewCache.clearLoading(configPage.cacheKey) }
             )
+            PluginWebViewCache.put(configPage.cacheKey, webView)
             if (PluginWebViewCache.takeBridge(configPage.cacheKey) == null) {
                 val bridge = bridgeFactory(
                     configPage,
@@ -475,7 +497,6 @@ internal fun PluginDetailSection(
                 webView.addJavascriptInterface(bridge, "__aicodeBridge")
                 PluginWebViewCache.putBridge(configPage.cacheKey, bridge)
             }
-            PluginWebViewCache.put(configPage.cacheKey, webView)
             PluginWebViewCache.markLoading(configPage.cacheKey, url)
             val metrics = context.resources.displayMetrics
             webView.measure(
@@ -514,7 +535,10 @@ internal fun PluginDetailSection(
                 onToggleEnabled = onToggleEnabled,
                 onUninstall = onUninstall,
                 dependencyState = dependencyState,
-                onPrepareDependencies = onPrepareDependencies
+                onPrepareDependencies = onPrepareDependencies,
+                shizukuGranted = shizukuGranted,
+                shizukuState = shizukuState,
+                onSetShizukuGranted = onSetShizukuGranted
             )
         } else {
             // Tab 1: 插件自己的专属 WebView 配置页面
@@ -541,7 +565,10 @@ private fun PluginNativeConfigContent(
     onToggleEnabled: (Boolean) -> Unit,
     onUninstall: () -> Unit,
     dependencyState: PluginDependencyUiState? = null,
-    onPrepareDependencies: () -> Unit = {}
+    onPrepareDependencies: () -> Unit = {},
+    shizukuGranted: Boolean = false,
+    shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
+    onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
     var confirmUninstall by remember { mutableStateOf(false) }
@@ -581,6 +608,55 @@ private fun PluginNativeConfigContent(
                     onCheckedChange = onToggleEnabled,
                     enabled = plugin.status == PluginStatus.OK
                 )
+            }
+        }
+
+        plugin.content.shizuku?.let { declaration ->
+            SettingsGroupHeader(text = stringResource(R.string.plugins_shizuku_section))
+            SettingsGroup {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.plugins_shizuku_scope),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = declaration.purpose,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = stringResource(
+                                if (shizukuGranted) R.string.plugins_shizuku_authorized_hint
+                                else R.string.plugins_shizuku_unauthorized_hint
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (shizukuGranted) MaterialTheme.semanticColors.success
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (shizukuState != ShizukuState.READY) {
+                            Text(
+                                text = stringResource(
+                                    R.string.plugins_shizuku_system_state,
+                                    stringResource(shizukuState.statusLabelRes())
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    AppSwitch(
+                        checked = shizukuGranted,
+                        onCheckedChange = onSetShizukuGranted,
+                        enabled = plugin.isActive
+                    )
+                }
             }
         }
 
@@ -653,8 +729,9 @@ private fun PluginNativeConfigContent(
                 val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
                 val providers = plugin.content.providers
+                val shizuku = plugin.content.shizuku
                 if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty()
+                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty() && shizuku == null
                 ) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
@@ -688,7 +765,11 @@ private fun PluginNativeConfigContent(
                     stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
                 } + providers.map {
                     stringResource(R.string.plugins_content_provider, it.name.resolve(languageTag)) to it.baseUrl
-                }
+                } + listOfNotNull(
+                    shizuku?.let {
+                        stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
+                    }
+                )
                 rows.forEachIndexed { index, (title, description) ->
                     if (index > 0) SettingsDivider()
                     ContentRow(title = title, description = description, active = plugin.isActive)
@@ -829,4 +910,120 @@ private fun ContentRow(title: String, description: String, active: Boolean) {
             )
         }
     }
+}
+
+@Composable
+private fun PluginDeveloperSection(
+    devMode: Boolean,
+    devRootPath: String,
+    projects: List<PluginDevProject>,
+    onSetDevMode: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    onInstall: (PluginDevProject) -> Unit
+) {
+    SettingsGroupHeader(text = stringResource(R.string.plugins_dev_section))
+    SettingsGroup {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.plugins_dev_mode),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(R.string.plugins_dev_mode_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppSwitch(checked = devMode, onCheckedChange = onSetDevMode)
+        }
+    }
+
+    if (!devMode) return
+
+    Spacer(Modifier.height(Spacing.xs))
+    SettingsGroup {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.plugins_dev_root, devRootPath),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onRefresh) {
+                Text(stringResource(R.string.plugins_dev_refresh))
+            }
+        }
+    }
+
+    if (projects.isEmpty()) {
+        Text(
+            text = stringResource(R.string.plugins_dev_empty),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
+        return
+    }
+
+    SettingsGroup {
+        projects.forEachIndexed { index, project ->
+            if (index > 0) SettingsDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = project.dirName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = when {
+                            project.error != null -> stringResource(R.string.plugins_dev_invalid)
+                            project.installedVersion != null -> stringResource(
+                                R.string.plugins_dev_installed,
+                                project.installedVersion
+                            )
+                            else -> stringResource(R.string.plugins_dev_not_installed)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(
+                    onClick = { onInstall(project) },
+                    enabled = project.error == null
+                ) {
+                    Text(
+                        stringResource(
+                            if (project.installedVersion != null) R.string.plugins_dev_reload
+                            else R.string.plugins_dev_install
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun ShizukuState.statusLabelRes(): Int = when (this) {
+    ShizukuState.NOT_INSTALLED -> R.string.settings_shizuku_status_not_installed
+    ShizukuState.NOT_RUNNING -> R.string.settings_shizuku_status_not_running
+    ShizukuState.PERMISSION_DENIED -> R.string.settings_shizuku_status_denied
+    ShizukuState.READY -> R.string.settings_shizuku_status_ready
 }

@@ -84,6 +84,18 @@
     toast: function (message) {
       return call('toast', { message: String(message) });
     },
+    // 在对话内显示可关闭提示条；options.action = { label, handler } 时点击会回调插件进程。
+    tip: function (options) {
+      return call('tip', options || {});
+    },
+    // 通过 Shizuku 在 Android 系统执行命令；需插件声明范围且使用者已单独授权。
+    shizuku: {
+      exec: function (command, options) {
+        var params = { command: String(command) };
+        if (options && options.timeout != null) params.timeout = Number(options.timeout);
+        return call('shizuku.exec', params);
+      }
+    },
     ui: {
       close: function () {
         return call('ui.close');

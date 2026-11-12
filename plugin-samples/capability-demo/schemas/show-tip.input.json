@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "提示标题，可省略"
+    },
+    "text": {
+      "type": "string",
+      "description": "提示正文"
+    },
+    "actionLabel": {
+      "type": "string",
+      "description": "可选按钮文字；填写后点击会回调插件"
+    }
+  },
+  "additionalProperties": false
+}

@@ -52,7 +52,9 @@ class PluginRuntimeManager @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val eventBus: PluginEventBus,
     private val notifier: PluginNotifier,
-    private val terminalRunner: PluginTerminalRunner
+    private val terminalRunner: PluginTerminalRunner,
+    private val shizukuRunner: PluginShizukuRunner,
+    private val tipManager: PluginTipManager
 ) {
 
     private class Entry(
@@ -190,6 +192,8 @@ class PluginRuntimeManager @Inject constructor(
             "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
             "host.bash" -> bash(params)
             "host.notify" -> notifier.notify(pluginId, params)
+            "host.shizuku.exec" -> shizukuExec(pluginId, params)
+            "host.tip" -> tip(pluginId, params)
             "host.terminal.run" -> terminalRun(pluginId, params)
             "host.terminal.poll" -> terminalPoll(pluginId, params)
             "host.terminal.stop" -> terminalStop(pluginId, params, close = false)
@@ -198,8 +202,27 @@ class PluginRuntimeManager @Inject constructor(
         }
     }
 
-    private suspend fun bash(params: JsonObject): JsonElement {
-        val command = PluginHostPaths.requireString(params, "command")
+    private fun tip(pluginId: String, params: JsonObject): JsonElement = try {
+        tipManager.show(pluginId, params)
+    } catch (e: PluginTipException) {
+        throw PluginProcessException(e.code, e.message.orEmpty())
+    }
+
+    private suspend fun shizukuExec(pluginId: String, params: JsonObject): JsonElement {        val command = PluginHostPaths.requireString(params, "command")
+        val timeoutSeconds = (params["timeout"] as? JsonPrimitive)?.longOrNull ?: DEFAULT_SHIZUKU_TIMEOUT_SECONDS
+        return try {
+            val result = shizukuRunner.exec(pluginId, command, timeoutSeconds)
+            buildJsonObject {
+                put("output", result.output)
+                put("exitCode", result.exitCode)
+                put("truncated", result.truncated)
+            }
+        } catch (e: PluginShizukuException) {
+            throw PluginProcessException(e.code, e.message.orEmpty())
+        }
+    }
+
+    private suspend fun bash(params: JsonObject): JsonElement {        val command = PluginHostPaths.requireString(params, "command")
         if (command.isBlank()) throw PluginProcessException("PARAM_INVALID", "empty command")
         if (command.length > PluginHostPaths.MAX_COMMAND_CHARS) {
             throw PluginProcessException("PARAM_INVALID", "command too long")
@@ -296,5 +319,6 @@ class PluginRuntimeManager @Inject constructor(
         const val IDLE_TIMEOUT_MS = 10 * 60_000L
         const val IDLE_CHECK_MS = 60_000L
         const val MAX_TERMINAL_TITLE_CHARS = 120
+        const val DEFAULT_SHIZUKU_TIMEOUT_SECONDS = 120L
     }
 }
