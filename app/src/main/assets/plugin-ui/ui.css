@@ -383,32 +383,113 @@ html {
 .aicode-input,
 .aicode-select,
 .aicode-textarea {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 56px;
-  padding: 16px 14px;
-  border: 1px solid var(--aicode-subtle-border);
+  min-width: 0;
+  min-height: max(56px, calc(32px + 24px * var(--aicode-font-scale)));
+  margin: 0;
+  padding: 16px;
+  border: none;
   border-radius: var(--aicode-radius-md-large);
-  background: var(--aicode-card-surface);
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--aicode-text-field-border);
+  background: var(--aicode-text-field-bg, var(--aicode-card-surface));
   color: var(--aicode-on-surface);
+  caret-color: var(--aicode-primary);
   font: inherit;
   font-size: calc(14px * var(--aicode-font-scale));
+  line-height: calc(21px * var(--aicode-font-scale));
+  letter-spacing: calc(0.25px * var(--aicode-font-scale));
 }
 
-.aicode-input:disabled,
-.aicode-select:disabled {
-  opacity: 0.6;
-}
-
+.aicode-input,
 .aicode-textarea {
-  min-height: 180px;
-  resize: vertical;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.aicode-input::placeholder,
+.aicode-textarea::placeholder {
+  color: var(--aicode-on-surface-variant);
+  font-size: calc(16px * var(--aicode-font-scale));
+  line-height: calc(24px * var(--aicode-font-scale));
+  letter-spacing: calc(0.5px * var(--aicode-font-scale));
+  opacity: 1;
 }
 
 .aicode-input:focus,
 .aicode-select:focus,
 .aicode-textarea:focus {
+  box-shadow: inset 0 0 0 2px var(--aicode-primary);
+  background: var(--aicode-text-field-focused-bg);
+}
+
+.aicode-input:disabled,
+.aicode-select:disabled,
+.aicode-textarea:disabled {
+  box-shadow: inset 0 0 0 1px var(--aicode-text-field-disabled-border);
+  background: var(--aicode-text-field-bg, var(--aicode-card-surface));
+  color: var(--aicode-text-field-disabled-text);
+  -webkit-text-fill-color: var(--aicode-text-field-disabled-text);
+  opacity: 1;
+}
+
+.aicode-input:disabled::placeholder,
+.aicode-textarea:disabled::placeholder {
+  color: var(--aicode-text-field-disabled-text);
+}
+
+.aicode-textarea {
+  display: block;
+  min-height: 180px;
+  resize: vertical;
+}
+
+.aicode-password-field {
+  position: relative;
+  min-width: 0;
+}
+
+.aicode-password-field > .aicode-input {
+  display: block;
+  padding-right: 52px;
+}
+
+.aicode-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--aicode-on-surface-variant);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.aicode-password-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.aicode-password-toggle:active:not(:disabled) {
+  background: var(--aicode-surface-variant);
+}
+
+.aicode-password-toggle:focus-visible {
   outline: 2px solid var(--aicode-primary);
-  outline-offset: 1px;
+  outline-offset: -4px;
+}
+
+.aicode-password-toggle:disabled {
+  color: var(--aicode-text-field-disabled-text);
+  cursor: default;
 }
 
 /* ── 按钮 ── */
@@ -475,32 +556,120 @@ html {
   opacity: 0.5;
 }
 
-/* ── 浮动标签输入框（对齐 OutlinedTextField） ── */
+/* ── 浮动标签输入框（对齐 AppTextField） ── */
 .aicode-outlined-field {
   position: relative;
-  margin: 18px 16px 12px;
+  margin: 8px 16px 12px;
 }
 
-.aicode-outlined-field > label {
+.aicode-text-field[data-label="true"] {
+  padding-top: calc(8px * var(--aicode-font-scale));
+}
+
+.aicode-field-label {
   position: absolute;
-  top: -7px;
-  left: 10px;
+  top: calc(50% + 4px * var(--aicode-font-scale));
+  left: 16px;
   z-index: 1;
-  padding: 0 4px;
-  background: var(--aicode-card-surface);
+  max-width: calc(100% - 32px);
+  overflow: hidden;
   color: var(--aicode-on-surface-variant);
-  font-size: calc(12px * var(--aicode-font-scale));
-  line-height: 14px;
+  font-size: calc(16px * var(--aicode-font-scale));
+  line-height: calc(24px * var(--aicode-font-scale));
+  letter-spacing: calc(0.5px * var(--aicode-font-scale));
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: translateY(-50%);
+  transform-origin: left center;
+  transition: top 0.15s ease, font-size 0.15s ease, line-height 0.15s ease, color 0.15s ease;
+  cursor: text;
 }
 
-.aicode-outlined-field .aicode-input,
-.aicode-outlined-field .aicode-textarea,
-.aicode-outlined-field .aicode-select {
-  border: 1px solid var(--aicode-subtle-border);
+.aicode-text-field[data-multiline="true"] > .aicode-field-label {
+  top: calc(16px + 20px * var(--aicode-font-scale));
+}
+
+.aicode-text-field[data-password="true"] > .aicode-field-label {
+  max-width: calc(100% - 68px);
+}
+
+.aicode-text-field[data-filled="true"] > .aicode-field-label,
+.aicode-text-field:focus-within > .aicode-field-label {
+  top: calc(8px * var(--aicode-font-scale));
+  font-size: calc(12px * var(--aicode-font-scale));
+  line-height: calc(16px * var(--aicode-font-scale));
+  letter-spacing: calc(0.4px * var(--aicode-font-scale));
+}
+
+.aicode-text-field:focus-within > .aicode-field-label {
+  color: var(--aicode-primary);
+}
+
+.aicode-field-outline {
+  position: absolute;
+  top: calc(8px * var(--aicode-font-scale));
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--aicode-text-field-border);
   border-radius: var(--aicode-radius-md-large);
-  background: var(--aicode-card-surface);
-  padding: 16px 14px;
-  font-size: calc(14px * var(--aicode-font-scale));
+  pointer-events: none;
+}
+
+.aicode-text-field[data-label="false"] > .aicode-field-outline {
+  top: 0;
+}
+
+.aicode-field-outline > legend {
+  width: 0;
+  max-width: calc(100% - 8px);
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+  font-size: calc(12px * var(--aicode-font-scale));
+  line-height: calc(16px * var(--aicode-font-scale));
+  letter-spacing: calc(0.4px * var(--aicode-font-scale));
+  white-space: nowrap;
+  visibility: hidden;
+}
+
+.aicode-field-outline > legend > span {
+  padding: 0 4px;
+}
+
+.aicode-text-field[data-filled="true"] > .aicode-field-outline > legend,
+.aicode-text-field:focus-within > .aicode-field-outline > legend {
+  width: auto;
+}
+
+.aicode-text-field:focus-within > .aicode-field-outline {
+  padding: 0 11px;
+  border-width: 2px;
+  border-color: var(--aicode-primary);
+}
+
+.aicode-text-field .aicode-input,
+.aicode-text-field .aicode-textarea,
+.aicode-text-field .aicode-select {
+  box-shadow: none;
+}
+
+.aicode-text-field[data-label="true"][data-filled="false"]:not(:focus-within) .aicode-input::placeholder,
+.aicode-text-field[data-label="true"][data-filled="false"]:not(:focus-within) .aicode-textarea::placeholder {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.aicode-text-field[data-disabled="true"] > .aicode-field-label {
+  color: var(--aicode-text-field-disabled-text);
+  cursor: default;
+}
+
+.aicode-text-field[data-disabled="true"] > .aicode-field-outline {
+  border-color: var(--aicode-text-field-disabled-border);
 }
 
 .aicode-outlined-field-body {
@@ -858,38 +1027,110 @@ html {
   position: fixed;
   inset: 0;
   z-index: 110;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 24px 32px;
   background: rgba(0, 0, 0, 0.32);
 }
 
 .aicode-dialog {
-  width: min(100%, 420px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: min(280px, 100%);
+  max-width: min(560px, 100%);
   max-height: 100%;
-  overflow: auto;
+  overflow: hidden;
   padding: 24px;
   border-radius: 28px;
-  background: var(--aicode-surface);
+  outline: none;
+  background: var(--aicode-dialog-surface);
   color: var(--aicode-on-surface);
+  font-family: var(--aicode-font-sans);
+  animation: aicode-dialog-in 0.15s ease;
 }
 
 .aicode-dialog-title {
-  margin: 0 0 12px;
-  font-size: calc(18px * var(--aicode-font-scale));
+  flex: none;
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+  font-size: calc(24px * var(--aicode-font-scale));
   font-weight: 600;
+  line-height: calc(32px * var(--aicode-font-scale));
+  letter-spacing: 0;
+}
+
+.aicode-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  margin-bottom: 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .aicode-dialog-message {
-  margin: 0 0 20px;
+  margin: 0;
   color: var(--aicode-on-surface-variant);
   font-size: calc(14px * var(--aicode-font-scale));
-  line-height: 1.6;
+  line-height: calc(21px * var(--aicode-font-scale));
+  letter-spacing: calc(0.25px * var(--aicode-font-scale));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.aicode-dialog-form {
+  width: 100%;
+  --aicode-text-field-bg: transparent;
+  --aicode-text-field-focused-bg: transparent;
+}
+
+.aicode-dialog-form .aicode-outlined-field {
+  flex: none;
+  margin: 0;
+}
+
+.aicode-dialog-form .aicode-field {
+  padding: 0;
 }
 
 .aicode-dialog-actions {
   display: flex;
+  flex: none;
+  flex-wrap: wrap-reverse;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px 8px;
+}
+
+.aicode-dialog-button {
+  box-sizing: border-box;
+  min-width: 58px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--aicode-primary);
+  font: inherit;
+  font-size: calc(14px * var(--aicode-font-scale));
+  font-weight: 500;
+  line-height: calc(20px * var(--aicode-font-scale));
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.aicode-dialog-button:active:not(:disabled),
+.aicode-dialog-button:focus-visible {
+  background: var(--aicode-primary-soft);
+}
+
+.aicode-dialog-button:disabled {
+  color: var(--aicode-on-surface);
+  opacity: 0.38;
+  cursor: default;
 }

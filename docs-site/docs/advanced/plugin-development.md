@@ -593,6 +593,47 @@ const off = aicode.events.on((event) => {
 
 可用变量包括 `--aicode-bg`、`--aicode-surface`、`--aicode-on-surface`、`--aicode-primary`、`--aicode-error`、`--aicode-success`、`--aicode-warning`、`--aicode-radius-*`、`--aicode-space-*`、`--aicode-font-scale`。深浅色切换时宿主直接更新变量，页面不会重新加载。
 
+表单可以直接使用宿主的 Vue 组件库，输入框的圆角、描边、文字间距以及深浅色、聚焦和禁用状态与 App 的输入框保持一致：
+
+```html
+<link rel="stylesheet" href="/__aicode/ui.css">
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+
+<aicode-field label="名称">
+  <aicode-input v-model="name" placeholder="输入名称"></aicode-input>
+</aicode-field>
+<aicode-field label="描述">
+  <aicode-textarea v-model="description" placeholder="输入描述"></aicode-textarea>
+</aicode-field>
+```
+
+在 Vue 应用挂载前调用 `app.use(AicodeUI)` 注册组件。每个 `aicode-field` 放一个输入组件；空值且未聚焦时，标签显示在框内，聚焦或有内容时标签浮到边框处，提示文字在标签浮起后显示。点击标签也能聚焦输入框；通过 `disabled` 禁用时，底色保持不变，文字与边框变淡。单独使用 `aicode-input` 或 `aicode-textarea` 时同样应用输入框样式。
+
+`aicode-input` 设置 `type="password"` 时，默认隐藏内容，右侧自动显示明文／隐藏切换按钮；切换只改变显示方式，保留原内容和正在编辑的光标位置。输入框禁用时，切换按钮也会禁用。
+
+### 输入弹窗与文字确认弹窗
+
+`aicode-dialog` 对齐 App 的居中对话框：标题、内容和底部文字按钮分区排列，取消在左、确认在右。两种常见用法分别是：
+
+```html
+<!-- 文字确认 -->
+<aicode-dialog v-model="confirmOpen" title="确认操作"
+  message="确定继续执行吗？" @confirm="runAction"></aicode-dialog>
+
+<!-- 输入表单 -->
+<aicode-dialog v-model="editOpen" title="修改名称" confirm-text="保存"
+  :confirm-disabled="!name.trim()" @confirm="saveName">
+  <aicode-field label="名称">
+    <aicode-input v-model="name" placeholder="输入名称"></aicode-input>
+  </aicode-field>
+</aicode-dialog>
+```
+
+文字确认通过 `message` 显示说明；输入弹窗把输入组件放在默认插槽中，输入框底色透出弹窗颜色，内容过长时只滚动内容区，底部按钮保持可见。`confirm-disabled` 为 `true` 时不能确认，适合必填项未完成时禁用保存。确认会触发 `confirm` 并关闭；取消按钮、遮罩、返回键或 Escape 会触发 `cancel` 并关闭。输入值由页面的 `v-model` 管理，取消时是否恢复原值也由页面决定。
+
+`aicode-bottom-sheet` 仍用于底部弹窗内容，窄屏从底部展开，宽屏居中；简单输入和文字确认直接使用 `aicode-dialog`。
+
 ### 限制
 
 - 页面资源只能从插件包经虚拟域加载，外部链接会被宿主拦截；

@@ -313,20 +313,66 @@
     }
   });
 
+  var FIELD_CONTEXT = Symbol('AicodeField');
+  var nextFieldId = 0;
+
   var AicodeField = defineComponent({
     name: 'AicodeField',
     props: {
       label: { type: String, default: '' }
     },
     setup: function (props, context) {
+      var field = Vue.reactive({
+        id: 'aicode-field-' + (++nextFieldId),
+        outlined: false,
+        filled: false,
+        disabled: false,
+        multiline: false,
+        password: false
+      });
+      Vue.provide(FIELD_CONTEXT, field);
+
       return function () {
-        return h('div', { class: 'aicode-outlined-field' }, [
-          props.label ? h('label', null, props.label) : null,
-          context.slots.default ? context.slots.default() : []
+        return h('div', {
+          class: field.outlined ? 'aicode-outlined-field aicode-text-field' : 'aicode-field',
+          'data-label': String(!!props.label),
+          'data-filled': String(field.filled),
+          'data-disabled': String(field.disabled),
+          'data-multiline': String(field.multiline),
+          'data-password': String(field.password)
+        }, [
+          props.label ? h('label', {
+            class: field.outlined ? 'aicode-field-label' : undefined,
+            for: field.outlined ? field.id : undefined
+          }, props.label) : null,
+          context.slots.default ? context.slots.default() : [],
+          field.outlined ? h('fieldset', {
+            class: 'aicode-field-outline',
+            'aria-hidden': 'true'
+          }, props.label ? [h('legend', null, [h('span', null, props.label)])] : []) : null
         ]);
       };
     }
   });
+
+  function useFieldControl(props, context, kind) {
+    var field = Vue.inject(FIELD_CONTEXT, null);
+    if (!field) return null;
+    var generatedId = field.id;
+
+    function sync() {
+      field.id = context.attrs.id || generatedId;
+      field.outlined = true;
+      field.filled = kind === 'select' || (props.modelValue != null && String(props.modelValue).length > 0);
+      field.disabled = props.disabled;
+      field.multiline = kind === 'textarea';
+      field.password = kind === 'input' && props.type === 'password';
+    }
+
+    Vue.watchEffect(sync);
+    Vue.onBeforeUpdate(sync);
+    return field;
+  }
 
   var AicodeSegmented = defineComponent({
     name: 'AicodeSegmented',
@@ -647,8 +693,21 @@
     }
   });
 
+  var EYE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>' +
+    '<circle cx="12" cy="12" r="3"></circle></svg>';
+
+  var EYE_OFF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94' +
+    'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-4.23 5.67' +
+    'M14.12 14.12a3 3 0 0 1-4.24-4.24"></path>' +
+    '<line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
   var AicodeInput = defineComponent({
     name: 'AicodeInput',
+    inheritAttrs: false,
     props: {
       modelValue: { type: String, default: '' },
       placeholder: { type: String, default: '' },
@@ -657,17 +716,57 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'input');
+      var inputRef = Vue.ref(null);
+      var passwordVisible = Vue.ref(false);
+
+      Vue.watch(function () { return props.type; }, function () {
+        passwordVisible.value = false;
+      });
+
+      function togglePassword() {
+        if (props.disabled) return;
+        var input = inputRef.value;
+        var focused = document.activeElement === input;
+        var start = input.selectionStart;
+        var end = input.selectionEnd;
+        var direction = input.selectionDirection;
+        passwordVisible.value = !passwordVisible.value;
+        if (focused) {
+          Vue.nextTick(function () {
+            input.setSelectionRange(start, end, direction);
+          });
+        }
+      }
+
       return function () {
-        return h('input', {
+        var password = props.type === 'password';
+        var input = h('input', Vue.mergeProps({
+          ref: inputRef,
           class: 'aicode-input',
-          type: props.type,
+          id: field ? field.id : undefined,
+          type: password && passwordVisible.value ? 'text' : props.type,
           value: props.modelValue,
           placeholder: props.placeholder,
           disabled: props.disabled,
           onInput: function (event) {
             context.emit('update:modelValue', event.target.value);
           }
-        });
+        }, context.attrs));
+        if (!password) return input;
+        return h('div', { class: 'aicode-password-field' }, [
+          input,
+          h('button', {
+            class: 'aicode-password-toggle',
+            type: 'button',
+            disabled: props.disabled,
+            'aria-label': passwordVisible.value ? 'Hide password' : 'Show password',
+            'aria-pressed': String(passwordVisible.value),
+            onPointerdown: function (event) { event.preventDefault(); },
+            onClick: togglePassword,
+            innerHTML: passwordVisible.value ? EYE_OFF_ICON : EYE_ICON
+          })
+        ]);
       };
     }
   });
@@ -681,9 +780,11 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'textarea');
       return function () {
         return h('textarea', {
           class: 'aicode-textarea',
+          id: field ? field.id : undefined,
           value: props.modelValue,
           placeholder: props.placeholder,
           disabled: props.disabled,
@@ -704,9 +805,11 @@
     },
     emits: ['update:modelValue'],
     setup: function (props, context) {
+      var field = useFieldControl(props, context, 'select');
       return function () {
         return h('select', {
           class: 'aicode-select',
+          id: field ? field.id : undefined,
           value: props.modelValue,
           disabled: props.disabled,
           onChange: function (event) {
@@ -751,6 +854,21 @@
   var overlayRequest = Promise.resolve();
   var lastOverlaySignature = '';
   var overlaySyncScheduled = false;
+  var overlayScrollLocks = 0;
+  var overlayBodyOverflow = '';
+
+  function lockOverlayScroll() {
+    if (overlayScrollLocks === 0) {
+      overlayBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+    overlayScrollLocks++;
+  }
+
+  function unlockOverlayScroll() {
+    overlayScrollLocks--;
+    if (overlayScrollLocks === 0) document.body.style.overflow = overlayBodyOverflow;
+  }
 
   function topOverlayRect() {
     for (var i = overlayStack.length - 1; i >= 0; i--) {
@@ -854,12 +972,12 @@
       var sheetRef = Vue.ref(null);
       var closeTimer = null;
       var drag = null;
-      var bodyOverflow = null;
+      var bodyLocked = false;
 
       function lockBody() {
-        if (bodyOverflow !== null) return;
-        bodyOverflow = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
+        if (bodyLocked) return;
+        lockOverlayScroll();
+        bodyLocked = true;
       }
 
       function sheetRect() {
@@ -879,9 +997,9 @@
       }
 
       function unlockBody() {
-        if (bodyOverflow === null) return;
-        document.body.style.overflow = bodyOverflow;
-        bodyOverflow = null;
+        if (!bodyLocked) return;
+        unlockOverlayScroll();
+        bodyLocked = false;
       }
 
       function requestClose() {
@@ -1049,21 +1167,35 @@
     }
   });
 
+  var nextDialogId = 0;
+
   var AicodeDialog = defineComponent({
     name: 'AicodeDialog',
+    inheritAttrs: false,
     props: {
       modelValue: { type: Boolean, default: false },
       title: { type: String, default: '' },
       message: { type: String, default: '' },
       confirmText: { type: String, default: '确定' },
-      cancelText: { type: String, default: '取消' }
+      cancelText: { type: String, default: '取消' },
+      confirmDisabled: { type: Boolean, default: false }
     },
     emits: ['update:modelValue', 'confirm', 'cancel'],
     setup: function (props, context) {
       var dialogRef = Vue.ref(null);
+      var titleId = 'aicode-dialog-title-' + (++nextDialogId);
+      var messageId = titleId + '-message';
+      var previousFocus = null;
+      var bodyLocked = false;
+      var resizeObserver = null;
 
       function close() {
         context.emit('update:modelValue', false);
+      }
+
+      function cancel() {
+        context.emit('cancel');
+        close();
       }
 
       function dialogRect() {
@@ -1081,51 +1213,115 @@
         };
       }
 
+      function release() {
+        if (resizeObserver) {
+          resizeObserver.disconnect();
+          resizeObserver = null;
+        }
+        if (bodyLocked) {
+          unlockOverlayScroll();
+          bodyLocked = false;
+        }
+        removeOverlay(cancel);
+        if (dialogRef.value && dialogRef.value.contains(document.activeElement)) {
+          document.activeElement.blur();
+          if (previousFocus && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
+        }
+        previousFocus = null;
+      }
+
       Vue.watch(function () {
         return props.modelValue;
       }, function (open) {
-        if (open) pushOverlay(close, dialogRect);
-        else removeOverlay(close);
+        if (!open) {
+          release();
+          return;
+        }
+        previousFocus = document.activeElement;
+        lockOverlayScroll();
+        bodyLocked = true;
+        pushOverlay(cancel, dialogRect);
+        Vue.nextTick(function () {
+          var dialog = dialogRef.value;
+          if (!props.modelValue || !dialog) return;
+          if (window.ResizeObserver) {
+            resizeObserver = new ResizeObserver(scheduleOverlaySync);
+            resizeObserver.observe(dialog);
+          }
+          var target = dialog.querySelector('[autofocus]:not(:disabled)') || dialog;
+          target.focus({ preventScroll: true });
+          scheduleOverlaySync();
+          trackOverlayMotion(180);
+        });
       }, { immediate: true });
 
-      Vue.onUnmounted(function () {
-        removeOverlay(close);
-      });
+      Vue.onBeforeUnmount(release);
+
+      function onKeydown(event) {
+        var top = overlayStack[overlayStack.length - 1];
+        if (!top || top.close !== cancel) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          cancel();
+        } else if (event.key === 'Tab') {
+          var dialog = dialogRef.value;
+          var focusable = dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]');
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      }
 
       return function () {
         if (!props.modelValue) return null;
-        return h('div', {
+        var form = !!context.slots.default;
+        return h(Vue.Teleport, { to: 'body' }, [h('div', Vue.mergeProps({
           class: 'aicode-dialog-mask',
           onClick: function (event) {
-            if (event.target === event.currentTarget) {
-              context.emit('cancel');
-              close();
-            }
-          }
-        }, [
-          h('div', { ref: dialogRef, class: 'aicode-dialog' }, [
-            props.title ? h('h2', { class: 'aicode-dialog-title' }, props.title) : null,
-            props.message ? h('p', { class: 'aicode-dialog-message' }, props.message) : null,
+            if (event.target === event.currentTarget) cancel();
+          },
+          onKeydown: onKeydown
+        }, context.attrs), [
+          h('div', {
+            ref: dialogRef,
+            class: 'aicode-dialog' + (form ? ' aicode-dialog-form' : ''),
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': props.title ? titleId : undefined,
+            'aria-describedby': props.message ? messageId : undefined,
+            tabindex: -1
+          }, [
+            props.title ? h('h2', { id: titleId, class: 'aicode-dialog-title' }, props.title) : null,
+            props.message || form ? h('div', { class: 'aicode-dialog-body' }, [
+              props.message ? h('p', { id: messageId, class: 'aicode-dialog-message' }, props.message) : null,
+              form ? context.slots.default() : null
+            ]) : null,
             h('div', { class: 'aicode-dialog-actions' }, [
               h('button', {
-                class: 'aicode-button aicode-button-compact',
+                class: 'aicode-dialog-button',
                 type: 'button',
-                onClick: function () {
-                  context.emit('cancel');
-                  close();
-                }
+                onClick: cancel
               }, props.cancelText),
               h('button', {
-                class: 'aicode-button aicode-button-primary aicode-button-compact',
+                class: 'aicode-dialog-button',
                 type: 'button',
+                disabled: props.confirmDisabled,
                 onClick: function () {
+                  if (props.confirmDisabled) return;
                   context.emit('confirm');
                   close();
                 }
               }, props.confirmText)
             ])
           ])
-        ]);
+        ])]);
       };
     }
   });
