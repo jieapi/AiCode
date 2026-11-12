@@ -53,6 +53,7 @@ import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.SegmentedTabs
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.plugin.domain.InstalledPlugin
+import com.aicode.feature.plugin.domain.PluginHookModes
 import com.aicode.feature.plugin.domain.PluginMcpServer
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.domain.PluginStatus
@@ -676,7 +677,12 @@ private fun PluginNativeConfigContent(
                     stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
                         it.description.resolve(languageTag)
                 } + hooks.map {
-                    stringResource(R.string.plugins_content_hook, it.event) to it.handler
+                    val title = if (it.mode == PluginHookModes.TRANSFORM) {
+                        stringResource(R.string.plugins_content_transform_hook, it.event)
+                    } else {
+                        stringResource(R.string.plugins_content_hook, it.event)
+                    }
+                    title to it.handler
                 } + mcpServers.map {
                     stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
                 }

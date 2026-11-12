@@ -2054,6 +2054,7 @@
     <string name="plugins_content_tool">Workspace Tool · %1$s</string>
     <string name="plugins_content_ai_tool">AI Tool · %1$s</string>
     <string name="plugins_content_hook">Lifecycle Hook · %1$s</string>
+    <string name="plugins_content_transform_hook">Writable Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
     <string name="plugins_content_settings_page">Settings page · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>

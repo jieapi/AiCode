@@ -65,6 +65,14 @@ data class PluginToolRef(
     val handler: String
 )
 
+/** hook 的两种模式：`observe` 只观察并返回日志；`transform` 等待宿主应用结构化变更。 */
+object PluginHookModes {
+    const val OBSERVE = "observe"
+    const val TRANSFORM = "transform"
+
+    val ALL = setOf(OBSERVE, TRANSFORM)
+}
+
 /** 宿主支持的插件生命周期事件；清单 `event` 只能取这里的值。 */
 object PluginHookEvents {
     const val AGENT_RUN_STARTED = "agent.run.started"
@@ -75,6 +83,15 @@ object PluginHookEvents {
     const val AGENT_TOOL_FINISHED = "agent.tool.finished"
     const val AGENT_COMPACTION = "agent.compaction"
 
+    /** 一次工具调用执行前；可拒绝或改写参数，改写后重新走完整权限判断。 */
+    const val AGENT_TOOL_BEFORE = "agent.tool.before"
+
+    /** 一次工具调用成功结束后；可改写结果的 `data`。 */
+    const val AGENT_TOOL_AFTER = "agent.tool.after"
+
+    /** 只允许 `mode: "transform"` 的事件。 */
+    val TRANSFORM = setOf(AGENT_TOOL_BEFORE, AGENT_TOOL_AFTER)
+
     val ALL = setOf(
         AGENT_RUN_STARTED,
         AGENT_RUN_FINISHED,
@@ -82,12 +99,22 @@ object PluginHookEvents {
         AGENT_REQUEST_FINISHED,
         AGENT_TOOL_STARTED,
         AGENT_TOOL_FINISHED,
-        AGENT_COMPACTION
+        AGENT_COMPACTION,
+        AGENT_TOOL_BEFORE,
+        AGENT_TOOL_AFTER
     )
 }
 
-/** `contributes.hooks` 声明的一条生命周期 hook。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
-data class PluginHookRef(val id: String, val event: String, val handler: String)
+/**
+ * `contributes.hooks` 声明的一条生命周期 hook。[handler] 是 runtime 导出的 handlers 表里的稳定键；
+ * [mode] 缺省为 [PluginHookModes.OBSERVE]，可写 hook 必须显式声明 `transform`。
+ */
+data class PluginHookRef(
+    val id: String,
+    val event: String,
+    val handler: String,
+    val mode: String = PluginHookModes.OBSERVE
+)
 
 /** `contributes.mcp` 声明的 MCP 配置文件；文件沿用现有 `{"mcpServers": {...}}` 结构。 */
 data class PluginMcpRef(val id: String, val file: String)

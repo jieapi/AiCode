@@ -1,7 +1,7 @@
 # 开发插件
 
 ::: warning 预览功能
-目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**只读的生命周期 hooks**（观察每轮运行开始与结束），只能从本地 `.zip` 导入。提供商、代审核、在线分发等还没有实现，写进清单会被拒绝安装。hooks 是第一版，只接收运行元数据，看不到消息正文，也不能改动请求或替你批准工具。AI 工具与 hooks 的业务逻辑在独立的 JavaScript 沙箱中执行；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
+目前插件可以提供**技能**、**子代理**、**工作区工具**、**设置页入口（HTML 页面）**、**AI 工具**、**MCP 服务器**和**生命周期 hooks**，只能从本地 `.zip` 导入。hooks 分两种：只读观察只接收运行元数据；可写 hook 可在工具执行前拒绝调用或改写参数（改写后重新走完整权限判断），也可改写工具成功结果的数据。只读观察看不到消息正文、工具参数或结果；可写 hook 会拿到对应调用的参数或结果，只安装你信任的插件。提供商、代审核、在线分发等还没有实现，写进清单会被拒绝安装。AI 工具与 hooks 的业务逻辑在容器内的插件子进程中运行（`node` 或 `python3`）；设置页页面在 WebView 里运行，通过宿主注入的 `aicode` 接口读写文件与提示；MCP 服务器复用现有的 HTTP/stdio 连接链路。使用方法见[插件](/guide/plugins)。
 :::
 
 一个插件就是一个 `.zip` 包，根目录放一份 `plugin.json` 说明包里有什么，其余是 Markdown、页面 JSON、工具 schema，以及可选的 `dist/main.js` 业务入口。
@@ -215,7 +215,19 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 
 ## 生命周期 hooks
 
-hooks 让插件在 Agent 运行的关键节点收到只读通知，用来记录日志或统计。当前只支持**只读观察**，事件有七个：
+hooks 有两种模式：
+
+- **`observe`（默认）**：只读通知，宿主异步派发，适合记录日志或统计；
+- **`transform`**：可写，宿主在固定拦截点等待结果，校验通过后应用；失败、超时或格式错误都保持原值继续。
+
+可写 hook 目前只支持两个事件，且必须显式写 `"mode": "transform"`：
+
+| 事件 | 时机 | 可返回的变更 |
+| --- | --- | --- |
+| `agent.tool.before` | 工具执行前、权限判定前 | `decision: "deny"` 阻止执行；`arguments` 改写参数 |
+| `agent.tool.after` | 工具成功结束后 | `data` 改写成功结果的数据 |
+
+只读观察事件有七个：
 
 | 事件 | 时机 |
 | --- | --- |
@@ -227,35 +239,39 @@ hooks 让插件在 Agent 运行的关键节点收到只读通知，用来记录�
 | `agent.tool.finished` | 一次工具调用结束；成功或失败 |
 | `agent.compaction` | 上下文被压缩时 |
 
-hooks 需要 `runtime`，`handler` 写 `dist/main.js` 里 `globalThis.aicode.handlers` 的键：
+hooks 需要 `runtime`，`handler` 是进程 handler 表里的键（与 AI 工具共用），由宿主通过 `hook.invoke` 调用：
 
 ```json
 {
   "runtime": {"type": "javascript", "entry": "dist/main.js"},
   "contributes": {
     "hooks": [
-      {"id": "run-started", "event": "agent.run.started", "handler": "hooks.runStarted"},
       {"id": "run-finished", "event": "agent.run.finished", "handler": "hooks.runFinished"},
-      {"id": "tool-finished", "event": "agent.tool.finished", "handler": "hooks.toolFinished"}
+      {"id": "guard-bash", "event": "agent.tool.before", "handler": "hooks.guardBash", "mode": "transform"},
+      {"id": "redact-result", "event": "agent.tool.after", "handler": "hooks.redactResult", "mode": "transform"}
     ]
   }
 }
 ```
 
 ```js
-globalThis.aicode = {
-  handlers: {
-    "hooks.runStarted": (payload) => ({ logs: [`run started ${payload.runId} mode=${payload.mode}`] }),
-    "hooks.runFinished": (payload) => {
-      const line = `run finished ${payload.status} toolCalls=${payload.toolCalls}`;
-      return { logs: [line] };
-    },
-    "hooks.toolFinished": (payload) => ({ logs: [`tool ${payload.toolName} ${payload.status} ${payload.durationMs}ms`] })
-  }
+const handlers = {
+  "hooks.runFinished": (payload) => ({
+    logs: [`run finished ${payload.status} toolCalls=${payload.toolCalls}`]
+  }),
+  "hooks.guardBash": (payload) => {
+    if (payload.toolName === "bash" && /rm\\s+-rf/.test(payload.arguments.command ?? "")) {
+      return { decision: "deny", reason: "禁止递归删除" };
+    }
+    return { arguments: payload.arguments };
+  },
+  "hooks.redactResult": (payload) => ({
+    data: { text: String(payload.data?.text ?? "").replace(/ghp_[A-Za-z0-9]+/g, "***") }
+  })
 };
 ```
 
-`scope.ids` 要覆盖全部 hook 的 `id`，`scope.events` 要覆盖 hooks 用到的事件集合，两项都不能多写或漏写；只声明事件而没有对应 hook、或只写 hooks 而不申请 `agent.hooks`，都会拒绝安装。
+`handlers` 的接入方式见上面的进程消息循环；hook 与 AI 工具共用同一个进程与 handler 表。
 
 ### 事件内容
 
@@ -280,20 +296,46 @@ globalThis.aicode = {
 | `agent.tool.started` | `callId`、`toolName` |
 | `agent.tool.finished` | `callId`、`toolName`、`status`（`success`/`error`）、`durationMs` |
 | `agent.compaction` | `compacted=true`、`estimatedInputTokens` |
+| `agent.tool.before` | `callId`、`toolName`、`arguments` |
+| `agent.tool.after` | `callId`、`toolName`、`status=success`、`data` |
 
-payload 里**没有**消息正文、工具参数、工具结果和模型输出，插件拿不到你在对话里说了什么，也看不到工具改了什么。
+只读事件的 payload 里**没有**消息正文、工具参数、工具结果和模型输出；可写事件会提供它要处理的参数或结果快照。
+
+### 可写 hook 的返回值
+
+`agent.tool.before`：
+
+```json
+{"decision": "deny", "reason": "策略说明", "arguments": {"path": "safe.txt"}}
+```
+
+- `decision` 只能是 `allow` 或 `deny`，缺省按 `allow`；`deny` 会立即停止后续 hook，返回给 AI 的工具错误码是 `PLUGIN_HOOK_DENIED`；
+- `arguments` 必须是 JSON 对象，且不能改工具名；
+- 参数被改写后，宿主按最终参数重新执行完整权限判断与模式限制，原批准不会沿用。
+
+`agent.tool.after`：
+
+```json
+{"data": {"text": "已脱敏结果"}}
+```
+
+- 只能改 `data`；`status`、图片附件、文件卡片与错误结果不可改，失败的工具调用不会触发该事件；
+- 宿主把改写后的结果同时用于界面展示与回放给模型。
+
+多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个看到前一个改写后的值。单次调用上限 10 秒，一次拦截合计上限 20 秒；超时、异常或返回值格式不合法时跳过该 hook 并保持当前值，**不会因此自动放行或自动拒绝**。
 
 ### 调试输出
 
-handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（最多 50 行、单行 500 字符），其余返回值被忽略。这是 hooks 唯一的输出通道，没有文件、网络或 Android 接口。
+handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（最多 50 行、单行 500 字符）。可写 hook 的 `decision`、`arguments`、`data` 与 `logs` 可以同时返回。
 
 ### 边界
 
-- 宿主异步派发，hook 不进入 Agent 主流程：卡住或抛错只记日志，不阻塞这一轮对话，也不改变运行结果；
-- **只读**：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，也不能影响工具授权与模式限制；
-- 本切片没有 `transform`：能改写内容的 hooks 属于后续能力，写进清单会被拒绝安装；
-- hook 与 AI 工具共用同一个插件进程；进程拥有容器内的文件与命令能力，hook 的只读限制来自宿主只传运行元数据，不是运行时沙箱；
-- 单项调用超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
+- 只读 hook 异步派发，不进入 Agent 主流程；可写 hook 在固定拦截点等待结果，受上述超时约束；
+- **不能提权**：可写 hook 只能拒绝或缩小调用，不能批准工具、不能把宿主拒绝改成允许、不能绕过 PLAN 模式或权限策略；
+- 改写参数后必须重新走完整权限判断；审批后不会悄悄改写参数；
+- `agent.tool.after` 只处理成功结果，不能把错误改成成功，也不能伪造附件或图片；
+- hook 与 AI 工具共用同一个插件进程；进程拥有容器内的文件与命令能力，可写 hook 能读取对应工具的参数与结果，只安装可信插件；
+- 单项观察 hook 超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
 
 ## 插件事件
 

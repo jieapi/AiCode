@@ -84,7 +84,8 @@ data class PluginHook(
     val localId: String,
     val event: String,
     val handler: String,
-    val runtime: PluginRuntime
+    val runtime: PluginRuntime,
+    val mode: String = PluginHookModes.OBSERVE
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
@@ -268,7 +269,8 @@ object PluginContentLoader {
             localId = ref.id,
             event = ref.event,
             handler = ref.handler,
-            runtime = runtime
+            runtime = runtime,
+            mode = ref.mode
         )
     }
 

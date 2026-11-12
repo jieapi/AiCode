@@ -12,7 +12,7 @@ import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
 object PluginApi {
-    val VERSION = SemVer(1, 1, 0)
+    val VERSION = SemVer(1, 2, 0)
 }
 
 sealed interface ManifestParseResult {
@@ -49,7 +49,7 @@ object PluginManifestParser {
     private val RUNTIME_DEPENDENCY_KEYS = setOf("tool", "file")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
-    private val HOOK_KEYS = setOf("id", "event", "handler")
+    private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
     private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
@@ -475,15 +475,30 @@ object PluginManifestParser {
                 val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
                 val event = item["event"]?.stringOrNull()?.takeIf { it in PluginHookEvents.ALL }
                 val handler = item["handler"]?.stringOrNull()?.trim()?.takeIf { HANDLER_NAME.matches(it) }
+                val mode = when (val raw = item["mode"]) {
+                    null -> PluginHookModes.OBSERVE
+                    else -> raw.stringOrNull()?.takeIf { it in PluginHookModes.ALL } ?: run {
+                        invalid("$itemPath.mode")
+                        ok = false
+                        null
+                    }
+                }
                 if (id == null) { invalid("$itemPath.id"); ok = false }
                 if (event == null) { invalid("$itemPath.event"); ok = false }
                 if (handler == null) { invalid("$itemPath.handler"); ok = false }
-                if (id != null && event != null && handler != null) {
+                if (event != null && mode != null) {
+                    val transformEvent = event in PluginHookEvents.TRANSFORM
+                    if (transformEvent != (mode == PluginHookModes.TRANSFORM)) {
+                        invalid("$itemPath.mode")
+                        ok = false
+                    }
+                }
+                if (id != null && event != null && handler != null && mode != null) {
                     if (result.any { it.id == id }) {
                         err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
                         ok = false
                     } else {
-                        result += PluginHookRef(id, event, handler)
+                        result += PluginHookRef(id, event, handler, mode)
                     }
                 }
             }

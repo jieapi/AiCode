@@ -289,6 +289,56 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun transformHooks_areParsed() {
+        val manifest = success(
+            hooksManifest(
+                hooksBlock = """{"id": "guard", "event": "agent.tool.before", "handler": "hooks.guard", "mode": "transform"},
+                    {"id": "redact", "event": "agent.tool.after", "handler": "hooks.redact", "mode": "transform"}"""
+            )
+        )
+        assertEquals(
+            listOf(
+                PluginHookRef("guard", "agent.tool.before", "hooks.guard", PluginHookModes.TRANSFORM),
+                PluginHookRef("redact", "agent.tool.after", "hooks.redact", PluginHookModes.TRANSFORM)
+            ),
+            manifest.hooks
+        )
+    }
+
+    @Test
+    fun transformModeOnObserveEvent_isRejected() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "on-start", "event": "agent.run.started", "handler": "hooks.onStart", "mode": "transform"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
+    fun transformEventRequiresTransformMode() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "guard", "event": "agent.tool.before", "handler": "hooks.guard"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
+    fun unknownHookMode_isRejected() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "on-start", "event": "agent.run.started", "handler": "hooks.onStart", "mode": "write"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
     fun unknownHookEvent_isRejected() {
         assertRejected(
             hooksManifest(
