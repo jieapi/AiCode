@@ -84,7 +84,7 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 
 插件启用后，清单声明的技能、子代理、AI 工具、工作区工具、设置页、hook 和 MCP 都会生效，不再逐项授权。安装确认只展示它会提供什么。
 
-- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，并可以执行 `aicode.bash`。
+- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，可以执行 `aicode.bash`，也可以用 `aicode.invoke` 调用同一插件常驻进程的 handler。
 - 命令与 MCP 进程内部不受宿主路径限制；只安装你信任来源的插件。
 - `aicode://` 下的 `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件给自己扩权或读取密钥。
 - 插件 AI 工具与 hook 在本地容器的插件子进程中运行，可以读写自己目录与授权范围内的文件、执行命令、访问网络；host API 的路径限制只约束这些接口，不约束进程自身。
@@ -196,6 +196,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | --- | --- | --- |
 | 宿主 → 插件 | `tool.invoke` | `params: {handler, args}`，返回 `result` |
 | 宿主 → 插件 | `hook.invoke` | `params: {handler, args}`，返回 `result` |
+| 宿主 → 插件 | `ui.invoke` | 插件页面调用常驻进程：`params: {handler, args}`，返回 `result` |
 | 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
@@ -504,11 +505,14 @@ const off = aicode.events.on((event) => {
 | `aicode.fs.delete(path)` | 删除文件或目录 |
 | `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
 | `aicode.toast(message)` | 轻提示 |
+| `aicode.invoke(handler, args)` | 调用同一插件常驻进程的 handler，返回其 `result`；不支持跨插件 |
 | `aicode.bash(command, options)` | 在当前工作区执行一次性 Shell 命令，返回 `{ output, exitCode, truncated }` |
 | `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
 
 返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
+
+`aicode.invoke` 只允许调用当前页面对应插件的进程，参数与返回值都走 JSON；它会让宿主按需启动该插件的 runtime，单次等待上限 60 秒。插件进程需要处理 `ui.invoke` 方法，否则会返回 `METHOD_UNKNOWN`。
 
 `aicode.bash` 在插件页面所属工作区执行命令，返回 stdout/stderr 合并输出、退出码与是否被截断；`options.timeout` 以秒计，默认 30、上限 300。它适合版本检测、状态查询这类短命令，不要用来启动常驻进程或交互式程序；命令执行环境的初始化由终端页负责，未初始化时返回的退出码为 `null`，输出里会带引导提示。
 

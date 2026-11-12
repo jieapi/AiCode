@@ -24,7 +24,10 @@ internal object PluginWebViewFactory {
 
     const val PAGE_BASE_URL = "https://appassets.androidplatform.net/plugin/"
 
-    fun pageUrl(page: PluginSettingsPage): String = PAGE_BASE_URL + page.pageFile
+    fun pageUrl(page: PluginSettingsPage): String {
+        val version = page.pluginVersion.takeIf { it.isNotBlank() }?.let { "?v=$it" }.orEmpty()
+        return PAGE_BASE_URL + page.pageFile + version
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     fun create(

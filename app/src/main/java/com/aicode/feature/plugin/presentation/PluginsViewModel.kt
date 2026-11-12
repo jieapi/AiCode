@@ -16,6 +16,7 @@ import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -64,7 +65,8 @@ class PluginsViewModel @Inject constructor(
     private val pathHomeResolver: PathHomeResolver,
     private val workspaceRepository: WorkspaceRepository,
     private val commandEngine: CommandEngine,
-    private val eventBus: PluginEventBus
+    private val eventBus: PluginEventBus,
+    private val pluginRuntimeManager: PluginRuntimeManager
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -180,6 +182,8 @@ class PluginsViewModel @Inject constructor(
             commandEngine = commandEngine,
             workspacePath = { workspaceRepository.currentPath() },
             eventBus = eventBus,
+            pluginManager = manager,
+            pluginRuntimeManager = pluginRuntimeManager,
             theme = theme,
             onClosePage = onClosePage,
             post = post

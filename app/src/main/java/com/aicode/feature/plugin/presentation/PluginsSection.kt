@@ -452,31 +452,31 @@ internal fun PluginDetailSection(
         if (!hasConfigPage) return@LaunchedEffect
         val url = PluginWebViewFactory.pageUrl(configPage)
         delay(200)
-        if (PluginWebViewCache.isLoaded(configPage.key, url)) return@LaunchedEffect
+        if (PluginWebViewCache.isLoaded(configPage.cacheKey, url)) return@LaunchedEffect
         runCatching {
-            val webView = PluginWebViewCache.take(configPage.key) ?: PluginWebViewFactory.create(
+            val webView = PluginWebViewCache.take(configPage.cacheKey) ?: PluginWebViewFactory.create(
                 context = context,
                 page = configPage,
                 dark = themeDark,
                 backgroundColor = pageBackground,
                 themeVariables = { themeVariables },
                 onPageFinished = { view ->
-                    PluginWebViewCache.markLoaded(configPage.key, url)
+                    PluginWebViewCache.markLoaded(configPage.cacheKey, url)
                     view.evaluateJavascript(PluginThemeTokens.applyScript(themeVariables), null)
                 },
-                onMainFrameError = { PluginWebViewCache.clearLoading(configPage.key) }
+                onMainFrameError = { PluginWebViewCache.clearLoading(configPage.cacheKey) }
             )
-            if (PluginWebViewCache.takeBridge(configPage.key) == null) {
+            if (PluginWebViewCache.takeBridge(configPage.cacheKey) == null) {
                 val bridge = bridgeFactory(
                     configPage,
                     { script -> runCatching { webView.evaluateJavascript(script, null) } },
                     onClosePage
                 )
                 webView.addJavascriptInterface(bridge, "__aicodeBridge")
-                PluginWebViewCache.putBridge(configPage.key, bridge)
+                PluginWebViewCache.putBridge(configPage.cacheKey, bridge)
             }
-            PluginWebViewCache.put(configPage.key, webView)
-            PluginWebViewCache.markLoading(configPage.key, url)
+            PluginWebViewCache.put(configPage.cacheKey, webView)
+            PluginWebViewCache.markLoading(configPage.cacheKey, url)
             val metrics = context.resources.displayMetrics
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(metrics.widthPixels, View.MeasureSpec.EXACTLY),
