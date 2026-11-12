@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SSH 服务器</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <link rel="stylesheet" href="/__aicode/ui.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    [hidden], [v-cloak] { display: none !important; }
+    body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+    .page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 28px;
+    }
+    .hint {
+      margin: 4px 4px 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(12px * var(--aicode-font-scale));
+    }
+    .warning {
+      margin: 8px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--aicode-error) 12%, transparent);
+      color: var(--aicode-error);
+      font-size: calc(12px * var(--aicode-font-scale));
+    }
+    .action-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 0;
+    }
+    .status {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: calc(11px * var(--aicode-font-scale));
+      white-space: nowrap;
+    }
+    .status.online { background: color-mix(in srgb, var(--aicode-success) 18%, transparent); color: var(--aicode-success); }
+    .status.connecting { background: color-mix(in srgb, var(--aicode-warning) 18%, transparent); color: var(--aicode-warning); }
+    .status.offline { background: color-mix(in srgb, var(--aicode-error) 14%, transparent); color: var(--aicode-error); }
+  </style>
+</head>
+<body>
+<div id="app" class="aicode-page" v-cloak>
+  <header class="aicode-page-header">
+    <aicode-icon-button label="返回" @click="handleBackButton">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+    </aicode-icon-button>
+    <h1 class="aicode-page-title">{{ pageTitle }}</h1>
+    <aicode-icon-button v-if="view === 'list'" label="新建" @click="openEdit(null)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </aicode-icon-button>
+    <button v-if="view === 'edit'" class="aicode-text-button" :disabled="saving" @click="save">保存</button>
+  </header>
+
+  <div class="page-content">
+    <section v-show="view === 'list'" class="view">
+      <aicode-group title="SSH 服务器">
+        <template v-if="servers.length">
+          <template v-for="(server, index) in servers" :key="server.id">
+            <div v-if="index > 0" class="aicode-divider"></div>
+            <aicode-swipe-row @delete="remove(server)">
+              <aicode-row
+                :title="server.name || server.host"
+                :subtitle="server.username + '@' + server.host + ':' + server.port"
+                :badge="statusLabel(server.status)"
+                @click="openDetail(server)"></aicode-row>
+            </aicode-swipe-row>
+          </template>
+        </template>
+        <aicode-empty v-else text="暂无 SSH 服务器" />
+      </aicode-group>
+      <p class="hint">App 启动时会自动连接启用项；连接由常驻插件进程维护。</p>
+      <div class="warning">
+        密码和私钥路径明文保存在插件数据目录 <code>data://servers.json</code>，不会进入 AiCode 备份。建议使用受限账号，私钥放在插件数据目录。
+      </div>
+    </section>
+
+    <section v-show="view === 'detail'" class="view">
+      <aicode-group title="连接信息" :collapsible="false">
+        <div class="aicode-info-row"><span>名称</span><span>{{ current ? current.name : '' }}</span></div>
+        <div class="aicode-divider aicode-divider-flat"></div>
+        <div class="aicode-info-row"><span>地址</span><span>{{ current ? current.username + '@' + current.host + ':' + current.port : '' }}</span></div>
+        <div class="aicode-divider aicode-divider-flat"></div>
+        <div class="aicode-info-row"><span>认证</span><span>{{ current && current.auth === 'password' ? '密码' : '私钥' }}</span></div>
+        <div class="aicode-divider aicode-divider-flat"></div>
+        <div class="aicode-info-row"><span>状态</span><span :class="['status', current ? current.status : 'offline']">{{ statusLabel(current ? current.status : 'offline') }}</span></div>
+        <div class="aicode-divider aicode-divider-flat"></div>
+        <div class="aicode-info-row"><span>启动连接</span><span>{{ current && current.enabled !== false ? '是' : '否' }}</span></div>
+      </aicode-group>
+      <p v-if="current && current.error" class="warning">{{ current.error }}</p>
+      <div class="action-bar">
+        <aicode-button :disabled="busy || !current || current.status === 'online'" @click="connect(current)">连接</aicode-button>
+        <aicode-button :disabled="busy || !current || current.status === 'offline'" @click="disconnect(current)">断开</aicode-button>
+        <aicode-button @click="openEdit(current)">编辑</aicode-button>
+      </div>
+    </section>
+
+    <section v-show="view === 'edit'" class="view">
+      <aicode-group title="基本信息" :collapsible="false">
+        <aicode-field label="名称">
+          <aicode-input v-model="form.name" placeholder="production" />
+        </aicode-field>
+        <aicode-field label="Host">
+          <aicode-input v-model="form.host" placeholder="192.168.1.10" />
+        </aicode-field>
+        <aicode-field label="端口">
+          <aicode-input v-model.number="form.port" placeholder="22" />
+        </aicode-field>
+        <aicode-field label="用户名">
+          <aicode-input v-model="form.username" placeholder="root" />
+        </aicode-field>
+        <aicode-field label="认证方式">
+          <aicode-segmented v-model="form.auth" :options="authOptions" />
+        </aicode-field>
+        <aicode-field v-if="form.auth === 'key'" label="私钥路径">
+          <aicode-input v-model="form.privateKeyPath" placeholder="data://id_ed25519" />
+        </aicode-field>
+        <aicode-field v-if="form.auth === 'key'" label="私钥口令（可选）">
+          <aicode-input v-model="form.passphrase" type="password" />
+        </aicode-field>
+        <aicode-field v-if="form.auth === 'password'" label="密码">
+          <aicode-input v-model="form.password" type="password" />
+        </aicode-field>
+        <div class="aicode-scope-row">
+          <span class="aicode-scope-label">App 启动时连接</span>
+          <aicode-switch v-model="form.enabled"></aicode-switch>
+        </div>
+      </aicode-group>
+      <p v-if="form.auth === 'key'" class="hint">私钥建议使用 data:// 路径，文件放在插件数据目录，避免容器重建后丢失。</p>
+      <p v-if="error" class="aicode-error">{{ error }}</p>
+    </section>
+  </div>
+</div>
+
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/aicode-ui-vue.js"></script>
+<script src="/__aicode/aicode.js"></script>
+<script>
+  (function () {
+    'use strict';
+
+    function emptyForm() {
+      return {
+        id: '',
+        name: '',
+        host: '',
+        port: 22,
+        username: 'root',
+        auth: 'key',
+        privateKeyPath: 'data://id_ed25519',
+        passphrase: '',
+        password: '',
+        enabled: true,
+        status: 'offline',
+        error: ''
+      };
+    }
+
+    function plainServer(server) {
+      return {
+        id: server.id || '',
+        name: server.name || '',
+        host: server.host || '',
+        port: Number(server.port) || 22,
+        username: server.username || '',
+        auth: server.auth === 'password' ? 'password' : 'key',
+        privateKeyPath: server.privateKeyPath || '',
+        passphrase: server.passphrase || '',
+        password: server.password || '',
+        enabled: server.enabled !== false
+      };
+    }
+
+    var app = Vue.createApp({
+      data: function () {
+        return {
+          view: 'list',
+          servers: [],
+          current: null,
+          form: emptyForm(),
+          editingId: '',
+          busy: false,
+          saving: false,
+          error: ''
+        };
+      },
+      computed: {
+        pageTitle: function () {
+          if (this.view === 'edit') return this.editingId ? '编辑服务器' : '新建服务器';
+          if (this.view === 'detail') return this.current ? (this.current.name || this.current.host) : 'SSH 服务器';
+          return 'SSH 服务器';
+        },
+        authOptions: function () {
+          return [
+            { value: 'key', label: '私钥' },
+            { value: 'password', label: '密码' }
+          ];
+        }
+      },
+      mounted: function () {
+        var self = this;
+        this.load().then(function () { return self.refreshStatus(); });
+        if (window.aicode && aicode.ui && aicode.ui.onBack) {
+          aicode.ui.onBack(this.handleBack);
+        }
+        if (window.aicode && aicode.events) {
+          aicode.events.on(function (event) {
+            if (!event || event.name !== 'ssh.status' || !event.payload) return;
+            var payload = event.payload;
+            var server = self.servers.find(function (item) { return item.id === payload.serverId; });
+            if (!server) return;
+            server.status = payload.status;
+            server.error = payload.error || '';
+            if (self.current && self.current.id === server.id) self.current = server;
+          });
+        }
+      },
+      methods: {
+        load: function () {
+          var self = this;
+          return aicode.fs.read('data://servers.json').then(function (res) {
+            var parsed = {};
+            try { parsed = res && res.content ? JSON.parse(res.content) : {}; } catch (e) {}
+            self.servers = (Array.isArray(parsed.servers) ? parsed.servers : []).map(function (server) {
+              var item = plainServer(server);
+              item.status = 'offline';
+              return item;
+            });
+          }).catch(function () {
+            self.servers = [];
+          });
+        },
+        mergeStatus: function (list) {
+          var byId = {};
+          (list || []).forEach(function (server) { byId[server.id] = server; });
+          this.servers.forEach(function (server) {
+            var live = byId[server.id];
+            if (!live) return;
+            server.status = live.status || 'offline';
+            server.error = live.error || '';
+          });
+          if (this.current) {
+            var currentId = this.current.id;
+            var updated = this.servers.find(function (server) { return server.id === currentId; });
+            if (updated) this.current = updated;
+          }
+        },
+        refreshStatus: function () {
+          var self = this;
+          return aicode.invoke('ui.status').then(function (res) {
+            if (res && Array.isArray(res.servers)) self.mergeStatus(res.servers);
+          }).catch(function (e) {
+            self.error = e.message || String(e);
+          });
+        },
+        saveConfig: function () {
+          return aicode.fs.write('data://servers.json', JSON.stringify({ servers: this.servers }, null, 2));
+        },
+        openDetail: function (server) {
+          this.current = server;
+          this.view = 'detail';
+          this.error = '';
+        },
+        openEdit: function (server) {
+          this.error = '';
+          if (server) {
+            this.editingId = server.id;
+            this.form = Object.assign(emptyForm(), server);
+            delete this.form.status;
+            delete this.form.error;
+          } else {
+            this.editingId = '';
+            this.form = emptyForm();
+          }
+          this.view = 'edit';
+        },
+        handleBack: function () {
+          if (this.view === 'list') return false;
+          if (this.view === 'edit') {
+            this.view = this.editingId ? 'detail' : 'list';
+          } else {
+            this.view = 'list';
+          }
+          return true;
+        },
+        handleBackButton: function () {
+          if (!this.handleBack()) {
+            aicode.ui.close().catch(function () {});
+          }
+        },
+        save: function () {
+          var self = this;
+          this.error = '';
+          if (!this.form.name || !this.form.host || !this.form.username) {
+            this.error = '名称、Host、用户名不能为空';
+            return;
+          }
+          this.saving = true;
+          this.form.port = Number(this.form.port) || 22;
+          var data = plainServer(this.form);
+          var index = this.servers.findIndex(function (item) { return item.id === self.editingId; });
+          if (index >= 0) {
+            data.id = this.editingId;
+            this.servers.splice(index, 1, data);
+          } else {
+            data.id = 'srv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+            this.servers.push(data);
+          }
+          this.saveConfig()
+            .then(function () { return aicode.invoke('ui.reload'); })
+            .then(function (res) {
+              if (res && Array.isArray(res.servers)) self.mergeStatus(res.servers);
+              self.view = 'list';
+              aicode.toast('已保存');
+            })
+            .catch(function (e) { self.error = e.message || String(e); })
+            .then(function () { self.saving = false; });
+        },
+        remove: function (server) {
+          var self = this;
+          this.servers = this.servers.filter(function (item) { return item.id !== server.id; });
+          this.current = null;
+          this.view = 'list';
+          this.saveConfig()
+            .then(function () {
+              aicode.invoke('ui.disconnect', { serverId: server.id }).catch(function () {});
+              return self.refreshStatus();
+            })
+            .catch(function (e) { self.error = e.message || String(e); });
+        },
+        connect: function (server) {
+          var self = this;
+          if (!server) return;
+          this.busy = true;
+          aicode.invoke('ui.connect', { serverId: server.id })
+            .then(function () { return self.refreshStatus(); })
+            .catch(function (e) { aicode.toast(e.message || String(e)); })
+            .then(function () { self.busy = false; });
+        },
+        disconnect: function (server) {
+          var self = this;
+          if (!server) return;
+          aicode.invoke('ui.disconnect', { serverId: server.id })
+            .then(function () { return self.refreshStatus(); })
+            .catch(function (e) { aicode.toast(e.message || String(e)); });
+        },
+        statusLabel: function (status) {
+          if (status === 'online') return '已连接';
+          if (status === 'connecting') return '连接中';
+          return '未连接';
+        }
+      }
+    });
+    app.use(AicodeUI);
+    app.mount('#app');
+  })();
+</script>
+</body>
+</html>
