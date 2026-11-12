@@ -671,7 +671,7 @@ fun SettingsScreen(
                 viewModel = viewModel,
                 initialProvider = editingProvider,
                 presetPrefill = providerPresetPrefill,
-                initialTab = if (editingProvider?.pluginId != null ||
+                initialTab = if (
                     onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS ||
                     onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG
                 ) 1 else 0,

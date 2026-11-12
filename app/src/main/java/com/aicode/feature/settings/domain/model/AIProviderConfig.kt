@@ -54,11 +54,7 @@ data class AIProviderConfig(
      * 执行面板脚本时注入为额外环境变量 `AICODE_KEY_<KEY>`，
      * 值支持引用提供商配置占位符，如 `{{PROVIDER_API_KEY}}`、`{{BASE_URL}}`。
      */
-    val scriptParams: Map<String, String> = emptyMap(),
-    /** 非空表示该提供商由插件登记，值对应插件 ID；此类提供商只读、不写入用户配置。 */
-    val pluginId: String? = null,
-    /** 插件内的提供商局部 ID；与 [pluginId] 一起定位贡献。 */
-    val pluginProviderId: String? = null
+    val scriptParams: Map<String, String> = emptyMap()
 ) {
     /** 实际生效的模型：优先 selectedModel，其次 defaultModel。 */
     val effectiveModel: String
@@ -75,8 +71,8 @@ data class AIProviderConfig(
             listOf(ProviderKey(apiKey)).filter { it.value.isNotBlank() }
         }
 
-    /** 是否已配置至少一个可用 Key；插件提供商由插件服务自行处理凭据，宿主不要求 Key。 */
-    val hasUsableApiKey: Boolean get() = pluginId != null || effectiveApiKeys.isNotEmpty()
+    /** 是否已配置至少一个可用 Key。插件提供商默认带占位 Key，使用者可改成服务要求的凭据。 */
+    val hasUsableApiKey: Boolean get() = effectiveApiKeys.isNotEmpty()
 
     /** 实际生效的切换状态码：留空回退默认集合。 */
     val effectiveKeySwitchStatusCodes: Set<Int>

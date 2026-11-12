@@ -441,7 +441,6 @@ object AgentModule {
         eventInjector: AgentEventInjector,
         fileAccess: FileAccessProvider,
         pluginHookDispatcher: com.aicode.feature.plugin.runtime.PluginHookDispatcher,
-        pluginProviderRegistry: com.aicode.feature.plugin.runtime.PluginProviderRegistry,
         @ApplicationContext context: Context
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
@@ -470,7 +469,6 @@ object AgentModule {
             eventInjector,
             fileAccess,
             pluginHookDispatcher,
-            pluginProviderRegistry,
             context
         )
     }
