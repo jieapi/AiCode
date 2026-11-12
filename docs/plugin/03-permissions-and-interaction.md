@@ -1,6 +1,6 @@
 # 插件系统计划：权限、代审核与双向交互
 
-状态：部分实现。代审核已按 `agent.permission.review` 接入全部 ASK 三态流程（含高危）；插件采用启用即信任，不再有逐项能力授权；HTML 页面/配置、通知、Bash/terminal 已实现；tips、Shizuku、提供商仍是设计规划。
+状态：部分实现。代审核已按 `agent.permission.review` 接入全部 ASK 三态流程（含高危）；插件采用启用即信任，不再有逐项能力授权；HTML 页面/配置、通知、Bash/terminal、对话内 tips 与插件级 Shizuku 授权已实现；提供商生命周期与健康探测待补。
 
 ## 1. 三层边界必须分开
 
@@ -26,9 +26,9 @@
 | 提供 HTML 页面 / 配置 | 页面入口、配置读写范围与事件 | 页面可读写工作区、执行命令；不能改变宿主授权 |
 | Bash / terminal | 执行环境、工作区、命令/终端归属 | `bash` 同步；`terminal.run` 走共享标签，由插件显式选择 |
 | 服务依赖准备 | 目标环境 ID、依赖输入/锁文件、实际执行目标 | 单独申请 environment.prepare，用户手动触发，不自动安装系统工具 |
-| 显示 tips | 页面/会话目标、是否含按钮 | 建议仍显式声明，限制频率和来源展示 |
+| 显示 tips | 页面/会话目标、是否含按钮 | 已实现：`host.tip` 与页面 `tip`，队列最多 3 条，同一插件保留最新一条；按钮点击回调插件 handler |
 | 发送系统通知 | 通知类别、目标会话和动作 | 不能取消宿主或其他插件的通知 |
-| 执行 Shizuku | 允许的操作范围 | 插件声明用途/范围，授权后范围内直接执行，不逐次确认；不下发 Binder |
+| 执行 Shizuku | 允许的操作范围 | 已实现：清单声明 `purpose`，插件详情单独授权后可直接执行任意命令；不下发 Binder |
 
 Bash/terminal 已纳入通用能力。页面桥的工作区读写、网络与命令能力都由插件启用状态控制；任意命令内部实际具有的文件/网络等权限，不能靠接口权限伪称已被限制。
 
@@ -140,17 +140,17 @@ AI ToolCall（完整参数）
 
 ## 7. Shizuku
 
-**已确认：插件声明用途/范围，授权后范围内直接执行，不逐次确认。** 建议复用 [ShizukuManager.kt:220](../../app/src/main/java/com/aicode/feature/agent/domain/shizuku/ShizukuManager.kt:220) 的执行后端，不复制一套连接逻辑。
+**已确认：插件声明用途，单独授权后可直接执行任意命令，不逐次确认。** 已实现：清单 `contributes.shizuku` 只声明 `purpose`；插件详情提供独立开关。执行复用 [ShizukuManager.kt:220](../../app/src/main/java/com/aicode/feature/agent/domain/shizuku/ShizukuManager.kt:220) 的 UserService 后端，不复制连接逻辑。
 
-调用前至少确认：插件已启用、声明范围、Shizuku 可用状态与 App 的 Shizuku 系统授权；范围变化或停用后重新检查。授权插件不能代替使用者启动 Shizuku 服务或批准系统授权弹窗。
+调用前至少确认：插件已启用、使用者已授权、Shizuku 可用状态与 App 的 Shizuku 系统授权；停用后重新检查。授权插件不能代替使用者启动 Shizuku 服务或批准系统授权弹窗。
 
 - 不把 Binder、UserService 或任意系统服务对象交给插件。
 - 始终作用于手机 Android 系统，SSH 模式也不变；UI 和日志必须说明目标，避免误当成远端命令。
-- 任意 shell 命令属于高风险能力；第一版按插件声明的范围执行，不做逐次确认。是否先提供结构化操作接口、如何表达范围仍需细化。
+- 任意 shell 命令属于高风险能力；授权后插件可直接执行任意命令，不做逐次确认。结构化操作接口仍后置。
 - 输出有界且可脱敏。取消等待不代表 shell 命令已终止，需专门验证 UserService 中的中断与清理，不能提前宣称取消成功。
 - 宽泛 Shizuku 权限会显著扩大攻击面，包括间接操作其他 App 或 UI 的可能性；沙箱不能撤回已经委托出去的系统能力。
 
-现有 AI Shizuku 工具默认逐次审核，见 [ShizukuTool.kt:47](../../app/src/main/java/com/aicode/feature/agent/domain/tool/shizuku/ShizukuTool.kt:47)。插件 SDK 调用复用后端，但按插件的声明范围与启用状态检查，不因绕过 AgentTool 而绕过系统授权。
+现有 AI Shizuku 工具默认逐次审核，见 [ShizukuTool.kt:47](../../app/src/main/java/com/aicode/feature/agent/domain/tool/shizuku/ShizukuTool.kt:47)。插件 SDK 调用复用后端，但按插件的声明范围、启用状态与插件级授权检查，不因绕过 AgentTool 而绕过系统授权。
 
 ## 8. 停用与安全承诺
 

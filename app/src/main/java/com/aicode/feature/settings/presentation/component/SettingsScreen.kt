@@ -411,6 +411,10 @@ fun SettingsScreen(
     val plugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
     val pluginsLoaded by pluginsViewModel.loaded.collectAsStateWithLifecycle()
     val pluginDependencyStates by pluginsViewModel.dependencyStates.collectAsStateWithLifecycle()
+    val shizukuGrantedPluginIds by pluginsViewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
+    val shizukuState by pluginsViewModel.shizukuState.collectAsStateWithLifecycle()
+    val pluginDevMode by pluginsViewModel.devMode.collectAsStateWithLifecycle()
+    val pluginDevProjects by pluginsViewModel.devProjects.collectAsStateWithLifecycle()
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val pluginLanguageTag = currentLanguageTag()
@@ -1388,7 +1392,13 @@ fun SettingsScreen(
                         section = SettingsSection.PluginDetail
                     },
                     onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) },
-                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) }
+                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) },
+                    devMode = pluginDevMode,
+                    devRootPath = pluginsViewModel.devRootPath,
+                    devProjects = pluginDevProjects,
+                    onSetDevMode = pluginsViewModel::setDevMode,
+                    onRefreshDevProjects = pluginsViewModel::refreshDevProjects,
+                    onInstallDevProject = pluginsViewModel::installDevProject
                 )
                 SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -1413,7 +1423,10 @@ fun SettingsScreen(
                             section = SettingsSection.Plugins
                         },
                         dependencyState = pluginDependencyStates[plugin.id],
-                        onPrepareDependencies = { pluginsViewModel.prepareDependencies(plugin.id) }
+                        onPrepareDependencies = { pluginsViewModel.prepareDependencies(plugin.id) },
+                        shizukuGranted = plugin.id in shizukuGrantedPluginIds,
+                        shizukuState = shizukuState,
+                        onSetShizukuGranted = { pluginsViewModel.setShizukuGranted(plugin, it) }
                     )
                 }
                 SettingsSection.About -> AboutSection(

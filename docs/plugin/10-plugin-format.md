@@ -396,6 +396,17 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 凭据 | 默认发占位 Key，插件服务自行处理上游凭据；使用者可按插件要求改成实际凭据 |
 | 状态 | 清单解析、自动注册与清理、模型添加与选择已实现；服务就绪探测与 SSH 场景待验证 |
 
+### 第七切片（已实现）：Shizuku 声明
+
+| 项 | 行为 |
+| --- | --- |
+| 贡献 | `contributes.shizuku`，`{purpose}`；只声明用途，授权后可直接执行任意命令 |
+| 授权 | 插件级独立授权，在插件详情中开启；启用插件不会自动获得 |
+| 执行 | 复用 `ShizukuManager` 的 UserService 后端；每次调用检查插件启用、使用者授权与 Shizuku 就绪状态 |
+| 接口 | 进程 `host.shizuku.exec`、页面 `aicode.shizuku.exec`；返回 `{output, exitCode, truncated}`，输出有界 |
+| 边界 | 始终作用于手机 Android 系统，SSH 模式不变；不向插件下发 Binder 或系统服务对象 |
+| 状态 | 已实现并通过单测；真机验证待补 |
+
 ### 第五切片（已实现）：生命周期 hooks
 
 | 项 | 行为 |
@@ -426,7 +437,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 校验规则（实现里的硬规则）
 
-- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools`、`contributes.mcp`、`contributes.hooks`（`observe` / `transform`）。
+- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools`、`contributes.mcp`、`contributes.hooks`（`observe` / `transform`）、`contributes.providers`、`contributes.shizuku`。
 - hooks 声明的事件必须来自宿主支持的事件集合；事件与 mode 一一对应：`agent.tool.before` / `agent.tool.after` / `agent.http.before` 必须 `transform`，`agent.permission.review` 必须 `review`，其余只读事件必须 `observe`；同类贡献 ID 不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。

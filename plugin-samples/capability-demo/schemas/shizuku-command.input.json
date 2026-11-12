@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "要执行的 settings 命令；省略时查询免打扰状态"
+    }
+  },
+  "additionalProperties": false
+}

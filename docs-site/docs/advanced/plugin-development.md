@@ -173,6 +173,20 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 
 插件负责启动兼容服务并保证宿主可访问；插件启用或安装后，宿主在设置 → 提供商里创建带「插件」标记的普通条目。条目与自建渠道同权：可以改名、改地址、改凭据、启停，在模型页从兼容服务 `/v1/models` 拉取并选择模型。插件停用或卸载时，该插件注册的条目会被删除；服务未就绪时请求直接失败，宿主不会回退到其他付费渠道。
 
+## Shizuku 权限
+
+插件可以声明通过 Shizuku 执行 Android 系统命令的范围。Shizuku 是插件级独立授权：安装或启用插件不会自动获得，必须在插件详情里单独打开。
+
+```json
+"contributes": {
+  "shizuku": {
+    "purpose": "切换免打扰与查询系统设置"
+  }
+}
+```
+
+授权后，该插件可以直接执行任意 Shizuku 命令，不逐次确认；实际执行还要求 Shizuku 服务运行且 App 已获系统授权。Shizuku 授权是插件级独立开关，启用插件本身不会自动获得。
+
 ## AI 工具与运行时
 
 AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器的子进程里运行它，工作目录是插件自己的安装目录；进程通过 stdin/stdout 的 NDJSON JSON-RPC 与宿主通信，可以读写文件、执行命令、发事件。
@@ -228,6 +242,8 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
 | 插件 → 宿主 | `host.terminal.run` / `poll` / `stop` / `close` | 创建、轮询、停止、关闭共享终端标签，参数与页面桥 `terminal.*` 一致 |
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
+| 插件 → 宿主 | `host.tip` | `params: {title?, text, action?{label, handler}}`，在对话内显示可关闭提示条；按钮点击以 `ui.invoke` 回调 `handler` |
+| 插件 → 宿主 | `host.shizuku.exec` | `params: {command, timeout?}`，经 Shizuku 在 Android 系统执行；插件声明用途且使用者已授权后直接执行 |
 | 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
 
 入口至少要实现一个消息循环：
@@ -533,6 +549,8 @@ const off = aicode.events.on((event) => {
 | `aicode.fs.delete(path)` | 删除文件或目录 |
 | `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
 | `aicode.toast(message)` | 轻提示 |
+| `aicode.tip({title?, text, action?{label, handler}})` | 在对话内显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
+| `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；插件声明用途且已单独授权后直接执行，`options.timeout` 以秒计 |
 | `aicode.invoke(handler, args)` | 调用同一插件常驻进程的 handler，返回其 `result`；不支持跨插件 |
 | `aicode.bash(command, options)` | 在当前工作区执行一次性 Shell 命令，返回 `{ output, exitCode, truncated }` |
 | `aicode.terminal.run(command, options)` | 创建共享终端标签，返回 `{ tabId, state }`；`options.title` 可选 |

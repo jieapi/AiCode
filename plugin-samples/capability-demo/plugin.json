@@ -1,0 +1,57 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.capabilities",
+  "name": {
+    "default": "Capability Demo",
+    "zh-CN": "能力演示"
+  },
+  "version": "1.0.0",
+  "publisher": "demo",
+  "repository": "https://github.com/example/capability-demo",
+  "description": {
+    "default": "Demo plugin for conversation tips and plugin-level Shizuku permission.",
+    "zh-CN": "演示对话内提示条与插件级 Shizuku 授权：可在插件配置页直接触发，也可以让 AI 调用两个演示工具。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "tools": [
+      {
+        "id": "show-tip",
+        "title": {
+          "default": "Show Tip",
+          "zh-CN": "显示提示条"
+        },
+        "description": {
+          "default": "Show a dismissible tip in the conversation. Use it to verify host.tip.",
+          "zh-CN": "在对话内显示一条可关闭的提示条，用于验证 host.tip。"
+        },
+        "inputSchema": "schemas/show-tip.input.json",
+        "handler": "tools.showTip"
+      },
+      {
+        "id": "shizuku-command",
+        "title": {
+          "default": "Shizuku Command",
+          "zh-CN": "执行 Shizuku"
+        },
+        "description": {
+          "default": "Run a read-only settings command through Shizuku. Requires the plugin-level Shizuku permission.",
+          "zh-CN": "通过 Shizuku 执行一条只读 settings 命令；需要先在插件详情中开启 Shizuku 权限。"
+        },
+        "inputSchema": "schemas/shizuku-command.input.json",
+        "handler": "tools.shizuku"
+      }
+    ],
+    "shizuku": {
+      "purpose": "演示查询 Android 系统设置"
+    },
+    "configPage": "pages/config.html"
+  }
+}

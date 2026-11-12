@@ -205,6 +205,10 @@ class PluginManager internal constructor(
     /** 插件专属数据目录，对应桥里的 `data://` 根。 */
     fun dataDirFor(pluginId: String): File = File(dataRoot, pluginId)
 
+    /** 开发者侧载目录，容器内对应 `~/.aicode/plugin-dev`。 */
+    val devDir: File
+        get() = File(rootDir.parentFile ?: rootDir, DEV_DIR).apply { mkdirs() }
+
     /**
      * 在本地容器、插件安装目录里准备依赖；长操作不持锁，失败时保留未准备状态。
      * 没有运行时的纯声明式插件与没有依赖声明的运行时直接视为无需准备。
@@ -533,6 +537,7 @@ class PluginManager internal constructor(
         private const val TAG = "PluginManager"
         private const val REPLACED_SUFFIX = ".replaced"
         private const val PLUGINS_DIR = "plugins"
+        private const val DEV_DIR = "plugin-dev"
         private const val REGISTRY_FILE = "plugin-registry.json"
         const val ORIGIN_LOCAL = "local"
     }

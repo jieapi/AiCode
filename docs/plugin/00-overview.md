@@ -50,7 +50,7 @@
 | R08 | 扩展 Agent 生命周期 | 包含请求前、完成时、hooks 等；每个时机可读和可修改什么仍需细化 |
 | R09 | 参与权限审核 | 按下节已确认的委托顺序，不是替换整个权限策略引擎；已开放高危 ASK |
 | R10 | 双向交互 | 插件可向 App 显示 tips、发送通知，App 可把事件或操作结果回传插件 |
-| R11 | 调用 Shizuku | 插件声明用途/范围，授权后范围内直接执行，不逐次弹窗；系统授权与撤销仍需检查 |
+| R11 | 调用 Shizuku | 插件声明用途，使用者单独授权后可直接执行任意命令，不逐次弹窗；系统授权与撤销仍需检查 |
 | R12 | 声明能力与安装确认 | 安装确认时展示将获得的贡献与高危能力；采用启用即信任，安装后全部贡献生效 |
 | R13 | 多索引与独立源码仓库 | 可配置多个索引仓库，索引仓库只存索引，每个插件一个独立源码仓库 |
 | R14 | UI 通用化 | 插件页面、设置页入口与配置页统一使用 HTML + 宿主组件库 + 页面桥 |
@@ -139,8 +139,8 @@ App 按现有规则判断
 | 启动事件与常驻运行时（`app.started`、`runtime.resident`） | 已实现，冒烟编译与单测待本次验证 | `AIEditorApp.onCreate`、`PluginHookDispatcher.dispatchAppStarted`、`PluginRuntimeManager.pruneIdle` |
 | 设置页入口与插件配置页（HTML） | 已实现 | `contributes.settingsPages`、`configPage`、`PluginWebPanelScreen` |
 | 贡献：插件提供商（OpenAI 兼容服务 + 自动注册为可写提供商） | 部分实现，待真机验证 | `contributes.providers`、`PluginProviderRegistrar`、设置页插件标记 |
-| 服务环境、tips / Shizuku | 未实现 | 见 [03](03-permissions-and-interaction.md)、[12](12-service-dependencies.md) |
-| 开发者侧载 / 调试模式 | 未实现（已定要做） | 普通 `.zip` 导入已可用 |
+| 插件 tips（`host.tip` / 页面 `tip`）与插件级 Shizuku 授权 | 已实现，单测通过；真机验证待补 | `PluginTipManager`、`PluginShizukuRunner`、`PluginShizukuPermissionRepository` |
+| 开发者侧载 / 调试模式 | 已实现：开关、开发目录安装与自动重载 | `PluginDevSettingsRepository`、`PluginDevPackageBuilder`、`PluginsViewModel` |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 本轮不做，保留阶段 7 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 实现范围的精确说明（哪些字段会被接受、哪些会被拒绝、各项限额）见 [10-plugin-format.md](10-plugin-format.md) 第 12 节。
@@ -157,14 +157,14 @@ App 按现有规则判断
 | 3 通用 UI | 已定方案 | 唯一形态是 HTML 页面（WebView + 宿主 bridge + Vue 组件库）；声明式结构化 UI 引擎不再实施 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；插件提供商已接入 OpenAI 兼容服务并自动注册为可写提供商，服务就绪探测待验证 |
 | 5 右抽屉、配置与受控命令 | 部分完成 | 右抽屉、全部工具页、详情页已接通；`bash` 同步 + `terminal.run` 共享标签已实现，标签默认隐藏、终端设置开启后可见；待真机验证 |
-| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）的 allow/deny/pass；`planMode` 与插件自身工具仍不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform、tips 与 Shizuku 未开始 |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）的 allow/deny/pass；`planMode` 与插件自身工具仍不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。tips 与插件级 Shizuku 授权已实现；响应 transform 仍后置 |
 | 7 目录分发、发布与安全验收 | 本轮不做 | 在线索引保留规划；官方标识用官方索引地址白名单，仓库尚未创建；不在 F-Droid 上架 |
 
 ### 8.3 当前进度
 
 当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash`/`host.terminal.*` 使用宿主能力。工作区工具页面统一为 HTML，命令由页面通过宿主桥执行；共享终端标签已实现，运行状态由插件页面轮询展示。
 
-2026-11-12 设计收敛：通用 UI 唯一形态定为 HTML 页面（WebView + 宿主 bridge + Vue 组件库），删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0（此前 1.1.0-1.5.0 的功能全部归入 1.0.0）；插件启用即信任、全局安装与启用；不在 F-Droid 上架；官方标识用官方索引地址白名单（仓库未创建）；在线索引本轮不做；备份不含插件；外部 MCP/技能脚本不做强隔离；tips 用对话内提示条；Shizuku 由插件声明范围，授权后范围内直接执行；增加开发者侧载；代审核开放高危 ASK。命令侧定为 `bash` 同步 + `terminal.run` 共享标签，由插件显式选择，标签生命周期由插件维护，后台运行默认隐藏、终端设置开启后可见。提供商改为插件提供 OpenAI 兼容服务，宿主只登记 baseUrl 与模型。
+2026-11-12 设计收敛：通用 UI 唯一形态定为 HTML 页面（WebView + 宿主 bridge + Vue 组件库），删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0（此前 1.1.0-1.5.0 的功能全部归入 1.0.0）；插件启用即信任、全局安装与启用；不在 F-Droid 上架；官方标识用官方索引地址白名单（仓库未创建）；在线索引本轮不做；备份不含插件；外部 MCP/技能脚本不做强隔离；tips 用对话内提示条；Shizuku 由插件声明用途，授权后可直接执行任意命令；增加开发者侧载；代审核开放高危 ASK。命令侧定为 `bash` 同步 + `terminal.run` 共享标签，由插件显式选择，标签生命周期由插件维护，后台运行默认隐藏、终端设置开启后可见。提供商改为插件提供 OpenAI 兼容服务，宿主只登记 baseUrl 与模型。
 
 2026-11-12：插件提供商改为自动注册为可写提供商——清单支持 `contributes.providers[]`（`id`/`name`/`description?`/`format`/`baseUrl`），只接受 OpenAI 兼容格式；插件启用或安装时在提供商表中创建 `plugin:<插件ID>:<局部ID>` 记录，复用 `OpenAIAdapter`，用户可像普通渠道一样改名、改地址、改凭据、拉取与选择模型；插件停用/卸载时删除该插件注册的记录。设置页保留“插件”标记。服务未启动时请求失败，不回退其他渠道。编译与插件单测通过，真机验证待补。
 
@@ -201,22 +201,21 @@ App 按现有规则判断
    - 插件在 `contributes.providers` 登记 OpenAI 兼容服务的 `baseUrl`；宿主复用 `OpenAIAdapter`，不新增上游适配器。
    - 插件启用或安装时自动注册为可写提供商记录，停用或卸载时删除；设置页保留插件标记，模型与选中模型走现有存储。
    - 待补：服务就绪检测、SSH 场景与真机验证；停用或卸载时不静默回退其他付费渠道。
-3. **tips 与 Shizuku**
-   - tips：对话内可关闭提示条，支持操作按钮；与系统通知（`host.notify`）分开。
-   - Shizuku：插件声明用途/范围，授权后范围内直接执行，不逐次弹窗；系统授权、撤销与范围变化仍需重新检查。
-4. **开发者侧载 / 调试模式**
-   - 设置开关，支持本地目录或 `.zip` 安装与热重载，带明显风险提示；不参与在线更新。
-5. **安全与发布前检查**
+3. **tips、Shizuku 与开发者侧载**（已实现，真机待验证）
+   - tips：`host.tip` / 页面 `tip` 在对话内显示可关闭提示条，支持按钮回调插件 handler；队列最多 3 条。
+   - Shizuku：清单声明用途，插件详情单独授权后可直接执行任意命令，不再按命令过滤。
+   - 开发者侧载：插件页开关；`~/.aicode/plugin-dev/<项目>` 目录安装，启用期间自动重载。
+4. **安全与发布前检查**
    - 页面桥的 `bash`/`fs.*` 在执行前复核插件仍启用；当前页面打开后停用插件仍可调用。
    - 插件进程 stdout 增加单行长度上限；补强杀、崩溃恢复、OOM 与资源边界验证。
    - 命令与输出写入日志时处理敏感信息；插件可执行命令的风险要在安装确认与用户文档中持续说明。
    - 同步 `docs-site/docs/guide/plugins.md` 与 `advanced/plugin-development.md`：移除运行面板、1.1.0、沙箱等过时描述。
-6. **已完成的清理项**
+5. **已完成的清理项**
    - 抽屉交互、工具数据对账、`removeToolFromProject`、工作区切换重读、不可用标注、详情页空态已完成；参数类型与快速运行问题随 JSON 页面移除而消失。
 
 ### 8.5 需求与阶段对应
 
-- 命令执行与共享标签、提供商、tips/Shizuku 是下一阶段优先项；开发者侧载与安全加固随实现补。
+- 命令执行与共享标签、提供商、tips/Shizuku、开发者侧载均已实现，下一阶段优先做真机回归与服务就绪探测。
 - 在线安装、更新与官方标识属于阶段 7，本轮不做；官方索引仓库建好后再补地址与发布流程。
 - 声明式结构化 UI 不再实施，HTML 页面协议是唯一形态。
 - hooks 响应 transform 仍后置，见 [05](05-roadmap-and-decisions.md) 决策表。
