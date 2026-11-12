@@ -35,6 +35,7 @@
 
 - 宿主注入 CSS 变量（背景、表面、文字、主色、间距、圆角、字号缩放），页面使用这些变量。
 - `aicode-ui-vue.js` 提供按钮、输入、开关、列表、卡片、徽章等组件；视觉复用 App 语义色。
+- `AicodeMarkdown` 复用宿主内置的 `marked`、`DOMPurify` 与 `highlight.js`，并随主题加载 GitHub Markdown / highlight 样式；插件 WebView 的静态资源统一放在 `assets/plugin-ui/`，经 `/__aicode/` 白名单提供。
 - 页面自行处理窄屏/平板、键盘遮挡与长列表滚动；宿主只提供 WebView 容器、标题栏与返回。
 - WebView 缓存按插件版本失效；插件更新后不会继续加载旧页面资源。
 

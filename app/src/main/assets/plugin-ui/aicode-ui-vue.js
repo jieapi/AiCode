@@ -125,6 +125,84 @@
     return html.join('');
   }
 
+  /* ── Markdown ── */
+  var markdownAssetState = {
+    ready: false,
+    loading: null,
+    themeLink: null,
+    highlightLink: null
+  };
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      script.src = src;
+      script.onload = function () { resolve(); };
+      script.onerror = function () { reject(new Error('failed to load ' + src)); };
+      document.head.appendChild(script);
+    });
+  }
+
+  function ensureMarkdownThemeLinks() {
+    if (markdownAssetState.themeLink) return;
+    markdownAssetState.themeLink = document.createElement('link');
+    markdownAssetState.themeLink.rel = 'stylesheet';
+    markdownAssetState.themeLink.id = 'aicode-markdown-theme';
+    document.head.appendChild(markdownAssetState.themeLink);
+    markdownAssetState.highlightLink = document.createElement('link');
+    markdownAssetState.highlightLink.rel = 'stylesheet';
+    markdownAssetState.highlightLink.id = 'aicode-highlight-theme';
+    document.head.appendChild(markdownAssetState.highlightLink);
+  }
+
+  function markdownThemeIsDark() {
+    var value = getComputedStyle(document.documentElement)
+      .getPropertyValue('--aicode-page-bg')
+      .trim();
+    var match = /^#([0-9a-fA-F]{6})$/.exec(value);
+    if (!match) return false;
+    var rgb = parseInt(match[1], 16);
+    var r = (rgb >> 16) & 255;
+    var g = (rgb >> 8) & 255;
+    var b = rgb & 255;
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
+  }
+
+  function applyMarkdownTheme() {
+    if (!markdownAssetState.themeLink) return;
+    var dark = markdownThemeIsDark();
+    var markdown = '/__aicode/markdown/' +
+      (dark ? 'github-markdown-dark.css' : 'github-markdown-light.css');
+    var highlight = '/__aicode/markdown/' +
+      (dark ? 'highlight-github-dark.min.css' : 'highlight-github.min.css');
+    if (markdownAssetState.themeLink.getAttribute('href') !== markdown) {
+      markdownAssetState.themeLink.href = markdown;
+    }
+    if (markdownAssetState.highlightLink.getAttribute('href') !== highlight) {
+      markdownAssetState.highlightLink.href = highlight;
+    }
+  }
+
+  function ensureMarkdownAssets() {
+    ensureMarkdownThemeLinks();
+    applyMarkdownTheme();
+    if (markdownAssetState.ready) return Promise.resolve();
+    if (markdownAssetState.loading) return markdownAssetState.loading;
+    markdownAssetState.loading = Promise.all([
+      loadScript('/__aicode/markdown/marked.min.js'),
+      loadScript('/__aicode/markdown/purify.min.js'),
+      loadScript('/__aicode/markdown/highlight.min.js')
+    ]).then(function () {
+      markdownAssetState.ready = true;
+    }).catch(function (error) {
+      markdownAssetState.loading = null;
+      throw error;
+    });
+    return markdownAssetState.loading;
+  }
+
+  window.addEventListener('aicode:theme', applyMarkdownTheme);
+
   var AicodeBadge = defineComponent({
     name: 'AicodeBadge',
     props: {
@@ -338,10 +416,47 @@
       text: { type: String, default: '' }
     },
     setup: function (props) {
+      var root = Vue.ref(null);
+      var enhanced = Vue.ref(false);
+
+      function highlight() {
+        if (!enhanced.value || !window.hljs || !root.value) return;
+        Array.prototype.forEach.call(root.value.querySelectorAll('pre code'), function (element) {
+          try {
+            window.hljs.highlightElement(element);
+          } catch (e) {
+            // 忽略单个代码块的高亮失败。
+          }
+        });
+      }
+
+      function html() {
+        var text = String(props.text || '');
+        if (enhanced.value && window.marked && window.DOMPurify) {
+          try {
+            var raw = window.marked.parse(text, { gfm: true, breaks: false });
+            return window.DOMPurify.sanitize(raw, { ADD_ATTR: ['align', 'target'] });
+          } catch (e) {
+            // 解析失败时退回内置解析器。
+          }
+        }
+        return renderMarkdown(text);
+      }
+
+      Vue.onMounted(function () {
+        ensureMarkdownAssets().then(function () {
+          enhanced.value = true;
+          Vue.nextTick(highlight);
+        }).catch(function () {});
+      });
+
+      Vue.onUpdated(highlight);
+
       return function () {
         return h('div', {
-          class: 'aicode-markdown',
-          innerHTML: renderMarkdown(props.text)
+          ref: root,
+          class: 'aicode-markdown markdown-body',
+          innerHTML: html()
         });
       };
     }

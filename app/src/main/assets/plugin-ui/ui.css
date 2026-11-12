@@ -282,6 +282,35 @@ html {
   word-break: break-word;
 }
 
+/* GitHub Markdown 样式动态加载为 .markdown-body；覆盖底色与排版，保持插件卡片观感。 */
+.aicode-markdown.markdown-body {
+  padding: 12px 16px;
+  background: transparent;
+  color: var(--aicode-on-surface);
+  font-family: inherit;
+  font-size: calc(14px * var(--aicode-font-scale));
+  line-height: 1.6;
+}
+
+.aicode-markdown.markdown-body pre {
+  padding: 10px;
+  background: var(--aicode-surface-variant);
+  border-radius: 8px;
+}
+
+.aicode-markdown.markdown-body code {
+  background: var(--aicode-surface-variant);
+  color: inherit;
+  font-family: var(--aicode-font-mono);
+}
+
+.aicode-markdown.markdown-body pre code,
+.aicode-markdown.markdown-body pre code.hljs {
+  padding: 0;
+  background: transparent;
+  font-size: calc(13px * var(--aicode-font-scale));
+}
+
 .aicode-markdown h1,
 .aicode-markdown h2,
 .aicode-markdown h3,

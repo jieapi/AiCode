@@ -191,6 +191,11 @@
       Object.keys(variables || {}).forEach(function (key) {
         document.documentElement.style.setProperty(key, variables[key]);
       });
+      try {
+        window.dispatchEvent(new CustomEvent('aicode:theme', { detail: variables || {} }));
+      } catch (e) {
+        // 旧 WebView 不支持 CustomEvent 时忽略。
+      }
     }
   };
 })();
