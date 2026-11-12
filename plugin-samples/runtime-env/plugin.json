@@ -25,7 +25,7 @@
           "en": "Runtime"
         },
         "anchor": "settings.environment",
-        "page": "ui/runtime.html",
+        "page": "pages/runtime.html",
         "icon": "package"
       }
     ]

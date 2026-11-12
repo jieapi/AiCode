@@ -25,7 +25,7 @@
           "en": "Memory"
         },
         "anchor": "settings.ai",
-        "page": "ui/memory.html",
+        "page": "pages/memory.html",
         "icon": "book"
       }
     ]
