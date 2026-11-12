@@ -63,6 +63,56 @@ class PluginHookTransformTest {
     }
 
     @Test
+    fun httpMutation_isParsed() {
+        val result = PluginHookTransform.parseHttp(
+            json("""{"url":"https://gateway.example/v1/chat","headers":{"X-Test":"1"},"body":"{\"model\":\"m\"}"}""")
+        )
+        assertEquals("https://gateway.example/v1/chat", result!!.url)
+        assertEquals(mapOf("X-Test" to "1"), result.headers)
+        assertEquals("{\"model\":\"m\"}", result.body)
+
+        assertEquals(HttpRequestHookResult(), PluginHookTransform.parseHttp(json("""{"logs":["ok"]}""")))
+    }
+
+    @Test
+    fun httpMutation_rejectsUnsafeFields() {
+        assertNull(PluginHookTransform.parseHttp(json("""{"headers":{"Content-Length":"1"}}""")))
+        assertNull(PluginHookTransform.parseHttp(json("""{"headers":{"Bad Header":"1"}}""")))
+        assertNull(PluginHookTransform.parseHttp(json("""{"headers":{"X-Test":1}}""")))
+        assertNull(PluginHookTransform.parseHttp(json("""{"body":"not json"}""")))
+        assertNull(PluginHookTransform.parseHttp(json("""{"url":1}""")))
+        assertNull(PluginHookTransform.parseHttp(JsonPrimitive(1)))
+    }
+
+    @Test
+    fun reviewDecision_isParsed() {
+        val allow = PluginHookTransform.parseReview(json("""{"decision":"allow","reason":"ok"}"""))
+        assertEquals(PermissionReviewDecision.ALLOW, allow!!.decision)
+        assertEquals("ok", allow.reason)
+
+        val deny = PluginHookTransform.parseReview(json("""{"decision":"deny","reason":"  blocked  "}"""))
+        assertEquals(PermissionReviewDecision.DENY, deny!!.decision)
+        assertEquals("blocked", deny.reason)
+
+        assertEquals(
+            PermissionReviewDecision.PASS,
+            PluginHookTransform.parseReview(json("""{"logs":["ok"]}"""))!!.decision
+        )
+        assertEquals(
+            PermissionReviewDecision.PASS,
+            PluginHookTransform.parseReview(json("""{"decision":"pass"}"""))!!.decision
+        )
+    }
+
+    @Test
+    fun reviewDecision_rejectsInvalidValues() {
+        assertNull(PluginHookTransform.parseReview(json("""{"decision":"write"}""")))
+        assertNull(PluginHookTransform.parseReview(json("""{"decision":1}""")))
+        assertNull(PluginHookTransform.parseReview(json("""{"reason":1}""")))
+        assertNull(PluginHookTransform.parseReview(JsonPrimitive(1)))
+    }
+
+    @Test
     fun oversizedJson_isRejected() {
         val huge = "x".repeat(PluginHookTransform.MAX_JSON_CHARS)
         assertNull(PluginHookTransform.parseBefore(JsonObject(mapOf("arguments" to JsonObject(mapOf("text" to JsonPrimitive(huge)))))))

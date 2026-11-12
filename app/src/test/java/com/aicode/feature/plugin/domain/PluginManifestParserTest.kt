@@ -306,6 +306,112 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun httpHook_isParsed() {
+        val manifest = success(
+            hooksManifest(
+                hooksBlock = """{"id": "proxy", "event": "agent.http.before", "handler": "hooks.proxy", "mode": "transform"}"""
+            )
+        )
+        assertEquals(
+            listOf(PluginHookRef("proxy", "agent.http.before", "hooks.proxy", PluginHookModes.TRANSFORM)),
+            manifest.hooks
+        )
+    }
+
+    @Test
+    fun appStartedHook_isParsed() {
+        val manifest = success(
+            hooksManifest(
+                hooksBlock = """{"id": "boot", "event": "app.started", "handler": "hooks.boot"}"""
+            )
+        )
+        assertEquals(
+            listOf(PluginHookRef("boot", "app.started", "hooks.boot", PluginHookModes.OBSERVE)),
+            manifest.hooks
+        )
+    }
+
+    @Test
+    fun appStartedRequiresObserveMode() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "boot", "event": "app.started", "handler": "hooks.boot", "mode": "transform"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "boot", "event": "app.started", "handler": "hooks.boot", "mode": "review"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
+    fun residentRuntime_isParsed() {
+        val manifest = success(
+            hooksManifest(
+                runtimeBlock = """"runtime": {"type": "javascript", "entry": "dist/main.js", "resident": true},"""
+            )
+        )
+        assertEquals(
+            PluginRuntimeRef("javascript", "dist/main.js", resident = true),
+            manifest.runtime
+        )
+    }
+
+    @Test
+    fun invalidResident_isRejected() {
+        assertRejected(
+            hooksManifest(
+                runtimeBlock = """"runtime": {"type": "javascript", "entry": "dist/main.js", "resident": "yes"},"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "runtime.resident"
+        )
+    }
+
+    @Test
+    fun permissionReviewHook_isParsed() {
+        val manifest = success(
+            hooksManifest(
+                hooksBlock = """{"id": "reviewer", "event": "agent.permission.review", "handler": "hooks.review", "mode": "review"}"""
+            )
+        )
+        assertEquals(
+            listOf(PluginHookRef("reviewer", "agent.permission.review", "hooks.review", PluginHookModes.REVIEW)),
+            manifest.hooks
+        )
+    }
+
+    @Test
+    fun permissionReviewRequiresReviewMode() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "reviewer", "event": "agent.permission.review", "handler": "hooks.review", "mode": "transform"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "reviewer", "event": "agent.permission.review", "handler": "hooks.review"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "guard", "event": "agent.tool.before", "handler": "hooks.guard", "mode": "review"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
     fun transformModeOnObserveEvent_isRejected() {
         assertRejected(
             hooksManifest(

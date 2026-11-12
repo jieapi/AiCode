@@ -12,6 +12,7 @@ import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aicode.feature.agent.data.remote.gemini.GeminiApi
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
 import com.aicode.feature.agent.domain.model.AgentContext
+import com.aicode.feature.plugin.runtime.PermissionReviewDecision
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
@@ -133,6 +134,7 @@ class StatefulAgentWorkflow @Inject constructor(
         const val PROGRESS_INTERVAL_MS = 250L
         const val USER_REJECTED_CODE = "USER_REJECTED"
         const val PLUGIN_HOOK_DENIED = "PLUGIN_HOOK_DENIED"
+        const val PLUGIN_REVIEW_DENIED = "PLUGIN_REVIEW_DENIED"
         const val TITLE_GENERATOR_FILE = "agent/title-generator.md"
         const val TITLE_MAX_CHARS = 50
         const val COMMIT_GENERATOR_FILE = "agent/commit-generator.md"
@@ -837,7 +839,17 @@ class StatefulAgentWorkflow @Inject constructor(
                                 errorCode = PLUGIN_HOOK_DENIED
                             )
                         } else {
-                            requestPermissionIfNeeded(tool, toolCall.id, toolCall.arguments, argsPreview, currentContext.permissionMode, currentContext.sessionId)
+                            requestPermissionIfNeeded(
+                                tool = tool,
+                                callId = toolCall.id,
+                                arguments = toolCall.arguments,
+                                argsPreview = argsPreview,
+                                mode = currentContext.permissionMode,
+                                sessionId = currentContext.sessionId,
+                                runId = hookRunId,
+                                scope = hookScope,
+                                agentName = hookAgentName
+                            )
                         }
 
                         if (!checkResult.approved) {
@@ -1553,7 +1565,10 @@ class StatefulAgentWorkflow @Inject constructor(
         arguments: Map<String, JsonElement>,
         argsPreview: String,
         mode: AgentMode,
-        sessionId: String?
+        sessionId: String?,
+        runId: String,
+        scope: String,
+        agentName: String?
     ): PermissionCheckResult {
         if (tool == null) {
             return PermissionCheckResult(true)
@@ -1583,6 +1598,29 @@ class StatefulAgentWorkflow @Inject constructor(
             ToolPermissionPolicyEngine.Verdict.ALLOW -> PermissionCheckResult(true)
             ToolPermissionPolicyEngine.Verdict.DENY -> PermissionCheckResult(false)
             ToolPermissionPolicyEngine.Verdict.ASK -> {
+                // 高危不可记忆的请求（Shizuku、elevate、配置修改、删除子代理、危险 rm）
+                // 与模式切换仍由本人确认，第一版不交给代审核插件。
+                if (eval.rememberDisabledReason == null && tool.name != "planMode") {
+                    val review = pluginHookDispatcher.reviewPermission(
+                        runId = runId,
+                        sessionId = sessionId,
+                        mode = mode.name,
+                        scope = scope,
+                        agentName = agentName,
+                        callId = callId,
+                        toolName = tool.name,
+                        arguments = JsonObject(arguments)
+                    )
+                    when (review.decision) {
+                        PermissionReviewDecision.ALLOW -> return PermissionCheckResult(true)
+                        PermissionReviewDecision.DENY -> return PermissionCheckResult(
+                            approved = false,
+                            denyReason = review.reason ?: "插件代审核拒绝了该工具调用",
+                            errorCode = PLUGIN_REVIEW_DENIED
+                        )
+                        PermissionReviewDecision.PASS -> Unit
+                    }
+                }
                 val base = tool.buildPermissionRequest(callId, arguments, argsPreview)
                 val request = base.copy(
                     title = eval.askTitle ?: base.title,

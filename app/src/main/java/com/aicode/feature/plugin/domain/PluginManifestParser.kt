@@ -7,12 +7,13 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
 object PluginApi {
-    val VERSION = SemVer(1, 2, 0)
+    val VERSION = SemVer(1, 5, 0)
 }
 
 sealed interface ManifestParseResult {
@@ -45,7 +46,7 @@ object PluginManifestParser {
         "description", "license", "engines", "runtime", "contributes", "configPage"
     )
     private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
-    private val RUNTIME_KEYS = setOf("type", "entry", "command", "dependencies")
+    private val RUNTIME_KEYS = setOf("type", "entry", "command", "dependencies", "resident")
     private val RUNTIME_DEPENDENCY_KEYS = setOf("tool", "file")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
@@ -289,7 +290,12 @@ object PluginManifestParser {
             val dependencies = readDependencies(runtime["dependencies"])
             if (command == null && runtime["command"] != null) return null
             if (dependencies == null && runtime["dependencies"] != null) return null
-            return PluginRuntimeRef(type, entry, command, dependencies)
+            val resident = when (val raw = runtime["resident"]) {
+                null -> false
+                else -> (raw as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                    ?: return null.also { invalid("runtime.resident") }
+            }
+            return PluginRuntimeRef(type, entry, command, dependencies, resident)
         }
 
         private fun entryMatchesType(entry: String, type: String): Boolean = when (type) {
@@ -487,8 +493,12 @@ object PluginManifestParser {
                 if (event == null) { invalid("$itemPath.event"); ok = false }
                 if (handler == null) { invalid("$itemPath.handler"); ok = false }
                 if (event != null && mode != null) {
-                    val transformEvent = event in PluginHookEvents.TRANSFORM
-                    if (transformEvent != (mode == PluginHookModes.TRANSFORM)) {
+                    val expectedMode = when (event) {
+                        in PluginHookEvents.TRANSFORM -> PluginHookModes.TRANSFORM
+                        in PluginHookEvents.REVIEW -> PluginHookModes.REVIEW
+                        else -> PluginHookModes.OBSERVE
+                    }
+                    if (mode != expectedMode) {
                         invalid("$itemPath.mode")
                         ok = false
                     }

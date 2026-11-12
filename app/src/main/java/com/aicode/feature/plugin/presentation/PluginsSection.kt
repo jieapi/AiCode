@@ -677,10 +677,10 @@ private fun PluginNativeConfigContent(
                     stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
                         it.description.resolve(languageTag)
                 } + hooks.map {
-                    val title = if (it.mode == PluginHookModes.TRANSFORM) {
-                        stringResource(R.string.plugins_content_transform_hook, it.event)
-                    } else {
-                        stringResource(R.string.plugins_content_hook, it.event)
+                    val title = when (it.mode) {
+                        PluginHookModes.TRANSFORM -> stringResource(R.string.plugins_content_transform_hook, it.event)
+                        PluginHookModes.REVIEW -> stringResource(R.string.plugins_content_review_hook, it.event)
+                        else -> stringResource(R.string.plugins_content_hook, it.event)
                     }
                     title to it.handler
                 } + mcpServers.map {

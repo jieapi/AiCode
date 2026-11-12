@@ -59,7 +59,8 @@ data class PluginRuntime(
     val installDir: File,
     val entryFile: File,
     val command: List<String>,
-    val dependencies: PluginDependency? = null
+    val dependencies: PluginDependency? = null,
+    val resident: Boolean = false
 )
 
 /** 已校验存在的依赖输入文件。 */
@@ -218,7 +219,8 @@ object PluginContentLoader {
             installDir = dir,
             entryFile = file,
             command = ref.command ?: defaultCommand(ref.type, ref.entry),
-            dependencies = dependency
+            dependencies = dependency,
+            resident = ref.resident
         )
     }
 

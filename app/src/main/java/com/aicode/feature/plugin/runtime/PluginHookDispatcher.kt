@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
+import java.util.UUID
 
 /**
  * 把 AI 运行生命周期事件分发给生效插件声明的 hook。
@@ -37,6 +38,19 @@ class PluginHookDispatcher @Inject constructor(
     private val runtime: PluginRuntimeManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** App 进程启动完成；声明 `app.started` 的插件会在此拉起进程，resident 运行时不受空闲回收。 */
+    fun dispatchAppStarted(appVersion: String) {
+        dispatch(
+            event = PluginHookEvents.APP_STARTED,
+            payload = buildJsonObject {
+                put("launchId", UUID.randomUUID().toString())
+                put("startedAt", System.currentTimeMillis())
+                put("appVersion", appVersion)
+                put("process", "main")
+            }
+        )
+    }
 
     fun dispatchRunStarted(
         sessionId: String,
@@ -210,7 +224,7 @@ class PluginHookDispatcher @Inject constructor(
         arguments: JsonObject
     ): ToolBeforeHookResult {
         if (sessionId == null) return ToolBeforeHookResult(arguments = arguments)
-        val targets = transformTargets(PluginHookEvents.AGENT_TOOL_BEFORE)
+        val targets = hooksFor(PluginHookEvents.AGENT_TOOL_BEFORE, PluginHookModes.TRANSFORM)
         if (targets.isEmpty()) return ToolBeforeHookResult(arguments = arguments)
         val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
         var current = arguments
@@ -220,7 +234,7 @@ class PluginHookDispatcher @Inject constructor(
                 FileLogger.w(TAG, "可写 hook 总预算用尽: ${hook.event}")
                 break
             }
-            if (!isActiveTransformHook(hook)) continue
+            if (!isActiveHook(hook, PluginHookModes.TRANSFORM)) continue
             val payload = payload(runId, sessionId, mode, scope, agentName) {
                 put("callId", callId)
                 put("toolName", toolName)
@@ -259,7 +273,7 @@ class PluginHookDispatcher @Inject constructor(
         data: JsonElement
     ): ToolAfterHookResult {
         if (sessionId == null) return ToolAfterHookResult()
-        val targets = transformTargets(PluginHookEvents.AGENT_TOOL_AFTER)
+        val targets = hooksFor(PluginHookEvents.AGENT_TOOL_AFTER, PluginHookModes.TRANSFORM)
         if (targets.isEmpty()) return ToolAfterHookResult()
         val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
         var current = data
@@ -270,7 +284,7 @@ class PluginHookDispatcher @Inject constructor(
                 FileLogger.w(TAG, "可写 hook 总预算用尽: ${hook.event}")
                 break
             }
-            if (!isActiveTransformHook(hook)) continue
+            if (!isActiveHook(hook, PluginHookModes.TRANSFORM)) continue
             val payload = payload(runId, sessionId, mode, scope, agentName) {
                 put("callId", callId)
                 put("toolName", toolName)
@@ -291,26 +305,139 @@ class PluginHookDispatcher @Inject constructor(
         return ToolAfterHookResult(data = if (changed) current else null)
     }
 
-    private suspend fun transformTargets(event: String): List<Pair<String, PluginHook>> = withContext(Dispatchers.IO) {
+    /**
+     * provider HTTP 请求发出前的可写 hook。每次实际发送都会执行，重试或换 Key 可能重复触发；
+     * 插件应保持幂等。返回的 URL/headers/body 由调用方校验后再重建请求。
+     */
+    suspend fun beforeHttpRequest(
+        url: String,
+        method: String,
+        headers: Map<String, String>,
+        body: String
+    ): HttpRequestHookResult {
+        val targets = hooksFor(PluginHookEvents.AGENT_HTTP_BEFORE, PluginHookModes.TRANSFORM)
+        if (targets.isEmpty()) return HttpRequestHookResult()
+        val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
+        var currentUrl = url
+        var currentHeaders = headers
+        var currentBody = body
+        var urlChanged = false
+        var headersChanged = false
+        var bodyChanged = false
+        for ((version, hook) in targets) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) {
+                FileLogger.w(TAG, "可写 hook 总预算用尽: ${hook.event}")
+                break
+            }
+            if (!isActiveHook(hook, PluginHookModes.TRANSFORM)) continue
+            val payload = buildJsonObject {
+                put("url", currentUrl)
+                put("method", method)
+                put("headers", JsonObject(currentHeaders.mapValues { JsonPrimitive(it.value) }))
+                put("body", currentBody)
+            }
+            val result = invokeTransform(version, hook, payload, remaining) ?: continue
+            val mutation = PluginHookTransform.parseHttp(result)
+            if (mutation == null) {
+                FileLogger.w(TAG, "忽略格式错误的可写 hook 返回值: ${hook.pluginId}/${hook.localId}")
+                continue
+            }
+            mutation.url?.let {
+                currentUrl = it
+                urlChanged = true
+            }
+            mutation.headers?.let {
+                currentHeaders = it
+                headersChanged = true
+            }
+            mutation.body?.let {
+                currentBody = it
+                bodyChanged = true
+            }
+        }
+        return HttpRequestHookResult(
+            url = if (urlChanged) currentUrl else null,
+            headers = if (headersChanged) currentHeaders else null,
+            body = if (bodyChanged) currentBody else null
+        )
+    }
+
+    /**
+     * 宿主判定为 ASK 后、弹出用户确认前的代审核。按插件 ID 顺序逐个询问：
+     * allow/deny 立即生效，pass 继续下一个；全部不处理则回到 UI。超时、异常与格式错误都按 pass。
+     * 插件不能审核自己提供的工具，避免自批。
+     */
+    suspend fun reviewPermission(
+        runId: String,
+        sessionId: String?,
+        mode: String,
+        scope: String,
+        agentName: String?,
+        callId: String,
+        toolName: String,
+        arguments: JsonObject
+    ): PermissionReviewHookResult {
+        if (sessionId == null) return PermissionReviewHookResult(PermissionReviewDecision.PASS)
+        val targets = hooksFor(PluginHookEvents.AGENT_PERMISSION_REVIEW, PluginHookModes.REVIEW)
+        if (targets.isEmpty()) return PermissionReviewHookResult(PermissionReviewDecision.PASS)
+        val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
+        for ((version, hook) in targets) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) {
+                FileLogger.w(TAG, "代审核总预算用尽，回退用户确认")
+                break
+            }
+            if (!isActiveHook(hook, PluginHookModes.REVIEW)) continue
+            if (isOwnPluginTool(hook.pluginId, toolName)) {
+                FileLogger.d(TAG, "跳过自身工具代审核: ${hook.pluginId}/$toolName")
+                continue
+            }
+            val payload = payload(runId, sessionId, mode, scope, agentName) {
+                put("callId", callId)
+                put("toolName", toolName)
+                put("arguments", arguments)
+            }
+            val result = invokeTransform(version, hook, payload, remaining) ?: continue
+            val review = PluginHookTransform.parseReview(result)
+            if (review == null) {
+                FileLogger.w(TAG, "忽略格式错误的代审核返回值: ${hook.pluginId}/${hook.localId}")
+                continue
+            }
+            if (review.decision == PermissionReviewDecision.PASS) continue
+            FileLogger.i(TAG, "代审核 ${review.decision}: ${hook.pluginId}/${hook.localId} tool=$toolName")
+            return review
+        }
+        return PermissionReviewHookResult(PermissionReviewDecision.PASS)
+    }
+
+    private fun isOwnPluginTool(pluginId: String, toolName: String): Boolean {
+        val sanitized = pluginId.map { c ->
+            if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-') c else '_'
+        }.joinToString("")
+        return toolName.startsWith("plugin__${sanitized}__")
+    }
+
+    private suspend fun hooksFor(event: String, mode: String): List<Pair<String, PluginHook>> = withContext(Dispatchers.IO) {
         try {
             pluginManager.ensureLoaded()
             pluginManager.plugins.value
                 .filter { it.isActive }
                 .flatMap { plugin ->
                     plugin.content.hooks
-                        .filter { it.event == event && it.mode == PluginHookModes.TRANSFORM }
+                        .filter { it.event == event && it.mode == mode }
                         .map { hook -> plugin.record.version to hook }
                 }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.w(TAG, "可写 hook 调度失败: $event (${e.javaClass.simpleName})")
+            FileLogger.w(TAG, "hook 调度失败: $event (${e.javaClass.simpleName})")
             emptyList()
         }
     }
 
-    private suspend fun isActiveTransformHook(hook: PluginHook): Boolean = withContext(Dispatchers.IO) {
-        pluginManager.activeHooks().any { it.key == hook.key && it.mode == PluginHookModes.TRANSFORM }
+    private suspend fun isActiveHook(hook: PluginHook, mode: String): Boolean = withContext(Dispatchers.IO) {
+        pluginManager.activeHooks().any { it.key == hook.key && it.mode == mode }
     }
 
     private suspend fun invokeTransform(

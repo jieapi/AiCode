@@ -58,7 +58,8 @@ class PluginRuntimeManager @Inject constructor(
         val pluginId: String,
         val key: String,
         val transport: PluginProcessTransport,
-        var lastUsed: Long
+        var lastUsed: Long,
+        var resident: Boolean
     )
 
     private val processes = ConcurrentHashMap<String, Entry>()
@@ -102,6 +103,19 @@ class PluginRuntimeManager @Inject constructor(
         }
     }
 
+    /** 插件版本替换后关闭旧版本进程，避免 resident 旧进程永远不回收。 */
+    fun closeOtherVersions(pluginId: String, currentVersion: String) {
+        val keepKey = "$pluginId@$currentVersion"
+        synchronized(processes) {
+            processes.entries
+                .filter { (key, entry) -> entry.pluginId == pluginId && key != keepKey }
+                .forEach { (key, entry) ->
+                    processes.remove(key)
+                    entry.transport.close()
+                }
+        }
+    }
+
     /** 插件停用、卸载或版本替换时关闭它的进程。 */
     fun closePlugin(pluginId: String) {
         synchronized(processes) {
@@ -116,7 +130,10 @@ class PluginRuntimeManager @Inject constructor(
 
     private suspend fun getOrCreate(pluginId: String, version: String, runtime: PluginRuntime): Entry {
         val key = "$pluginId@$version"
-        processes[key]?.let { return it }
+        processes[key]?.let { entry ->
+            entry.resident = runtime.resident
+            return entry
+        }
         val profile = runtimeProfile()
         engine.notReadyHintFor(profile)?.let {
             throw PluginProcessException("PLUGIN_RUNTIME_UNAVAILABLE", it)
@@ -140,7 +157,7 @@ class PluginRuntimeManager @Inject constructor(
                 synchronized(processes) { processes.remove(key) }
             }
         )
-        val entry = Entry(pluginId, key, transport, System.currentTimeMillis())
+        val entry = Entry(pluginId, key, transport, System.currentTimeMillis(), runtime.resident)
         val existing = synchronized(processes) { processes.putIfAbsent(key, entry) }
         if (existing != null) {
             transport.close()
@@ -216,7 +233,7 @@ class PluginRuntimeManager @Inject constructor(
         val now = System.currentTimeMillis()
         synchronized(processes) {
             processes.entries
-                .filter { now - it.value.lastUsed > IDLE_TIMEOUT_MS }
+                .filter { !it.value.resident && now - it.value.lastUsed > IDLE_TIMEOUT_MS }
                 .forEach { (key, entry) ->
                     processes.remove(key)
                     entry.transport.close()

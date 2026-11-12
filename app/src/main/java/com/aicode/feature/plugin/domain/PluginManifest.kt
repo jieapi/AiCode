@@ -53,7 +53,9 @@ data class PluginRuntimeRef(
     val type: String,
     val entry: String,
     val command: List<String>? = null,
-    val dependencies: PluginDependencyRef? = null
+    val dependencies: PluginDependencyRef? = null,
+    /** 为 true 时进程不参与空闲回收，直到插件停用、卸载、版本替换或 App 进程结束。 */
+    val resident: Boolean = false
 )
 
 /** `contributes.tools` 声明的 AI 可调用工具。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
@@ -65,16 +67,23 @@ data class PluginToolRef(
     val handler: String
 )
 
-/** hook 的两种模式：`observe` 只观察并返回日志；`transform` 等待宿主应用结构化变更。 */
+/**
+ * hook 的三种模式：`observe` 只观察并返回日志；`transform` 等待宿主应用结构化变更；
+ * `review` 只在宿主 ASK 分支做代审核决定。
+ */
 object PluginHookModes {
     const val OBSERVE = "observe"
     const val TRANSFORM = "transform"
+    const val REVIEW = "review"
 
-    val ALL = setOf(OBSERVE, TRANSFORM)
+    val ALL = setOf(OBSERVE, TRANSFORM, REVIEW)
 }
 
 /** 宿主支持的插件生命周期事件；清单 `event` 只能取这里的值。 */
 object PluginHookEvents {
+    /** App 进程启动完成；用于常驻插件初始化自己的进程与服务。 */
+    const val APP_STARTED = "app.started"
+
     const val AGENT_RUN_STARTED = "agent.run.started"
     const val AGENT_RUN_FINISHED = "agent.run.finished"
     const val AGENT_REQUEST_STARTED = "agent.request.started"
@@ -89,10 +98,20 @@ object PluginHookEvents {
     /** 一次工具调用成功结束后；可改写结果的 `data`。 */
     const val AGENT_TOOL_AFTER = "agent.tool.after"
 
+    /** 每次实际发出 provider HTTP 请求前；可改写 URL、headers 与 JSON body。 */
+    const val AGENT_HTTP_BEFORE = "agent.http.before"
+
+    /** 宿主判定需要使用者确认后、弹窗前的代审核。 */
+    const val AGENT_PERMISSION_REVIEW = "agent.permission.review"
+
     /** 只允许 `mode: "transform"` 的事件。 */
-    val TRANSFORM = setOf(AGENT_TOOL_BEFORE, AGENT_TOOL_AFTER)
+    val TRANSFORM = setOf(AGENT_TOOL_BEFORE, AGENT_TOOL_AFTER, AGENT_HTTP_BEFORE)
+
+    /** 只允许 `mode: "review"` 的事件。 */
+    val REVIEW = setOf(AGENT_PERMISSION_REVIEW)
 
     val ALL = setOf(
+        APP_STARTED,
         AGENT_RUN_STARTED,
         AGENT_RUN_FINISHED,
         AGENT_REQUEST_STARTED,
@@ -101,7 +120,9 @@ object PluginHookEvents {
         AGENT_TOOL_FINISHED,
         AGENT_COMPACTION,
         AGENT_TOOL_BEFORE,
-        AGENT_TOOL_AFTER
+        AGENT_TOOL_AFTER,
+        AGENT_HTTP_BEFORE,
+        AGENT_PERMISSION_REVIEW
     )
 }
 

@@ -2054,6 +2054,7 @@
     <string name="plugins_content_ai_tool">AI 工具 · %1$s</string>
     <string name="plugins_content_hook">生命周期 Hook · %1$s</string>
     <string name="plugins_content_transform_hook">可写 Hook · %1$s</string>
+    <string name="plugins_content_review_hook">代审核 Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
     <string name="plugins_content_settings_page">设置页 · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
