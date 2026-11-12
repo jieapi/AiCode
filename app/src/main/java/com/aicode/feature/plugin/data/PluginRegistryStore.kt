@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * 一个已安装插件的宿主侧记录。启停、授权与包摘要只存在这里，由宿主独占写入，
+ * 一个已安装插件的宿主侧记录。启停与包摘要只存在这里，由宿主独占写入，
  * 不放进插件包目录，插件包内容无法改动它。
  */
 @Serializable
@@ -22,15 +22,13 @@ data class PluginRecord(
     /** 安装来源标识，目前只有 `local`（本地导入）。 */
     val origin: String,
     val archiveSha256: String,
-    val manifestSha256: String,
-    /** 使用者已授予的能力 ID。 */
-    val grants: List<String> = emptyList()
+    val manifestSha256: String
 )
 
 @Serializable
 private data class RegistryFile(val schema: Int = SCHEMA, val plugins: List<PluginRecord> = emptyList())
 
-private const val SCHEMA = 1
+private const val SCHEMA = 2
 
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {

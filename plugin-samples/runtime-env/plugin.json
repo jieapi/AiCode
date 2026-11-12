@@ -16,30 +16,6 @@
   "engines": {
     "pluginApi": ">=1.1.0 <2.0.0"
   },
-  "permissions": [
-    {
-      "id": "settings.pages",
-      "required": true,
-      "reason": {
-        "zh-CN": "在设置中添加入口并打开运行环境页面",
-        "en": "Add an entry in Settings and open the runtime page"
-      },
-      "scope": {
-        "ids": ["runtime"]
-      }
-    },
-    {
-      "id": "workspace.exec",
-      "required": true,
-      "reason": {
-        "zh-CN": "执行版本检测命令",
-        "en": "Run version detection commands"
-      },
-      "scope": {
-        "ids": ["runtime"]
-      }
-    }
-  ],
   "contributes": {
     "settingsPages": [
       {

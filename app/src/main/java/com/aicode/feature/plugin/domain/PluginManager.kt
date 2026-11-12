@@ -49,16 +49,9 @@ data class InstalledPlugin(
 ) {
     val id: String get() = record.id
 
-    val granted: Set<PluginPermission> =
-        record.grants.mapNotNull { PluginPermission.fromId(it) }.toSet()
-
-    /** 清单要求必须授权、但目前尚未授权的能力。 */
-    val missingRequired: Set<PluginPermission>
-        get() = manifest?.requiredPermissions.orEmpty() - granted
-
-    /** 启用且状态正常且必要能力齐全，其贡献才会生效。 */
+    /** 启用且状态正常、清单可读时，它声明的全部贡献都生效。 */
     val isActive: Boolean
-        get() = record.enabled && status == PluginStatus.OK && manifest != null && missingRequired.isEmpty()
+        get() = record.enabled && status == PluginStatus.OK && manifest != null
 }
 
 /** 已通过校验、等待使用者确认安装的暂存包。 */
@@ -83,11 +76,10 @@ sealed interface PluginInstallResult {
 }
 
 /**
- * 插件的安装、启停、授权与贡献聚合。
+ * 插件的安装、启停与贡献聚合。
  *
- * 插件包与授权记录都保存在手机端 `filesDir/plugins`，该目录没有绑定进 PRoot 容器，也不经
+ * 插件包与安装记录都保存在手机端 `filesDir/plugins`，该目录没有绑定进 PRoot 容器，也不经
  * [com.aicode.feature.workspace.domain.FileAccessProvider]，不随 SSH 模式迁到远端。
- * 本构建只加载声明式贡献（技能、子代理），不执行任何插件代码。
  */
 @Singleton
 class PluginManager internal constructor(
@@ -150,11 +142,11 @@ class PluginManager internal constructor(
         }
     }
 
-    /** 当前生效的插件技能：已启用、必要能力齐全且授予了 `skills.register`。 */
+    /** 当前生效的插件技能：插件启用即可用。 */
     fun activeSkills(): List<Skill> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.SKILLS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { plugin -> plugin.content.skills.map { it.skill } }
     }
 
@@ -164,11 +156,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { plugin -> plugin.content.skills.map { it.skill } }
     }
 
-    /** 当前生效的插件子代理定义，条件同 [activeSkills]，对应 `agents.register`。 */
+    /** 当前生效的插件子代理定义，条件同 [activeSkills]。 */
     fun activeAgents(): List<AgentDefinition> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.AGENTS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { plugin -> plugin.content.agents.map { it.definition } }
     }
 
@@ -181,11 +173,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { plugin -> plugin.content.agents.map { it.definition } }
     }
 
-    /** 当前生效的插件工作区工具：已启用且授予了 `workspace.tools`。 */
+    /** 当前生效的插件工作区工具：插件启用即可用。 */
     fun activeWorkspaceTools(): List<PluginWorkspaceTool> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.WORKSPACE_TOOLS in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.workspaceTools }
     }
 
@@ -198,11 +190,11 @@ class PluginManager internal constructor(
     /** 插件专属数据目录，对应桥里的 `data://` 根。 */
     fun dataDirFor(pluginId: String): File = File(dataRoot, pluginId)
 
-    /** 当前生效的插件 AI 工具：已启用且授予了 `tools.register`。 */
+    /** 当前生效的插件 AI 工具：插件启用即可用。 */
     fun activeTools(): List<PluginTool> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.TOOLS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.tools }
     }
 
@@ -212,11 +204,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.tools }
     }
 
-    /** 当前生效的插件生命周期 hook：已启用且授予了 `agent.events`。 */
+    /** 当前生效的插件生命周期 hook：插件启用即可用。 */
     fun activeHooks(): List<PluginHook> {
         ensureLoaded()
         return _plugins.value
-            .filter { it.isActive && PluginPermission.AGENT_EVENTS in it.granted }
+            .filter { it.isActive }
             .flatMap { it.content.hooks }
     }
 
@@ -226,15 +218,11 @@ class PluginManager internal constructor(
         return _plugins.value.flatMap { it.content.hooks }
     }
 
-    /** 当前生效的插件 MCP server：注册与连接两项权限都已授予。 */
+    /** 当前生效的插件 MCP server：插件启用即可用。 */
     fun activeMcpServers(): List<PluginMcpServer> {
         ensureLoaded()
         return _plugins.value
-            .filter {
-                it.isActive &&
-                    PluginPermission.MCP_REGISTER in it.granted &&
-                    PluginPermission.MCP_CONNECT in it.granted
-            }
+            .filter { it.isActive }
             .flatMap { it.content.mcp }
     }
 
@@ -297,25 +285,18 @@ class PluginManager internal constructor(
     }
 
     /**
-     * 安装暂存包。[granted] 是使用者在确认界面勾选的能力：必须覆盖全部必要能力，且不能超出清单申请的范围。
-     * 同 ID 已安装时整体替换，授权按本次确认重新设定，不继承旧授权。
+     * 安装暂存包。插件清单里的贡献随启用生效，安装不再逐项授权。
+     * 同 ID 已安装时整体替换。
      */
-    suspend fun install(token: String, granted: Set<PluginPermission>): PluginInstallResult =
+    suspend fun install(token: String): PluginInstallResult =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 ensureLoaded()
                 val pending = staged[token]
                     ?: return@withLock PluginInstallResult.Failed(PluginError(PluginErrorCode.PREVIEW_EXPIRED))
                 val manifest = pending.manifest
-                val declared = manifest.permissions.map { it.permission }.toSet()
-                val missing = manifest.requiredPermissions - granted
-                if (missing.isNotEmpty() || !declared.containsAll(granted)) {
-                    return@withLock PluginInstallResult.Failed(
-                        PluginError(PluginErrorCode.PERMISSION_NOT_GRANTED, missing.joinToString { it.id })
-                    )
-                }
                 try {
-                    commitInstall(token, pending, granted)
+                    commitInstall(token, pending)
                     PluginInstallResult.Installed(manifest.id)
                 } catch (e: IOException) {
                     FileLogger.e(TAG, "安装插件失败: ${manifest.id}", e)
@@ -324,7 +305,7 @@ class PluginManager internal constructor(
             }
         }
 
-    private fun commitInstall(token: String, pending: StagedPackage, granted: Set<PluginPermission>) {
+    private fun commitInstall(token: String, pending: StagedPackage) {
         val manifest = pending.manifest
         installedDir.mkdirs()
         val target = File(installedDir, manifest.id)
@@ -338,8 +319,7 @@ class PluginManager internal constructor(
             installedAt = clock(),
             origin = ORIGIN_LOCAL,
             archiveSha256 = pending.pkg.archiveSha256,
-            manifestSha256 = pending.pkg.manifestSha256,
-            grants = granted.map { it.id }.sorted()
+            manifestSha256 = pending.pkg.manifestSha256
         )
 
         var movedOld = false
@@ -376,15 +356,6 @@ class PluginManager internal constructor(
     suspend fun setEnabled(id: String, enabled: Boolean): Boolean = updateRecord(id) { record, _ ->
         record.copy(enabled = enabled)
     }
-
-    /** 授予或撤销单项能力。清单没有申请过的能力不会被授予。 */
-    suspend fun setGranted(id: String, permission: PluginPermission, granted: Boolean): Boolean =
-        updateRecord(id) { record, plugin ->
-            if (plugin.manifest?.requestFor(permission) == null) return@updateRecord record
-            val grants = record.grants.toMutableSet()
-            if (granted) grants += permission.id else grants -= permission.id
-            record.copy(grants = grants.sorted())
-        }
 
     private suspend fun updateRecord(
         id: String,

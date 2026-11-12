@@ -42,7 +42,7 @@ private class BridgeException(val code: String, override val message: String) : 
  * `workspace://`（当前工作区）、`aicode://`（全局 `.aicode`），后两者经 [FileAccessProvider]，
  * 远程模式同样生效。
  *
- * 桥只由宿主注入到已授权插件的页面；方法在 WebView 的 JavaBridge 线程调用，
+ * 桥只由宿主注入到已启用插件的页面；方法在 WebView 的 JavaBridge 线程调用，
  * 不能在这里直接操作 UI。
  */
 class PluginWebBridge(
@@ -55,7 +55,6 @@ class PluginWebBridge(
     private val homeResolver: PathHomeResolver,
     private val commandEngine: CommandEngine,
     private val workspacePath: () -> String,
-    private val execAllowed: () -> Boolean,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -133,7 +132,6 @@ class PluginWebBridge(
 
     /** 一次性 Shell 命令：在插件页面所属工作区执行，输出与退出码原样返回。 */
     private suspend fun bash(params: JsonObject): JsonElement {
-        if (!execAllowed()) throw BridgeException("PERMISSION_DENIED", "workspace.exec not granted")
         val command = params.str("command")
         if (command.isBlank()) throw BridgeException("PARAM_INVALID", "empty command")
         if (command.length > MAX_COMMAND_CHARS) throw BridgeException("PARAM_INVALID", "command too long")
@@ -148,7 +146,9 @@ class PluginWebBridge(
     }
 
     private fun read(path: String): JsonElement {
-        return when (val target = resolve(path)) {
+        val target = resolve(path)
+        requireRead(target)
+        return when (target) {
             is Target.Local -> {
                 if (!target.file.isFile) throw BridgeException("NOT_FOUND", "not a file: $path")
                 val size = target.file.length()
@@ -176,7 +176,9 @@ class PluginWebBridge(
     private fun write(path: String, content: String): JsonElement {
         val bytes = content.toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_WRITE_BYTES) throw BridgeException("TOO_LARGE", "content too large: $path")
-        when (val target = resolve(path)) {
+        val target = resolve(path)
+        requireWrite(target)
+        when (target) {
             is Target.Local -> {
                 if (!target.writable) throw BridgeException("READ_ONLY", "root is read-only: $path")
                 atomicWrite(target.file, content)
@@ -192,7 +194,9 @@ class PluginWebBridge(
     }
 
     private fun list(path: String): JsonElement {
-        val entries = when (val target = resolve(path)) {
+        val target = resolve(path)
+        requireRead(target)
+        val entries = when (target) {
             is Target.Local -> {
                 if (!target.file.isDirectory) throw BridgeException("NOT_FOUND", "not a directory: $path")
                 target.file.listFiles().orEmpty()
@@ -227,7 +231,10 @@ class PluginWebBridge(
     }
 
     private fun delete(path: String): JsonElement {
-        when (val target = resolve(path)) {
+        val target = resolve(path)
+        requireWrite(target)
+        if (target.relative.isEmpty()) throw BridgeException("PATH_DENIED", "cannot delete a root")
+        when (target) {
             is Target.Local -> {
                 if (!target.writable) throw BridgeException("READ_ONLY", "root is read-only: $path")
                 target.file.deleteRecursively()
@@ -241,17 +248,21 @@ class PluginWebBridge(
         return buildJsonObject { put("ok", true) }
     }
 
-    private fun stat(path: String): JsonElement = when (val target = resolve(path)) {
-        is Target.Local -> buildJsonObject {
-            put("exists", target.file.exists())
-            put("isDir", target.file.isDirectory)
-            put("size", if (target.file.isFile) target.file.length() else 0L)
-        }
+    private fun stat(path: String): JsonElement {
+        val target = resolve(path)
+        requireRead(target)
+        return when (target) {
+            is Target.Local -> buildJsonObject {
+                put("exists", target.file.exists())
+                put("isDir", target.file.isDirectory)
+                put("size", if (target.file.isFile) target.file.length() else 0L)
+            }
 
-        is Target.Remote -> buildJsonObject {
-            put("exists", fileAccess.exists(target.path))
-            put("isDir", fileAccess.isDirectory(target.path))
-            put("size", if (fileAccess.isFile(target.path)) fileAccess.fileSize(target.path) else 0L)
+            is Target.Remote -> buildJsonObject {
+                put("exists", fileAccess.exists(target.path))
+                put("isDir", fileAccess.isDirectory(target.path))
+                put("size", if (fileAccess.isFile(target.path)) fileAccess.fileSize(target.path) else 0L)
+            }
         }
     }
 
@@ -265,11 +276,40 @@ class PluginWebBridge(
         relative = relative.trimEnd('/')
         validateRelative(relative)
         return when (scheme) {
-            "data" -> Target.Local(inside(dataDir, relative), writable = true)
-            "plugin" -> Target.Local(inside(page.installDir, relative), writable = false)
-            "workspace" -> Target.Remote(containerPath(WORKSPACE_ROOT, relative), writable = true)
-            "aicode" -> Target.Remote(containerPath(homeResolver.aicodeRoot(), relative), writable = true)
+            "data" -> Target.Local(inside(dataDir, relative), scheme, relative, writable = true)
+            "plugin" -> Target.Local(inside(page.installDir, relative), scheme, relative, writable = false)
+            "workspace" -> Target.Remote(containerPath(WORKSPACE_ROOT, relative), scheme, relative, writable = true)
+            "aicode" -> Target.Remote(containerPath(homeResolver.aicodeRoot(), relative), scheme, relative, writable = true)
             else -> throw BridgeException("PATH_INVALID", "unknown root: $scheme")
+        }
+    }
+
+    private fun requireRead(target: Target) {
+        if (target.scheme == "aicode") assertHostReadable(target.relative)
+    }
+
+    private fun requireWrite(target: Target) {
+        when (target.scheme) {
+            "data", "workspace" -> Unit
+            "plugin" -> throw BridgeException("READ_ONLY", "plugin root is read-only")
+            "aicode" -> assertHostWritable(target.relative)
+            else -> throw BridgeException("PATH_INVALID", "unknown root: ${target.scheme}")
+        }
+    }
+
+    /** 宿主配置与权限文件不能由插件读取或写入，避免插件拿到密钥或给自己扩权。 */
+    private fun assertHostReadable(relative: String) {
+        val first = relative.substringBefore('/')
+        if (first in HOST_PROTECTED) {
+            throw BridgeException("READ_ONLY", "host path is protected: $relative")
+        }
+    }
+
+    /** 宿主配置与权限文件不能由插件写入，否则插件可以给自己扩权。 */
+    private fun assertHostWritable(relative: String) {
+        val first = relative.substringBefore('/')
+        if (first in HOST_PROTECTED) {
+            throw BridgeException("READ_ONLY", "host path is protected: $relative")
         }
     }
 
@@ -356,8 +396,23 @@ class PluginWebBridge(
     }
 
     private sealed interface Target {
-        data class Local(val file: File, val writable: Boolean) : Target
-        data class Remote(val path: String, val writable: Boolean) : Target
+        val scheme: String
+        val relative: String
+        val writable: Boolean
+
+        data class Local(
+            val file: File,
+            override val scheme: String,
+            override val relative: String,
+            override val writable: Boolean
+        ) : Target
+
+        data class Remote(
+            val path: String,
+            override val scheme: String,
+            override val relative: String,
+            override val writable: Boolean
+        ) : Target
     }
 
     private companion object {
@@ -370,5 +425,6 @@ class PluginWebBridge(
         const val MAX_COMMAND_CHARS = 4000
         const val DEFAULT_BASH_TIMEOUT_SECONDS = 30L
         const val MAX_BASH_TIMEOUT_SECONDS = 300L
+        val HOST_PROTECTED = setOf("permissions.json", "mcp.json", "skills", "agents", "prompts.custom", "docs")
     }
 }

@@ -7,7 +7,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
@@ -21,7 +20,7 @@ sealed interface ManifestParseResult {
 }
 
 /**
- * `plugin.json` 的严格解析器：未知字段、未实现的贡献类型与能力一律拒绝，不静默忽略。
+ * `plugin.json` 的严格解析器：未知字段、未实现的贡献类型一律拒绝，不静默忽略。
  * 只做静态结构校验，不读取包内其他文件，也不执行任何代码。
  */
 object PluginManifestParser {
@@ -42,11 +41,10 @@ object PluginManifestParser {
 
     private val TOP_LEVEL_KEYS = setOf(
         "manifestVersion", "id", "name", "version", "publisher", "repository",
-        "description", "license", "engines", "runtime", "permissions", "contributes", "configPage"
+        "description", "license", "engines", "runtime", "contributes", "configPage"
     )
     private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
     private val RUNTIME_KEYS = setOf("type", "entry")
-    private val PERMISSION_KEYS = setOf("id", "required", "reason", "scope")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler")
@@ -60,7 +58,6 @@ object PluginManifestParser {
 
     private const val MAX_NAME = 80
     private const val MAX_DESCRIPTION = 600
-    private const val MAX_REASON = 300
     private const val MAX_LICENSE = 100
     private const val MAX_REPOSITORY = 300
     private const val MAX_LOCALES = 16
@@ -100,12 +97,10 @@ object PluginManifestParser {
             val license = readText(obj, "license", MAX_LICENSE)
             val engines = readEngines(obj)
             val runtime = readRuntime(obj)
-            val permissions = readPermissions(obj)
             val contributes = readContributes(obj)
 
             val needsRuntime = contributes != null && (contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty())
             if (needsRuntime && runtime == null) missing("runtime")
-            if (permissions != null && contributes != null) crossCheck(permissions, contributes)
             if (errors.isNotEmpty()) return ManifestParseResult.Failure(errors.toList())
 
             return ManifestParseResult.Success(
@@ -120,7 +115,6 @@ object PluginManifestParser {
                     license = requireNotNull(license),
                     pluginApi = requireNotNull(engines).first,
                     structuredUi = engines.second,
-                    permissions = requireNotNull(permissions),
                     skills = requireNotNull(contributes).skills,
                     agents = contributes.agents,
                     workspaceTools = contributes.workspaceTools,
@@ -288,78 +282,6 @@ object PluginManifestParser {
                 return null
             }
             return PluginRuntimeRef(type, entry)
-        }
-
-        private fun readPermissions(obj: JsonObject): List<PluginPermissionRequest>? {
-            val raw = obj["permissions"] ?: return null.also { missing("permissions") }
-            val array = raw as? JsonArray ?: return null.also { invalid("permissions") }
-            val result = mutableListOf<PluginPermissionRequest>()
-            var ok = true
-            array.forEachIndexed { index, element ->
-                val request = readPermission(element, "permissions[$index]")
-                if (request == null) {
-                    ok = false
-                } else if (result.any { it.permission == request.permission }) {
-                    err(PluginErrorCode.DUPLICATE_ID, "permissions.${request.permission.id}")
-                    ok = false
-                } else {
-                    result += request
-                }
-            }
-            return if (ok) result else null
-        }
-
-        private fun readPermission(element: JsonElement, path: String): PluginPermissionRequest? {
-            val obj = element as? JsonObject ?: return null.also { invalid(path) }
-            obj.keys.filter { it !in PERMISSION_KEYS }.forEach { err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.$it") }
-            val missingKeys = PERMISSION_KEYS.filter { it !in obj }
-            if (missingKeys.isNotEmpty()) {
-                missingKeys.forEach { missing("$path.$it") }
-                return null
-            }
-
-            val idText = obj.getValue("id").stringOrNull() ?: return null.also { invalid("$path.id") }
-            val permission = PluginPermission.fromId(idText)
-            if (permission == null) {
-                err(PluginErrorCode.UNSUPPORTED_PERMISSION, idText)
-                return null
-            }
-            val required = (obj.getValue("required") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-                ?: return null.also { invalid("$path.required") }
-            val reason = parseLocalized(obj.getValue("reason"), "$path.reason", MAX_REASON) ?: return null
-            val scope = obj.getValue("scope") as? JsonObject ?: return null.also { invalid("$path.scope") }
-            val agentEvents = permission == PluginPermission.AGENT_EVENTS
-            val allowedScopeKeys = if (agentEvents) setOf("ids", "events") else setOf("ids")
-            scope.keys.filter { it !in allowedScopeKeys }.forEach {
-                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.scope.$it")
-            }
-            val ids = readLocalIds(scope["ids"], "$path.scope.ids") ?: return null
-            if (!agentEvents) return PluginPermissionRequest(permission, required, reason, ids)
-            val events = readEvents(scope["events"], "$path.scope.events") ?: return null
-            return PluginPermissionRequest(permission, required, reason, ids, events)
-        }
-
-        private fun readLocalIds(raw: JsonElement?, path: String): List<String>? {
-            if (raw == null) return null.also { missing(path) }
-            val array = raw as? JsonArray ?: return null.also { invalid(path) }
-            if (array.isEmpty() || array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
-            val ids = array.map { it.stringOrNull() }
-            if (ids.any { it == null || !LOCAL_ID.matches(it) }) return null.also { invalid(path) }
-            val distinct = ids.filterNotNull()
-            if (distinct.toSet().size != distinct.size) return null.also { err(PluginErrorCode.DUPLICATE_ID, path) }
-            return distinct
-        }
-
-        /** `agent.events.scope.events`：非空、无重复且只能是宿主支持的事件。 */
-        private fun readEvents(raw: JsonElement?, path: String): List<String>? {
-            if (raw == null) return null.also { missing(path) }
-            val array = raw as? JsonArray ?: return null.also { invalid(path) }
-            if (array.isEmpty() || array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
-            val events = array.map { it.stringOrNull() }
-            if (events.any { it == null || it !in PluginHookEvents.ALL }) return null.also { invalid(path) }
-            val distinct = events.filterNotNull()
-            if (distinct.toSet().size != distinct.size) return null.also { err(PluginErrorCode.DUPLICATE_ID, path) }
-            return distinct
         }
 
         private class Contributes(
@@ -652,66 +574,5 @@ object PluginManifestParser {
             return if (ok) result else null
         }
 
-        /** 每类贡献的局部 ID 必须被对应的注册权限逐项覆盖，权限范围里也不能有不存在的 ID。 */
-        private fun crossCheck(permissions: List<PluginPermissionRequest>, contributes: Contributes) {
-            checkCoverage(PluginPermission.SKILLS_REGISTER, "skills", contributes.skills.map { it.id }, permissions)
-            checkCoverage(PluginPermission.AGENTS_REGISTER, "agents", contributes.agents.map { it.id }, permissions)
-            checkCoverage(PluginPermission.WORKSPACE_TOOLS, "workspaceTools", contributes.workspaceTools.map { it.id }, permissions)
-            checkCoverage(PluginPermission.SETTINGS_PAGES, "settingsPages", contributes.settingsPages.map { it.id }, permissions)
-            checkCoverage(PluginPermission.TOOLS_REGISTER, "tools", contributes.tools.map { it.id }, permissions)
-            checkCoverage(PluginPermission.AGENT_EVENTS, "hooks", contributes.hooks.map { it.id }, permissions)
-            checkEventCoverage(
-                PluginPermission.AGENT_EVENTS,
-                "hooks",
-                contributes.hooks.map { it.event }.toSet(),
-                permissions
-            )
-            val mcpIds = contributes.mcp.map { it.id }
-            checkCoverage(PluginPermission.MCP_REGISTER, "mcp", mcpIds, permissions)
-            checkCoverage(PluginPermission.MCP_CONNECT, "mcp", mcpIds, permissions)
-            // 执行权限不注册内容，scope.ids 只允许指向自己的设置页或工具页，避免声明不存在的页面。
-            checkScopeSubset(
-                PluginPermission.WORKSPACE_EXEC,
-                "settingsPages",
-                contributes.settingsPages.map { it.id } + contributes.workspaceTools.map { it.id },
-                permissions
-            )
-        }
-
-        private fun checkScopeSubset(
-            permission: PluginPermission,
-            type: String,
-            declaredIds: Collection<String>,
-            permissions: List<PluginPermissionRequest>
-        ) {
-            val covered = permissions.firstOrNull { it.permission == permission }?.ids.orEmpty().toSet()
-            (covered - declaredIds.toSet()).forEach {
-                err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it")
-            }
-        }
-
-        private fun checkCoverage(
-            permission: PluginPermission,
-            type: String,
-            declaredIds: Collection<String>,
-            permissions: List<PluginPermissionRequest>
-        ) {
-            val covered = permissions.firstOrNull { it.permission == permission }?.ids.orEmpty().toSet()
-            val declared = declaredIds.toSet()
-            (declared - covered).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "$type.$it") }
-            (covered - declared).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it") }
-        }
-
-        /** `agent.events` 的 events 也必须与 hooks 声明的事件集合完全一致。 */
-        private fun checkEventCoverage(
-            permission: PluginPermission,
-            type: String,
-            declaredEvents: Set<String>,
-            permissions: List<PluginPermissionRequest>
-        ) {
-            val covered = permissions.firstOrNull { it.permission == permission }?.events.orEmpty().toSet()
-            (declaredEvents - covered).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "$type.$it") }
-            (covered - declaredEvents).forEach { err(PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "${permission.id}.$it") }
-        }
     }
 }

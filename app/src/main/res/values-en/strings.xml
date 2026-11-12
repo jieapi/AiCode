@@ -2021,7 +2021,6 @@
     <string name="plugins_config_card_hint">This plugin provides its own settings page. Tap to configure.</string>
     <string name="plugins_status_active">Active</string>
     <string name="plugins_status_disabled">Disabled</string>
-    <string name="plugins_status_needs_permission">Needs permission</string>
     <string name="plugins_status_damaged">Damaged</string>
     <string name="plugins_status_incompatible">Unavailable</string>
     <string name="plugins_tag_config">Configurable</string>
@@ -2042,13 +2041,9 @@
     <string name="plugins_preview_runtime_notice">This plugin contains runtime code. AI tools run in an isolated JavaScript sandbox, and each tool call still needs your approval.</string>
     <string name="plugins_preview_mcp_notice">This plugin registers MCP servers. HTTP servers use the network, and stdio servers start processes in the container or on the remote host. Only install it if you trust the author.</string>
     <string name="plugins_preview_hook_notice">This plugin contains lifecycle hooks. It only receives run start/finish metadata and does not read message content.</string>
-    <string name="plugins_preview_replace_notice">Version %1$s is installed. Continuing replaces it, and you need to confirm the permissions below again.</string>
+    <string name="plugins_preview_replace_notice">Version %1$s is installed. Continuing replaces it.</string>
     <string name="plugins_preview_identical_notice">This is the same file that is already installed (identical content).</string>
     <string name="plugins_preview_contents">What it provides</string>
-    <string name="plugins_preview_permissions">Permissions it needs</string>
-    <string name="plugins_preview_optional_hint">Optional permissions are off by default and only take effect when you turn them on.</string>
-    <string name="plugins_permission_required">Required</string>
-    <string name="plugins_permission_optional">Optional</string>
     <string name="plugins_install">Install</string>
     <string name="plugins_install_replace">Replace</string>
 
@@ -2061,15 +2056,6 @@
     <string name="plugins_content_settings_page">Settings page · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
-    <string name="plugins_permission_skills_register">Register skills</string>
-    <string name="plugins_permission_agents_register">Register sub-agents</string>
-    <string name="plugins_permission_workspace_tools">Register workspace tools</string>
-    <string name="plugins_permission_workspace_exec">Run shell commands</string>
-    <string name="plugins_permission_tools_register">Register AI tools</string>
-    <string name="plugins_permission_agent_events">Receive lifecycle events</string>
-    <string name="plugins_permission_mcp_register">Register MCP servers</string>
-    <string name="plugins_permission_mcp_connect">Connect MCP servers</string>
-    <string name="plugins_permission_settings_pages">Provide pages in Settings</string>
     <string name="plugins_ext_entry_subtitle">Plugin %1$s</string>
     <string name="settings_plugin_page_title">Plugin page</string>
     <string name="plugin_web_page_failed">Page failed to load</string>
@@ -2088,7 +2074,7 @@
     <string name="plugin_tool_remove">Remove from project</string>
     <string name="plugin_tool_not_found">Tool unavailable</string>
     <string name="plugin_tool_not_found_hint">The plugin may be disabled, uninstalled, or no longer providing this tool.</string>
-    <string name="plugin_tool_not_authorized">The plugin is disabled or no longer authorized, so this tool is unavailable</string>
+    <string name="plugin_tool_not_authorized">The plugin is disabled, so this tool is unavailable</string>
     <string name="plugin_tool_permission_title">Confirm plugin tool</string>
     <string name="plugin_tool_permission_summary">The AI wants to call tool \"%2$s\" from plugin \"%1$s\"</string>
     <string name="plugin_tool_permission_details">Plugin: %1$s\nTool: %2$s\nArguments: %3$s</string>
@@ -2100,14 +2086,12 @@
     <string name="plugin_invalid_result">Plugin handler returned an invalid result</string>
 
     <string name="plugins_enable">Enable plugin</string>
-    <string name="plugins_enable_hint">When off, the skills and sub-agents it provides stop working.</string>
-    <string name="plugins_hint_needs_permission">A required permission hasn\'t been granted, so the plugin has no effect yet. Turn on the matching permission below.</string>
+    <string name="plugins_enable_hint">When off, the skills, sub-agents, tools, and pages it provides stop working.</string>
     <string name="plugins_hint_damaged">The plugin files are damaged or missing, so it can\'t be enabled. Uninstall it and import it again.</string>
     <string name="plugins_hint_incompatible">This plugin isn\'t compatible with this version of AiCode, so it can\'t be enabled.</string>
     <string name="plugins_section_summary">About</string>
     <string name="plugins_section_info">Details</string>
     <string name="plugins_section_contents">What it provides</string>
-    <string name="plugins_section_permissions">Permissions</string>
     <string name="plugins_info_version">Version</string>
     <string name="plugins_info_publisher">Publisher</string>
     <string name="plugins_info_license">License</string>
@@ -2133,15 +2117,12 @@
     <string name="plugins_error_manifest_version">Unsupported manifest version: %1$s</string>
     <string name="plugins_error_unsupported_field">Field not supported by this version: %1$s</string>
     <string name="plugins_error_unsupported_contribution">Content type not supported by this version yet: %1$s</string>
-    <string name="plugins_error_unsupported_permission">Permission not supported by this version yet: %1$s</string>
     <string name="plugins_error_api_incompatible">The plugin requires plugin API %1$s, which this version of AiCode doesn\'t provide.</string>
     <string name="plugins_error_duplicate_id">Duplicate ID: %1$s</string>
-    <string name="plugins_error_scope_mismatch">The permission scope doesn\'t match what the plugin provides: %1$s</string>
     <string name="plugins_error_file_missing">A file referenced by the manifest is missing: %1$s</string>
     <string name="plugins_error_content_invalid">Invalid content: %1$s</string>
     <string name="plugins_error_storage_failed">Couldn\'t save. Please try again.</string>
     <string name="plugins_error_preview_expired">This import has expired. Please pick the file again.</string>
-    <string name="plugins_error_permission_not_granted">A required permission wasn\'t granted: %1$s</string>
     <string name="skills_group_plugin">From Plugins</string>
     <string name="subagents_group_plugin">From Plugins</string>
     <string name="plugins_scope_badge">Plugin</string>

@@ -16,24 +16,6 @@
   "engines": {
     "pluginApi": "^1.0.0"
   },
-  "permissions": [
-    {
-      "id": "workspace.tools",
-      "required": true,
-      "reason": "注册「构建 APK」与「清理缓存」两个项目工具",
-      "scope": {
-        "ids": ["build-apk", "clean-cache"]
-      }
-    },
-    {
-      "id": "workspace.exec",
-      "required": true,
-      "reason": "在工具页面中检测项目类型并执行构建、清理命令",
-      "scope": {
-        "ids": ["build-apk", "clean-cache"]
-      }
-    }
-  ],
   "contributes": {
     "workspaceTools": [
       {

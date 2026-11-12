@@ -2020,7 +2020,6 @@
     <string name="plugins_config_card_hint">此插件提供了专属配置界面，点击直接前往配置。</string>
     <string name="plugins_status_active">已启用</string>
     <string name="plugins_status_disabled">已停用</string>
-    <string name="plugins_status_needs_permission">待授权</string>
     <string name="plugins_status_damaged">已损坏</string>
     <string name="plugins_status_incompatible">不可用</string>
     <string name="plugins_tag_config">可配置</string>
@@ -2041,13 +2040,9 @@
     <string name="plugins_preview_runtime_notice">这个插件包含运行时代码：AI 工具会在独立的 JavaScript 沙箱中执行，工具调用仍需要你授权。</string>
     <string name="plugins_preview_mcp_notice">这个插件会注册 MCP 服务器：HTTP 服务器会联网，stdio 服务器会在容器或远端启动进程。请确认你信任插件作者。</string>
     <string name="plugins_preview_hook_notice">这个插件包含生命周期 Hook：只接收运行开始/结束的元数据，不读取消息正文。</string>
-    <string name="plugins_preview_replace_notice">已安装 %1$s 版。继续会整体替换它，下面的权限需要重新确认。</string>
+    <string name="plugins_preview_replace_notice">已安装 %1$s 版。继续会整体替换它。</string>
     <string name="plugins_preview_identical_notice">已安装的就是这个文件（内容完全一致）。</string>
     <string name="plugins_preview_contents">将提供的内容</string>
-    <string name="plugins_preview_permissions">需要的权限</string>
-    <string name="plugins_preview_optional_hint">可选权限默认不开启，打开才会生效。</string>
-    <string name="plugins_permission_required">必要</string>
-    <string name="plugins_permission_optional">可选</string>
     <string name="plugins_install">安装</string>
     <string name="plugins_install_replace">替换安装</string>
 
@@ -2060,15 +2055,6 @@
     <string name="plugins_content_settings_page">设置页 · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
-    <string name="plugins_permission_skills_register">注册技能</string>
-    <string name="plugins_permission_agents_register">注册子代理</string>
-    <string name="plugins_permission_workspace_tools">注册工作区工具</string>
-    <string name="plugins_permission_workspace_exec">执行 Shell 命令</string>
-    <string name="plugins_permission_tools_register">注册 AI 工具</string>
-    <string name="plugins_permission_agent_events">接收生命周期事件</string>
-    <string name="plugins_permission_mcp_register">注册 MCP 服务器</string>
-    <string name="plugins_permission_mcp_connect">连接 MCP 服务器</string>
-    <string name="plugins_permission_settings_pages">在设置中提供页面</string>
     <string name="plugins_ext_entry_subtitle">插件 %1$s</string>
     <string name="settings_plugin_page_title">插件页面</string>
     <string name="plugin_web_page_failed">页面加载失败</string>
@@ -2087,7 +2073,7 @@
     <string name="plugin_tool_remove">从项目移除</string>
     <string name="plugin_tool_not_found">工具不可用</string>
     <string name="plugin_tool_not_found_hint">插件可能已停用、卸载或不再提供这个工具。</string>
-    <string name="plugin_tool_not_authorized">插件已停用或未授权，工具不再可用</string>
+    <string name="plugin_tool_not_authorized">插件已停用，工具不再可用</string>
     <string name="plugin_tool_permission_title">确认调用插件工具</string>
     <string name="plugin_tool_permission_summary">AI 请求调用插件「%1$s」的工具「%2$s」</string>
     <string name="plugin_tool_permission_details">插件：%1$s\n工具：%2$s\n参数：%3$s</string>
@@ -2099,14 +2085,12 @@
     <string name="plugin_invalid_result">插件 handler 返回了无效结果</string>
 
     <string name="plugins_enable">启用插件</string>
-    <string name="plugins_enable_hint">关闭后，它提供的技能和子代理都不再生效。</string>
-    <string name="plugins_hint_needs_permission">必要权限还没有授予，插件暂不生效。请在下方打开对应权限。</string>
+    <string name="plugins_enable_hint">关闭后，它提供的技能、子代理、工具和页面都不再生效。</string>
     <string name="plugins_hint_damaged">插件文件已损坏或丢失，无法启用。请卸载后重新导入。</string>
     <string name="plugins_hint_incompatible">这个插件与当前版本的 AiCode 不兼容，无法启用。</string>
     <string name="plugins_section_summary">简介</string>
     <string name="plugins_section_info">信息</string>
     <string name="plugins_section_contents">提供的内容</string>
-    <string name="plugins_section_permissions">权限</string>
     <string name="plugins_info_version">版本</string>
     <string name="plugins_info_publisher">发布者</string>
     <string name="plugins_info_license">许可证</string>
@@ -2132,15 +2116,12 @@
     <string name="plugins_error_manifest_version">不支持的清单版本：%1$s</string>
     <string name="plugins_error_unsupported_field">此版本不支持的字段：%1$s</string>
     <string name="plugins_error_unsupported_contribution">此版本暂不支持的内容类型：%1$s</string>
-    <string name="plugins_error_unsupported_permission">此版本暂不支持的权限：%1$s</string>
     <string name="plugins_error_api_incompatible">插件要求的插件接口版本（%1$s）与当前 AiCode 不兼容。</string>
     <string name="plugins_error_duplicate_id">重复的 ID：%1$s</string>
-    <string name="plugins_error_scope_mismatch">权限范围与提供的内容不一致：%1$s</string>
     <string name="plugins_error_file_missing">清单引用的文件不存在：%1$s</string>
     <string name="plugins_error_content_invalid">内容无效：%1$s</string>
     <string name="plugins_error_storage_failed">保存失败，请稍后重试。</string>
     <string name="plugins_error_preview_expired">这次导入已经过期，请重新选择文件。</string>
-    <string name="plugins_error_permission_not_granted">必要权限没有授予：%1$s</string>
     <string name="skills_group_plugin">插件提供</string>
     <string name="subagents_group_plugin">插件提供</string>
     <string name="plugins_scope_badge">插件</string>

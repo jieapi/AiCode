@@ -54,7 +54,6 @@ import com.aicode.core.ui.SegmentedTabs
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginMcpServer
-import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.settings.presentation.component.LazyGroupItem
@@ -91,21 +90,6 @@ internal fun mcpDescription(server: PluginMcpServer): String {
     }
     return if (target.isBlank()) transport else "$transport · $target"
 }
-
-@Composable
-internal fun PluginPermission.label(): String = stringResource(
-    when (this) {
-        PluginPermission.SKILLS_REGISTER -> R.string.plugins_permission_skills_register
-        PluginPermission.AGENTS_REGISTER -> R.string.plugins_permission_agents_register
-        PluginPermission.WORKSPACE_TOOLS -> R.string.plugins_permission_workspace_tools
-        PluginPermission.WORKSPACE_EXEC -> R.string.plugins_permission_workspace_exec
-        PluginPermission.TOOLS_REGISTER -> R.string.plugins_permission_tools_register
-        PluginPermission.AGENT_EVENTS -> R.string.plugins_permission_agent_events
-        PluginPermission.MCP_REGISTER -> R.string.plugins_permission_mcp_register
-        PluginPermission.MCP_CONNECT -> R.string.plugins_permission_mcp_connect
-        PluginPermission.SETTINGS_PAGES -> R.string.plugins_permission_settings_pages
-    }
-)
 
 /**
  * 设置 → 插件：类似 MCP 风格的插件卡片列表。
@@ -249,7 +233,6 @@ private fun PluginRow(
         plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_status_incompatible)
         plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_status_damaged)
         !plugin.record.enabled -> stringResource(R.string.plugins_status_disabled)
-        plugin.missingRequired.isNotEmpty() -> stringResource(R.string.plugins_status_needs_permission)
         else -> stringResource(R.string.plugins_status_active)
     }
 
@@ -258,8 +241,6 @@ private fun PluginRow(
             MaterialTheme.colorScheme.error
         !plugin.record.enabled ->
             MaterialTheme.colorScheme.outline
-        plugin.missingRequired.isNotEmpty() ->
-            MaterialTheme.semanticColors.warning
         else ->
             MaterialTheme.colorScheme.tertiary
     }
@@ -443,7 +424,6 @@ private fun PluginRow(
 internal fun PluginDetailSection(
     plugin: InstalledPlugin,
     onToggleEnabled: (Boolean) -> Unit,
-    onTogglePermission: (PluginPermission, Boolean) -> Unit,
     onUninstall: () -> Unit,
     bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
     onClosePage: () -> Unit = {}
@@ -529,7 +509,6 @@ internal fun PluginDetailSection(
                 hasConfigPage = hasConfigPage,
                 onNavigateToConfigTab = { selectedTab = 1 },
                 onToggleEnabled = onToggleEnabled,
-                onTogglePermission = onTogglePermission,
                 onUninstall = onUninstall
             )
         } else {
@@ -555,7 +534,6 @@ private fun PluginNativeConfigContent(
     hasConfigPage: Boolean,
     onNavigateToConfigTab: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onTogglePermission: (PluginPermission, Boolean) -> Unit,
     onUninstall: () -> Unit
 ) {
     val manifest = plugin.manifest
@@ -680,77 +658,25 @@ private fun PluginNativeConfigContent(
                     )
                 }
                 val rows = skills.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_skill, it.skill.name),
-                        it.skill.description,
-                        PluginPermission.SKILLS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_skill, it.skill.name) to it.skill.description
                 } + agents.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_agent, it.definition.name),
-                        it.definition.description,
-                        PluginPermission.AGENTS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_agent, it.definition.name) to it.definition.description
                 } + workspaceTools.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)),
-                        it.description.resolve(languageTag),
-                        PluginPermission.WORKSPACE_TOOLS
-                    )
+                    stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)) to
+                        it.description.resolve(languageTag)
                 } + settingsPages.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)),
-                        it.anchor,
-                        PluginPermission.SETTINGS_PAGES
-                    )
+                    stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)) to it.anchor
                 } + aiTools.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)),
-                        it.description.resolve(languageTag),
-                        PluginPermission.TOOLS_REGISTER
-                    )
+                    stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
+                        it.description.resolve(languageTag)
                 } + hooks.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_hook, it.event),
-                        it.handler,
-                        PluginPermission.AGENT_EVENTS
-                    )
+                    stringResource(R.string.plugins_content_hook, it.event) to it.handler
                 } + mcpServers.map {
-                    Triple(
-                        stringResource(R.string.plugins_content_mcp, it.originalName),
-                        mcpDescription(it),
-                        PluginPermission.MCP_CONNECT
-                    )
+                    stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
                 }
-                rows.forEachIndexed { index, (title, description, permission) ->
+                rows.forEachIndexed { index, (title, description) ->
                     if (index > 0) SettingsDivider()
-                    val active = plugin.isActive && when (permission) {
-                        PluginPermission.MCP_CONNECT ->
-                            PluginPermission.MCP_REGISTER in plugin.granted &&
-                                PluginPermission.MCP_CONNECT in plugin.granted
-                        PluginPermission.AGENT_EVENTS ->
-                            PluginPermission.AGENT_EVENTS in plugin.granted
-                        else -> permission in plugin.granted
-                    }
-                    ContentRow(
-                        title = title,
-                        description = description,
-                        active = active
-                    )
-                }
-            }
-
-            SettingsGroupHeader(text = stringResource(R.string.plugins_section_permissions))
-            SettingsGroup {
-                manifest.permissions.forEachIndexed { index, request ->
-                    if (index > 0) SettingsDivider()
-                    PermissionRow(
-                        label = request.permission.label(),
-                        reason = request.reason.resolve(languageTag),
-                        required = request.required,
-                        granted = request.permission in plugin.granted,
-                        onToggle = { onTogglePermission(request.permission, it) }
-                    )
+                    ContentRow(title = title, description = description, active = plugin.isActive)
                 }
             }
         }
@@ -792,7 +718,6 @@ private fun PluginNativeConfigContent(
 private fun enableHint(plugin: InstalledPlugin): String = when {
     plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_hint_incompatible)
     plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_hint_damaged)
-    plugin.missingRequired.isNotEmpty() -> stringResource(R.string.plugins_hint_needs_permission)
     else -> stringResource(R.string.plugins_enable_hint)
 }
 
@@ -840,36 +765,5 @@ private fun ContentRow(title: String, description: String, active: Boolean) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-@Composable
-private fun PermissionRow(
-    label: String,
-    reason: String,
-    required: Boolean,
-    granted: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "$label · ${stringResource(if (required) R.string.plugins_permission_required else R.string.plugins_permission_optional)}",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Spacer(modifier = Modifier.width(Spacing.md))
-        AppSwitch(checked = granted, onCheckedChange = onToggle)
     }
 }
