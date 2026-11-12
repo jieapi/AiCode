@@ -120,9 +120,11 @@ internal object PluginWebViewFactory {
                     ByteArrayInputStream(css.toByteArray(Charsets.UTF_8))
                 )
             }
+            if (path.isBlank() || path.startsWith("/") || path.split('/').any { it == ".." || it == "." }) {
+                return null
+            }
             val bytes = runCatching {
-                val assetPath = if (path == "eruda.min.js") "scripts/eruda.min.js" else "plugin-ui/$path"
-                context.assets.open(assetPath).use { it.readBytes() }
+                context.assets.open("plugin-ui/$path").use { it.readBytes() }
             }.getOrNull() ?: return null
             return webResource(mimeOf(path), bytes)
         }

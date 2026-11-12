@@ -38,7 +38,7 @@ class MarkdownPreviewViewModel @Inject constructor(
         /** [WebViewAssetLoader] 的默认虚拟 host。 */
         const val ASSET_HOST = "appassets.androidplatform.net"
 
-        private const val ASSET_BASE = "https://$ASSET_HOST/assets/markdown/"
+        private const val ASSET_BASE = "https://$ASSET_HOST/assets/plugin-ui/markdown/"
         private const val LOCAL_PREFIX = "/local/"
         private const val TAG = "MarkdownPreview"
 
@@ -51,7 +51,7 @@ class MarkdownPreviewViewModel @Inject constructor(
     }
 
     private val template: String by lazy {
-        context.assets.open("markdown/preview.html").bufferedReader().use { it.readText() }
+        context.assets.open("plugin-ui/markdown/preview.html").bufferedReader().use { it.readText() }
     }
 
     /** 最近一次渲染使用的深浅色，供 [LocalAssetPathHandler] 渲染跳转到的 Markdown 时沿用。 */

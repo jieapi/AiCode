@@ -720,7 +720,7 @@ class BrowserManager @Inject constructor(
     private fun loadErudaScript(): String {
         erudaScriptCache?.let { return it }
         val script = try {
-            appContext.assets.open("scripts/eruda.min.js").bufferedReader().use { it.readText() }
+            appContext.assets.open("plugin-ui/eruda.min.js").bufferedReader().use { it.readText() }
         } catch (e: Exception) {
             FileLogger.e(TAG, "Failed to read eruda.min.js from assets", e)
             ""
