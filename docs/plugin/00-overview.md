@@ -1,6 +1,6 @@
 # 插件系统计划：总览
 
-状态：讨论稿 v0.7，2026-10-25（进度更新至 2026-11-10）。技能与子代理、工作区工具、AI 工具与运行时、MCP 服务器、生命周期 hooks 第一版（只读）五个切片已在 `feat/plugin-system` 分支实现；hooks 已通过冒烟编译、插件单测与真机验证（2026-11-10）。其余仍为设计规划；进度见第 8 节。
+状态：讨论稿 v0.7，2026-10-25（进度更新至 2026-11-12）。技能与子代理、工作区工具、AI 工具与运行时、MCP 服务器、生命周期 hooks 已在 `feat/plugin-system` 分支实现；只读 hooks 已通过冒烟编译、插件单测与真机验证（2026-11-10），可写 hooks 第一版（工具前后）已实现。其余仍为设计规划；进度见第 8 节。
 
 本文档用于持续讨论，不代表已经批准实施，也不代表下面的建议都已确定。后续直接修改对应主题文件，避免把尚未决定的事项写成既定约束。
 
@@ -106,7 +106,7 @@ App 按现有规则判断
 
 - 构建插件已明确为右抽屉入口、结构化页面/配置与插件业务逻辑；具体字段、组件清单、页面呈现容器与任务保留策略尚未定稿，不自行扩展为 App 内置构建配方或复杂任务图引擎。
 - 自由布局、动效、状态绑定、表单反馈已确认；是否开放任意 HTML/CSS、插件原生 View 或由代码任意返回 UI 树等其他渲染方式未确认。
-- 第一个 hooks 切片只读：只给运行元数据，不允许改写消息、工具参数、响应或模型配置；后续是否提供 `transform`、能改哪些字段仍未确认，支持生命周期扩展不等于任意修改内部状态。
+- 第一个 hooks 切片只读：只给运行元数据，不允许改写消息、工具参数、响应或模型配置。可写 `transform` 已在 2026-11-12 扩展到工具前后两个事件（`agent.tool.before` / `agent.tool.after`）；请求/消息级可变字段与更多事件仍未开放，支持生命周期扩展不等于任意修改内部状态。
 - 不确定安装、启用和授权是全局、项目级还是会话级。
 - 多索引在线目录已确认；不另外预设账号、付费、评分、专用市场后端或多语言运行时。
 - 是否官方的认定尚未决定；推荐区分官方维护与官方索引收录，不把自定义索引的声明直接当可信身份。
@@ -136,7 +136,8 @@ App 按现有规则判断
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
 | 贡献：AI 工具（`runtime` + `tools.register` + JavaScript 沙箱 handler） | 已实现，冒烟编译与插件单测通过，已真机验证（2026-11-10） | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
-| 贡献：生命周期 hooks（只读；`agent.events` + `contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
+| 贡献：生命周期 hooks（只读；`contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
+| 贡献：可写 hooks（`mode: "transform"`；`agent.tool.before` / `agent.tool.after`，可拒绝/改参数/改成功结果 data） | 已实现，冒烟编译与单测待本次验证 | `PluginHookDispatcher.beforeToolCall/afterToolCall`、`PluginHookTransform`、`StatefulAgentWorkflow` 的权限与批次结果路径 |
 | 通用页面与配置、代审核、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
@@ -154,12 +155,14 @@ App 按现有规则判断
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
-| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），payload 含 `runId`、`sessionId`、`mode`、`scope`、`agentName` 与各事件专属字段，已真机验证 run 事件（2026-11-10）；`transform`、代审核与双向交互未开始，依赖阶段 0 的 D12、D13、D14 |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 第一版已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`；单 hook 10 秒、合计 20 秒，失败按未改动继续。代审核与请求级 transform 未开始，依赖阶段 0 的 D12、D13、D14 |
 | 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 ### 8.3 当前进度
 
 当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。声明式工作区工具仍只有 HTML 页面，没有运行态回传。
+
+2026-11-12：新增可写 hooks 第一版——清单 `contributes.hooks[]` 增加 `mode`（缺省 `observe`，可写必须显式 `transform`），新增 `agent.tool.before` 与 `agent.tool.after`。`agent.tool.before` 在权限判定前运行，可返回 `{decision:"deny",reason}` 或 `{arguments}`；改写参数后重新走完整权限判断，拒绝返回 `PLUGIN_HOOK_DENIED`。`agent.tool.after` 只处理成功结果，可返回 `{data}` 改写 `data`，不能改状态、图片或附件。插件按 ID 升序、清单顺序执行，单 hook 10 秒、合计 20 秒，超时/异常/格式错误保持原值继续；转换结果有 256 KiB 上限，只接受白名单字段。插件详情把可写 hook 标注为「可写 Hook」。
 
 2026-11-12：运行时重构为容器内进程——移除 AndroidX JavaScriptSandbox 与 isolate，`runtime.type` 支持 `javascript`（node）与 `python`（python3）；插件目录与依赖装在 `~/.aicode/plugins`，可声明 npm/pip 依赖并在设置页手动准备；host API 复用页面桥的四根与保护目录；`plugin.event` 可推送到同插件已打开的页面。编译与插件单测通过，真机验证待补。
 

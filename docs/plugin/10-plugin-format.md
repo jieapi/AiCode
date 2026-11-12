@@ -142,7 +142,7 @@ community.workbench-kit-1.0.0.zip
 | `pages` | 数组 | `id/title/document/onOpen`；`onOpen` 可省略 |
 | `workspacePanel` | 单个对象，可省略 | `page` 引用页面，右抽屉按插件展示入口 |
 | `configuration` | 单个对象，可省略 | `page/defaults/saveHandler`，从设置内配置操作打开 |
-| `hooks` | 数组 | `id/event/handler`；第一切片只有只读观察，`mode` 与 `transform` 未实现 |
+| `hooks` | 数组 | `id/event/handler/mode`；缺省 `observe`，工具前后事件必须显式 `mode: "transform"` |
 | `permissionReviewer` | 单个对象，可省略 | `handler`，必须已申请 `agent.permissionReview` |
 | `environments` | 数组 | `id/target/manager/prerequisites/inputs/lockFiles/checkHandler/prepareHandler` |
 | `services` | 数组 | `id/environment/environmentRef/startHandler/stopHandler/exports`，无依赖时可省略 environmentRef |
@@ -321,7 +321,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ## 12. 当前实现范围
 
-上面的格式是完整草案；宿主现在只实现了声明式贡献、AI 工具运行时、MCP 注册与第一版只读 hooks，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已真机验证；第四切片（MCP）已实现，冒烟编译与插件单测通过，待真机验证；第五切片（只读 hooks）已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10）。
+上面的格式是完整草案；宿主现在只实现了声明式贡献、AI 工具运行时、MCP 注册、只读 hooks 与工具前后的可写 hooks，其余一律在安装时明确拒绝，不静默忽略。第一、第二切片已提交；第三切片（AI 工具）已真机验证；第四切片（MCP）已实现，冒烟编译与插件单测通过，待真机验证；第五切片（只读 hooks）已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10）；可写 hooks 第一版（工具前后）已实现，验证状态见 00 第 8 节。
 
 ### 第一切片（已提交）：技能与子代理
 
@@ -385,12 +385,12 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
 | 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
 
-### 第五切片（已实现）：生命周期 hooks（只读）
+### 第五切片（已实现）：生命周期 hooks
 
 | 项 | 行为 |
 | --- | --- |
-| 能力 | `agent.hooks`，`scope` 为 `{"ids": [...], "events": [...]}`；`ids` 要覆盖 `contributes.hooks` 的全部 id，`events` 要覆盖 hooks 使用的事件集合；必须同时申请 `agent.hooks` |
-| 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 为 `dist/main.js` 里 `globalThis.aicode.handlers` 的键 |
+| 生效 | 插件启用即生效，没有逐项权限系统 |
+| 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 是插件进程 handler 表里的键，由 `hook.invoke` 调用 |
 | 运行时 | hooks 需要 `runtime`；没有运行时的包不能声明 hooks |
 | 事件 | `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction` |
 | payload | 公共字段 `runId`、`sessionId`、`mode`、`scope`（`main`/`subagent`）、`agentName`；run 事件带 `status`/`toolCalls`/`errorCode`；请求事件带 `requestId`/`usage`/`durationMs`/`stopReason`/`estimatedInputTokens`；工具事件带 `callId`/`toolName`/`status`/`durationMs`；压缩事件带 `compacted`/`estimatedInputTokens` |
@@ -398,10 +398,23 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 边界 | 只读：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，不能影响工具授权与模式限制 |
 | 未验证 | run 事件曾真机验证；扩展的请求/工具/压缩事件尚未真机验证 |
 
+### 第五切片补充（已实现）：可写 hooks（工具前后）
+
+| 项 | 行为 |
+| --- | --- |
+| 贡献 | `contributes.hooks[]` 增加可选 `mode`；`observe` 为缺省，`transform` 必须显式声明 |
+| 事件 | `agent.tool.before`、`agent.tool.after` 只接受 `mode: "transform"`；七个只读事件不接受 `transform` |
+| `agent.tool.before` | 在工具权限判定前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny", reason?, arguments?}`。拒绝时工具错误码 `PLUGIN_HOOK_DENIED`；参数改写后重新走完整权限判断 |
+| `agent.tool.after` | 仅成功执行后同步等待；payload 含 `callId`、`toolName`、`status=success`、`data`；返回 `{data}`，只能改 `data`，不能改状态、图片、附件或错误结果 |
+| 顺序与预算 | 按插件 ID 升序、清单内顺序执行；单 hook 10 秒、合计 20 秒；超时/异常/格式错误保持原值继续，不自动批准 |
+| 校验 | 只接受白名单字段；`arguments` 必须是 JSON 对象，`data` 可为任意 JSON；变更 JSON 上限 256 KiB；拒绝理由截断到 500 字符 |
+| 边界 | 不能改工具名、不能批准工具、不能把宿主 DENY 改成 ALLOW、不能绕过 PLAN 与权限策略；审批后不悄悄改写参数 |
+| 未验证 | 冒烟编译与插件单测通过后需补真机验证 |
+
 ### 校验规则（实现里的硬规则）
 
-- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` / `tools.register`、`contributes.mcp` / `mcp.register` / `mcp.connect`、`contributes.hooks` / `agent.hooks`。
-- hooks 声明的事件必须来自宿主支持的事件集合；同类贡献 ID 不得重复。
+- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools`、`contributes.mcp`、`contributes.hooks`（`observe` / `transform`）。
+- hooks 声明的事件必须来自宿主支持的事件集合；`mode: "transform"` 只能用于 `agent.tool.before` / `agent.tool.after`，这两个事件也必须显式声明 `transform`；同类贡献 ID 不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。
 - ZIP：压缩包 ≤ 16 MiB、≤ 512 个条目、单条目 ≤ 4 MiB、解压总量 ≤ 32 MiB；重复条目（含仅大小写不同）拒绝；清单 ≤ 256 KiB 且必须在根目录。限额在流式读取时执行，不信任条目自报的大小。所有条目都按普通文件写出，ZIP 里的符号链接与权限位被忽略。
@@ -425,4 +438,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的 `transform` 模式与可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的请求/消息 transform 与更多可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

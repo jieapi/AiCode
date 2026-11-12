@@ -132,6 +132,7 @@ class StatefulAgentWorkflow @Inject constructor(
         const val LIVE_TAIL_CHARS = 4_000
         const val PROGRESS_INTERVAL_MS = 250L
         const val USER_REJECTED_CODE = "USER_REJECTED"
+        const val PLUGIN_HOOK_DENIED = "PLUGIN_HOOK_DENIED"
         const val TITLE_GENERATOR_FILE = "agent/title-generator.md"
         const val TITLE_MAX_CHARS = 50
         const val COMMIT_GENERATOR_FILE = "agent/commit-generator.md"
@@ -807,16 +808,45 @@ class StatefulAgentWorkflow @Inject constructor(
                     }
                     is AgentSideEffect.RequestPermission -> {
                         val tool = toolRegistry.getTool(effect.toolCall.name)
-                        val argsPreview = JsonObject(effect.toolCall.arguments).toString().take(500)
-                        val checkResult = requestPermissionIfNeeded(tool, effect.toolCall.id, effect.toolCall.arguments, argsPreview, currentContext.permissionMode, currentContext.sessionId)
+                        var toolCall = effect.toolCall
+                        val hookDecision = if (tool != null && hookSessionId != null) {
+                            pluginHookDispatcher.beforeToolCall(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                callId = toolCall.id,
+                                toolName = toolCall.name,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                arguments = JsonObject(toolCall.arguments)
+                            )
+                        } else {
+                            null
+                        }
+                        if (hookDecision != null) {
+                            toolCall = toolCall.copy(
+                                arguments = hookDecision.arguments ?: JsonObject(toolCall.arguments)
+                            )
+                        }
+                        val argsPreview = JsonObject(toolCall.arguments).toString().take(500)
+                        // 参数可能已被插件改写：必须按最终参数重新走完整权限判断，原批准不沿用。
+                        val checkResult = if (hookDecision?.denied == true) {
+                            PermissionCheckResult(
+                                approved = false,
+                                denyReason = hookDecision.denyReason ?: "插件阻止了该工具调用",
+                                errorCode = PLUGIN_HOOK_DENIED
+                            )
+                        } else {
+                            requestPermissionIfNeeded(tool, toolCall.id, toolCall.arguments, argsPreview, currentContext.permissionMode, currentContext.sessionId)
+                        }
 
                         if (!checkResult.approved) {
                             val rawResult = ToolResult.Error(checkResult.denyReason, checkResult.errorCode).toTransportString()
-                            send(AgentEvent.ToolCallFinished(effect.toolCall.id, effect.toolCall.name, rawResult, true, argsPreview))
+                            send(AgentEvent.ToolCallFinished(toolCall.id, toolCall.name, rawResult, true, argsPreview))
                         } else {
-                            send(AgentEvent.ToolCallStarted(effect.toolCall.id, effect.toolCall.name, argsPreview))
+                            send(AgentEvent.ToolCallStarted(toolCall.id, toolCall.name, argsPreview))
                         }
-                        actionQueue.addLast(AgentAction.PermissionEvaluated(effect.toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
+                        actionQueue.addLast(AgentAction.PermissionEvaluated(toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
                     }
                     is AgentSideEffect.CancelToolBatch -> {
                         // 整批取消：已批准未执行的工具补发完成事件（内容为未执行），
@@ -919,6 +949,21 @@ class StatefulAgentWorkflow @Inject constructor(
                                 } else {
                                     currentContext = newCtx
                                     rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newCtx.mode))
+                                }
+                            }
+                            if (!isError && hookSessionId != null) {
+                                toolResultSuccessData(rawResult)?.let { data ->
+                                    val transform = pluginHookDispatcher.afterToolCall(
+                                        sessionId = hookSessionId,
+                                        runId = hookRunId,
+                                        callId = toolCall.id,
+                                        toolName = toolCall.name,
+                                        mode = currentContext.mode.name,
+                                        scope = hookScope,
+                                        agentName = hookAgentName,
+                                        data = data
+                                    )
+                                    transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
                                 }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
@@ -1477,6 +1522,17 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /** 从回传给模型的 sendFile 结果中剥离宿主本地路径（模型只应看到容器路径）。 */
+    private fun toolResultSuccessData(raw: String): JsonElement? {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        if ((obj["status"] as? JsonPrimitive)?.contentOrNull != "success") return null
+        return obj["data"]
+    }
+
+    private fun replaceToolResultData(raw: String, data: JsonElement): String {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return raw
+        return JsonObject(obj.toMutableMap().apply { this["data"] = data }).toString()
+    }
+
     private fun stripAttachments(result: ToolResult): ToolResult {
         val success = result as? ToolResult.Success ?: return result
         val data = success.data as? JsonObject ?: return result
