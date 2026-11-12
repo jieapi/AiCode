@@ -345,6 +345,8 @@
     <string name="notification_agent_live_title_multi">%1$d tasks running</string>
     <string name="notification_channel_agent_approval">Approval notifications</string>
     <string name="notification_channel_agent_approval_desc">Notifications shown when the AI requests permission, asks a question, or waits for plan approval in the background</string>
+    <string name="notification_channel_plugin_events">Plugin notifications</string>
+    <string name="notification_channel_plugin_events_desc">Notifications sent by plugins through host.notify</string>
     <string name="notification_approval_title">AI is waiting for your confirmation</string>
     <string name="notification_approval_multi_title">%1$d tasks awaiting confirmation</string>
     <string name="notification_approval_needed">Approval needed</string>

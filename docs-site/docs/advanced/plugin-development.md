@@ -184,6 +184,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 宿主 → 插件 | `hook.invoke` | `params: {handler, args}`，返回 `result` |
 | 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
+| 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
 | 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
 
 入口至少要实现一个消息循环：

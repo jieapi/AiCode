@@ -804,6 +804,17 @@ class AIEditorApp : Application(), Configuration.Provider {
                 setShowBadge(false)
             }
             notificationManager.createNotificationChannel(approvalChannel)
+
+            // 插件通知：由插件进程通过 host.notify 发起，默认优先级，可单独关闭。
+            val pluginChannel = NotificationChannel(
+                "plugin_events",
+                getString(R.string.notification_channel_plugin_events),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.notification_channel_plugin_events_desc)
+                setShowBadge(true)
+            }
+            notificationManager.createNotificationChannel(pluginChannel)
         }
     }
 }

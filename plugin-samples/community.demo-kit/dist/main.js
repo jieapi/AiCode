@@ -34,6 +34,14 @@ const handlers = {
     return { text, length: text.length, plugin: 'community.demo-kit', runtime: 'process' };
   },
   'tools.lastRun': () => lastRun,
+  'tools.notify': async (args) => {
+    await hostCall('host.notify', {
+      title: String(args.title ?? ''),
+      body: String(args.body ?? ''),
+      key: args.key === undefined ? undefined : String(args.key)
+    });
+    return { ok: true };
+  },
   'hooks.runFinished': (args) => {
     lastRun = args;
     return 'stored';
