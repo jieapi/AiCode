@@ -30,7 +30,7 @@ class PluginManagerTest {
         manager = newManager()
     }
 
-    private fun newManager() = PluginManager(root, PluginApi.VERSION) { now++ }
+    private fun newManager() = PluginManager(root, PluginApi.VERSION, { now++ })
 
     private suspend fun previewOf(bytes: ByteArray = PluginFixtures.validPackage()): PluginPreview {
         val result = manager.preview(ByteArrayInputStream(bytes))
@@ -117,6 +117,27 @@ class PluginManagerTest {
         assertTrue(manager.activeSkills().isEmpty())
         assertFalse(File(root, "installed/community.demo-kit").exists())
         assertTrue(newManager().plugins.value.isEmpty())
+    }
+
+    @Test
+    fun legacyRoot_isMigratedOnLoad() = runTest {
+        val legacy = File(tmp.root, "filesDir/plugins")
+        val old = PluginManager(legacy, PluginApi.VERSION, { now++ })
+        val preview = old.preview(ByteArrayInputStream(PluginFixtures.validPackage()))
+        check(preview is PluginPreviewResult.Ready) { "旧目录预览应成功: $preview" }
+        check(old.install(preview.preview.token) is PluginInstallResult.Installed)
+        assertTrue(File(legacy, "registry.json").isFile)
+
+        val newRoot = File(tmp.root, "aicode/plugins")
+        val registry = File(tmp.root, "filesDir/plugin-registry.json")
+        val migrated = PluginManager(newRoot, PluginApi.VERSION, { now++ }, registry, legacy)
+        migrated.ensureLoaded()
+
+        assertEquals(PluginStatus.OK, migrated.plugins.value.single().status)
+        assertTrue(File(newRoot, "installed/community.demo-kit/plugin.json").isFile)
+        assertTrue(registry.isFile)
+        assertFalse(File(newRoot, "registry.json").exists())
+        assertFalse(legacy.exists())
     }
 
     @Test

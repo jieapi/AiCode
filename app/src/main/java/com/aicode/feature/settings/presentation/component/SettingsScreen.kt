@@ -419,10 +419,7 @@ fun SettingsScreen(
         plugins.filter { it.isActive }
             .flatMap { plugin ->
                 plugin.content.settingsPages.map { page ->
-                    page.copy(
-                        pluginVersion = plugin.record.version,
-                        dataDir = pluginsViewModel.dataDirFor(plugin.id)
-                    )
+                    page.copy(pluginVersion = plugin.record.version)
                 }
             }
     }
