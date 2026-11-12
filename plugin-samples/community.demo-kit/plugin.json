@@ -67,6 +67,19 @@
         },
         "inputSchema": "schemas/last-run.input.json",
         "handler": "tools.lastRun"
+      },
+      {
+        "id": "notify",
+        "title": {
+          "default": "Notify",
+          "zh-CN": "发通知"
+        },
+        "description": {
+          "default": "Send a system notification through the host. Use it to verify host.notify.",
+          "zh-CN": "通过宿主发一条系统通知，用于验证 host.notify。"
+        },
+        "inputSchema": "schemas/notify.input.json",
+        "handler": "tools.notify"
       }
     ],
     "workspaceTools": [

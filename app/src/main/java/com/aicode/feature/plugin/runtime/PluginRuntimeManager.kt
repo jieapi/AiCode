@@ -50,7 +50,8 @@ class PluginRuntimeManager @Inject constructor(
     private val homeResolver: PathHomeResolver,
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
-    private val eventBus: PluginEventBus
+    private val eventBus: PluginEventBus,
+    private val notifier: PluginNotifier
 ) {
 
     private class Entry(
@@ -170,6 +171,7 @@ class PluginRuntimeManager @Inject constructor(
             "host.fs.delete" -> paths.delete(PluginHostPaths.requireString(params, "path"))
             "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
             "host.bash" -> bash(params)
+            "host.notify" -> notifier.notify(pluginId, params)
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")
         }
     }

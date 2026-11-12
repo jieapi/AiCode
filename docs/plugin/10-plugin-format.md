@@ -366,7 +366,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | --- | --- |
 | 顶层字段 | `runtime` 接受 `{type, entry, command?, dependencies?}`；`type` 为 `javascript`（node）或 `python`（python3）；`dependencies` 为 `{tool: npm|pip, file}` |
 | 运行位置 | 本地容器内子进程，cwd 为插件安装目录；SSH 模式下仍在手机端 |
-| 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`；插件可发 `host.fs.*`、`host.bash` 与 `plugin.event` |
+| 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`；插件可发 `host.fs.*`、`host.bash`、`host.notify` 与 `plugin.event` |
 | 依赖 | 详情页手动「准备依赖」：npm `npm ci`/`npm install`，pip 创建 `.venv`；缺少运行时只提示，不自动装系统包 |
 | 生命周期 | 按插件版本惰性启动，空闲 10 分钟回收，停用/卸载关闭；单次调用 120s，hook 30s |
 | 事件 | `plugin.event` 推送到同插件已打开的页面（`aicode.events.on`），不跨插件转发 |

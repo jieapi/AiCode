@@ -345,6 +345,8 @@
     <string name="notification_agent_live_title_multi">%1$d 个任务进行中</string>
     <string name="notification_channel_agent_approval">授权审批通知</string>
     <string name="notification_channel_agent_approval_desc">AI 在后台请求授权、提问或等待计划审批时弹出的通知</string>
+    <string name="notification_channel_plugin_events">插件通知</string>
+    <string name="notification_channel_plugin_events_desc">插件通过 host.notify 发送的通知</string>
     <string name="notification_approval_title">AI 等待你的确认</string>
     <string name="notification_approval_multi_title">%1$d 个任务等待确认</string>
     <string name="notification_approval_needed">需要审批</string>

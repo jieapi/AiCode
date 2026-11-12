@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "通知标题，最多 100 字"
+    },
+    "body": {
+      "type": "string",
+      "description": "通知正文，最多 1000 字"
+    },
+    "key": {
+      "type": "string",
+      "description": "可选，同 key 的新通知覆盖上一条"
+    }
+  },
+  "required": ["title", "body"]
+}
