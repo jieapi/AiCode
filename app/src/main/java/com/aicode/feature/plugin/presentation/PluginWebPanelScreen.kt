@@ -61,16 +61,16 @@ fun PluginWebPanelScreen(
     val currentVariables by rememberUpdatedState(variables)
     val backgroundColor = semantic.pageBackground.toArgb()
     val pageUrl = PluginWebViewFactory.pageUrl(page)
-    val cached = remember(page.key) { PluginWebViewCache.take(page.key) }
-    val cachedBridge = remember(page.key) {
-        if (cached != null) PluginWebViewCache.takeBridge(page.key) else null
+    val cached = remember(page.cacheKey) { PluginWebViewCache.take(page.cacheKey) }
+    val cachedBridge = remember(page.cacheKey) {
+        if (cached != null) PluginWebViewCache.takeBridge(page.cacheKey) else null
     }
-    var failed by remember(page.key) { mutableStateOf(false) }
-    var viewportReady by remember(page.key) { mutableStateOf(false) }
+    var failed by remember(page.cacheKey) { mutableStateOf(false) }
+    var viewportReady by remember(page.cacheKey) { mutableStateOf(false) }
     // 返回键派发给页面后要等 JS 结果；期间重复触发不再派发，避免连续退出。
-    var backDispatching by remember(page.key) { mutableStateOf(false) }
+    var backDispatching by remember(page.cacheKey) { mutableStateOf(false) }
 
-    val webView = remember(page.key) {
+    val webView = remember(page.cacheKey) {
         (cached ?: PluginWebViewFactory.create(
             context = context,
             page = page,
@@ -79,18 +79,18 @@ fun PluginWebPanelScreen(
             themeVariables = { currentVariables },
             onPageFinished = { view ->
                 failed = false
-                PluginWebViewCache.markLoaded(page.key, pageUrl)
+                PluginWebViewCache.markLoaded(page.cacheKey, pageUrl)
                 view.evaluateJavascript(PluginThemeTokens.applyScript(currentVariables), null)
             },
             onMainFrameError = { failed = true }
-        )).also { PluginWebViewCache.put(page.key, it) }
+        )).also { PluginWebViewCache.put(page.cacheKey, it) }
     }
 
-    val bridge = remember(webView, page.key) {
+    val bridge = remember(webView, page.cacheKey) {
         cachedBridge ?: bridgeFactory({ script ->
             runCatching { webView.evaluateJavascript(script, null) }
         }, onClosePage).also { created ->
-            PluginWebViewCache.putBridge(page.key, created)
+            PluginWebViewCache.putBridge(page.cacheKey, created)
             // 注入对象只在页面下次加载时出现；这里先注入，LaunchedEffect 随后 loadUrl。
             webView.addJavascriptInterface(created, "__aicodeBridge")
         }
@@ -110,8 +110,8 @@ fun PluginWebPanelScreen(
     LaunchedEffect(webView, pageUrl, viewportReady) {
         if (
             viewportReady &&
-            !PluginWebViewCache.isLoaded(page.key, pageUrl) &&
-            !PluginWebViewCache.isLoading(page.key, pageUrl)
+            !PluginWebViewCache.isLoaded(page.cacheKey, pageUrl) &&
+            !PluginWebViewCache.isLoading(page.cacheKey, pageUrl)
         ) {
             webView.loadUrl(pageUrl)
         }

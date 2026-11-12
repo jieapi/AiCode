@@ -9,8 +9,11 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginHostPaths
+import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginProcessException
+import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import java.io.File
@@ -50,6 +53,8 @@ class PluginWebBridge(
     private val commandEngine: CommandEngine,
     private val workspacePath: () -> String,
     private val eventBus: PluginEventBus,
+    private val pluginManager: PluginManager,
+    private val pluginRuntimeManager: PluginRuntimeManager,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -130,7 +135,38 @@ class PluginWebBridge(
         "fs.delete" -> hostPaths.delete(PluginHostPaths.requireString(params, "path"))
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
         "bash" -> bash(params)
+        "plugin.invoke" -> invokePlugin(params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")
+    }
+
+    /** 页面调用自身插件的常驻进程；不允许跨插件。 */
+    private suspend fun invokePlugin(params: JsonObject): JsonElement {
+        val handler = PluginHostPaths.requireString(params, "handler").trim()
+        if (!HANDLER_NAME.matches(handler)) {
+            throw PluginHostException("PARAM_INVALID", "invalid handler")
+        }
+        val args = params["args"] as? JsonObject ?: JsonObject(emptyMap())
+        if (args.toString().length > MAX_INVOKE_ARGS_CHARS) {
+            throw PluginHostException("TOO_LARGE", "invoke args too large")
+        }
+        pluginManager.ensureLoaded()
+        val plugin = pluginManager.plugins.value.firstOrNull { it.id == page.pluginId && it.isActive }
+            ?: throw PluginHostException("PLUGIN_INACTIVE", "plugin is not active: ${page.pluginId}")
+        val runtime = plugin.content.runtime
+            ?: throw PluginHostException("RUNTIME_UNAVAILABLE", "plugin has no runtime")
+        return try {
+            pluginRuntimeManager.invoke(
+                pluginId = page.pluginId,
+                version = plugin.record.version,
+                runtime = runtime,
+                handler = handler,
+                args = args,
+                method = "ui.invoke",
+                timeoutMs = UI_INVOKE_TIMEOUT_MS
+            )
+        } catch (e: PluginProcessException) {
+            throw PluginHostException(e.code, e.message)
+        }
     }
 
     /** 一次性 Shell 命令：在插件页面所属工作区执行，输出与退出码原样返回。 */
@@ -188,5 +224,8 @@ class PluginWebBridge(
 
     private companion object {
         const val TAG = "PluginWebBridge"
+        const val UI_INVOKE_TIMEOUT_MS = 60_000L
+        const val MAX_INVOKE_ARGS_CHARS = 256 * 1024
+        val HANDLER_NAME = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
     }
 }

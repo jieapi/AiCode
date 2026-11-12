@@ -49,6 +49,9 @@ data class PluginSettingsPage(
     val pluginVersion: String = ""
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
+
+    /** WebView/页面桥缓存键：插件版本变化后强制创建新实例，避免继续使用旧页面。 */
+    val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
 }
 
 /** 已校验存在性的插件业务入口文件。 */
@@ -137,7 +140,9 @@ object PluginContentLoader {
         val workspaceTools = manifest.workspaceTools.map {
             loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
         }
-        val settingsPages = manifest.settingsPages.mapNotNull { loadSettingsPage(dir, manifest.id, it, errors) }
+        val settingsPages = manifest.settingsPages.mapNotNull {
+            loadSettingsPage(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
         val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
@@ -145,7 +150,9 @@ object PluginContentLoader {
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
         val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
-        val configPage = manifest.configPage?.let { loadConfigPage(dir, manifest.id, it, errors) }
+        val configPage = manifest.configPage?.let {
+            loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
+        }
         return if (errors.isEmpty()) {
             ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp, configPage))
         } else {
@@ -311,6 +318,7 @@ object PluginContentLoader {
     private fun loadSettingsPage(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         ref: PluginSettingsPageRef,
         errors: MutableList<PluginError>
     ): PluginSettingsPage? {
@@ -331,7 +339,8 @@ object PluginContentLoader {
             anchor = ref.anchor,
             pageFile = ref.page,
             icon = ref.icon,
-            installDir = dir
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 
@@ -339,6 +348,7 @@ object PluginContentLoader {
     private fun loadConfigPage(
         dir: File,
         pluginId: String,
+        pluginVersion: String,
         relativePath: String,
         errors: MutableList<PluginError>
     ): PluginSettingsPage? {
@@ -359,7 +369,8 @@ object PluginContentLoader {
             anchor = "",
             pageFile = relativePath,
             icon = "settings",
-            installDir = dir
+            installDir = dir,
+            pluginVersion = pluginVersion
         )
     }
 

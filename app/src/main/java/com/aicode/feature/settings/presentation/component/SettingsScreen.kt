@@ -442,7 +442,7 @@ fun SettingsScreen(
     LaunchedEffect(pluginsLoaded, pluginPages) {
         if (!pluginsLoaded || pluginPages.isEmpty() || PluginWebViewCache.hasCachedWebView) return@LaunchedEffect
         val target = PluginWebViewCache.lastPageKey
-            ?.let { key -> pluginPages.firstOrNull { it.key == key } }
+            ?.let { key -> pluginPages.firstOrNull { it.cacheKey == key } }
             ?: pluginPages.first()
         delay(200)
         // 预热等待期间用户可能已打开插件页，此时不要再替换掉正在显示的实例。
@@ -455,7 +455,7 @@ fun SettingsScreen(
                 backgroundColor = pluginThemeBackground,
                 themeVariables = { pluginThemeVariables },
                 onPageFinished = { view ->
-                    PluginWebViewCache.markLoaded(target.key, PluginWebViewFactory.pageUrl(target))
+                    PluginWebViewCache.markLoaded(target.cacheKey, PluginWebViewFactory.pageUrl(target))
                     view.evaluateJavascript(PluginThemeTokens.applyScript(pluginThemeVariables), null)
                 },
                 onMainFrameError = {}
@@ -471,8 +471,8 @@ fun SettingsScreen(
                 }
             )
             webView.addJavascriptInterface(bridge, "__aicodeBridge")
-            PluginWebViewCache.put(target.key, webView)
-            PluginWebViewCache.putBridge(target.key, bridge)
+            PluginWebViewCache.put(target.cacheKey, webView)
+            PluginWebViewCache.putBridge(target.cacheKey, bridge)
         }.onFailure { e ->
             FileLogger.w("SettingsScreen", "插件页预热失败", e)
         }
