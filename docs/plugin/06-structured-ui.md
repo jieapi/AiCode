@@ -19,6 +19,7 @@
 | `context` | `pluginId`、`pageId`、`version`、`languageTag`、`theme`、`workspaceName` |
 | `toast` | 宿主 Toast |
 | `ui.close` | 关闭页面 |
+| `ui.overlay` | 页面内全屏弹层开关与矩形；宿主在背景图对应区域挖洞 |
 | `fs.read` / `fs.write` / `fs.list` / `fs.delete` / `fs.stat` | 经 `PluginHostPaths` 读写插件目录、工作区与 `.aicode`；保护目录拒绝 |
 | `bash` | 在当前工作区执行一次性同步命令，返回 `{output, exitCode, truncated}`；受超时与长度限制 |
 | `terminal.run` | 新建共享终端标签，返回 `{tabId, state}`；由插件显式选择，命令在后台运行 |

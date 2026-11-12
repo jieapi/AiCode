@@ -75,7 +75,7 @@
 
   <div class="page-content">
     <section v-show="view === 'list'" class="view">
-      <aicode-group title="全局记忆" v-model:expanded="globalExpanded">
+      <aicode-group title="全局记忆" collapsible v-model:expanded="globalExpanded">
         <template v-if="globalItems.length">
           <template v-for="(item, index) in globalItems" :key="item.fileName">
             <div v-if="index > 0" class="aicode-divider"></div>
@@ -93,7 +93,7 @@
         <aicode-empty v-else text="暂无全局记忆" />
       </aicode-group>
 
-      <aicode-group title="项目记忆" v-model:expanded="projectExpanded">
+      <aicode-group title="项目记忆" collapsible v-model:expanded="projectExpanded">
         <template v-if="projectItems.length">
           <template v-for="(item, index) in projectItems" :key="item.fileName">
             <div v-if="index > 0" class="aicode-divider"></div>

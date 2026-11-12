@@ -4,7 +4,8 @@
   var pending = {};
   var nextId = 1;
 
-  var backHandler = null;
+  // 页面内返回处理器栈：后注册的优先执行，返回 true 的处理器消费本次返回。
+  var backHandlers = [];
   var eventHandlers = [];
 
   // 宿主推送插件事件：payload 是 JSON 字符串，形如 { name, payload }。
@@ -26,13 +27,15 @@
 
   // 宿主返回键派发入口：页面注册的处理器同步返回 true 表示已消费，宿主不再退出插件页。
   window.__aicodeBack = function () {
-    if (typeof backHandler !== 'function') return false;
-    try {
-      return backHandler() === true;
-    } catch (e) {
-      console.error('aicode: back handler failed', e);
-      return false;
+    var snapshot = backHandlers.slice();
+    for (var i = snapshot.length - 1; i >= 0; i--) {
+      try {
+        if (snapshot[i]() === true) return true;
+      } catch (e) {
+        console.error('aicode: back handler failed', e);
+      }
     }
+    return false;
   };
 
   window.__aicodeResolve = function (id, payload) {
@@ -100,10 +103,31 @@
       close: function () {
         return call('ui.close');
       },
+      // 页面内全屏弹层开关：打开时宿主按矩形在全局背景图上挖洞，关闭后恢复。
+      setOverlay: function (visible, rect) {
+        var params = { visible: visible !== false };
+        if (params.visible && rect) {
+          params.rect = {
+            left: Number(rect.left) || 0,
+            top: Number(rect.top) || 0,
+            width: Number(rect.width) || 0,
+            height: Number(rect.height) || 0,
+            topRadius: Number(rect.topRadius) || 0,
+            bottomRadius: Number(rect.bottomRadius) || 0,
+            coversBottom: rect.coversBottom === true
+          };
+        }
+        return call('ui.overlay', params);
+      },
       // 注册页面内返回：系统返回手势 / 返回键先交给它，返回 true 时宿主不退出插件页。
+      // 返回的 Promise 解析为注销函数，便于弹窗等临时界面关闭后移除处理器。
       onBack: function (handler) {
-        backHandler = typeof handler === 'function' ? handler : null;
-        return Promise.resolve();
+        if (typeof handler !== 'function') return Promise.resolve(function () {});
+        backHandlers.push(handler);
+        return Promise.resolve(function () {
+          var index = backHandlers.indexOf(handler);
+          if (index >= 0) backHandlers.splice(index, 1);
+        });
       }
     },
     // 监听插件进程主动发出的事件；返回取消订阅函数。

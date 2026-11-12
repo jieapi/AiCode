@@ -32,7 +32,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -71,6 +73,7 @@ class PluginWebBridge(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hostPaths = PluginHostPaths(dataDir, page.installDir, fileAccess, homeResolver)
+    @Volatile private var overlayActive = false
     private val eventSubscription = eventBus.subscribe(page.pluginId) { event ->
         val script = "window.__aicodeEvent(${jsString(event.toString())})"
         mainHandler.post { runCatching { post(script) } }
@@ -100,6 +103,7 @@ class PluginWebBridge(
     }
 
     fun close() {
+        updateOverlay(false, null)
         eventSubscription()
         scope.cancel()
     }
@@ -132,6 +136,14 @@ class PluginWebBridge(
 
         "ui.close" -> {
             mainHandler.post { onClosePage() }
+            buildJsonObject { put("ok", true) }
+        }
+
+        "ui.overlay" -> {
+            val visible = (params["visible"] as? JsonPrimitive)?.booleanOrNull
+                ?: throw PluginHostException("PARAM_INVALID", "visible required")
+            val rect = (params["rect"] as? JsonObject)?.let { readOverlayRect(it) }
+            updateOverlay(visible, rect)
             buildJsonObject { put("ok", true) }
         }
 
@@ -275,6 +287,32 @@ class PluginWebBridge(
             put("exitCode", result.exitCode)
             put("truncated", result.outputTruncated)
         }
+    }
+
+    /** 页面弹层开关与位置；多个页面同时打开时由控制器逐个挖洞。 */
+    @Synchronized
+    private fun updateOverlay(visible: Boolean, rect: PluginOverlayController.CssRect?) {
+        if (!visible && !overlayActive) return
+        overlayActive = visible
+        PluginOverlayController.setOverlay(page.cacheKey, visible, rect)
+    }
+
+    private fun readOverlayRect(obj: JsonObject): PluginOverlayController.CssRect? {
+        fun value(key: String): Float? = (obj[key] as? JsonPrimitive)?.floatOrNull
+        val left = value("left") ?: return null
+        val top = value("top") ?: return null
+        val width = value("width") ?: return null
+        val height = value("height") ?: return null
+        if (width <= 0f || height <= 0f) return null
+        return PluginOverlayController.CssRect(
+            left = left,
+            top = top,
+            width = width,
+            height = height,
+            topRadius = value("topRadius") ?: 0f,
+            bottomRadius = value("bottomRadius") ?: 0f,
+            coversBottom = (obj["coversBottom"] as? JsonPrimitive)?.booleanOrNull == true
+        )
     }
 
     private fun errorReply(code: String, message: String): JsonObject = buildJsonObject {

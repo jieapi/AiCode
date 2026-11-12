@@ -558,9 +558,12 @@ const off = aicode.events.on((event) => {
 | `aicode.terminal.stop(tabId)` | 发送 Ctrl-C；超时仍未退出则关闭标签 |
 | `aicode.terminal.close(tabId)` | 关闭标签；标签生命周期由插件维护 |
 | `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
+| `aicode.ui.setOverlay(visible, rect)` | 打开/关闭页面内全屏弹层并上报弹层矩形；宿主在全局背景图上按矩形挖洞，避免背景叠到弹层上 |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
 
 返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
+
+`AicodeBottomSheet`、`AicodeDialog` 打开时会自动上报弹层矩形并调用 `aicode.ui.setOverlay(true, rect)`，关闭后恢复；页面自己绘制的全屏弹层也应成对调用，`rect` 取弹层元素 `getBoundingClientRect()` 的 `left/top/width/height`，并用 `topRadius`/`bottomRadius` 描述圆角，避免全局背景图叠在弹层上。
 
 `aicode.invoke` 只允许调用当前页面对应插件的进程，参数与返回值都走 JSON；它会让宿主按需启动该插件的 runtime，单次等待上限 60 秒。插件进程需要处理 `ui.invoke` 方法，否则会返回 `METHOD_UNKNOWN`。
 

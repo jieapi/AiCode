@@ -7,7 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -25,16 +27,25 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.feature.plugin.domain.PluginSettingsPage
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 插件 HTML 页面宿主。
@@ -53,7 +64,15 @@ fun PluginWebPanelScreen(
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     val semantic = MaterialTheme.semanticColors
-    val fontScale = LocalConfiguration.current.fontScale
+    val configuration = LocalConfiguration.current
+    val fontScale = configuration.fontScale
+    val density = LocalDensity.current
+    val overlayState by PluginOverlayController.state.collectAsStateWithLifecycle()
+    val navigationBarHeight = WindowInsets.navigationBars.getBottom(density)
+    val compactBottomSheet = applySystemBarInsets && configuration.screenWidthDp < 600
+    // 紧凑屏的底部弹层应铺到系统导航栏后面；WebView 有 navigationBarsPadding，
+    // 这里用同色底条补上导航栏区域，宽屏居中对话框不补。
+    val fillNavigationBar = compactBottomSheet && overlayState.bottomFill
     val dark = PluginThemeTokens.isDark(colorScheme)
     val variables = remember(colorScheme, semantic, fontScale) {
         PluginThemeTokens.variables(colorScheme, semantic, fontScale)
@@ -67,6 +86,9 @@ fun PluginWebPanelScreen(
     }
     var failed by remember(page.cacheKey) { mutableStateOf(false) }
     var viewportReady by remember(page.cacheKey) { mutableStateOf(false) }
+    // WebView 在窗口中的位置与尺寸；布局线程更新，桥线程读取，用原子引用避免跨线程直接访问 View。
+    val webViewOrigin = remember(page.cacheKey) { AtomicReference(Offset.Zero) }
+    val webViewSize = remember(page.cacheKey) { AtomicReference(IntSize.Zero) }
     // 返回键派发给页面后要等 JS 结果；期间重复触发不再派发，避免连续退出。
     var backDispatching by remember(page.cacheKey) { mutableStateOf(false) }
 
@@ -117,6 +139,28 @@ fun PluginWebPanelScreen(
         }
     }
 
+    // 插件页上报的是 WebView 内 CSS 像素矩形；这里换算成窗口物理像素供背景图挖洞。
+    DisposableEffect(webView, page.cacheKey, navigationBarHeight, compactBottomSheet) {
+        PluginOverlayController.registerAnchor(page.cacheKey) { rect ->
+            val location = webViewOrigin.get()
+            val density = context.resources.displayMetrics.density
+            val bottom = if (rect.coversBottom && compactBottomSheet) {
+                location.y + webViewSize.get().height + navigationBarHeight
+            } else {
+                location.y + (rect.top + rect.height) * density
+            }
+            PluginOverlayController.Bounds(
+                left = location.x + rect.left * density,
+                top = location.y + rect.top * density,
+                right = location.x + (rect.left + rect.width) * density,
+                bottom = bottom,
+                topRadius = rect.topRadius * density,
+                bottomRadius = rect.bottomRadius * density
+            )
+        }
+        onDispose { PluginOverlayController.unregisterAnchor(page.cacheKey) }
+    }
+
     LaunchedEffect(dark, variables) {
         (webView.context as? ContextThemeWrapper)?.setTheme(PluginWebViewFactory.webViewThemeRes(dark))
         webView.setBackgroundColor(backgroundColor)
@@ -146,6 +190,15 @@ fun PluginWebPanelScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .drawBehind {
+                if (fillNavigationBar) {
+                    drawRect(
+                        color = colorScheme.surface,
+                        topLeft = Offset(0f, size.height - navigationBarHeight),
+                        size = Size(size.width, navigationBarHeight.toFloat())
+                    )
+                }
+            }
             .then(
                 if (applySystemBarInsets) {
                     Modifier.statusBarsPadding().navigationBarsPadding()
@@ -158,7 +211,14 @@ fun PluginWebPanelScreen(
             factory = { webView },
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { coordinates ->
+                    val origin = coordinates.positionInWindow()
+                    if (webViewOrigin.getAndSet(origin) != origin) {
+                        PluginOverlayController.refresh(page.cacheKey)
+                    }
+                }
                 .onSizeChanged { size ->
+                    webViewSize.set(IntSize(size.width, size.height))
                     if (size.width > 0 && size.height > 0) viewportReady = true
                 }
         )
