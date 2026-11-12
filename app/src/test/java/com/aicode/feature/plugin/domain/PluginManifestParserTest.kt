@@ -71,6 +71,67 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun providerContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.provider",
+              "name": "Demo Provider",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/provider",
+              "description": "Provider demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "providers": [
+                  {
+                    "id": "gateway",
+                    "name": {"zh-CN": "网关", "en": "Gateway"},
+                    "format": "openai",
+                    "baseUrl": "http://127.0.0.1:18080/v1"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.providers.size)
+        assertEquals("gateway", m.providers.single().id)
+        assertEquals("http://127.0.0.1:18080/v1", m.providers.single().baseUrl)
+    }
+
+    @Test
+    fun providerRejectsNonHttpBaseUrl() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.provider",
+              "name": "Demo Provider",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/provider",
+              "description": "Provider demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "providers": [
+                  {
+                    "id": "gateway",
+                    "name": "Gateway",
+                    "format": "openai",
+                    "baseUrl": "ftp://127.0.0.1:18080"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        assertRejected(json, PluginErrorCode.FIELD_INVALID, "contributes.providers[0].baseUrl")
+    }
+
+    @Test
     fun notJson_isRejected() {
         assertRejected("not json", PluginErrorCode.MANIFEST_NOT_JSON)
         assertRejected("[]", PluginErrorCode.MANIFEST_NOT_JSON, "root")
@@ -125,9 +186,9 @@ class PluginManifestParserTest {
     @Test
     fun unsupportedContribution_isRejected() {
         assertRejected(
-            base.replace("\"contributes\": {", "\"contributes\": {\"providers\": [], "),
+            base.replace("\"contributes\": {", "\"contributes\": {\"unknownContribution\": [], "),
             PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
-            "providers"
+            "unknownContribution"
         )
     }
 

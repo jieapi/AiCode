@@ -652,8 +652,9 @@ private fun PluginNativeConfigContent(
                 val aiTools = plugin.content.tools
                 val hooks = plugin.content.hooks
                 val mcpServers = plugin.content.mcp
+                val providers = plugin.content.providers
                 if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty()
+                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty()
                 ) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
@@ -685,6 +686,8 @@ private fun PluginNativeConfigContent(
                     title to it.handler
                 } + mcpServers.map {
                     stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
+                } + providers.map {
+                    stringResource(R.string.plugins_content_provider, it.name.resolve(languageTag)) to it.baseUrl
                 }
                 rows.forEachIndexed { index, (title, description) ->
                     if (index > 0) SettingsDivider()

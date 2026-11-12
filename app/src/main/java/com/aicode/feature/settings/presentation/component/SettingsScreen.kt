@@ -671,7 +671,10 @@ fun SettingsScreen(
                 viewModel = viewModel,
                 initialProvider = editingProvider,
                 presetPrefill = providerPresetPrefill,
-                initialTab = if (onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS || onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) 1 else 0,
+                initialTab = if (editingProvider?.pluginId != null ||
+                    onboardingStep == OnboardingStep.PROVIDER_FETCH_MODELS ||
+                    onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG
+                ) 1 else 0,
                 onboardingStep = onboardingStep,
                 onOnboardingModelAdded = onOnboardingModelAdded,
                 onOnboardingDismissFetchDialog = onOnboardingDismissFetchDialog,

@@ -52,6 +52,7 @@ object PluginManifestParser {
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
     private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
+    private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -67,6 +68,7 @@ object PluginManifestParser {
     private const val MAX_REPOSITORY = 300
     private const val MAX_LOCALES = 16
     private const val MAX_IDS_PER_TYPE = 64
+    private const val MAX_PROVIDER_URL = 2048
     const val MAX_PATH_LENGTH = 200
     const val MAX_PATH_DEPTH = 8
 
@@ -127,6 +129,7 @@ object PluginManifestParser {
                     tools = contributes.tools,
                     hooks = contributes.hooks,
                     mcp = contributes.mcp,
+                    providers = contributes.providers,
                     configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage")
                 )
             )
@@ -348,6 +351,7 @@ object PluginManifestParser {
             val tools: List<PluginToolRef>,
             val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>,
+            val providers: List<PluginProviderRef>,
             val configPage: String?
         )
 
@@ -357,7 +361,7 @@ object PluginManifestParser {
             var ok = true
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
-                    it != "tools" && it != "hooks" && it != "mcp" && it != "configPage"
+                    it != "tools" && it != "hooks" && it != "mcp" && it != "providers" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -372,14 +376,16 @@ object PluginManifestParser {
             val mcpRefs = readContributionList(contributes["mcp"], "contributes.mcp", extension = ".json")
                 ?: run { ok = false; emptyList() }
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
+            val providers = readProviders(contributes["providers"], "contributes.providers")
+                ?: run { ok = false; emptyList() }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && configPage == null
+                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, configPage) else null
+            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, configPage) else null
         }
 
         private fun readConfigPage(raw: JsonElement?, path: String): String? {
@@ -448,6 +454,68 @@ object PluginManifestParser {
                 }
             }
             return result
+        }
+
+        /** 缺省视为空列表；每项声明 OpenAI 兼容服务地址与模型。 */
+        private fun readProviders(raw: JsonElement?, path: String): List<PluginProviderRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginProviderRef>()
+            var ok = true
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    ok = false
+                    return@forEachIndexed
+                }
+                item.keys.filter { it !in PROVIDER_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                    ok = false
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val nameRaw = item["name"]
+                val name = if (nameRaw != null) parseLocalized(nameRaw, "$itemPath.name", MAX_NAME) else null
+                val descRaw = item["description"]
+                val description = if (descRaw != null) {
+                    parseLocalized(descRaw, "$itemPath.description", MAX_DESCRIPTION)
+                } else {
+                    LocalizedText.single("")
+                }
+                val format = item["format"]?.stringOrNull()?.takeIf { it in PluginProviderFormats.ALL }
+                val baseUrl = readProviderBaseUrl(item["baseUrl"])
+                if (id == null) { invalid("$itemPath.id"); ok = false }
+                if (name == null) { invalid("$itemPath.name"); ok = false }
+                if (description == null) { invalid("$itemPath.description"); ok = false }
+                if (format == null) { invalid("$itemPath.format"); ok = false }
+                if (baseUrl == null) { invalid("$itemPath.baseUrl"); ok = false }
+                if (id != null && name != null && description != null && format != null && baseUrl != null) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                        ok = false
+                    } else {
+                        result += PluginProviderRef(id, name, description, format, baseUrl)
+                    }
+                }
+            }
+            return if (ok) result else null
+        }
+
+        /** 只接受 http/https 的绝对地址；拒绝账号、查询、片段与超长值。 */
+        private fun readProviderBaseUrl(raw: JsonElement?): String? {
+            val text = raw?.stringOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            if (text.length > MAX_PROVIDER_URL) return null
+            val uri = try {
+                URI(text)
+            } catch (e: URISyntaxException) {
+                return null
+            }
+            val valid = (uri.scheme == "http" || uri.scheme == "https") &&
+                !uri.host.isNullOrBlank() && uri.userInfo == null &&
+                uri.rawQuery == null && uri.rawFragment == null
+            return if (valid) text.trimEnd('/') else null
         }
 
         /** 缺省视为空列表；每项只允许 id/event/handler，event 必须在宿主支持的事件表内。 */

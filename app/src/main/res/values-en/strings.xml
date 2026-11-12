@@ -1733,6 +1733,8 @@
     <string name="terminal_theme_title">Color Theme</string>
     <string name="terminal_font_size_title">Font Size</string>
     <string name="terminal_cursor_style_title">Cursor Style</string>
+    <string name="provider_source_plugin">Plugin</string>
+    <string name="provider_plugin_readonly_hint">This provider is declared by a plugin. Name, URL and credentials are read-only; fetch and add models on the Models tab.</string>
     <string name="terminal_show_plugin_tabs">Show plugin runs</string>
     <string name="terminal_show_plugin_tabs_desc">Show terminal tabs created by plugins</string>
     <string name="terminal_cursor_block">Block</string>
@@ -2059,6 +2061,7 @@
     <string name="plugins_content_transform_hook">Writable Hook · %1$s</string>
     <string name="plugins_content_review_hook">Permission Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
+    <string name="plugins_content_provider">Provider · %1$s</string>
     <string name="plugins_content_settings_page">Settings page · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
