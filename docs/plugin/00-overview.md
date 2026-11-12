@@ -1,6 +1,6 @@
 # 插件系统计划：总览
 
-状态：讨论稿 v0.7，2026-10-25（进度更新至 2026-11-12）。技能与子代理、工作区工具、AI 工具与运行时、MCP 服务器、生命周期 hooks 已在 `feat/plugin-system` 分支实现；只读 hooks 已通过冒烟编译、插件单测与真机验证（2026-11-10），可写 hooks 第一版（工具前后）已实现。其余仍为设计规划；进度见第 8 节。
+状态：讨论稿 v0.8，2026-11-12。技能与子代理、工作区工具、AI 工具与运行时、MCP 服务器、生命周期 hooks 已在 `feat/plugin-system` 分支实现；只读 hooks 已通过冒烟编译、插件单测与真机验证（2026-11-10），可写 hooks、HTTP hook 与代审核已实现。2026-11-12 已定：通用 UI 唯一形态为 HTML 页面，删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0；插件启用即信任、全局安装与启用；不在 F-Droid 上架；代审核开放高危 ASK。其余仍为设计规划；进度见第 8 节。
 
 本文档用于持续讨论，不代表已经批准实施，也不代表下面的建议都已确定。后续直接修改对应主题文件，避免把尚未决定的事项写成既定约束。
 
@@ -31,8 +31,8 @@
 - **宿主**：AiCode Android App。
 - **插件作者**：编写和发布第三方插件的人。
 - **使用者**：安装插件、授予权限、使用 AiCode 的用户。
-- **插件权限**：使用者授予某插件调用宿主能力的权限，不等于 Android 系统权限，也不等于 AI 工具调用的审批结果。
-- **代审核**：经使用者单独授权，插件处理原本需要使用者确认的 AI 工具调用。
+- **插件能力**：插件声明的宿主能力；当前采用启用即信任，安装后随插件生效，不等于 Android 系统权限，也不等于 AI 工具调用的审批结果。
+- **代审核**：插件按声明参与宿主 ASK 决策；启用即生效，不单独授权。
 
 文中的接口、事件和组件名称均为规划用名；标注为“现有”的代码链接除外，不表示这些新接口已经存在。源码、发布包、清单和索引已补具体结构草案及 JSON 示例，优先阅读 10/11；它们不是已实现 SDK、完整 UI 协议或已批准的正式格式。
 
@@ -46,21 +46,21 @@
 | R04 | 注册 MCP | 复用现有 MCP 功能，不另造一套协议或擅自限定成 HTTP-only |
 | R05 | 注册 Skill | 纳入现有技能使用流程 |
 | R06 | 注册子代理 | 纳入现有自定义子代理发现与派发流程 |
-| R07 | 构建插件形态 | 右抽屉列表入口，点击打开插件声明的结构化 UI；插件配置页也采用结构化声明 |
+| R07 | 构建插件形态 | 右抽屉列表入口，点击打开插件自带的 HTML 页面；设置页入口与插件配置页也使用 HTML |
 | R08 | 扩展 Agent 生命周期 | 包含请求前、完成时、hooks 等；每个时机可读和可修改什么仍需细化 |
-| R09 | 参与权限审核 | 按下节已确认的委托顺序，不是替换整个权限策略引擎 |
+| R09 | 参与权限审核 | 按下节已确认的委托顺序，不是替换整个权限策略引擎；已开放高危 ASK |
 | R10 | 双向交互 | 插件可向 App 显示 tips、发送通知，App 可把事件或操作结果回传插件 |
-| R11 | 调用 Shizuku | 插件能够申请执行 Shizuku 功能；具体接口与逐次确认规则待定 |
-| R12 | 显式声明并授权插件权限 | 通知、Shizuku、代审核等受保护功能必须先声明，并获得使用者授权 |
+| R11 | 调用 Shizuku | 插件声明用途/范围，授权后范围内直接执行，不逐次弹窗；系统授权与撤销仍需检查 |
+| R12 | 声明能力与安装确认 | 安装确认时展示将获得的贡献与高危能力；采用启用即信任，安装后全部贡献生效 |
 | R13 | 多索引与独立源码仓库 | 可配置多个索引仓库，索引仓库只存索引，每个插件一个独立源码仓库 |
-| R14 | DIY 通用化 | 增强现有解析和布局能力，并复用于面板之外的场景 |
-| R15 | 丰富结构化 UI | 自由布局、外观动效、动态内容、表单与反馈；采用声明 + 状态绑定 |
+| R14 | UI 通用化 | 插件页面、设置页入口与配置页统一使用 HTML + 宿主组件库 + 页面桥 |
+| R15 | 丰富页面 UI | HTML/CSS 自由布局、外观动效、动态内容与表单；不再实施声明式 UI 引擎 |
 | R16 | 插件提供具体业务 | 插件声明 UI 并实现业务逻辑，App 不内置具体构建/依赖下载业务 |
 | R17 | 插件调用 Bash / terminal | 使用通用能力执行构建、下载依赖等命令 |
 | R18 | 命令跟随工作区 | 本地模式走本地容器，SSH 模式走远端；插件 UI 和运行逻辑仍在手机 |
 | R19 | 范围内直接执行命令 | 插件明确声明且获用户授权后，范围内命令不逐条弹窗确认 |
 | R20 | 设置内插件管理 | 设置 → 插件 → 插件列表，显示名称/版本等，提供插件配置、插件权限等管理操作 |
-| R21 | 展示官方标识 | 索引条目要显示是否官方；认定标准尚未决定，推荐方案见分发章节 |
+| R21 | 展示官方标识 | 使用官方索引地址白名单，自定义索引一律非官方；官方索引仓库尚未创建 |
 | R22 | 非官方安装确认 | 点击安装后显示宿主确认弹窗，手动输入该插件源码仓库地址 |
 | R23 | 在线安装与更新 | 可从配置的索引在线安装、检查和应用更新，不等于授权无交互自动更新 |
 | R24 | 非官方每次更新确认 | 每次非官方更新都再次弹窗、输入源码仓库地址，不复用首次确认 |
@@ -79,7 +79,7 @@ App 按现有规则判断
   ├─ 可以直接执行：沿原流程执行
   └─ 需要使用者确认
        ↓
-     按使用者设置的顺序询问已声明且获授权的代审核插件
+     按使用者设置的顺序询问已启用并声明代审核的插件
        ├─ 同意：批准本次调用，停止询问后续插件
        ├─ 拒绝：仅拒绝本次调用，停止询问后续插件
        └─ 不处理：询问下一个；全部不处理时进入现有 UI
@@ -87,33 +87,28 @@ App 按现有规则判断
 
 **已确认**：首个同意或拒绝生效；没有适用插件或全部不处理才进入 UI。插件拒绝只影响当前工具，其他工具继续审批、执行，AI 可以继续处理结果，不因此停止整批或本轮。
 
-异常与超时的具体策略，以及代审核授权的粒度尚未确认。不能根据这张图自行推出“插件可以给自己授予权限”或“可以永久记住允许规则”。
+已实现：异常/超时按 `pass` 继续，最终回 UI；`allow` 只批准当前调用，不写永久允许规则；插件不能代审自己提供的工具，`planMode` 也不代审。
 
-## 5. 本轮建议摘要
+## 5. 已定方案摘要
 
-1. **插件逻辑优先评估 JavaScript，TypeScript 在发布前编译。** 语言与具体引擎分别选型，尚未确定依赖库。
-2. **采用隔离运行时 + 宿主能力接口。** 不向第三方代码暴露 Android Context、数据库、Shizuku Binder 或现有管理器对象。
-3. **复用工具、MCP、Skill、子代理和提供商等现有消费链路，新增插件来源与归属。** 不通过直接改写用户配置来伪装成用户手工安装。
-4. **把代审核做成宿主需要确认之后的一步。** 插件权限授权和 Android/Shizuku 系统授权不进入可被插件自批的队列。
-5. **默认官方索引建议独立托管。** 多索引和每插件独立源码仓库已确认；官方索引的具体托管位置、地址与可信发布身份仍需确定。
-6. **将 DIY 演进为通用结构化 UI 引擎。** 解析/校验、布局/渲染、绑定/事件与具体业务执行分开；面板、插件页面和配置页共用基础。
-7. **插件声明页面、代码处理业务、宿主提供受控能力。** 不在渲染器或 App 命令枚举里硬编码构建与依赖业务。
-8. **提供商以现有兼容接口接入。** 兼容 HTTP 服务是建议接入方式；上游转换由插件实现，进程、入口和凭据仍按生命周期与权限管理。
+1. **通用 UI 唯一形态是 HTML 页面。** 插件自带 HTML/CSS/JS，宿主提供 WebView 容器、`aicode.js` 页面桥与 Vue 组件库；不再做声明式 UI 引擎。
+2. **插件逻辑跑在本地容器的 node/python 子进程。** 通过 NDJSON JSON-RPC 调用 handler，`host.fs.*`/`host.bash`/`host.notify` 是宿主能力；进程不构成安全沙箱，启用即信任。
+3. **启用即信任、全局安装与启用。** 安装确认展示贡献与高危能力，不再逐项授权；`pluginApi` 统一为 1.0.0。
+4. **代审核是宿主 ASK 之后的一步。** 已开放全部 ASK（含高危）；插件不能代审自身工具、不能覆盖宿主 DENY、不写永久规则。
+5. **命令侧 `bash` 同步 + `terminal.run` 共享标签。** 由插件显式选择；标签生命周期插件维护，后台默认隐藏、终端设置开启后可见。
+6. **提供商首选宿主内嵌 handler。** 插件进程提供请求/响应转换，宿主直接调用；外部固定地址作为补充，不首选插件起 HTTP 服务。
+7. **分发使用官方索引地址白名单。** 在线索引本轮不做；非官方逐次手输、多索引、独立源码仓库保留规划。
+8. **不在 F-Droid 上架。**
 
-这些都是建议，不是已经批准的技术决策。特别是 Bash/terminal 命令、MCP stdio、Skill 附带脚本和高权限 Shizuku 调用，必须单独说明其离开插件运行时后的风险，不能笼统承诺“所有插件行为都在沙箱内”。
+## 6. 仍未定与不擅自扩展的内容
 
-## 6. 当前不擅自定义的内容
-
-- 构建插件已明确为右抽屉入口、结构化页面/配置与插件业务逻辑；具体字段、组件清单、页面呈现容器与任务保留策略尚未定稿，不自行扩展为 App 内置构建配方或复杂任务图引擎。
-- 自由布局、动效、状态绑定、表单反馈已确认；是否开放任意 HTML/CSS、插件原生 View 或由代码任意返回 UI 树等其他渲染方式未确认。
-- 第一个 hooks 切片只读：只给运行元数据，不允许改写消息、工具参数、响应或模型配置。可写 `transform` 已在 2026-11-12 扩展到工具前后两个事件（`agent.tool.before` / `agent.tool.after`）；请求/消息级可变字段与更多事件仍未开放，支持生命周期扩展不等于任意修改内部状态。
-- 不确定安装、启用和授权是全局、项目级还是会话级。
-- 多索引在线目录已确认；不另外预设账号、付费、评分、专用市场后端或多语言运行时。
-- 是否官方的认定尚未决定；推荐区分官方维护与官方索引收录，不把自定义索引的声明直接当可信身份。
-- 非官方逐次手输规则已确认；地址等价形式、是否允许粘贴及官方自动更新仍待确定，不擅自增加或跳过步骤。
-- 不决定已有会话在插件安装、更新、停用后如何切换版本，先在计划中列出一致性要求与候选策略。
-- 提供商可使用插件获授权的执行环境处理上游，但兼容服务的启动方式、可达地址、实例创建与凭据交付尚需细化；不以“完整环境”假定这些接线已存在。
-- 服务依赖范围和手动准备已确认；锁格式支持、缓存/更新复用、空间及失败恢复仍需技术验证和细化。
+- hooks 响应 transform、消息级改写与持久化规则未开放；当前只覆盖工具参数、成功结果 `data` 与 provider HTTP 请求。
+- SDK 许可证、包签名/来源连续性后置，发布 SDK 或在线索引前必须定。
+- 在线索引的官方索引仓库尚未创建；白名单地址、发布流程与撤回策略待定。
+- 服务依赖的锁格式、缓存/更新复用、空间与失败恢复仍需验证；本轮不自动安装系统工具。
+- 外部 MCP stdio 与技能脚本不做强隔离，风险按“与 Bash 同级”告知，不宣称沙箱。
+- 插件安装/更新的版本切换对在途会话的影响未定；先保证不重复执行、旧回包不写入新页面。
+- 非官方逐次手输的地址等价形式、是否允许粘贴、官方自动更新细节待定。
 
 ## 7. 与现有项目约定的关系
 
@@ -129,20 +124,22 @@ App 按现有规则判断
 | --- | --- | --- |
 | 清单解析与校验、SemVer 范围、本地化文本 | 已实现（单测覆盖） | `app/.../feature/plugin/domain/` 的 `PluginManifestParser`、`SemVer`、`LocalizedText` |
 | 安全 ZIP 读取、安装记录库（原子写 JSON） | 已实现（单测覆盖） | `feature/plugin/data/` 的 `PluginPackageReader`、`PluginRegistryStore` |
-| 插件管理器：预览、安装、替换、卸载、启停、逐项授权 | 已实现（单测覆盖） | `feature/plugin/domain/PluginManager.kt` |
+| 插件管理器：预览、安装、替换、卸载、启停 | 已实现（单测覆盖） | `feature/plugin/domain/PluginManager.kt` |
 | 贡献：技能、子代理 | 已实现 | `PluginSkillSource`、`PluginAgentSource`，接入 `SkillRepository`、`AgentDefinitionRepository` |
-| 设置 → 插件：列表、详情、导入预览与授权 | 已实现，未真机验证 | `feature/plugin/presentation/`，接线在 `SettingsScreen.kt` |
-| 贡献：工作区工具（声明式页面 + 命令模板） | 已提交（`c0223c8e`），未真机验证 | `contributes.workspaceTools`、`workspace.tools`、`PluginContentLoader.loadWorkspaceTool`、`ProjectToolsRepository` |
+| 设置 → 插件：列表、详情、导入预览 | 已实现，未真机验证 | `feature/plugin/presentation/`，接线在 `SettingsScreen.kt` |
+| 贡献：工作区工具（HTML 页面 + 页面桥） | 已实现；页面统一为 HTML，命令由页面调用宿主 `bash`，运行态回传待做 | `contributes.workspaceTools`、`workspace.tools`、`PluginContentLoader.loadWorkspaceTool`、`ProjectToolsRepository` |
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
-| 贡献：AI 工具（`runtime` + `tools.register` + JavaScript 沙箱 handler） | 已实现，冒烟编译与插件单测通过，已真机验证（2026-11-10） | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
+| 贡献：AI 工具（`runtime` + `tools.register` + 容器进程 handler） | 已实现；2026-11-10 真机验证的是旧沙箱实现，容器进程版待真机验证 | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
 | 贡献：生命周期 hooks（只读；`contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
 | 贡献：可写 hooks（`mode: "transform"`；`agent.tool.before` / `agent.tool.after`，可拒绝/改参数/改成功结果 data） | 已实现，冒烟编译与单测待本次验证 | `PluginHookDispatcher.beforeToolCall/afterToolCall`、`PluginHookTransform`、`StatefulAgentWorkflow` 的权限与批次结果路径 |
 | 贡献：HTTP 请求 hooks（`agent.http.before`，可改写 URL/headers/body） | 已实现，冒烟编译与单测待本次验证 | `PluginHttpHookInterceptor`、`PluginHookDispatcher.beforeHttpRequest`、`PluginHookTransform.parseHttp` |
-| 贡献：代审核 hooks（`agent.permission.review`，普通 ASK 三态 allow/deny/pass） | 已实现，冒烟编译与单测待本次验证 | `PluginHookDispatcher.reviewPermission`、`PluginHookTransform.parseReview`、`StatefulAgentWorkflow.requestPermissionIfNeeded` |
+| 贡献：代审核 hooks（`agent.permission.review`，全部 ASK 三态 allow/deny/pass） | 已实现，冒烟编译与插件单测通过；真机验证待补 | `PluginHookDispatcher.reviewPermission`、`PluginHookTransform.parseReview`、`StatefulAgentWorkflow.requestPermissionIfNeeded` |
 | 启动事件与常驻运行时（`app.started`、`runtime.resident`） | 已实现，冒烟编译与单测待本次验证 | `AIEditorApp.onCreate`、`PluginHookDispatcher.dispatchAppStarted`、`PluginRuntimeManager.pruneIdle` |
-| 通用页面与配置、提供商、服务环境、通知 / tips / Shizuku | 未实现 | 依赖运行时与协议，见 [05](05-roadmap-and-decisions.md) 的交付分层 |
-| 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 未实现 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
+| 设置页入口与插件配置页（HTML） | 已实现 | `contributes.settingsPages`、`configPage`、`PluginWebPanelScreen` |
+| 提供商、服务环境、tips / Shizuku | 未实现 | 见 [03](03-permissions-and-interaction.md)、[09](09-provider-plugins.md) |
+| 开发者侧载 / 调试模式 | 未实现（已定要做） | 普通 `.zip` 导入已可用 |
+| 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 本轮不做，保留阶段 7 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
 
 实现范围的精确说明（哪些字段会被接受、哪些会被拒绝、各项限额）见 [10-plugin-format.md](10-plugin-format.md) 第 12 节。
 
@@ -152,22 +149,24 @@ App 按现有规则判断
 
 | 阶段 | 状态 | 当前落点 |
 | --- | --- | --- |
-| 0 产品与安全定义 | 进行中 | 决策表仍有未定项，见 05 第 4 节 |
+| 0 产品与安全定义 | 已收敛 | 2026-11-12 已定主要边界；SDK 许可证、包签名、响应 transform 仍后置，见 05 第 4 节 |
 | 1 运行时与 UI 协议 PoC | 部分完成 | 运行时已改为本地容器内的插件子进程（javascript/python），可引用依赖并通过 JSON-RPC 调用宿主文件/命令 API；真机验证待补 |
-| 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、逐项授权已实现；在线索引未开始 |
-| 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
+| 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、启用即信任、全局作用域已实现；在线索引本轮不做 |
+| 3 通用 UI | 已定方案 | 唯一形态是 HTML 页面（WebView + 宿主 bridge + Vue 组件库）；声明式结构化 UI 引擎不再实施 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
 | 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
-| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已实现普通 ASK 的 allow/deny/pass；高危不可记忆 ASK（Shizuku、elevate、配置修改、删除子代理、危险 rm）、`planMode` 与插件自身工具不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform 未开始，依赖 D12、D13、D14 |
-| 7 目录分发、发布与安全验收 | 未开始 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
+| 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）的 allow/deny/pass；`planMode` 与插件自身工具仍不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform、tips 与 Shizuku 未开始 |
+| 7 目录分发、发布与安全验收 | 本轮不做 | 在线索引保留规划；官方标识用官方索引地址白名单，仓库尚未创建；不在 F-Droid 上架 |
 
 ### 8.3 当前进度
 
-当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。声明式工作区工具仍只有 HTML 页面，没有运行态回传。
+当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。工作区工具页面统一为 HTML，命令由页面通过宿主桥执行；共享终端标签与运行态回传待做。
+
+2026-11-12 设计收敛：通用 UI 唯一形态定为 HTML 页面（WebView + 宿主 bridge + Vue 组件库），删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0（此前 1.1.0-1.5.0 的功能全部归入 1.0.0）；插件启用即信任、全局安装与启用；不在 F-Droid 上架；官方标识用官方索引地址白名单（仓库未创建）；在线索引本轮不做；备份不含插件；外部 MCP/技能脚本不做强隔离；tips 用对话内提示条；Shizuku 由插件声明范围，授权后范围内直接执行；增加开发者侧载；代审核开放高危 ASK。命令侧定为 `bash` 同步 + `terminal.run` 共享标签，由插件显式选择，标签生命周期由插件维护，后台运行默认隐藏、终端设置开启后可见。提供商首选宿主内嵌 handler。
 
 2026-11-12：新增 `app.started` 启动事件与 `runtime.resident`（PluginApi 1.5.0）——App 主进程 onCreate 完成后派发一次，payload 为 `launchId`/`startedAt`/`appVersion`/`process`；声明该事件的插件会在此时拉起容器内进程。`runtime.resident: true` 的进程跳过 10 分钟空闲回收，停用/卸载/版本替换与 App 进程结束仍会关闭。容器未就绪时启动 hook 失败只记日志，后续调用仍按需启动。
 
-2026-11-12：新增 `agent.permission.review` 代审核（PluginApi 1.4.0）——`mode: "review"`，只在宿主权限判定为 ASK 后、弹出确认前运行；返回 `allow`/`deny`/`pass`，首个 allow/deny 生效，pass 继续下一个，全部不处理回退 UI。allow 只批准当前调用、不写入永久允许规则；deny 错误码 `PLUGIN_REVIEW_DENIED`，只影响当前工具。超时/异常/格式错误按 pass。第一版只处理 `rememberDisabledReason == null` 且非 `planMode` 的普通 ASK，Shizuku、elevate、配置修改、删除子代理与危险 rm 仍由本人确认；插件不能代审自己提供的工具；按插件 ID 升序、单 hook 10 秒/合计 20 秒。
+2026-11-12：新增 `agent.permission.review` 代审核（当时标注 PluginApi 1.4.0，现统一为 1.0.0）——`mode: "review"`，只在宿主权限判定为 ASK 后、弹出确认前运行；返回 `allow`/`deny`/`pass`，首个 allow/deny 生效，pass 继续下一个，全部不处理回退 UI。allow 只批准当前调用、不写入永久允许规则；deny 错误码 `PLUGIN_REVIEW_DENIED`，只影响当前工具。超时/异常/格式错误按 pass。已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理与危险 rm）；`planMode` 与插件自身工具仍不代审；按插件 ID 升序、单 hook 10 秒/合计 20 秒。
 
 2026-11-12：新增 `agent.http.before` HTTP 请求 hook（PluginApi 1.3.0）——挂在 AgentModule 共享 OkHttpClient 上，覆盖对话、标题、压缩、模型列表/测试与图片请求；payload 为 `url`、`method`、`headers`、`body`，可返回 `{url?, headers?, body?}`。URL 限 http/https、headers 最多 64 项且禁止改 Host/Content-Length 等受控头、body 必须是 JSON 对象且 ≤4 MiB；方法固定 POST。每次实际发送都会执行，重试与换 Key 会重复触发；失败、超时或格式错误保持原请求。headers 含明文鉴权头，属于高权限能力。
 
@@ -183,50 +182,38 @@ App 按现有规则判断
 
 2026-10-28：抽屉与入口交互修正已完成——删除聊天页头部工具图标、左右抽屉宽度统一、列表图标统一主题色、左抽屉边缘手势恢复、右抽屉改为聊天页右半屏左滑打开、平板端接入右抽屉、详情返回恢复抽屉与滚动位置。首次真机反馈右边缘手势打不开，已将起点从右边缘 24dp 放宽到右半屏任意位置，并改为直接读指针位移。`assembleUniversalDebug` 与 `assembleArmsoloDebug` 均通过，已打 armsolo debug 包待真机验证；尚未提交。
 
-### 8.4 阶段 5 待办（按依赖顺序）
+### 8.4 待办（按依赖顺序）
 
-1. **抽屉与入口交互修正**（已完成 2026-10-28，冒烟编译通过，待真机验证）
-   - 平板端（`expanded`）分支目前没有组合右抽屉，头部图标会空转；先补入口，或明确平板不提供该入口。
-   - 删除聊天页右上角的工具图标，右侧工具抽屉只保留手势入口。
-   - 左右抽屉宽度统一使用 `drawerWidth()`（手机 300dp、Medium 340dp）。
-   - 工具列表图标统一为主题色，去掉按图标名映射的彩色。
-   - 修复左抽屉「左边缘向右滑」：右抽屉关闭时不接管横向手势。
-   - 右抽屉仅在聊天页、从屏幕右半部分向左滑打开。
-   - 从抽屉进入工具详情再返回时，恢复抽屉打开状态与列表滚动位置。
-2. **工具数据与对账**
-   - `removeToolFromProject` 没有 UI 调用方；补「从项目移除」入口。
-   - 插件停用或卸载后 `tools.json` 条目残留，抽屉行与运行按钮静默失效，全部工具页的「已添加」也不随插件状态变化；需要按状态过滤或标注不可用，并提供清理。
-   - 切换工作区不会重载 `tools.json`，需要补工作区切换监听。
-   - 参数类型不保真：布尔与列表保存后被转成字符串，重开表单无法还原；快速运行的列表参数用逗号连接，详情执行用空格连接，两条路径不一致。
-   - 快速运行只查 `body` 直接子级 `submit`；submit 放在 `Card` / `TabSet` 里时退化成 `echo 'No action configured...'`。
-   - 详情页找不到工具时整页空白，需要空态与返回入口。
-3. **命令执行会话**（宿主能力，不依赖 JS 运行时）
-   - 已确认形态是复用共享终端标签：先订阅再启动，用户可在终端页查看与交互。
-   - 增量输出：现有 `TerminalSessionProvider` 只有 `getTabOutput` 屏幕快照（约 2000 行，ANSI / 回车 / 退格已被解释）与 `TabFinishedEvent`（尾部 50 行、`replay = 0`，晚订阅会丢），不能作为实时日志协议。需要在 `TerminalSession` 输出泵增加可选原始字节回调，再由 Provider 暴露 per-tab 有界输出流与退出状态；主线程回调只做拷贝入队，解析与渲染放消费端。
-   - 备选：独立日志面板可直接用现有 `CommandEngine.runCommandStream`（本地逐行输出、可取消、有退出码），但它不产生终端标签，不满足已确认的共享终端形态；远程流式分支目前不读 stderr，选它必须先补。
-   - 状态机：运行中 / 成功 / 失败 / 已取消。本地退出码取会话的 `exitStatus`；远程依赖 `[command exited: N]` 标记，`notify = false` 当前不打印标记，通道异常时可能回落为 0，不能据此误报成功。
-   - 停止：`writeBytesToTab(tabId, 0x03)` 发 Ctrl-C，超时再 `closeTab`；`closeTab` 不触发 `TabFinishedEvent`，面板需要自行记为已取消。
-   - 标签生命周期：「构建结束即退出标签」与「保活复用标签」需要定；保活模式下退出码要另行获取。
-   - 工具详情页增加运行面板：实时日志、状态、退出码、错误摘要与停止按钮；终端标签保留完整输出并允许手动交互。
-4. **进度与错误解析**
-   - 第一版内置 Gradle / Flutter 常见输出模式，不承诺精确百分比。
-   - 插件自定义解析规则留到阶段 1 运行时落地后，以受限声明实现。
-5. **任务生命周期**（依赖 D24 决策）
-   - 返回聊天、关闭页面、停用、撤权、更新、卸载时任务是继续还是停止。
-   - 插件任务使用独立来源与事件路由，不复用 AI 会话 ID，不向 AI 注入消息。
-6. **安全与发布前检查**
-   - 命令插值是裸字符串替换，没有 shell 转义或引号；插件可在页面 `defaultValue` 里预置 `; cmd`，用户点一次即执行。需要参数化或明确转义规则。
-   - 执行前重新校验插件启用状态与 `workspace.tools` 授权；当前详情页打开后停用或卸载插件仍可执行。
-   - 最终命令应在页面展示；安装预览目前只列技能与子代理，看不到页面命令模板。
-   - `savedParams` 明文写入 `<workspace>/.aicode/tools.json`，本地模式可被 git 或 AI 读取；完整命令还会写入 `FileLogger`。敏感参数需要脱敏或明确提示。
-   - 同步 `docs-site/docs/guide/plugins.md` 与 `advanced/plugin-development.md`：工作区工具、`workspace.tools`、页面 JSON、命令执行的安全语义；同步双语字符串与 `prompts/`（如有工具或提示词变化）。
+1. **命令执行与共享终端标签**（形态已定）
+   - `bash` 保持一次性同步返回；新增 `terminal.run`，由插件显式选择是否走共享标签。
+   - 标签生命周期由插件维护（如 `keepAlive` 参数）；插件后台运行默认隐藏，终端设置开启「显示插件运行」后才在终端页可见。
+   - 增量输出：现有 `TerminalSessionProvider` 只有 `getTabOutput` 屏幕快照与 `TabFinishedEvent`（尾部 50 行、`replay = 0`），不能作为实时日志协议；需要在 `TerminalSession` 输出泵增加可选原始字节回调，再由 Provider 暴露 per-tab 有界输出流与退出状态。主线程回调只做拷贝入队，解析与渲染放消费端。
+   - 状态机：运行中 / 成功 / 失败 / 已取消。本地退出码取会话 `exitStatus`；远程依赖 `[command exited: N]` 标记，`notify = false` 当前不打印标记，通道异常时不能误报成功。
+   - 停止：`writeBytesToTab(tabId, 0x03)` 发 Ctrl-C，超时再 `closeTab`；`closeTab` 不触发 `TabFinishedEvent`，需要自行记为已取消。
+   - 运行状态由插件或页面展示；共享标签保留完整输出并允许手动交互，不接管用户已有标签。
+2. **提供商注册**（首选宿主内嵌 handler）
+   - 插件进程提供 provider 请求/响应转换 handler，宿主直接调用，不新增 HTTP 端口；流式响应用 JSON-RPC 分块事件。
+   - 保留「插件直接声明外部固定地址」的兼容形态；插件起兼容 HTTP 服务不作为首选。
+   - 覆盖归属、模型选择、服务就绪/失效与凭据边界；停用或卸载时不静默回退其他付费渠道。
+3. **tips 与 Shizuku**
+   - tips：对话内可关闭提示条，支持操作按钮；与系统通知（`host.notify`）分开。
+   - Shizuku：插件声明用途/范围，授权后范围内直接执行，不逐次弹窗；系统授权、撤销与范围变化仍需重新检查。
+4. **开发者侧载 / 调试模式**
+   - 设置开关，支持本地目录或 `.zip` 安装与热重载，带明显风险提示；不参与在线更新。
+5. **安全与发布前检查**
+   - 页面桥的 `bash`/`fs.*` 在执行前复核插件仍启用；当前页面打开后停用插件仍可调用。
+   - 插件进程 stdout 增加单行长度上限；补强杀、崩溃恢复、OOM 与资源边界验证。
+   - 命令与输出写入日志时处理敏感信息；插件可执行命令的风险要在安装确认与用户文档中持续说明。
+   - 同步 `docs-site/docs/guide/plugins.md` 与 `advanced/plugin-development.md`：移除运行面板、1.1.0、沙箱等过时描述。
+6. **已完成的清理项**
+   - 抽屉交互、工具数据对账、`removeToolFromProject`、工作区切换重读、不可用标注、详情页空态已完成；参数类型与快速运行问题随 JSON 页面移除而消失。
 
 ### 8.5 需求与阶段对应
 
-- 抽屉交互、工具数据对账、命令执行会话与安全前置都属于阶段 5；其中交互修正不依赖 JS 运行时，可先做。
-- 流式输出、构建进度、错误显示对应阶段 5 的退出条件「插件页面和配置可交互、反馈进度/日志/错误；非零退出不误报成功」。
-- 插件自定义构建配方与状态绑定依赖阶段 1、3、4；生命周期事件 handler 已由只读 hooks 起步。
-- 在线安装、更新与官方标识属于阶段 7；用户文档与提示词同步在阶段 5 发布前完成。
+- 命令执行与共享标签、提供商、tips/Shizuku 是下一阶段优先项；开发者侧载与安全加固随实现补。
+- 在线安装、更新与官方标识属于阶段 7，本轮不做；官方索引仓库建好后再补地址与发布流程。
+- 声明式结构化 UI 不再实施，HTML 页面协议是唯一形态。
+- hooks 响应 transform 仍后置，见 [05](05-roadmap-and-decisions.md) 决策表。
 
 ### 8.6 维护规则
 

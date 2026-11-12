@@ -13,7 +13,7 @@ import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
 object PluginApi {
-    val VERSION = SemVer(1, 5, 0)
+    val VERSION = SemVer(1, 0, 0)
 }
 
 sealed interface ManifestParseResult {
@@ -45,7 +45,7 @@ object PluginManifestParser {
         "manifestVersion", "id", "name", "version", "publisher", "repository",
         "description", "license", "engines", "runtime", "contributes", "configPage"
     )
-    private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
+    private val ENGINE_KEYS = setOf("pluginApi")
     private val RUNTIME_KEYS = setOf("type", "entry", "command", "dependencies", "resident")
     private val RUNTIME_DEPENDENCY_KEYS = setOf("tool", "file")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
@@ -118,8 +118,7 @@ object PluginManifestParser {
                     repository = requireNotNull(repository),
                     description = requireNotNull(description),
                     license = requireNotNull(license),
-                    pluginApi = requireNotNull(engines).first,
-                    structuredUi = engines.second,
+                    pluginApi = requireNotNull(engines),
                     skills = requireNotNull(contributes).skills,
                     agents = contributes.agents,
                     workspaceTools = contributes.workspaceTools,
@@ -234,8 +233,8 @@ object PluginManifestParser {
             return LocalizedText(values)
         }
 
-        /** 返回 (pluginApi 范围原文, structuredUi 范围原文或 null)。 */
-        private fun readEngines(obj: JsonObject): Pair<String, String?>? {
+        /** 返回 pluginApi 范围原文。 */
+        private fun readEngines(obj: JsonObject): String? {
             val raw = obj["engines"] ?: return null.also { missing("engines") }
             val engines = raw as? JsonObject ?: return null.also { invalid("engines") }
             engines.keys.filter { it !in ENGINE_KEYS }.forEach { err(PluginErrorCode.UNSUPPORTED_FIELD, "engines.$it") }
@@ -246,19 +245,11 @@ object PluginManifestParser {
                 return null
             }
             val apiRange = SemVerRange.parse(apiText) ?: return null.also { invalid("engines.pluginApi") }
-            val uiText = engines["structuredUi"]?.let { element ->
-                val text = element.stringOrNull()?.trim()
-                if (text == null || SemVerRange.parse(text) == null) {
-                    invalid("engines.structuredUi")
-                    return null
-                }
-                text
-            }
             if (!apiRange.matches(hostApi)) {
                 err(PluginErrorCode.API_INCOMPATIBLE, apiText)
                 return null
             }
-            return apiText to uiText
+            return apiText
         }
 
         /** 缺省视为纯声明式包；存在时必须指定运行时类型、包内入口与可选命令/依赖。 */

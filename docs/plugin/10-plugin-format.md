@@ -1,6 +1,6 @@
 # 插件结构规范草案：源码、发布包与 plugin.json
 
-状态：格式草案 v1，供本轮审阅和继续修改，不是已实现 SDK。本文给出具体文件组织、字段和完整清单示例；JavaScript 是推荐的逻辑载体，具体引擎尚待验证。不得把示例当作已可安装运行的插件。
+状态：格式草案 v1，供本轮审阅和继续修改，不是已实现 SDK。本文给出具体文件组织、字段和完整清单示例；运行时是容器内 node/python 进程，不再有 structuredUi。不得把示例当作已可安装运行的插件。
 
 ## 1. 三层结构
 
@@ -94,7 +94,7 @@ community.workbench-kit-1.0.0.zip
 - `id`：稳定插件标识，草案采用 `发布者.插件名`，如 `community.workbench-kit`。两段均以小写字母开头，仅包含小写字母、数字和连字符，中间用一个点分隔；它不是发布者可信证明。
 - `publisher`：与插件 ID 第一段一致的稳定发布者标识；改显示名称不改变 ID，改来源/发布身份不能静默继承授权。局部贡献 ID 使用 ASCII 字母/数字/下划线/连字符，以字母开头，不包含路径或命名空间分隔符。
 - `version`：SemVer，例如 `1.0.0`；同一版本号不得重新发布不同包内容。
-- `engines.pluginApi` / `engines.structuredUi`：插件 API 与 UI 协议版本范围，草案使用 SemVer 范围。没有 UI 的插件可省略后者。
+- `engines.pluginApi`：插件 API 版本范围，使用 SemVer 范围，必须包含宿主实现的 `1.0.0`。不再接受 `structuredUi`。
 - 安装身份由宿主结合配置的索引来源、源码仓库与核验结果建立，不能只信任清单中的 `id/publisher` 文本。
 - 局部贡献 ID 在各自类型内唯一；宿主按插件归属生成内部键与模型工具名，插件不能覆盖内置功能。
 
@@ -150,11 +150,11 @@ community.workbench-kit-1.0.0.zip
 
 这些都是静态声明。注册清单不执行 handler；启用后由宿主建立归属关系，真正触发事件/调用时再加载逻辑并检查权限。页面 onOpen 是一次受控初始化事件，不随重组重复发送；它不自动获得执行构建、安装依赖等副作用的权利，相关业务须由明确动作触发。
 
-贡献可用 `requires` 数组声明额外的已申请权限依赖；注册本类型的权限仍按类型隐式校验，不能通过省略 requires 省掉。依赖未获授权则相关功能不可用；每次能力调用仍单独核验，不把 requires 当作已授权证明。服务不因出现在清单中就自动运行。
+贡献可用 `requires` 数组声明依赖的服务或环境；依赖未准备则相关功能不可用；每次调用仍检查插件启用状态，不把 requires 当作已准备证明。服务不因出现在清单中就自动运行。
 
-`providers.requests` 仅在宿主路由确实选用了该插件拥有的提供商实例时生效，并绑定实例、请求、插件版本与授权。它允许处理该请求已发送的内容，不允许枚举历史或主动使用其他渠道消费额度。注册和凭据授权均不能代替这项请求处理授权。
+`providers.requests` 仅在宿主路由确实选用了该插件拥有的提供商实例时生效，并绑定实例、请求与插件版本。它允许处理该请求已发送的内容，不允许枚举历史或主动使用其他渠道消费额度。注册和凭据配置均不能代替启用状态检查。
 
-`mcp.connect` 对宿主 MCP 传输生效；`network.request` 单独约束插件 SDK 发起的请求，两者不隐式互相授予。下载后、真正授权连接之前，宿主展开并展示该 MCP 配置的实际 origin/入口路径或程序/参数，把包配置摘要、解析后的目标和凭据引用记录为有效范围。目标改变或跨 origin 重定向不沿用授权；无符合授权的明确目标则拒绝，不自动追加网络许可。
+`mcp.connect` 对宿主 MCP 传输生效；`network.request` 单独约束插件 SDK 发起的请求，两者不隐式互相授予。下载后、真正连接之前，宿主展开并展示该 MCP 配置的实际 origin/入口路径或程序/参数，把包配置摘要、解析后的目标和凭据引用记录为有效范围。目标改变或跨 origin 重定向不沿用原确认；无明确目标则拒绝，不自动追加网络许可。
 
 ### Handler 与引用约定
 
@@ -171,13 +171,13 @@ community.workbench-kit-1.0.0.zip
 
 `endpoint` 二选一：`{"url":"${COMPATIBLE_API_URL}"}`，或 `{"service":"gateway_service","export":"api"}`。后者引用服务声明的导出项，不把临时端口写死进清单。
 
-服务 `exports` 为名称到类型的映射。HTTP 导出声明 `type: httpEndpoint, audience: app, binding: managed, basePath: /v1/`；startHandler 通过宿主登记受管理的就绪出口句柄，不允许返回一个任意 URL 冒充该实例的服务。宿主把出口绑定到已授权服务实例、执行后端和固定 basePath；本地/SSH 的受控监听或转发如何实现仍待验证，不支持时拒绝导出，不能退回信任任意外部地址。
+服务 `exports` 为名称到类型的映射。HTTP 导出声明 `type: httpEndpoint, audience: app, binding: managed, basePath: /v1/`；startHandler 通过宿主登记受管理的就绪出口句柄，不允许返回一个任意 URL 冒充该实例的服务。宿主把出口绑定到已启用服务实例、执行后端和固定 basePath；本地/SSH 的受控监听或转发如何实现仍待验证，不支持时拒绝导出，不能退回信任任意外部地址。
 
-`startHandler` 仅在获授权、environmentRef 对应环境已 ready 且需要服务时运行；`stopHandler` 接收该实例的受控清理句柄，不因权限撤销或卸载就继续运行任意插件清理代码。App 消费的地址由宿主解析受控出口，不把远端 localhost 原样作为手机入口。
+`startHandler` 仅在插件启用、environmentRef 对应环境已 ready 且需要服务时运行；`stopHandler` 接收该实例的受控清理句柄，不因停用或卸载就继续运行任意插件清理代码。App 消费的地址由宿主解析受控出口，不把远端 localhost 原样作为手机入口。
 
-`authentication.source = serviceToken` 仅用于受管理服务出口，使用宿主为该实例生成并绑定受众的桥接认证，不把上游 Key 当作桥接口令。插件所需上游凭据另走 `credentials.use` 的自有授权。
+`authentication.source = serviceToken` 仅用于受管理服务出口，使用宿主为该实例生成并绑定受众的桥接认证，不把上游 Key 当作桥接口令。插件所需上游凭据另走 `credentials.use` 的自有声明。
 
-固定外部入口可使用 `authentication.source = providerInstance`，复用用户明确配置给该实例的认证；宿主将其绑定到已授权 origin 与 basePath，目标改变重新确认，不向跨 origin 重定向转发认证。清单不内嵌口令，也不读取全量渠道。
+固定外部入口可使用 `authentication.source = providerInstance`，复用用户明确配置给该实例的认证；宿主将其绑定到已声明 origin 与 basePath，目标改变重新确认，不向跨 origin 重定向转发认证。清单不内嵌口令，也不读取全量渠道。
 
 `models.mode = remote` 表示走当前格式的模型发现流程；静态模型可用 `mode = static, ids = [...]`。这些选项要与实际兼容服务能力匹配，模型发现与请求测试使用相同的受众/目标校验。
 
@@ -224,8 +224,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
   "license": "MIT",
   "repository": "${PLUGIN_REPOSITORY_URL}",
   "engines": {
-    "pluginApi": "^1.0.0",
-    "structuredUi": "^1.0.0"
+    "pluginApi": "^1.0.0"
   },
   "runtime": {
     "type": "javascript",
@@ -308,7 +307,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 - input schema 仅使用允许的本地引用，不在安装预览阶段追踪远端引用或执行代码。
 - 安装预览展示的贡献与实际清单一致；引用缺失文件或 handler 的诊断不能忽略错误继续启动。
 - 宿主先核验包摘要/清单摘要，再读取并校验声明；读取声明不触发模块顶层执行、MCP 连接、服务启动或脚本安装。
-- 更新保持 `id/version/repository/publisher` 与索引记录一致。服务地址的运行期导出绑定插件实例与授权版本，不因同名端口复用而信任另一进程。
+- 更新保持 `id/version/repository/publisher` 与索引记录一致。服务地址的运行期导出绑定插件实例与启用版本，不因同名端口复用而信任另一进程。
 - 资源上限、实际 runtime 支持、权限作用域、hook 可变字段与任务退出策略仍按宿主契约验证，不能因为清单可解析就声称这些实现完成。
 
 ## 11. 作者发布顺序
@@ -328,9 +327,9 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 项 | 行为 |
 | --- | --- |
 | 顶层字段 | `manifestVersion`（必须为 1）、`id`、`name`、`version`、`publisher`、`repository`、`description`、`license`、`engines`、`contributes` |
-| `engines` | `pluginApi` 必填，范围必须包含宿主实现的插件 API（当前 `1.0.0`）；`structuredUi` 只校验写法，目前没有对应功能 |
+| `engines` | `pluginApi` 必填，范围必须包含宿主实现的插件 API（当前 `1.0.0`）；不再接受 `structuredUi` |
 | 版本范围写法 | `^x.y.z`、`~x.y.z`、`>= > <= < =` 加完整版本、精确版本，空格分隔取交集；不支持 `1.x`、`*`、`\|\|`、`a - b` |
-| 能力 | `skills.register`、`agents.register`，`scope` 只有 `ids` |
+| 能力 | 技能与子代理随插件启用生效；逐项能力字段已移除 |
 | 贡献 | `contributes.skills[]`、`contributes.agents[]`，每项 `{id, file}`，`file` 为包内 `.md` |
 | `repository` | 必须是不带账号、查询、片段的 `https` 地址；只作为插件自述展示，**不核验** |
 | 安装路径 | 设置 → 插件 → 「＋」选择本地 `.zip`。这是目前唯一的安装路径，没有在线索引 |
@@ -339,23 +338,23 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 能力 | `workspace-tools.register`，`scope` 只有 `ids`，必须与 `contributes.workspaceTools` 的 ID 逐项对应 |
-| 贡献 | `contributes.workspaceTools[]`，每项 `{id, title, pageFile}`，`icon` / `category` 可选；`pageFile` 为包内 `.json` |
-| 页面 | `pageFile` 由 `AdaptiveCardParser` 解析；文件缺失报错；JSON 非法或超过 512 KB 时页面为空，不报错，插件仍为可用状态 |
+| 能力 | 工作区工具随插件启用生效；逐项能力字段已移除 |
+| 贡献 | `contributes.workspaceTools[]`，每项 `{id, title, pageFile}`，`icon` / `category` 可选；`pageFile` 为包内 `.html` |
+| 页面 | `pageFile` 由 WebView 加载，缺失或越出包目录时报错；页面通过宿主桥读写文件、执行同步 `bash` |
 | 数据 | 当前项目已启用的工具与参数保存在 `<workspace>/.aicode/tools.json`；插件启停、安装、卸载时重新读取该文件，不会自动移除或刷新已添加条目 |
 | UI | 右侧项目工具抽屉、全部工具页、工具详情页；提交只把命令模板发到终端标签，没有输出流与运行状态 |
 
-### 第三切片（已实现，已真机验证 2026-11-10）：AI 工具与运行时
+### 第三切片（历史，JavaScriptSandbox 已弃用）：AI 工具与运行时
 
 | 项 | 行为 |
 | --- | --- |
 | 顶层字段 | 新增可选 `runtime`，只接受 `{"type": "javascript", "entry": "<包内 .js>"}` |
-| 能力 | `tools.register`，`scope` 只有 `ids`，必须与 `contributes.tools` 的 ID 逐项对应 |
+| 能力 | 工具随插件启用生效；逐项能力字段已移除 |
 | 贡献 | `contributes.tools[]`，每项 `{id, title, description, inputSchema, handler}`；`inputSchema` 为包内 `.json`，`handler` 形如 `tools.echo` |
 | 运行时 | AndroidX JavaScriptSandbox 1.1.1；每个插件一个 isolate，共用 App 的单个 sandbox 进程 |
 | handler 协议 | 入口设置 `globalThis.aicode.handlers`，宿主注入 `__aicodeInvoke` 调用；参数用转义后的 JSON 字符串传入 |
 | 工具名 | 宿主生成 `plugin__<插件ID>__<工具ID>`（清洗并限长 64），不会与内置工具/MCP 重名 |
-| 授权 | 工具默认 ASK；PLAN 模式按 `EXTERNAL_TOOL` 拦截；执行前复核插件已启用且 `tools.register` 仍授权 |
+| 授权 | 工具默认 ASK；PLAN 模式按 `EXTERNAL_TOOL` 拦截；执行前复核插件已启用 |
 | 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
 | 已验证 | `agent.run.finished` 元数据与 Hook → isolate 状态共享（第一版两个事件）；扩到七个事件后仅编译/单测通过 |
 | 未验证 | started/finished 顺序、取消路径、设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
@@ -377,11 +376,11 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 能力 | `mcp.register` 与 `mcp.connect`，`scope` 只有 `ids`，两项都必须逐项覆盖 `contributes.mcp` 的 ID |
+| 能力 | MCP 随插件启用生效；逐项能力字段已移除 |
 | 贡献 | `contributes.mcp[]`，每项 `{id, file}`，`file` 为包内 `.json` |
 | 文件格式 | 沿用现有 `{"mcpServers": {...}}`，支持 HTTP（`url`）与 stdio（`command`/`args`/`env`），由 `McpConfigParser` 解析 |
 | 命名空间 | server 名生成 `plugin__<插件ID>__<贡献ID>__<原server名>`，用户同名配置优先 |
-| 连接 | 两项权限都授予且插件生效时才加入 `McpManager`；停用、撤权、卸载会重连并移除工具 |
+| 连接 | 插件生效时加入 `McpManager`；停用、卸载会重连并移除工具 |
 | 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
 | 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
 
@@ -407,7 +406,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | `agent.tool.before` | 在工具权限判定前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny", reason?, arguments?}`。拒绝时工具错误码 `PLUGIN_HOOK_DENIED`；参数改写后重新走完整权限判断 |
 | `agent.tool.after` | 仅成功执行后同步等待；payload 含 `callId`、`toolName`、`status=success`、`data`；返回 `{data}`，只能改 `data`，不能改状态、图片、附件或错误结果 |
 | `agent.http.before` | 挂在 AgentModule 共享 OkHttpClient 上，每次实际发出 provider 请求前同步等待；payload 含 `url`、`method`、`headers`、`body`；返回 `{url?, headers?, body?}`。body 是该 provider 的完整请求 JSON，系统提示词/消息/工具定义/模型参数均可改，但宿主不校验 provider 语义、工具注册一致性、签名或预算。覆盖对话、标题、压缩、模型列表/测试与图片请求；headers 含明文鉴权头 |
-| `agent.permission.review` | `mode: "review"`，只在宿主判定为 ASK 后、弹窗前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny"|"pass", reason?}`。首个 allow/deny 生效，pass 继续；allow 只批准当前调用、不写记忆规则；deny 错误码 `PLUGIN_REVIEW_DENIED`。高危不可记忆 ASK、`planMode` 与自身工具不代审；超时/异常/格式错误按 pass，最终回退 UI |
+| `agent.permission.review` | `mode: "review"`，只在宿主判定为 ASK 后、弹窗前同步等待；payload 含 `callId`、`toolName`、`arguments`；返回 `{decision:"allow"|"deny"|"pass", reason?}`。首个 allow/deny 生效，pass 继续；allow 只批准当前调用、不写记忆规则；deny 错误码 `PLUGIN_REVIEW_DENIED`。已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）；`planMode` 与自身工具不代审；超时/异常/格式错误按 pass，最终回退 UI |
 | 顺序与预算 | 按插件 ID 升序、清单内顺序执行；单 hook 10 秒、合计 20 秒；超时/异常/格式错误保持原值继续，不自动批准 |
 | 校验 | 只接受白名单字段；`arguments` 必须是 JSON 对象，`data` 可为任意 JSON；变更 JSON 上限 256 KiB；拒绝理由截断到 500 字符。HTTP：URL 限 http/https 且 ≤4096 字符，headers ≤64 项且禁止 Host/Content-Length/Transfer-Encoding/Connection/Expect/Upgrade，body 必须是 JSON 对象且 ≤4 MiB；方法固定 POST |
 | 边界 | 不能改工具名、不能批准工具、不能把宿主 DENY 改成 ALLOW、不能绕过 PLAN 与权限策略；审批后不悄悄改写参数。HTTP hook 不能改方法与非 JSON body，改写后的响应仍按原 provider 格式解析；重试/换 Key 会重复执行 |
@@ -423,21 +422,21 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 - 技能 / 子代理的清单名由宿主命名空间化为 `<插件ID>:<局部ID>`，frontmatter 里的 `name` 被忽略，因此不会覆盖内置功能、使用者自建内容或其他插件。用户自建技能名不允许含 `:`，二者不会撞名；万一撞名，使用者自建的优先。
 - 描述会进入系统提示词的技能 / 子代理清单，因此压成单行，避免插件借换行伪造清单条目。
 - 子代理定义不允许带 `provider` / `model`：它们会动用使用者的付费渠道，插件子代理一律继承父会话。`mode` 仍只能收紧不能放大（既有规则）。
-- 工作区工具项必须有合法 `id`、非空 `title` 与安全的包内 `.json` `pageFile`；同类 ID 不得重复。
+- 工作区工具项必须有合法 `id`、非空 `title` 与安全的包内 `.html` `pageFile`；同类 ID 不得重复。
 - `workspaceTools` 项内的未知键目前不拒绝，与 `skills` / `agents` 的严格键过滤不一致；`icon` / `category` 不校验长度与控制字符，`category` 默认硬编码中文「通用」且不可本地化。
-- 页面 JSON 的未知元素与未知字段静默忽略，未知 `type` 会退化成空文本；非法 JSON 解析为空页面。
+- 页面是包内 HTML；WebView 只加载包内资源，相对路径不能越出安装目录。
 - 工作区工具添加到项目时会把标题、说明、图标、分类写入 `tools.json`；之后插件更新不会自动刷新这些字段，需要从项目移除后重新添加。
 
-### 授权与状态
+### 启用与状态
 
-- 能力授权由安装确认界面逐项决定：必要能力固定勾选，**可选能力默认不开启**。
-- 同 ID 再次导入视为替换安装，授权按本次确认重新设定，**不继承**旧授权。
-- 必要能力被撤销后，插件整体不生效（“待授权”）；可选能力被撤销只让对应贡献失效。
+- 启用即信任：安装确认展示插件提供的贡献与高危能力，安装后全部生效，没有逐项能力授权。
+- 同 ID 再次导入视为替换安装，按新包重新确认，不继承旧状态。
+- 停用插件后所有贡献与页面入口失效；卸载删除包、数据与安装记录。
 - 安装记录（启停、包摘要）由宿主独占，保存在 `filesDir/plugin-registry.json`，不在插件包目录里，也不进入容器可写范围；插件包与插件数据位于 `~/.aicode/plugins`（本地容器内可直接访问）。
 - 每次读取已安装插件都会用记录里的清单摘要校验 `plugin.json`；摘要不符、文件缺失或内容无法解析时标记“已损坏”并让其贡献失效。清单不再通过校验（例如宿主插件 API 升级后不兼容）标记“不可用”。
 - 已派出去的子会话仍能还原自己的子代理定义（停用只拦新的派发）。
-- 安装记录目前**不进入备份**；备份域是固定的，插件相关数据不会被还原，换机后需重新导入。
+- 安装记录与插件数据**不进入备份**；换机后需重新导入。
 
 ### 暂未实现
 
-`pages`、`workspacePanel`、`configuration`、`permissionReviewer`、`environments`、`services`、`providers` 等贡献，hooks 的响应 transform 与更多可变字段，工具取消/输出流/状态绑定，在线索引安装与更新，官方标识，Skill 随包脚本。工作区工具的页面命令没有输出流、进度与停止；AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`environments`、`services`、`providers` 等贡献；hooks 的响应 transform 与更多可变字段；`terminal.run` 共享终端标签、运行状态与停止；tips；Shizuku；在线索引安装与更新、官方标识；Skill 随包脚本。工作区工具页面可自行调用 `bash`，但宿主没有统一运行面板与流式输出。AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

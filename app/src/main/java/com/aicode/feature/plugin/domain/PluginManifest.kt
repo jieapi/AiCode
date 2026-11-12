@@ -154,7 +154,6 @@ data class PluginManifest(
     val description: LocalizedText,
     val license: String,
     val pluginApi: String,
-    val structuredUi: String?,
     val skills: List<PluginContributionRef>,
     val agents: List<PluginContributionRef>,
     val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
