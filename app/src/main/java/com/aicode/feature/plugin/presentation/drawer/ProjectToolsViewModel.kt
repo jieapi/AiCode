@@ -9,6 +9,7 @@ import com.aicode.feature.workspace.domain.ProjectToolItem
 import com.aicode.feature.workspace.domain.ProjectToolsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class ProjectToolsViewModel @Inject constructor(
@@ -52,8 +54,19 @@ class ProjectToolsViewModel @Inject constructor(
         _selectedTool.value = tool
     }
 
-    fun selectToolByKey(key: String) {
-        _selectedTool.value = allPluginTools.value.firstOrNull { it.key == key }
+    /**
+     * 按 key 还原详情页的工具。
+     *
+     * 从右抽屉进入时 [selectTool] 已经设好了同一个工具；这里必须保留，不能拿未订阅的
+     * [allPluginTools]（其 value 可能还是初始空列表）把它覆盖成 null。需要按键还原时
+     * 直接向 PluginManager 取当前启用工具，避免依赖 StateFlow 的订阅时机。
+     */
+    suspend fun selectToolByKey(key: String) {
+        if (_selectedTool.value?.key == key) return
+        val tool = withContext(Dispatchers.IO) {
+            pluginManager.activeWorkspaceTools().firstOrNull { it.key == key }
+        }
+        _selectedTool.value = tool
     }
 
     /** 将工具添加到当前项目 */
