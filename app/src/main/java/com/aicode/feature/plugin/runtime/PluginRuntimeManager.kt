@@ -51,7 +51,8 @@ class PluginRuntimeManager @Inject constructor(
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
     private val eventBus: PluginEventBus,
-    private val notifier: PluginNotifier
+    private val notifier: PluginNotifier,
+    private val terminalRunner: PluginTerminalRunner
 ) {
 
     private class Entry(
@@ -189,6 +190,10 @@ class PluginRuntimeManager @Inject constructor(
             "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
             "host.bash" -> bash(params)
             "host.notify" -> notifier.notify(pluginId, params)
+            "host.terminal.run" -> terminalRun(pluginId, params)
+            "host.terminal.poll" -> terminalPoll(pluginId, params)
+            "host.terminal.stop" -> terminalStop(pluginId, params, close = false)
+            "host.terminal.close" -> terminalStop(pluginId, params, close = true)
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")
         }
     }
@@ -208,6 +213,50 @@ class PluginRuntimeManager @Inject constructor(
             put("exitCode", result.exitCode)
             put("truncated", result.outputTruncated)
         }
+    }
+
+    private suspend fun terminalRun(pluginId: String, params: JsonObject): JsonElement {
+        val command = PluginHostPaths.requireString(params, "command").trim()
+        val title = (params["title"] as? JsonPrimitive)?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.take(MAX_TERMINAL_TITLE_CHARS)
+        return try {
+            val tabId = terminalRunner.start(pluginId, command, title)
+            buildJsonObject {
+                put("tabId", tabId)
+                put("state", "running")
+            }
+        } catch (e: PluginTerminalException) {
+            throw PluginProcessException(e.code, e.message)
+        }
+    }
+
+    private suspend fun terminalPoll(pluginId: String, params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        val offset = (params["offset"] as? JsonPrimitive)?.longOrNull ?: 0L
+        return try {
+            val poll = terminalRunner.poll(pluginId, tabId, offset)
+            buildJsonObject {
+                put("output", poll.output)
+                put("offset", poll.offset)
+                put("state", poll.state)
+                poll.exitCode?.let { put("exitCode", it) }
+                put("truncated", poll.truncated)
+            }
+        } catch (e: PluginTerminalException) {
+            throw PluginProcessException(e.code, e.message)
+        }
+    }
+
+    private suspend fun terminalStop(pluginId: String, params: JsonObject, close: Boolean): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        try {
+            if (close) terminalRunner.close(pluginId, tabId) else terminalRunner.stop(pluginId, tabId)
+        } catch (e: PluginTerminalException) {
+            throw PluginProcessException(e.code, e.message)
+        }
+        return buildJsonObject { put("ok", true) }
     }
 
     private fun handleNotification(pluginId: String, method: String, params: JsonObject) {
@@ -246,5 +295,6 @@ class PluginRuntimeManager @Inject constructor(
         const val TOOL_TIMEOUT_MS = 120_000L
         const val IDLE_TIMEOUT_MS = 10 * 60_000L
         const val IDLE_CHECK_MS = 60_000L
+        const val MAX_TERMINAL_TITLE_CHARS = 120
     }
 }

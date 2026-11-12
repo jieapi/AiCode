@@ -14,6 +14,8 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginProcessException
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
+import com.aicode.feature.plugin.runtime.PluginTerminalException
+import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import java.io.File
@@ -55,6 +57,7 @@ class PluginWebBridge(
     private val eventBus: PluginEventBus,
     private val pluginManager: PluginManager,
     private val pluginRuntimeManager: PluginRuntimeManager,
+    private val terminalRunner: PluginTerminalRunner,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -136,6 +139,10 @@ class PluginWebBridge(
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
         "bash" -> bash(params)
         "plugin.invoke" -> invokePlugin(params)
+        "terminal.run" -> terminalRun(params)
+        "terminal.poll" -> terminalPoll(params)
+        "terminal.stop" -> terminalStop(params)
+        "terminal.close" -> terminalClose(params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")
     }
 
@@ -167,6 +174,59 @@ class PluginWebBridge(
         } catch (e: PluginProcessException) {
             throw PluginHostException(e.code, e.message)
         }
+    }
+
+    /** 新建共享终端标签；后续通过 terminal.poll 读取输出。 */
+    private suspend fun terminalRun(params: JsonObject): JsonElement {
+        val command = PluginHostPaths.requireString(params, "command").trim()
+        val title = (params["title"] as? JsonPrimitive)?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.take(MAX_TERMINAL_TITLE_CHARS)
+        return try {
+            val tabId = terminalRunner.start(page.pluginId, command, title)
+            buildJsonObject {
+                put("tabId", tabId)
+                put("state", "running")
+            }
+        } catch (e: PluginTerminalException) {
+            throw PluginHostException(e.code, e.message)
+        }
+    }
+
+    private suspend fun terminalPoll(params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        val offset = (params["offset"] as? JsonPrimitive)?.longOrNull ?: 0L
+        return try {
+            val poll = terminalRunner.poll(page.pluginId, tabId, offset)
+            buildJsonObject {
+                put("output", poll.output)
+                put("offset", poll.offset)
+                put("state", poll.state)
+                poll.exitCode?.let { put("exitCode", it) }
+                put("truncated", poll.truncated)
+            }
+        } catch (e: PluginTerminalException) {
+            throw PluginHostException(e.code, e.message)
+        }
+    }
+
+    private suspend fun terminalStop(params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        withTerminalErrors { terminalRunner.stop(page.pluginId, tabId) }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    private suspend fun terminalClose(params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        withTerminalErrors { terminalRunner.close(page.pluginId, tabId) }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    private suspend fun <T> withTerminalErrors(block: suspend () -> T): T = try {
+        block()
+    } catch (e: PluginTerminalException) {
+        throw PluginHostException(e.code, e.message)
     }
 
     /** 一次性 Shell 命令：在插件页面所属工作区执行，输出与退出码原样返回。 */
@@ -226,6 +286,7 @@ class PluginWebBridge(
         const val TAG = "PluginWebBridge"
         const val UI_INVOKE_TIMEOUT_MS = 60_000L
         const val MAX_INVOKE_ARGS_CHARS = 256 * 1024
+        const val MAX_TERMINAL_TITLE_CHARS = 120
         val HANDLER_NAME = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
     }
 }

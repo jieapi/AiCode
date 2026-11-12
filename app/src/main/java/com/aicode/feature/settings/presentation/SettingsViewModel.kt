@@ -440,6 +440,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { terminalSettingsRepository.setFontPath(path) }
     }
 
+    fun setTerminalShowPluginTabs(enabled: Boolean) {
+        viewModelScope.launch { terminalSettingsRepository.setShowPluginTabs(enabled) }
+    }
+
     // ── 全局代理 ──
 
     /** 全局代理配置快照（SharedPreferences 即时读写，改即对新连接生效）。 */

@@ -26,7 +26,8 @@ class PluginToolManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
     private val toolRegistry: ToolRegistry,
-    private val runtime: PluginRuntimeManager
+    private val runtime: PluginRuntimeManager,
+    private val terminalRunner: PluginTerminalRunner
 ) {
     private val started = AtomicBoolean(false)
     private val registeredLock = Any()
@@ -73,7 +74,10 @@ class PluginToolManager @Inject constructor(
             .filter { it.isActive && it.content.runtime != null }
             .map { it.id }
             .toSet()
-        (activePluginIds - currentActiveIds).forEach { runtime.closePlugin(it) }
+        (activePluginIds - currentActiveIds).forEach {
+            runtime.closePlugin(it)
+            terminalRunner.closePlugin(it)
+        }
         activePluginIds = currentActiveIds
 
         val desiredNames = desired.map { it.name }.toSet()

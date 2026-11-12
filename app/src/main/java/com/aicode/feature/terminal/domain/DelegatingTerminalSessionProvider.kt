@@ -53,6 +53,11 @@ class DelegatingTerminalSessionProvider @Inject constructor(
         sourceSessionId: String?
     ): String = delegate().startBackgroundCommand(command, title, notify, sourceSessionId)
 
+    override suspend fun startPluginCommand(command: String, title: String?, pluginId: String): String =
+        delegate().startPluginCommand(command, title, pluginId)
+
+    override fun tabStatus(id: String): TerminalTabStatus? = delegate().tabStatus(id)
+
     override fun sendInput(id: String, input: String, appendNewline: Boolean): Boolean =
         delegate().sendInput(id, input, appendNewline)
 
