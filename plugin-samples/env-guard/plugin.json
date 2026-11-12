@@ -1,0 +1,34 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.env-guard",
+  "name": {
+    "default": "Env Guard",
+    "zh-CN": ".env 守卫",
+    "en": "Env Guard"
+  },
+  "version": "1.0.0",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "default": "Demo writable hook that rejects AI tool calls touching .env or .env.* files.",
+    "zh-CN": "演示可写 Hook：AI 工具一旦访问 .env 或 .env.* 文件就直接拒绝。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": ">=1.2.0 <2.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "hooks": [
+      {
+        "id": "deny-env",
+        "event": "agent.tool.before",
+        "handler": "hooks.denyEnv",
+        "mode": "transform"
+      }
+    ]
+  }
+}
