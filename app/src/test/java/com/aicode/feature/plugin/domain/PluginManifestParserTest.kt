@@ -42,8 +42,6 @@ class PluginManifestParserTest {
         assertEquals("Demo Kit", m.name.resolve("en"))
         assertEquals(listOf(PluginContributionRef("notes", "skills/notes/SKILL.md")), m.skills)
         assertEquals(listOf(PluginContributionRef("builder", "agents/builder.md")), m.agents)
-        assertEquals(setOf(PluginPermission.SKILLS_REGISTER), m.requiredPermissions)
-        assertEquals("注册子代理", m.requestFor(PluginPermission.AGENTS_REGISTER)?.reason?.resolve("zh-CN"))
         assertEquals(2, m.contributionCount)
     }
 
@@ -61,20 +59,6 @@ class PluginManifestParserTest {
               "description": "为项目笔记和构建任务提供技能与子代理",
               "license": "MIT",
               "engines": {"pluginApi": "^1.0.0"},
-              "permissions": [
-                {
-                  "id": "skills.register",
-                  "required": true,
-                  "reason": "提供项目笔记技能",
-                  "scope": {"ids": ["project-notes"]}
-                },
-                {
-                  "id": "agents.register",
-                  "required": false,
-                  "reason": {"default": "Provide a build sub-agent", "zh": "提供构建子代理"},
-                  "scope": {"ids": ["builder"]}
-                }
-              ],
               "contributes": {
                 "skills": [{"id": "project-notes", "file": "skills/project-notes/SKILL.md"}],
                 "agents": [{"id": "builder", "file": "agents/builder.md"}]
@@ -85,8 +69,6 @@ class PluginManifestParserTest {
         val m = success(example)
         assertEquals(listOf("project-notes"), m.skills.map { it.id })
         assertEquals(listOf("builder"), m.agents.map { it.id })
-        assertEquals("Provide a build sub-agent", m.requestFor(PluginPermission.AGENTS_REGISTER)?.reason?.resolve("en"))
-        assertEquals("提供项目笔记技能", m.requestFor(PluginPermission.SKILLS_REGISTER)?.reason?.resolve("en"))
     }
 
     @Test
@@ -150,43 +132,12 @@ class PluginManifestParserTest {
     }
 
     @Test
-    fun unsupportedPermission_isRejected() {
-        assertRejected(
-            base.replace("\"skills.register\"", "\"workspace.commands\""),
-            PluginErrorCode.UNSUPPORTED_PERMISSION,
-            "workspace.commands"
-        )
-    }
-
-    @Test
     fun unsupportedContribution_isRejected() {
         assertRejected(
             base.replace("\"contributes\": {", "\"contributes\": {\"providers\": [], "),
             PluginErrorCode.UNSUPPORTED_CONTRIBUTION,
             "providers"
         )
-    }
-
-    @Test
-    fun permissionScope_mustMatchContributionsExactly() {
-        // 贡献了 notes，但权限只覆盖别的 ID
-        assertRejected(
-            base.replace("\"scope\": {\"ids\": [\"notes\"]}", "\"scope\": {\"ids\": [\"other\"]}"),
-            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
-            "skills.notes"
-        )
-        // 权限声明了不存在的贡献
-        assertRejected(
-            base.replace("\"scope\": {\"ids\": [\"builder\"]}", "\"scope\": {\"ids\": [\"builder\", \"ghost\"]}"),
-            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
-            "agents.register.ghost"
-        )
-        // 有技能贡献却没有对应权限
-        val noSkillPermission = base.replace(
-            Regex("""\{"id": "skills.register".*?"scope": \{"ids": \["notes"]}},\s*""", RegexOption.DOT_MATCHES_ALL),
-            ""
-        )
-        assertRejected(noSkillPermission, PluginErrorCode.PERMISSION_SCOPE_MISMATCH, "skills.notes")
     }
 
     @Test
@@ -210,11 +161,6 @@ class PluginManifestParserTest {
             PluginErrorCode.DUPLICATE_ID,
             "contributes.skills.notes"
         )
-        val duplicatePermission = base.replace(
-            "{\"id\": \"agents.register\"",
-            "{\"id\": \"skills.register\", \"required\": false, \"reason\": \"dup\", \"scope\": {\"ids\": [\"notes\"]}}, {\"id\": \"agents.register\""
-        )
-        assertRejected(duplicatePermission, PluginErrorCode.DUPLICATE_ID, "permissions.skills.register")
     }
 
     @Test
@@ -222,7 +168,7 @@ class PluginManifestParserTest {
         val empty = base
             .replace("\"skills\": [{\"id\": \"notes\", \"file\": \"skills/notes/SKILL.md\"}],", "")
             .replace("\"agents\": [{\"id\": \"builder\", \"file\": \"agents/builder.md\"}]", "")
-        assertTrue(errors(empty).any { it.code == PluginErrorCode.FIELD_INVALID || it.code == PluginErrorCode.PERMISSION_SCOPE_MISMATCH })
+        assertTrue(errors(empty).any { it.code == PluginErrorCode.FIELD_INVALID })
     }
 
     @Test
@@ -248,7 +194,6 @@ class PluginManifestParserTest {
         assertEquals(1, manifest.tools.size)
         assertEquals("echo", manifest.tools.single().id)
         assertEquals("tools.echo", manifest.tools.single().handler)
-        assertEquals(setOf(PluginPermission.TOOLS_REGISTER), manifest.requiredPermissions)
         assertEquals(1, manifest.contributionCount)
     }
 
@@ -276,8 +221,6 @@ class PluginManifestParserTest {
         val manifest = success(hooksManifest())
         assertEquals(PluginRuntimeRef("javascript", "dist/main.js"), manifest.runtime)
         assertEquals(listOf(PluginHookRef("on-start", "agent.run.started", "hooks.onStart")), manifest.hooks)
-        assertEquals(listOf("on-start"), manifest.requestFor(PluginPermission.AGENT_EVENTS)?.ids)
-        assertEquals(listOf("agent.run.started"), manifest.requestFor(PluginPermission.AGENT_EVENTS)?.events)
         assertEquals(1, manifest.contributionCount)
     }
 
@@ -285,37 +228,12 @@ class PluginManifestParserTest {
     fun newReadonlyHookEvents_areAccepted() {
         val manifest = success(
             hooksManifest(
-                permissionsBlock = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-request", "on-tool", "on-compact"], "events": ["agent.request.started", "agent.tool.finished", "agent.compaction"]}}""",
                 hooksBlock = """{"id": "on-request", "event": "agent.request.started", "handler": "hooks.onRequest"},
                     {"id": "on-tool", "event": "agent.tool.finished", "handler": "hooks.onTool"},
                     {"id": "on-compact", "event": "agent.compaction", "handler": "hooks.onCompact"}"""
             )
         )
         assertEquals(3, manifest.hooks.size)
-        assertEquals(
-            listOf("agent.request.started", "agent.tool.finished", "agent.compaction"),
-            manifest.requestFor(PluginPermission.AGENT_EVENTS)?.events
-        )
-    }
-
-    @Test
-    fun hooksRequireAgentEventsPermission() {
-        assertRejected(
-            hooksManifest(permissionsBlock = ""),
-            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
-            "hooks.on-start"
-        )
-    }
-
-    @Test
-    fun agentEventsScopeEvents_mustMatchHooks() {
-        assertRejected(
-            hooksManifest(
-                permissionsBlock = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-start"], "events": ["agent.run.finished"]}}"""
-            ),
-            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
-            "hooks.agent.run.started"
-        )
     }
 
     @Test
@@ -352,10 +270,6 @@ class PluginManifestParserTest {
         assertEquals(1, manifest.mcp.size)
         assertEquals("project-context", manifest.mcp.single().id)
         assertEquals("mcp/project-context.json", manifest.mcp.single().file)
-        assertEquals(
-            setOf(PluginPermission.MCP_REGISTER, PluginPermission.MCP_CONNECT),
-            manifest.requiredPermissions
-        )
     }
 
     @Test
@@ -370,7 +284,6 @@ class PluginManifestParserTest {
 
     private fun hooksManifest(
         runtimeBlock: String = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},",
-        permissionsBlock: String = """{"id": "agent.events", "required": false, "reason": "hooks", "scope": {"ids": ["on-start"], "events": ["agent.run.started"]}}""",
         hooksBlock: String = """{"id": "on-start", "event": "agent.run.started", "handler": "hooks.onStart"}"""
     ): String = """
         {
@@ -384,7 +297,6 @@ class PluginManifestParserTest {
           "license": "MIT",
           "engines": {"pluginApi": "^1.0.0"},
           $runtimeBlock
-          "permissions": [$permissionsBlock],
           "contributes": {
             "hooks": [$hooksBlock]
           }
@@ -402,10 +314,6 @@ class PluginManifestParserTest {
           "description": "MCP",
           "license": "MIT",
           "engines": {"pluginApi": "^1.0.0"},
-          "permissions": [
-            {"id": "mcp.register", "required": true, "reason": "register", "scope": {"ids": ["project-context"]}},
-            {"id": "mcp.connect", "required": true, "reason": "connect", "scope": {"ids": ["project-context"]}}
-          ],
           "contributes": {
             "mcp": [
               {"id": "project-context", "file": "mcp/project-context.json"}
@@ -429,9 +337,6 @@ class PluginManifestParserTest {
           "license": "MIT",
           "engines": {"pluginApi": "^1.0.0"},
           $runtimeBlock
-          "permissions": [
-            {"id": "tools.register", "required": true, "reason": "tools", "scope": {"ids": ["echo"]}}
-          ],
           "contributes": {
             "tools": [
               {"id": "echo", "title": "Echo", "description": "Echo text", "inputSchema": "schemas/echo.json", "handler": "$handler"}
@@ -443,7 +348,6 @@ class PluginManifestParserTest {
     private fun settingsManifest(
         anchor: String = "settings.ai",
         page: String = "ui/memory.html",
-        permissionId: String = "memory",
         pluginApi: String = ">=1.1.0 <2.0.0"
     ): String = """
         {
@@ -456,9 +360,6 @@ class PluginManifestParserTest {
           "description": "Memory demo",
           "license": "MIT",
           "engines": {"pluginApi": "$pluginApi"},
-          "permissions": [
-            {"id": "settings.pages", "required": true, "reason": "设置页", "scope": {"ids": ["$permissionId"]}}
-          ],
           "contributes": {
             "settingsPages": [
               {"id": "memory", "title": "记忆", "anchor": "$anchor", "page": "$page"}
@@ -474,7 +375,6 @@ class PluginManifestParserTest {
         assertEquals("settings.ai", m.settingsPages.single().anchor)
         assertEquals("ui/memory.html", m.settingsPages.single().page)
         assertEquals("book", m.settingsPages.single().icon)
-        assertEquals(setOf(PluginPermission.SETTINGS_PAGES), m.requiredPermissions)
     }
 
     @Test
@@ -492,15 +392,6 @@ class PluginManifestParserTest {
             settingsManifest(page = "ui/memory.json"),
             PluginErrorCode.FIELD_INVALID,
             "contributes.settingsPages[0].page"
-        )
-    }
-
-    @Test
-    fun settingsPage_permissionScopeMustMatch() {
-        assertRejected(
-            settingsManifest(permissionId = "other"),
-            PluginErrorCode.PERMISSION_SCOPE_MISMATCH,
-            "settingsPages.memory"
         )
     }
 

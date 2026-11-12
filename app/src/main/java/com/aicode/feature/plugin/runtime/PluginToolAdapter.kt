@@ -61,7 +61,7 @@ class PluginToolAdapter(
         if (!isStillAuthorized()) {
             return ToolResult.Error(
                 context.getString(R.string.plugin_tool_not_authorized),
-                "PLUGIN_NOT_AUTHORIZED"
+                "PLUGIN_DISABLED"
             )
         }
         return try {

@@ -21,57 +21,6 @@
     "type": "javascript",
     "entry": "dist/main.js"
   },
-  "permissions": [
-    {
-      "id": "skills.register",
-      "required": true,
-      "reason": "提供「项目笔记」技能，把讨论结论整理进 NOTES.md",
-      "scope": {
-        "ids": ["project-notes"]
-      }
-    },
-    {
-      "id": "agents.register",
-      "required": true,
-      "reason": "提供「只读审查」子代理，提交前复核改动",
-      "scope": {
-        "ids": ["reviewer"]
-      }
-    },
-    {
-      "id": "workspace.tools",
-      "required": true,
-      "reason": "提供「项目速览」工具，在右侧工具抽屉中一键运行",
-      "scope": {
-        "ids": ["project-snapshot"]
-      }
-    },
-    {
-      "id": "workspace.exec",
-      "required": true,
-      "reason": "执行 git 命令以展示仓库状态与文件列表",
-      "scope": {
-        "ids": ["project-snapshot"]
-      }
-    },
-    {
-      "id": "tools.register",
-      "required": true,
-      "reason": "提供由 AI 调用的「回显」与「上次运行」工具，验证插件运行时与 Hook",
-      "scope": {
-        "ids": ["echo", "last-run"]
-      }
-    },
-    {
-      "id": "agent.events",
-      "required": true,
-      "reason": "监听 Agent 运行结束事件，只保存运行元数据用于演示",
-      "scope": {
-        "ids": ["run-log"],
-        "events": ["agent.run.finished"]
-      }
-    }
-  ],
   "contributes": {
     "skills": [
       {

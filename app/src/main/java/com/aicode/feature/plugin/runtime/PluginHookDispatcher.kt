@@ -4,7 +4,6 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginHook
 import com.aicode.feature.plugin.domain.PluginHookEvents
 import com.aicode.feature.plugin.domain.PluginManager
-import com.aicode.feature.plugin.domain.PluginPermission
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -199,7 +198,7 @@ class PluginHookDispatcher @Inject constructor(
             val targets = try {
                 pluginManager.ensureLoaded()
                 pluginManager.plugins.value
-                    .filter { it.isActive && PluginPermission.AGENT_EVENTS in it.granted }
+                    .filter { it.isActive }
                     .flatMap { plugin ->
                         plugin.content.hooks
                             .filter { it.event == event }

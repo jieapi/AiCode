@@ -5,7 +5,6 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginManager
-import com.aicode.feature.plugin.domain.PluginPermission
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -51,22 +50,23 @@ class PluginToolManager @Inject constructor(
 
     private fun sync(plugins: List<InstalledPlugin>) {
         val desired = plugins
-            .filter { it.isActive && PluginPermission.TOOLS_REGISTER in it.granted }
+            .filter { it.isActive }
             .flatMap { plugin ->
                 val manifest = plugin.manifest ?: return@flatMap emptyList()
                 val runtimeEntry = plugin.content.runtime ?: return@flatMap emptyList()
                 val pluginName = manifest.name.resolve(Locale.getDefault().toLanguageTag())
-                plugin.content.tools.map { tool ->
-                    PluginToolAdapter(
-                        context = context,
-                        pluginId = plugin.id,
-                        pluginName = pluginName,
-                        pluginVersion = plugin.record.version,
-                        tool = tool,
-                        runtime = runtime,
-                        isStillAuthorized = { isAuthorized(plugin.id) }
-                    )
-                }
+                plugin.content.tools
+                    .map { tool ->
+                        PluginToolAdapter(
+                            context = context,
+                            pluginId = plugin.id,
+                            pluginName = pluginName,
+                            pluginVersion = plugin.record.version,
+                            tool = tool,
+                            runtime = runtime,
+                            isStillAuthorized = { isAuthorized(plugin.id) }
+                        )
+                    }
             }
             .distinctBy { it.name }
 
@@ -94,9 +94,7 @@ class PluginToolManager @Inject constructor(
     }
 
     private fun isAuthorized(pluginId: String): Boolean = pluginManager.plugins.value.any { plugin ->
-        plugin.id == pluginId &&
-            plugin.isActive &&
-            PluginPermission.TOOLS_REGISTER in plugin.granted
+        plugin.id == pluginId && plugin.isActive
     }
 
     private companion object {

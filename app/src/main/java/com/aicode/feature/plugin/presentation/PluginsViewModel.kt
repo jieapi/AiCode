@@ -11,7 +11,6 @@ import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
 import com.aicode.feature.plugin.domain.PluginInstallResult
 import com.aicode.feature.plugin.domain.PluginManager
-import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
@@ -37,12 +36,10 @@ sealed interface PluginImportState {
     data object Reading : PluginImportState
 
     /**
-     * 包已通过校验，等待使用者确认。[granted] 是当前勾选的能力：必要能力固定勾选，
-     * 可选能力默认不开启，由使用者逐项决定。
+     * 包已通过校验，等待使用者确认。
      */
     data class Preview(
         val preview: PluginPreview,
-        val granted: Set<PluginPermission>,
         val installing: Boolean = false,
         val error: PluginError? = null
     ) : PluginImportState
@@ -87,21 +84,10 @@ class PluginsViewModel @Inject constructor(
             }
             _importState.value = when (result) {
                 is PluginPreviewResult.Ready -> PluginImportState.Preview(
-                    preview = result.preview,
-                    granted = result.preview.manifest.requiredPermissions
+                    preview = result.preview
                 )
                 is PluginPreviewResult.Failed -> PluginImportState.Failed(result.errors)
             }
-        }
-    }
-
-    /** 切换一项可选能力；必要能力不能取消。 */
-    fun toggleGrant(permission: PluginPermission) {
-        _importState.update { state ->
-            if (state !is PluginImportState.Preview || state.installing) return@update state
-            if (permission in state.preview.manifest.requiredPermissions) return@update state
-            val granted = if (permission in state.granted) state.granted - permission else state.granted + permission
-            state.copy(granted = granted, error = null)
         }
     }
 
@@ -110,7 +96,7 @@ class PluginsViewModel @Inject constructor(
         if (state.installing) return
         _importState.value = state.copy(installing = true, error = null)
         viewModelScope.launch {
-            when (val result = manager.install(state.preview.token, state.granted)) {
+            when (val result = manager.install(state.preview.token)) {
                 is PluginInstallResult.Installed -> _importState.value = PluginImportState.Idle
                 is PluginInstallResult.Failed -> _importState.update { current ->
                     (current as? PluginImportState.Preview)?.copy(installing = false, error = result.error) ?: current
@@ -131,10 +117,6 @@ class PluginsViewModel @Inject constructor(
 
     fun setEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch { manager.setEnabled(id, enabled) }
-    }
-
-    fun setGranted(id: String, permission: PluginPermission, granted: Boolean) {
-        viewModelScope.launch { manager.setGranted(id, permission, granted) }
     }
 
     fun uninstall(id: String) {
@@ -167,10 +149,6 @@ class PluginsViewModel @Inject constructor(
             homeResolver = pathHomeResolver,
             commandEngine = commandEngine,
             workspacePath = { workspaceRepository.currentPath() },
-            execAllowed = {
-                plugins.value.firstOrNull { it.id == page.pluginId }
-                    ?.let { plugin -> plugin.isActive && PluginPermission.WORKSPACE_EXEC in plugin.granted } == true
-            },
             theme = theme,
             onClosePage = onClosePage,
             post = post

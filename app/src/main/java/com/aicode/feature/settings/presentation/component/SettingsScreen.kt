@@ -97,7 +97,6 @@ import com.aicode.feature.agent.domain.skill.SkillScope
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
 import com.aicode.core.util.FileLogger
-import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginSettingsAnchors
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.presentation.PluginDetailSection
@@ -417,7 +416,7 @@ fun SettingsScreen(
     var activePluginPage by remember { mutableStateOf<PluginSettingsPage?>(null) }
     // 直接从插件快照算入口，不走 PluginManager.ensureLoaded：组合期间不能同步读盘。
     val pluginPages = remember(plugins) {
-        plugins.filter { it.isActive && PluginPermission.SETTINGS_PAGES in it.granted }
+        plugins.filter { it.isActive }
             .flatMap { plugin ->
                 plugin.content.settingsPages.map { page ->
                     page.copy(
@@ -1395,9 +1394,6 @@ fun SettingsScreen(
                     PluginDetailSection(
                         plugin = plugin,
                         onToggleEnabled = { pluginsViewModel.setEnabled(plugin.id, it) },
-                        onTogglePermission = { permission, granted ->
-                            pluginsViewModel.setGranted(plugin.id, permission, granted)
-                        },
                         onUninstall = {
                             pluginsViewModel.uninstall(plugin.id)
                             section = SettingsSection.Plugins

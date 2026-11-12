@@ -43,20 +43,6 @@ demo-kit/
   "description": "为项目笔记和构建任务提供技能与子代理",
   "license": "MIT",
   "engines": {"pluginApi": "^1.0.0"},
-  "permissions": [
-    {
-      "id": "skills.register",
-      "required": true,
-      "reason": "提供项目笔记技能",
-      "scope": {"ids": ["project-notes"]}
-    },
-    {
-      "id": "agents.register",
-      "required": false,
-      "reason": {"default": "Provide a build sub-agent", "zh": "提供构建子代理"},
-      "scope": {"ids": ["builder"]}
-    }
-  ],
   "contributes": {
     "skills": [{"id": "project-notes", "file": "skills/project-notes/SKILL.md"}],
     "agents": [{"id": "builder", "file": "agents/builder.md"}]
@@ -76,14 +62,13 @@ demo-kit/
 | `repository` | 是 | 你的源码仓库，必须是 `https://` 地址，不能带账号、`?` 或 `#`。AiCode 只展示它，**不核验** |
 | `license` | 是 | 许可证名称，如 `MIT` |
 | `engines.pluginApi` | 是 | 需要的插件接口版本范围，目前宿主提供 `1.1.0`；设置页入口需要 `>=1.1.0 <2.0.0`，旧插件写 `^1.0.0` 仍然可用 |
-| `permissions` | 是 | 要向使用者申请的权限，见下 |
 | `contributes` | 是 | 提供的内容，至少一项 |
 
 不认识的字段一律拒绝安装，而不是忽略——所以不要写 `official`、`permissionReviewer` 之类目前不支持的字段。
 
 ### 多语言文字
 
-`name`、`description` 和权限的 `reason` 都可以写成按语言区分的对象：
+`name`、`description` 都可以写成按语言区分的对象：
 
 ```json
 "name": {"default": "Demo Kit", "zh-CN": "演示套件"}
@@ -95,24 +80,15 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 
 `engines.pluginApi` 支持 `^1.0.0`、`~1.0.0`、`>=1.0.0 <2.0.0`、精确版本 `1.0.0`。不支持 `1.x`、`*`、`||`、`1.0.0 - 2.0.0`。
 
-## 权限与内容必须一一对应
+## 能力与信任边界
 
-每一类内容都要有对应的注册权限，`scope.ids` 要和 `contributes` 里该类的 `id` 完全一致——多一个少一个都会被拒绝：
+插件启用后，清单声明的技能、子代理、AI 工具、工作区工具、设置页、hook 和 MCP 都会生效，不再逐项授权。安装确认只展示它会提供什么。
 
-| 内容 | 权限 | `scope` |
-| --- | --- | --- |
-| 技能 `contributes.skills` | `skills.register` | `{"ids": [技能 id…]}` |
-| 子代理 `contributes.agents` | `agents.register` | `{"ids": [子代理 id…]}` |
-| 工作区工具 `contributes.workspaceTools` | `workspace.tools` | `{"ids": [工具 id…]}` |
-| 设置页入口 `contributes.settingsPages` | `settings.pages` | `{"ids": [页面 id…]}` |
-| AI 工具 `contributes.tools` | `tools.register` | `{"ids": [工具 id…]}` |
-| MCP 服务器 `contributes.mcp` | `mcp.register` + `mcp.connect` | `{"ids": [MCP id…]}`，两项权限覆盖同一组 id |
-| 生命周期 hooks `contributes.hooks` | `agent.events` | `{"ids": [hook id…], "events": [事件名…]}`，`ids` 覆盖全部 hook，`events` 覆盖 hooks 用到的事件 |
-
-- `required: true`：使用者不同意就装不了，也无法在装好后正常工作；
-- `required: false`：使用者可以不开，不开时对应的内容不生效，插件的其余部分照常。**可选权限默认是关闭的**，所以别把核心功能放在可选权限后面。
-- 内容的 `id` 以字母开头，只含字母、数字、下划线、连字符。
-- `workspace.exec` 不是内容注册权限：它让设置页页面可以调用 `aicode.bash` 执行一次性命令，`scope.ids` 填使用该能力的设置页 id，必须来自自己的 `contributes.settingsPages`。
+- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，并可以执行 `aicode.bash`。
+- 命令与 MCP 进程内部不受宿主路径限制；只安装你信任来源的插件。
+- `aicode://` 下的 `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件给自己扩权或读取密钥。
+- 插件 JS handler（AI 工具、hook）运行在独立 JavaScript isolate 中，宿主没有注入文件、命令或网络 API；它们只能计算并返回结果。
+- 后续如果接入 Shizuku 这类宿主能真正拦截的系统能力，会单独增加确认开关。
 
 ## 技能文件
 
@@ -154,14 +130,10 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 }
 ```
 
-清单声明方式和权限：
+清单声明方式：
 
 ```json
 {
-  "permissions": [
-    {"id": "mcp.register", "required": true, "reason": "注册项目上下文服务", "scope": {"ids": ["project-context"]}},
-    {"id": "mcp.connect", "required": true, "reason": "连接项目上下文服务", "scope": {"ids": ["project-context"]}}
-  ],
   "contributes": {
     "mcp": [{"id": "project-context", "file": "mcp/project-context.json"}]
   }
@@ -169,7 +141,7 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 ```
 
 - 支持 HTTP 和 stdio；stdio 会在当前工作区的容器或 SSH 后端启动进程。
-- 注册与连接是两项权限，只有都授予后 server 才会连接；安装预览会显示 MCP 名称和连接目标。
+- 安装预览会显示 MCP 名称和连接目标。
 - 插件贡献的 server 名会加 `plugin__` 命名空间，不会覆盖你在「设置 → MCP」里手工创建的配置；同名冲突时用户配置优先。
 - 插件停用、撤权或卸载时，对应的 MCP 连接和工具会一起移除。
 - stdio 配置里的 `command`、`args`、`env` 会原样用于启动进程；只安装你信任的插件。
@@ -181,9 +153,6 @@ AI 工具需要 `runtime` 和 `tools.register`，包内放一个已打包的 Jav
 ```json
 {
   "runtime": {"type": "javascript", "entry": "dist/main.js"},
-  "permissions": [
-    {"id": "tools.register", "required": true, "reason": "提供回显工具", "scope": {"ids": ["echo"]}}
-  ],
   "contributes": {
     "tools": [
       {
@@ -228,22 +197,11 @@ hooks 让插件在 Agent 运行的关键节点收到只读通知，用来记录�
 | `agent.tool.finished` | 一次工具调用结束；成功或失败 |
 | `agent.compaction` | 上下文被压缩时 |
 
-hooks 需要 `runtime` 和 `agent.events` 权限，`handler` 写 `dist/main.js` 里 `globalThis.aicode.handlers` 的键：
+hooks 需要 `runtime`，`handler` 写 `dist/main.js` 里 `globalThis.aicode.handlers` 的键：
 
 ```json
 {
   "runtime": {"type": "javascript", "entry": "dist/main.js"},
-  "permissions": [
-    {
-      "id": "agent.events",
-      "required": false,
-      "reason": "记录每轮运行、请求与工具状态",
-      "scope": {
-        "ids": ["run-started", "run-finished", "tool-finished"],
-        "events": ["agent.run.started", "agent.run.finished", "agent.tool.finished"]
-      }
-    }
-  ],
   "contributes": {
     "hooks": [
       {"id": "run-started", "event": "agent.run.started", "handler": "hooks.runStarted"},
@@ -267,7 +225,7 @@ globalThis.aicode = {
 };
 ```
 
-`scope.ids` 要覆盖全部 hook 的 `id`，`scope.events` 要覆盖 hooks 用到的事件集合，两项都不能多写或漏写；只声明事件而没有对应 hook、或只写 hooks 而不申请 `agent.events`，都会拒绝安装。
+`scope.ids` 要覆盖全部 hook 的 `id`，`scope.events` 要覆盖 hooks 用到的事件集合，两项都不能多写或漏写；只声明事件而没有对应 hook、或只写 hooks 而不申请 `agent.hooks`，都会拒绝安装。
 
 ### 事件内容
 
@@ -309,7 +267,7 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 
 ## 工作区工具页面
 
-工作区工具通过 `workspace.tools` 和 `contributes.workspaceTools` 声明，`pageFile` 指向包内 AdaptiveCard JSON。用户可以在右侧项目工具抽屉里添加并运行；页面里的 `submit` 按钮把 `commandTemplate` 插值后在终端标签执行。命令模板属于可执行内容，安装预览会显示工具条目，但最终命令仍需用户点击运行。
+工作区工具通过 `workspace-tools.register` 和 `contributes.workspaceTools` 声明，`pageFile` 指向包内 AdaptiveCard JSON。用户可以在右侧项目工具抽屉里添加并运行；页面里的 `submit` 按钮把 `commandTemplate` 插值后在终端标签执行。命令模板属于可执行内容，安装预览会显示工具条目，但最终命令仍需用户点击运行。
 
 运行后宿主把终端原始输出清洗成日志回填到详情页的运行面板（最多保留最后 500 行），并从命令结束时打印的 `[command exited: N]` 标记识别退出码；非零退出显示为失败，不会误报成功。命令在保活标签里执行，结束后 shell 仍可继续使用，面板停止接收后续输出。
 
@@ -330,24 +288,16 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 }
 ```
 
-- **位置独立**：该页面只在「设置 → 插件」点击该插件后的详情界面中展示，与 AiCode 固定的原生配置（启停、权限、卸载）通过分段控件无缝切换，**不会混入设置主菜单**；
-- **免额外权限**：属于插件自身的专属配置 UI，启用插件即可加载使用，不需要申请 `settings.pages` 权限；
+- **位置独立**：该页面只在「设置 → 插件」点击该插件后的详情界面中展示，与 AiCode 固定的原生配置（启停、卸载）通过分段控件无缝切换，**不会混入设置主菜单**；
+- **随插件启用**：属于插件自身的专属配置 UI，启用插件即可加载使用；
 - **WebView 能力一致**：自动注入 App 全套主题 Token（CSS 变量、暗黑/浅色模式平滑同步），并提供 `window.aicode` 桥接接口读写私有数据目录（`data://`）。
 
 ### 2. 设置主菜单入口（`settingsPages`）
 
-若插件希望在宿主主设置的某个分组下注册独立功能页面（如添加一个通用的记忆管理页、文档演示页等），使用 `contributes.settingsPages`，此时需要 `settings.pages` 权限：
+若插件希望在宿主主设置的某个分组下注册独立功能页面（如添加一个通用的记忆管理页、文档演示页等），使用 `contributes.settingsPages`：
 
 ```json
 {
-  "permissions": [
-    {
-      "id": "settings.pages",
-      "required": true,
-      "reason": "在设置中提供记忆管理页面",
-      "scope": { "ids": ["memory"] }
-    }
-  ],
   "contributes": {
     "settingsPages": [
       {
@@ -394,7 +344,7 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 
 返回键按这个顺序处理：WebView 自身历史（如 hash 路由）→ `onBack` 注册的处理器 → 退出插件页。页面有多层视图时用 `onBack` 接管返回，回到最外层时返回 `false`，交给宿主退出；顶栏自绘的返回按钮在首页调用 `aicode.ui.close()`，在子页调用自己的路由返回。
 
-`aicode.bash` 需要清单里的 `workspace.exec` 权限。命令在插件页面所属工作区执行，返回 stdout/stderr 合并输出、退出码与是否被截断；`options.timeout` 以秒计，默认 30、上限 300。它适合版本检测、状态查询这类短命令，不要用来启动常驻进程或交互式程序；命令执行环境的初始化由终端页负责，未初始化时返回的退出码为 `null`，输出里会带引导提示。
+`aicode.bash` 在插件页面所属工作区执行命令，返回 stdout/stderr 合并输出、退出码与是否被截断；`options.timeout` 以秒计，默认 30、上限 300。它适合版本检测、状态查询这类短命令，不要用来启动常驻进程或交互式程序；命令执行环境的初始化由终端页负责，未初始化时返回的退出码为 `null`，输出里会带引导提示。
 
 路径必须以虚拟根开头：
 
@@ -422,7 +372,7 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 
 - 页面资源只能从插件包经虚拟域加载，外部链接会被宿主拦截；
 - 页面里的 JavaScript 与插件 AI 工具的沙箱是两套环境：页面有 DOM 与桥，AI 工具 handler 没有 DOM，两边不能直接互相调用；
-- 宿主只对已启用且授予 `settings.pages` 的插件注入桥；插件停用后入口消失，页面请求会被拒绝；
+- 宿主只对已启用且授予 `settings-pages.register` 的插件注入桥；插件停用后入口消失，页面请求会被拒绝；
 - 设置页入口最多按声明顺序展示，超出宿主限制的入口会被忽略。
 
 ## 打包
@@ -455,21 +405,19 @@ python3 -c "import shutil; shutil.make_archive('../demo-kit-1.0.0', 'zip', '.')"
 
 超出任何一项都会拒绝整个包。
 
-`workspace.exec` 让页面在当前工作区执行命令，能力与你在容器或 SSH 里执行脚本相近：命令以当前运行环境的用户身份运行，可能修改文件或安装依赖。只给信任来源的插件授予这项权限。
+`aicode.bash` 让页面在当前工作区执行命令，能力与你在容器或 SSH 里执行脚本相近：命令以当前运行环境的用户身份运行，可能修改文件或安装依赖。只安装信任来源的插件。
 
 ## 导入失败时的排查
 
 | 提示 | 常见原因 |
 | --- | --- |
 | 压缩包根目录里没有 plugin.json | 打包时多套了一层目录 |
-| plugin.json 缺少 / 无效字段 | 提示里会写出具体路径，如 `permissions[0].scope.ids` |
-| 权限范围与提供的内容不一致 | `scope.ids` 与 `contributes` 的 id 不是同一组 |
-| 此版本不支持的字段 / 内容类型 / 权限 | 用了目前未实现的能力，如 `providers`、`workspace.commands`、`permissionReviewer` |
-| `agent.events` 权限范围与 hooks 不一致 | `scope.ids` 要覆盖所有 hook 的 `id`，`scope.events` 要覆盖 hooks 使用的事件；多写没声明的 id 或事件同样会被拒绝 |
+| plugin.json 缺少 / 无效字段 | 提示里会写出具体路径 |
+| 此版本不支持的字段 / 内容类型 | 用了目前未实现的能力，如 `providers`、`permissionReviewer` |
 | hooks 声明了 handler 却没有运行时 | 带 handler 的贡献都需要 `runtime`，在清单里补上 `dist/main.js` 入口 |
 | `settingsPages` 的 `anchor` 无效 | 只能取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` |
 | `settingsPages` 的 `page` 不是 HTML | `page` 必须指向包内的 `.html` 或 `.htm` 文件 |
-| `settings.pages` 范围与页面不一致 | `scope.ids` 要覆盖全部 `settingsPages` 的 id，多写没声明的 id 也会被拒绝 |
-| `workspace.exec` 范围与页面不一致 | `scope.ids` 填的页面 id 必须来自自己的 `contributes.settingsPages`，多写没声明的 id 会被拒绝 |
+| `settings-pages.register` 范围与页面不一致 | `scope.ids` 要覆盖全部 `settingsPages` 的 id，多写没声明的 id 也会被拒绝 |
+| `workspace.commands` 范围与页面不一致 | `scope.ids` 填的页面 id 必须来自自己的 `contributes.settingsPages`，多写没声明的 id 会被拒绝 |
 | 内容无效 | 技能或子代理正文为空、子代理写了 `provider` / `model`、AI 工具缺少运行时入口或 schema 不是 `type: object`、MCP 文件没有有效 server |
 | 清单引用的文件不存在 | `file` 路径与压缩包里的实际路径不符，注意大小写 |

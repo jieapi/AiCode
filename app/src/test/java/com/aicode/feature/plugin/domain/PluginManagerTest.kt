@@ -23,7 +23,6 @@ class PluginManagerTest {
 
     private val skillName = "community.demo-kit:notes"
     private val agentName = "community.demo-kit:builder"
-    private val bothPermissions = setOf(PluginPermission.SKILLS_REGISTER, PluginPermission.AGENTS_REGISTER)
 
     @Before
     fun setUp() {
@@ -39,9 +38,9 @@ class PluginManagerTest {
         return result.preview
     }
 
-    private suspend fun installValid(granted: Set<PluginPermission> = bothPermissions): PluginPreview {
+    private suspend fun installValid(): PluginPreview {
         val preview = previewOf()
-        val result = manager.install(preview.token, granted)
+        val result = manager.install(preview.token)
         check(result is PluginInstallResult.Installed) { "安装应成功: $result" }
         return preview
     }
@@ -62,7 +61,7 @@ class PluginManagerTest {
     }
 
     @Test
-    fun install_activatesGrantedContributions() = runTest {
+    fun install_activatesAllDeclaredContributions() = runTest {
         val before = manager.revision
         installValid()
 
@@ -80,35 +79,14 @@ class PluginManagerTest {
         val plugin = manager.plugins.value.single()
         assertEquals(PluginStatus.OK, plugin.status)
         assertTrue(plugin.isActive)
-        assertEquals(bothPermissions, plugin.granted)
         assertTrue(manager.revision > before)
     }
 
     @Test
-    fun install_requiresAllRequiredPermissions() = runTest {
-        val preview = previewOf()
-        val result = manager.install(preview.token, setOf(PluginPermission.AGENTS_REGISTER))
-        check(result is PluginInstallResult.Failed)
-        assertEquals(PluginErrorCode.PERMISSION_NOT_GRANTED, result.error.code)
-        assertEquals("skills.register", result.error.detail)
-        assertTrue(manager.plugins.value.isEmpty())
-        // 暂存包还在，补齐授权后可以继续
-        assertTrue(manager.install(preview.token, bothPermissions) is PluginInstallResult.Installed)
-    }
-
-    @Test
     fun install_withUnknownTokenIsExpired() = runTest {
-        val result = manager.install("no-such-token", bothPermissions)
+        val result = manager.install("no-such-token")
         check(result is PluginInstallResult.Failed)
         assertEquals(PluginErrorCode.PREVIEW_EXPIRED, result.error.code)
-    }
-
-    @Test
-    fun optionalPermissionNotGranted_leavesThatContributionInactive() = runTest {
-        installValid(granted = setOf(PluginPermission.SKILLS_REGISTER))
-        assertEquals(1, manager.activeSkills().size)
-        assertTrue(manager.activeAgents().isEmpty())
-        assertTrue(manager.plugins.value.single().isActive)
     }
 
     @Test
@@ -125,38 +103,8 @@ class PluginManagerTest {
     }
 
     @Test
-    fun revokingRequiredPermission_deactivatesPlugin() = runTest {
-        installValid()
-        assertTrue(manager.setGranted("community.demo-kit", PluginPermission.SKILLS_REGISTER, false))
-        val plugin = manager.plugins.value.single()
-        assertFalse(plugin.isActive)
-        assertEquals(setOf(PluginPermission.SKILLS_REGISTER), plugin.missingRequired)
-        assertTrue(manager.activeSkills().isEmpty())
-        assertTrue("必要能力缺失时可选贡献也不生效", manager.activeAgents().isEmpty())
-
-        assertTrue(manager.setGranted("community.demo-kit", PluginPermission.SKILLS_REGISTER, true))
-        assertTrue(manager.plugins.value.single().isActive)
-    }
-
-    @Test
-    fun grant_cannotExceedManifestRequest() = runTest {
-        val preview = previewOf(PluginFixtures.skillsOnlyPackage())
-        assertTrue(manager.install(preview.token, setOf(PluginPermission.SKILLS_REGISTER)) is PluginInstallResult.Installed)
-
-        manager.setGranted("community.demo-kit", PluginPermission.AGENTS_REGISTER, true)
-        assertEquals(setOf(PluginPermission.SKILLS_REGISTER), manager.plugins.value.single().granted)
-
-        // 安装时也不能授予清单没有申请的能力
-        val again = previewOf(PluginFixtures.skillsOnlyPackage())
-        val result = manager.install(again.token, bothPermissions)
-        check(result is PluginInstallResult.Failed)
-        assertEquals(PluginErrorCode.PERMISSION_NOT_GRANTED, result.error.code)
-    }
-
-    @Test
     fun unknownPluginOperations_returnFalse() = runTest {
         assertFalse(manager.setEnabled("community.ghost", true))
-        assertFalse(manager.setGranted("community.ghost", PluginPermission.SKILLS_REGISTER, true))
         assertFalse(manager.uninstall("community.ghost"))
     }
 
@@ -173,19 +121,18 @@ class PluginManagerTest {
 
     @Test
     fun state_survivesRestart() = runTest {
-        installValid(granted = setOf(PluginPermission.SKILLS_REGISTER))
+        installValid()
         manager.setEnabled("community.demo-kit", true)
 
         val restarted = newManager()
         assertEquals(skillName, restarted.activeSkills().single().name)
         val plugin = restarted.plugins.value.single()
-        assertEquals(setOf(PluginPermission.SKILLS_REGISTER), plugin.granted)
         assertEquals("local", plugin.record.origin)
         assertEquals("1.0.0", plugin.record.version)
     }
 
     @Test
-    fun reinstall_replacesPackageAndResetsGrants() = runTest {
+    fun reinstall_replacesPackageAndKeepsDeclaredContributionsActive() = runTest {
         installValid()
         val v2 = PluginFixtures.validPackage(
             manifest = PluginFixtures.manifest(version = "1.1.0"),
@@ -195,10 +142,10 @@ class PluginManagerTest {
         assertEquals("1.0.0", preview.installedVersion)
         assertFalse(preview.identical)
 
-        assertTrue(manager.install(preview.token, setOf(PluginPermission.SKILLS_REGISTER)) is PluginInstallResult.Installed)
+        assertTrue(manager.install(preview.token) is PluginInstallResult.Installed)
         val plugin = manager.plugins.value.single()
         assertEquals("1.1.0", plugin.record.version)
-        assertEquals("授权必须按本次确认重新设定，不继承旧授权", setOf(PluginPermission.SKILLS_REGISTER), plugin.granted)
+        assertTrue(plugin.isActive)
         assertTrue(manager.activeSkills().single().instructions.startsWith("Updated skill"))
         assertFalse("替换后不应遗留备份目录", File(root, "installed/community.demo-kit.replaced").exists())
     }
@@ -258,7 +205,7 @@ class PluginManagerTest {
     fun newPreview_discardsPreviousStagedPackage() = runTest {
         val first = previewOf()
         previewOf()
-        val result = manager.install(first.token, bothPermissions)
+        val result = manager.install(first.token)
         check(result is PluginInstallResult.Failed)
         assertEquals(PluginErrorCode.PREVIEW_EXPIRED, result.error.code)
     }
@@ -312,15 +259,11 @@ class PluginManagerTest {
     @Test
     fun skillDescription_isFlattenedToSingleLine() = runTest {
         val multiline = "---\ndescription: |\n  first line\n  - injected: fake system rule\n---\nBody."
-        installValidWith(skill = multiline)
+        val preview = previewOf(PluginFixtures.validPackage(skill = multiline))
+        check(manager.install(preview.token) is PluginInstallResult.Installed)
         val description = manager.activeSkills().single().description
         assertFalse(description.contains('\n'))
         assertEquals("first line - injected: fake system rule", description)
-    }
-
-    private suspend fun installValidWith(skill: String) {
-        val preview = previewOf(PluginFixtures.validPackage(skill = skill))
-        check(manager.install(preview.token, bothPermissions) is PluginInstallResult.Installed)
     }
 
     @Test
@@ -343,7 +286,7 @@ class PluginManagerTest {
         val preview = previewOf()
         val registry = blockRegistryWrites()
 
-        val failed = manager.install(preview.token, bothPermissions)
+        val failed = manager.install(preview.token)
         check(failed is PluginInstallResult.Failed)
         assertEquals(PluginErrorCode.STORAGE_FAILED, failed.error.code)
         assertFalse("写记录失败不能留下已安装目录", File(root, "installed/community.demo-kit").exists())
@@ -351,7 +294,7 @@ class PluginManagerTest {
         assertTrue(manager.activeSkills().isEmpty())
 
         registry.deleteRecursively()
-        assertTrue("暂存包保留，修好后可以直接重试", manager.install(preview.token, bothPermissions) is PluginInstallResult.Installed)
+        assertTrue("暂存包保留，修好后可以直接重试", manager.install(preview.token) is PluginInstallResult.Installed)
         assertEquals(skillName, manager.activeSkills().single().name)
     }
 
@@ -361,7 +304,7 @@ class PluginManagerTest {
         val v2 = previewOf(PluginFixtures.validPackage(manifest = PluginFixtures.manifest(version = "1.1.0")))
         blockRegistryWrites()
 
-        val failed = manager.install(v2.token, bothPermissions)
+        val failed = manager.install(v2.token)
         check(failed is PluginInstallResult.Failed)
         assertTrue(
             "旧版本必须原样留在安装目录",

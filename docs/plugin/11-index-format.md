@@ -153,23 +153,6 @@ plugin-index/
     "name": "Workbench Kit",
     "description": "提供项目操作页面、上下文工具与兼容提供商",
     "license": "MIT",
-    "permissions": [
-      {"id": "tools.register", "required": true, "reason": "注册项目查询工具", "scope": {"ids": ["project_info"]}},
-      {"id": "mcp.register", "required": false, "reason": "注册项目上下文服务", "scope": {"ids": ["project_context"]}},
-      {"id": "mcp.connect", "required": false, "reason": "连接已配置的上下文服务", "scope": {"ids": ["project_context"]}},
-      {"id": "skills.register", "required": false, "reason": "提供项目说明技能", "scope": {"ids": ["project-notes"]}},
-      {"id": "agents.register", "required": false, "reason": "提供构建子代理定义", "scope": {"ids": ["builder"]}},
-      {"id": "providers.register", "required": false, "reason": "提供上游转换后的兼容入口", "scope": {"ids": ["gateway"]}},
-      {"id": "providers.requests", "required": false, "reason": "处理已选插件提供商的模型请求", "scope": {"ids": ["gateway"]}},
-      {"id": "ui.pages", "required": true, "reason": "展示操作和配置页面", "scope": {"ids": ["build", "configuration"]}},
-      {"id": "storage.plugin", "required": true, "reason": "保存本插件配置", "scope": {"access": "readWrite"}},
-      {"id": "workspace.commands", "required": true, "reason": "执行用户要求的项目命令", "scope": {"target": "currentWorkspace"}},
-      {"id": "terminal.sessions", "required": true, "reason": "在共享标签显示任务输出", "scope": {"target": "currentWorkspace", "access": "owned"}},
-      {"id": "environment.prepare", "required": false, "reason": "按用户操作准备本插件服务依赖", "scope": {"ids": ["gateway_deps"]}},
-      {"id": "agent.events", "required": false, "reason": "展示本轮运行状态", "scope": {"ids": ["before_request", "run_finished"], "events": ["agent.request.started", "agent.run.finished"], "data": "metadata"}},
-      {"id": "agent.permissionReview", "required": false, "reason": "代审用户授权范围内的命令", "scope": {"tools": ["Bash", "terminal"]}},
-      {"id": "credentials.use", "required": false, "reason": "处理交给本插件的上游凭据", "scope": {"access": "owned"}}
-    ],
     "contributions": {
       "tools": ["project_info"],
       "mcp": ["project_context"],

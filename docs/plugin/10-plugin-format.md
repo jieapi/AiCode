@@ -108,7 +108,6 @@ community.workbench-kit-1.0.0.zip
 | `description` / `license` | 是 | 用途说明与许可证标识/说明 |
 | `engines` | 是 | 所需插件 API，及使用到的 UI 协议版本 |
 | `runtime` | 有业务 handler 时 | 逻辑类型和发布包入口；纯静态贡献可省略 |
-| `permissions` | 是，可空数组 | 明确的能力申请、必要性、用途与范围 |
 | `contributes` | 是 | 至少一个有效贡献；未使用的类型省略 |
 
 清单不接受 `official` 作为可信身份，不接受 Key、密码、OAuth 令牌、授权结果或任意 `AUTO_APPROVE` 策略。未知顶层字段/贡献类型按不支持拒绝，不能把安全相关字段悄悄忽略。
@@ -124,38 +123,14 @@ community.workbench-kit-1.0.0.zip
 
 页面、配置页里由插件自己渲染的文案如何本地化属于 UI 协议范围，仍待 [06-structured-ui.md](06-structured-ui.md) 定稿，不在此处预设。
 
-## 6. 权限项结构
+## 6. 能力与信任边界
 
-每项包含 `id`、`required`、`reason`、`scope`：
+当前清单没有插件权限字段。技能、子代理、工具、页面、hook 与 MCP 随插件启用；插件页面通过宿主桥可以读写工作区与宿主配置目录，并执行命令。
 
-- `id`：宿主认识的能力标识，不是插件自己定义的新权限。
-- `required`：任一必要能力被拒绝时，插件保持已安装但未启用，宿主管理/授权/卸载仍可用；可选能力被拒绝时相关贡献不可用，不能静默降级成绕过检查。
-- `reason`：向使用者解释用途的文字，不是授权依据。
-- `scope`：该权限类型规定的结构化范围；宿主根据实际请求核验，插件自报范围不成为事实证明。
-
-草案能力名与范围如下；实现时必须逐项实现校验，不提供任意通用方法调用：
-
-| 能力 ID | scope 草案 | 边界 |
-| --- | --- | --- |
-| `tools.register` | `ids: [局部工具ID]` | 仅注册自身工具，不赋予执行副作用 |
-| `mcp.register` / `mcp.connect` | `ids: [局部MCP ID]` | 注册和连接/启动分别申请；连接授权覆盖该 ID 已核验配置的实际端点/启动范围，不是任意改址许可，stdio 仍需实际进程权限 |
-| `skills.register` / `agents.register` | `ids: [局部ID]` | 仅注册自身内容，不扩大派生 Agent 权限 |
-| `providers.register` | `ids: [局部提供商ID]` | 仅注册兼容入口，启动服务与请求/凭据另校验 |
-| `providers.requests` | `ids: [局部提供商ID]` | 处理实际选用这些提供商实例的请求/响应，不获得其他实例或任意会话历史 |
-| `ui.pages` | `ids: [页面ID]` | 提供自身页面，不替换宿主权限/安装 UI |
-| `storage.plugin` | `access: readWrite` | 仅自身配置/运行数据，具体全局/项目作用域仍待定 |
-| `workspace.commands` | `target: currentWorkspace` | 路由到当前工作区后端，不承诺 shell 的文件/网络隔离 |
-| `terminal.sessions` | `target: currentWorkspace, access: owned` | 新建共享标签并操作自有句柄，不接管用户已有标签 |
-| `environment.prepare` | `ids: [环境ID]` | 仅用户手动准备的插件服务依赖；不自动安装解释器或系统工具 |
-| `agent.events` | `ids: [hook ID], events: [事件名]` | 只覆盖声明的 hook 与事件；第一切片只给运行元数据，不能因监听事件读取会话内容；`data: metadata/content` 的区分尚未实现 |
-| `agent.transform` | `events: [事件名]` | 仅宿主明确支持的变更契约；字段未定的事件不能据此任意改写 |
-| `agent.permissionReview` | `tools: [工具匹配项]` | 只处理宿主 ASK；同意/拒绝/不处理，不修改自身授权 |
-| `notifications.post` / `shizuku.execute` | `target: device` | 均单独授权；Shizuku 具体操作粒度仍待定 |
-| `ui.tips` | `target: app` | 在 App 内显示来源明确的提示；限频，不得伪装成系统或授权界面；不含 Android 系统通知（那是 `notifications.post`） |
-| `credentials.use` | `access: owned` | 仅用户明确交给该插件/实例的凭据，不读取其他渠道 |
-| `network.request` | `hosts: [主机]` | SDK 网络调用的目标；不能限制已授权任意 shell 内部的全部网络行为 |
-
-注册描述与实际调用权限不混同；授予 `workspace.commands` 不自动授予通知、Shizuku、其他终端或渠道凭据。模型调用经插件工具进入时仍保留原 Agent 上下文和模式限制。
+- `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写。
+- 命令与 MCP 进程内部不受宿主路径限制，不能承诺细粒度沙箱。
+- 插件 JS handler（AI 工具、hook）运行在独立 JavaScript isolate 中，宿主没有注入文件、命令或网络 API。
+- Shizuku 这类宿主能真正拦截的系统能力，接入时再以独立的高危确认项加入清单。
 
 ## 7. contributes 的固定位置
 
@@ -256,23 +231,6 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
     "type": "javascript",
     "entry": "dist/main.js"
   },
-  "permissions": [
-    {"id": "tools.register", "required": true, "reason": "注册项目查询工具", "scope": {"ids": ["project_info"]}},
-    {"id": "mcp.register", "required": false, "reason": "注册项目上下文服务", "scope": {"ids": ["project_context"]}},
-    {"id": "mcp.connect", "required": false, "reason": "连接已配置的上下文服务", "scope": {"ids": ["project_context"]}},
-    {"id": "skills.register", "required": false, "reason": "提供项目说明技能", "scope": {"ids": ["project-notes"]}},
-    {"id": "agents.register", "required": false, "reason": "提供构建子代理定义", "scope": {"ids": ["builder"]}},
-    {"id": "providers.register", "required": false, "reason": "提供上游转换后的兼容入口", "scope": {"ids": ["gateway"]}},
-    {"id": "providers.requests", "required": false, "reason": "处理已选插件提供商的模型请求", "scope": {"ids": ["gateway"]}},
-    {"id": "ui.pages", "required": true, "reason": "展示操作和配置页面", "scope": {"ids": ["build", "configuration"]}},
-    {"id": "storage.plugin", "required": true, "reason": "保存本插件配置", "scope": {"access": "readWrite"}},
-    {"id": "workspace.commands", "required": true, "reason": "执行用户要求的项目命令", "scope": {"target": "currentWorkspace"}},
-    {"id": "terminal.sessions", "required": true, "reason": "在共享标签显示任务输出", "scope": {"target": "currentWorkspace", "access": "owned"}},
-    {"id": "environment.prepare", "required": false, "reason": "按用户操作准备本插件服务依赖", "scope": {"ids": ["gateway_deps"]}},
-    {"id": "agent.events", "required": false, "reason": "展示本轮运行状态", "scope": {"events": ["agent.request.before", "agent.run.finished"], "data": "metadata"}},
-    {"id": "agent.permissionReview", "required": false, "reason": "代审用户授权范围内的命令", "scope": {"tools": ["Bash", "terminal"]}},
-    {"id": "credentials.use", "required": false, "reason": "处理交给本插件的上游凭据", "scope": {"access": "owned"}}
-  ],
   "contributes": {
     "tools": [
       {"id": "project_info", "title": "项目信息", "description": "查询当前项目状态", "inputSchema": "schemas/project-info.input.json", "handler": "tools.projectInfo"}
@@ -312,7 +270,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 示例的可选提供商依赖 `providers.register`、`providers.requests`、已手动准备的 gateway_deps 环境、其服务实际使用的命令/终端能力和需要时的自有凭据授权；未授权时不能仅因声明存在就启动服务。MCP 文件里的真实地址、上游转换和依赖检查由插件提供，宿主不包含这些业务。
 
-示例里的 hooks 已按当前实现改成 `{id, event, handler}`；`agent.events` 的 `data` 等字段仍是后续草案。当前版本接受七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），以第 12 节为准。
+示例里的 hooks 已按当前实现改成 `{id, event, handler}`；`agent.hooks` 的 `data` 等字段仍是后续草案。当前版本接受七个事件（运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩），以第 12 节为准。
 
 ## 9. 页面文件的结构连接示例
 
@@ -348,7 +306,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 - 贡献 ID、页面引用、服务引用和 export 必须存在且类型匹配；同名局部 ID 不重复。
 - 包含 handler 的贡献必须有 runtime；只静态注册内容的包不需要业务入口。MCP 配置等外部资源的端点、启动参数和凭据引用还需在下载后展示实际授权范围；不能仅凭索引里的局部 ID 掩盖目标变化。
 - input schema 仅使用允许的本地引用，不在安装预览阶段追踪远端引用或执行代码。
-- 权限预览与实际清单逐项一致；引用某能力的贡献未获得对应授权时不可用，依赖项缺失需可诊断，不是忽略错误继续启动。
+- 安装预览展示的贡献与实际清单一致；引用缺失文件或 handler 的诊断不能忽略错误继续启动。
 - 宿主先核验包摘要/清单摘要，再读取并校验声明；读取声明不触发模块顶层执行、MCP 连接、服务启动或脚本安装。
 - 更新保持 `id/version/repository/publisher` 与索引记录一致。服务地址的运行期导出绑定插件实例与授权版本，不因同名端口复用而信任另一进程。
 - 资源上限、实际 runtime 支持、权限作用域、hook 可变字段与任务退出策略仍按宿主契约验证，不能因为清单可解析就声称这些实现完成。
@@ -369,7 +327,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 顶层字段 | `manifestVersion`（必须为 1）、`id`、`name`、`version`、`publisher`、`repository`、`description`、`license`、`engines`、`permissions`、`contributes` |
+| 顶层字段 | `manifestVersion`（必须为 1）、`id`、`name`、`version`、`publisher`、`repository`、`description`、`license`、`engines`、`contributes` |
 | `engines` | `pluginApi` 必填，范围必须包含宿主实现的插件 API（当前 `1.0.0`）；`structuredUi` 只校验写法，目前没有对应功能 |
 | 版本范围写法 | `^x.y.z`、`~x.y.z`、`>= > <= < =` 加完整版本、精确版本，空格分隔取交集；不支持 `1.x`、`*`、`\|\|`、`a - b` |
 | 能力 | `skills.register`、`agents.register`，`scope` 只有 `ids` |
@@ -381,7 +339,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 能力 | `workspace.tools`，`scope` 只有 `ids`，必须与 `contributes.workspaceTools` 的 ID 逐项对应 |
+| 能力 | `workspace-tools.register`，`scope` 只有 `ids`，必须与 `contributes.workspaceTools` 的 ID 逐项对应 |
 | 贡献 | `contributes.workspaceTools[]`，每项 `{id, title, pageFile}`，`icon` / `category` 可选；`pageFile` 为包内 `.json` |
 | 页面 | `pageFile` 由 `AdaptiveCardParser` 解析；文件缺失报错；JSON 非法或超过 512 KB 时页面为空，不报错，插件仍为可用状态 |
 | 数据 | 当前项目已启用的工具与参数保存在 `<workspace>/.aicode/tools.json`；插件启停、安装、卸载时重新读取该文件，不会自动移除或刷新已添加条目 |
@@ -418,7 +376,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 能力 | `agent.events`，`scope` 为 `{"ids": [...], "events": [...]}`；`ids` 要覆盖 `contributes.hooks` 的全部 id，`events` 要覆盖 hooks 使用的事件集合；必须同时申请 `agent.events` |
+| 能力 | `agent.hooks`，`scope` 为 `{"ids": [...], "events": [...]}`；`ids` 要覆盖 `contributes.hooks` 的全部 id，`events` 要覆盖 hooks 使用的事件集合；必须同时申请 `agent.hooks` |
 | 贡献 | `contributes.hooks[]`，每项 `{id, event, handler}`；同类 id 唯一；`handler` 为 `dist/main.js` 里 `globalThis.aicode.handlers` 的键 |
 | 运行时 | hooks 需要 `runtime`；没有运行时的包不能声明 hooks |
 | 事件 | `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction` |
@@ -429,9 +387,8 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 校验规则（实现里的硬规则）
 
-- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` / `tools.register`、`contributes.mcp` / `mcp.register` / `mcp.connect`、`contributes.hooks` / `agent.events`。
-- hooks 的权限范围双向覆盖：`agent.events` 的 `scope.ids` 必须覆盖全部 hook id，`scope.events` 必须覆盖 hooks 实际使用的事件集合；只写 hooks 不申请权限，或只申请权限不声明 hooks，都会拒绝。
-- 权限范围与贡献逐项对应：每个贡献 ID 必须被对应注册权限的 `scope.ids` 覆盖，权限里也不能列出不存在的 ID；同类 ID 与同一权限不得重复。
+- 未知顶层字段、未实现的字段、未实现的贡献类型与能力：整体拒绝。已实现 `runtime`、`contributes.tools` / `tools.register`、`contributes.mcp` / `mcp.register` / `mcp.connect`、`contributes.hooks` / `agent.hooks`。
+- hooks 声明的事件必须来自宿主支持的事件集合；同类贡献 ID 不得重复。
 - `publisher` 必须等于 `id` 第一段；`id` 形如 `发布者.插件名`，两段都是小写字母开头、仅含小写字母 / 数字 / 连字符。
 - 包内路径禁止绝对路径、`.` / `..` 段、空段、反斜杠、控制字符，长度 ≤ 200、深度 ≤ 8；贡献文件必须存在、位于包内、不超过 512 KB。
 - ZIP：压缩包 ≤ 16 MiB、≤ 512 个条目、单条目 ≤ 4 MiB、解压总量 ≤ 32 MiB；重复条目（含仅大小写不同）拒绝；清单 ≤ 256 KiB 且必须在根目录。限额在流式读取时执行，不信任条目自报的大小。所有条目都按普通文件写出，ZIP 里的符号链接与权限位被忽略。

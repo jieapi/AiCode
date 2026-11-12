@@ -31,10 +31,8 @@ import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AdaptiveModalBottomSheet
-import com.aicode.core.ui.AppSwitch
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
-import com.aicode.feature.plugin.domain.PluginPermission
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.settings.presentation.component.SettingsDivider
 import com.aicode.feature.settings.presentation.component.SettingsGroup
@@ -53,7 +51,6 @@ internal fun PluginImportHost(viewModel: PluginsViewModel) {
         is PluginImportState.Failed -> ImportFailedDialog(current.errors, onDismiss = viewModel::dismissImport)
         is PluginImportState.Preview -> PluginPreviewSheet(
             state = current,
-            onToggleGrant = viewModel::toggleGrant,
             onInstall = viewModel::confirmInstall,
             onDismiss = viewModel::dismissImport
         )
@@ -98,7 +95,6 @@ private fun ImportFailedDialog(errors: List<PluginError>, onDismiss: () -> Unit)
 @Composable
 private fun PluginPreviewSheet(
     state: PluginImportState.Preview,
-    onToggleGrant: (PluginPermission) -> Unit,
     onInstall: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -177,43 +173,6 @@ private fun PluginPreviewSheet(
                         }
                     }
                 }
-            }
-
-            SettingsGroupHeader(text = stringResource(R.string.plugins_preview_permissions))
-            SettingsGroup {
-                manifest.permissions.forEachIndexed { index, request ->
-                    if (index > 0) SettingsDivider()
-                    val required = request.required
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            val tag = stringResource(
-                                if (required) R.string.plugins_permission_required else R.string.plugins_permission_optional
-                            )
-                            Text(text = "${request.permission.label()} · $tag", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = request.reason.resolve(languageTag),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.width(Spacing.md))
-                        AppSwitch(
-                            checked = request.permission in state.granted,
-                            onCheckedChange = { onToggleGrant(request.permission) },
-                            enabled = !required && !state.installing
-                        )
-                    }
-                }
-            }
-            if (manifest.permissions.any { !it.required }) {
-                Text(
-                    text = stringResource(R.string.plugins_preview_optional_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             state.error?.let { error ->
@@ -301,14 +260,11 @@ internal fun pluginErrorMessage(error: PluginError): String {
         PluginErrorCode.UNSUPPORTED_MANIFEST_VERSION -> stringResource(R.string.plugins_error_manifest_version, detail)
         PluginErrorCode.UNSUPPORTED_FIELD -> stringResource(R.string.plugins_error_unsupported_field, detail)
         PluginErrorCode.UNSUPPORTED_CONTRIBUTION -> stringResource(R.string.plugins_error_unsupported_contribution, detail)
-        PluginErrorCode.UNSUPPORTED_PERMISSION -> stringResource(R.string.plugins_error_unsupported_permission, detail)
         PluginErrorCode.API_INCOMPATIBLE -> stringResource(R.string.plugins_error_api_incompatible, detail)
         PluginErrorCode.DUPLICATE_ID -> stringResource(R.string.plugins_error_duplicate_id, detail)
-        PluginErrorCode.PERMISSION_SCOPE_MISMATCH -> stringResource(R.string.plugins_error_scope_mismatch, detail)
         PluginErrorCode.FILE_MISSING -> stringResource(R.string.plugins_error_file_missing, detail)
         PluginErrorCode.CONTENT_INVALID -> stringResource(R.string.plugins_error_content_invalid, detail)
         PluginErrorCode.STORAGE_FAILED -> stringResource(R.string.plugins_error_storage_failed)
         PluginErrorCode.PREVIEW_EXPIRED -> stringResource(R.string.plugins_error_preview_expired)
-        PluginErrorCode.PERMISSION_NOT_GRANTED -> stringResource(R.string.plugins_error_permission_not_granted, detail)
     }
 }
