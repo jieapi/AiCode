@@ -9,6 +9,8 @@ import com.aicode.core.net.AppProxy
 import com.aicode.core.util.ApkInstaller
 import com.aicode.core.util.FileLogger
 import com.aicode.core.util.LogLevel
+import com.aicode.feature.plugin.runtime.PluginProviderRegistry
+import com.aicode.feature.settings.data.repository.PluginProviderSelectionRepository
 import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicode.feature.agent.data.local.dao.RecentCallRecord
 import com.aicode.feature.agent.data.local.entity.LlmCallRecordEntity
@@ -401,7 +403,9 @@ class SettingsViewModel @Inject constructor(
     private val apkVerifier: ApkVerifier,
     private val providerDashboardRunner: ProviderDashboardRunner,
     private val terminalSettingsRepository: TerminalSettingsRepository,
-    private val proxySettingsRepository: ProxySettingsRepository
+    private val proxySettingsRepository: ProxySettingsRepository,
+    private val pluginProviderRegistry: PluginProviderRegistry,
+    private val pluginProviderSelectionRepository: PluginProviderSelectionRepository
 ) : ViewModel() {
     private companion object {
         const val MAX_LOG_LINES = 1200
@@ -869,9 +873,11 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             launch {
-                repository.getAllProviders().collectLatest {
-                    _providers.value = it
-                }
+                combine(
+                    repository.getAllProviders(),
+                    pluginProviderRegistry.providersFlow()
+                ) { userProviders, pluginProviders -> userProviders + pluginProviders }
+                    .collectLatest { _providers.value = it }
             }
 
             launch {
@@ -2684,20 +2690,32 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setProviderEnabled(id: String, isEnabled: Boolean) {
+        if (isPluginProvider(id)) return
         viewModelScope.launch {
             repository.setProviderEnabled(id, isEnabled)
         }
     }
 
-    /** 批量启用 / 停用提供商（列表多选批量操作）。 */
+    /** 批量启用 / 停用提供商（列表多选批量操作）；插件提供商由插件启停控制。 */
     fun setProvidersEnabled(ids: Collection<String>, isEnabled: Boolean) {
-        if (ids.isEmpty()) return
+        val targets = ids.filterNot { isPluginProvider(it) }
+        if (targets.isEmpty()) return
         viewModelScope.launch {
-            repository.setProvidersEnabled(ids, isEnabled)
+            repository.setProvidersEnabled(targets, isEnabled)
         }
     }
 
     fun saveProvider(provider: AIProviderConfig) {
+        if (provider.pluginId != null) {
+            viewModelScope.launch {
+                pluginProviderSelectionRepository.setModels(
+                    providerId = provider.id,
+                    models = provider.models.distinct(),
+                    selectedModel = provider.models.firstOrNull().orEmpty()
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             val removedModels = (repository.getProviderById(provider.id)?.models ?: emptyList())
                 .toSet() - provider.models.toSet()
@@ -2746,16 +2764,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun deleteProvider(id: String) {
+        if (isPluginProvider(id)) return
         viewModelScope.launch {
             repository.deleteProvider(id)
         }
     }
 
-    /** 批量删除提供商（列表多选批量操作）。Room 单事务提交，删完 Flow 自动刷新列表。 */
+    /** 批量删除提供商（列表多选批量操作）。插件提供商由插件卸载移除。 */
     fun deleteProviders(ids: Collection<String>) {
-        if (ids.isEmpty()) return
+        val targets = ids.filterNot { isPluginProvider(it) }
+        if (targets.isEmpty()) return
         viewModelScope.launch {
-            repository.deleteProviders(ids)
+            repository.deleteProviders(targets)
         }
     }
 
@@ -2769,9 +2789,12 @@ class SettingsViewModel @Inject constructor(
         }
         _providers.value = reordered
         viewModelScope.launch {
-            repository.reorderProviders(reordered)
+            repository.reorderProviders(reordered.filter { it.pluginId == null })
         }
     }
+
+    private fun isPluginProvider(id: String): Boolean =
+        _providers.value.firstOrNull { it.id == id }?.pluginId != null
 
     fun fetchModels(provider: AIProviderConfig) {
         viewModelScope.launch {
@@ -2920,6 +2943,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun selectModel(providerId: String, model: String) {
+        if (isPluginProvider(providerId)) return
         viewModelScope.launch {
             repository.setSelectedModel(providerId, model)
         }

@@ -76,7 +76,7 @@ internal fun ProvidersSection(
     onBatchSetEnabled: (Set<String>, Boolean) -> Unit
 ) {
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
-    val allKeys = remember(providers) { providers.map { it.id } }
+    val allKeys = remember(providers) { providers.filter { it.pluginId == null }.map { it.id } }
 
     // 列表刷新（删除 / 外部改动）后剔除已消失的选中项；全空了就退出多选，避免顶栏按钮停在选中态。
     LaunchedEffect(allKeys, selection.isActive) {
@@ -169,11 +169,12 @@ internal fun ProvidersSection(
                         ProviderItem(
                             provider = provider,
                             onEdit = { onEdit(provider) },
-                            onDelete = { onDelete(provider) },
+                            onDelete = { if (provider.pluginId == null) onDelete(provider) },
+                            deleteEnabled = provider.pluginId == null,
                             selectionMode = selection.isActive,
                             selected = selection.isSelected(provider.id),
-                            onToggleSelect = { selection.toggle(provider.id) },
-                            dragModifier = if (selection.isActive) {
+                            onToggleSelect = { if (provider.pluginId == null) selection.toggle(provider.id) },
+                            dragModifier = if (selection.isActive || provider.pluginId != null) {
                                 Modifier
                             } else {
                                 Modifier.longPressDraggableHandle(
@@ -234,6 +235,7 @@ fun ProviderItem(
     provider: AIProviderConfig,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    deleteEnabled: Boolean = true,
     dragModifier: Modifier = Modifier,
     selectionMode: Boolean = false,
     selected: Boolean = false,
@@ -246,6 +248,7 @@ fun ProviderItem(
     SwipeToDeleteRow(
         onDelete = onDelete,
         onClick = onEdit,
+        deleteEnabled = deleteEnabled,
         selectionMode = selectionMode,
         selected = selected,
         onToggleSelect = onToggleSelect
@@ -311,6 +314,13 @@ fun ProviderItem(
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (provider.pluginId != null) {
+                            McpPill(
+                                text = stringResource(R.string.provider_source_plugin),
+                                textColor = MaterialTheme.colorScheme.primary,
+                                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            )
+                        }
                     }
                 }
             }

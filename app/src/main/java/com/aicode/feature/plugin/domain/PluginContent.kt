@@ -104,6 +104,19 @@ data class PluginMcpServer(
     val key: String get() = "$pluginId:$localId:$originalName"
 }
 
+/** 已解析的插件提供商：宿主只读取兼容服务地址与模型，不接触上游协议。 */
+data class PluginProviderDefinition(
+    val pluginId: String,
+    val localId: String,
+    val name: LocalizedText,
+    val description: LocalizedText,
+    val format: String,
+    val baseUrl: String,
+    val pluginVersion: String
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
@@ -113,6 +126,7 @@ data class PluginContent(
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
+    val providers: List<PluginProviderDefinition> = emptyList(),
     val configPage: PluginSettingsPage? = null
 )
 
@@ -150,11 +164,35 @@ object PluginContentLoader {
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
         val hooks = manifest.hooks.mapNotNull { loadHook(manifest.id, it, runtime) }
         val mcp = manifest.mcp.flatMap { loadMcp(dir, manifest.id, it, errors) }
+        val providers = manifest.providers.map { provider ->
+            PluginProviderDefinition(
+                pluginId = manifest.id,
+                localId = provider.id,
+                name = provider.name,
+                description = provider.description,
+                format = provider.format,
+                baseUrl = provider.baseUrl,
+                pluginVersion = manifest.version.toString()
+            )
+        }
         val configPage = manifest.configPage?.let {
             loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         return if (errors.isEmpty()) {
-            ContentLoadResult.Ok(PluginContent(skills, agents, workspaceTools, settingsPages, runtime, tools, hooks, mcp, configPage))
+            ContentLoadResult.Ok(
+                PluginContent(
+                    skills = skills,
+                    agents = agents,
+                    workspaceTools = workspaceTools,
+                    settingsPages = settingsPages,
+                    runtime = runtime,
+                    tools = tools,
+                    hooks = hooks,
+                    mcp = mcp,
+                    providers = providers,
+                    configPage = configPage
+                )
+            )
         } else {
             ContentLoadResult.Failed(errors)
         }

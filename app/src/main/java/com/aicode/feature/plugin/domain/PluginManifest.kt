@@ -140,6 +140,25 @@ data class PluginHookRef(
 /** `contributes.mcp` 声明的 MCP 配置文件；文件沿用现有 `{"mcpServers": {...}}` 结构。 */
 data class PluginMcpRef(val id: String, val file: String)
 
+/** 插件提供商当前支持的兼容格式；第一版只开放 OpenAI Chat Completions。 */
+object PluginProviderFormats {
+    const val OPENAI = "openai"
+
+    val ALL = setOf(OPENAI)
+}
+
+/**
+ * `contributes.providers` 声明的提供商：[baseUrl] 指向插件自行启动或明确提供的
+ * OpenAI 兼容服务，宿主复用现有 OpenAI 适配器请求，不内置新的上游协议。
+ */
+data class PluginProviderRef(
+    val id: String,
+    val name: LocalizedText,
+    val description: LocalizedText,
+    val format: String,
+    val baseUrl: String
+)
+
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
  * 安装身份还取决于来源，清单里的 `id` / `publisher` 文本不是身份证明。
@@ -162,12 +181,13 @@ data class PluginManifest(
     val tools: List<PluginToolRef> = emptyList(),
     val hooks: List<PluginHookRef> = emptyList(),
     val mcp: List<PluginMcpRef> = emptyList(),
+    val providers: List<PluginProviderRef> = emptyList(),
     val configPage: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
-            tools.size + hooks.size + mcp.size + (if (configPage != null) 1 else 0)
+            tools.size + hooks.size + mcp.size + providers.size + (if (configPage != null) 1 else 0)
 }
 
 /** 安装与加载过程中的失败原因。UI 按 [PluginErrorCode] 取本地化文案，[detail] 是语言无关的定位信息。 */

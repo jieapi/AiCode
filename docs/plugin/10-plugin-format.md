@@ -146,7 +146,7 @@ community.workbench-kit-1.0.0.zip
 | `permissionReviewer` | 单个对象，可省略 | `handler`，必须已申请 `agent.permissionReview` |
 | `environments` | 数组 | `id/target/manager/prerequisites/inputs/lockFiles/checkHandler/prepareHandler` |
 | `services` | 数组 | `id/environment/environmentRef/startHandler/stopHandler/exports`，无依赖时可省略 environmentRef |
-| `providers` | 数组 | `id/title/format/endpoint/models/authentication` |
+| `providers` | 数组 | 第一版为 `id/name/description/format/baseUrl`；`endpoint/services/authentication` 等字段属于后续草案 |
 
 这些都是静态声明。注册清单不执行 handler；启用后由宿主建立归属关系，真正触发事件/调用时再加载逻辑并检查权限。页面 onOpen 是一次受控初始化事件，不随重组重复发送；它不自动获得执行构建、安装依赖等副作用的权利，相关业务须由明确动作触发。
 
@@ -384,6 +384,18 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 工具名 | 沿用 `mcp__<server名>__<工具名>`，server 名已带插件命名空间 |
 | 未验证 | stdio 在本地容器/SSH 的启动、OAuth、插件更新时的连接切换 |
 
+### 第六切片（部分实现）：插件提供商
+
+| 项 | 行为 |
+| --- | --- |
+| 贡献 | `contributes.providers[]`，每项 `{id, name, description?, format, baseUrl, models}` |
+| 格式 | 第一版 `format` 只接受 `openai`；`baseUrl` 必须是 `http`/`https` 绝对地址，拒绝账号、查询、片段，最长 2048 |
+| 注册 | 插件启用即生效；宿主生成只读 `AIProviderConfig`，id 为 `plugin:<插件ID>:<局部ID>`，不写入用户 `providers.json` |
+| 调用 | 复用现有 `OpenAIAdapter`，按 `baseUrl` + `v1/chat/completions` 请求；插件负责兼容服务启动、就绪与上游转换 |
+| 模型 | 清单不声明模型；使用者在设置页经兼容服务 `/v1/models` 拉取后按需添加，选择单独持久化 |
+| 凭据 | 宿主只发占位 Key，插件服务自行处理上游凭据；宿主不读取其他渠道 Key |
+| 状态 | 清单解析、注册、按需添加模型已实现；服务生命周期与 SSH 场景待验证 |
+
 ### 第五切片（已实现）：生命周期 hooks
 
 | 项 | 行为 |
@@ -439,4 +451,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`environments`、`services`、`providers` 等贡献；hooks 的响应 transform 与更多可变字段；tips；Shizuku；在线索引安装与更新、官方标识；Skill 随包脚本。工作区工具页面可用 `bash` 同步执行，或用 `terminal.*` 创建共享标签；宿主不提供统一运行面板，运行状态由插件页面轮询展示。AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`environments`、`services` 等贡献；提供商兼容服务的启动/就绪与模型选择；hooks 的响应 transform 与更多可变字段；tips；Shizuku；在线索引安装与更新、官方标识；Skill 随包脚本。工作区工具页面可用 `bash` 同步执行，或用 `terminal.*` 创建共享标签；宿主不提供统一运行面板，运行状态由插件页面轮询展示。AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

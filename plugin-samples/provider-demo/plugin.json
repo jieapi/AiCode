@@ -1,0 +1,64 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.provider",
+  "name": {
+    "zh-CN": "演示提供商",
+    "en": "Demo Provider"
+  },
+  "version": "1.0.2",
+  "publisher": "demo",
+  "repository": "https://github.com/example/provider-demo",
+  "description": {
+    "zh-CN": "启动一个本机 OpenAI 兼容服务，把对话回显给 AiCode；用于验证插件提供商注册与请求链路。",
+    "en": "Starts a local OpenAI-compatible echo service so AiCode can verify plugin provider registration and requests."
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js",
+    "resident": true
+  },
+  "contributes": {
+    "providers": [
+      {
+        "id": "echo",
+        "name": {
+          "zh-CN": "演示回显服务",
+          "en": "Demo Echo Service"
+        },
+        "description": {
+          "zh-CN": "本机 127.0.0.1:18080 的 OpenAI 兼容回声服务，只返回收到的最后一条用户消息。",
+          "en": "OpenAI-compatible echo service on 127.0.0.1:18080 that repeats the last user message."
+        },
+        "format": "openai",
+        "baseUrl": "http://127.0.0.1:18080/v1"
+      }
+    ],
+    "hooks": [
+      {
+        "id": "app-start",
+        "event": "app.started",
+        "handler": "provider.started"
+      }
+    ],
+    "tools": [
+      {
+        "id": "start",
+        "title": {
+          "zh-CN": "启动演示提供商",
+          "en": "Start Demo Provider"
+        },
+        "description": {
+          "zh-CN": "启动插件内置的 OpenAI 兼容回声服务；安装后未重启 App 时可用它手动启动。",
+          "en": "Starts the bundled OpenAI-compatible echo service; use it after installing without restarting the app."
+        },
+        "inputSchema": "schemas/start.input.json",
+        "handler": "provider.start"
+      }
+    ],
+    "configPage": "pages/config.html"
+  }
+}

@@ -1732,6 +1732,8 @@
     <string name="terminal_theme_title">配色主题</string>
     <string name="terminal_font_size_title">字体大小</string>
     <string name="terminal_cursor_style_title">光标样式</string>
+    <string name="provider_source_plugin">插件</string>
+    <string name="provider_plugin_readonly_hint">插件提供商由插件声明，名称、地址和凭据不可修改；到「模型」页拉取并添加需要使用的模型。</string>
     <string name="terminal_show_plugin_tabs">显示插件运行</string>
     <string name="terminal_show_plugin_tabs_desc">在标签栏显示插件创建的运行标签</string>
     <string name="terminal_cursor_block">方块</string>
@@ -2058,6 +2060,7 @@
     <string name="plugins_content_transform_hook">可写 Hook · %1$s</string>
     <string name="plugins_content_review_hook">代审核 Hook · %1$s</string>
     <string name="plugins_content_mcp">MCP · %1$s</string>
+    <string name="plugins_content_provider">提供商 · %1$s</string>
     <string name="plugins_content_settings_page">设置页 · %1$s</string>
     <string name="plugins_mcp_transport_http">HTTP</string>
     <string name="plugins_mcp_transport_stdio">stdio</string>
