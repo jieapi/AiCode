@@ -14,6 +14,8 @@ import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.runtime.PluginDependencyResult
+import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -47,6 +49,13 @@ sealed interface PluginImportState {
     data class Failed(val errors: List<PluginError>) : PluginImportState
 }
 
+/** 依赖准备的界面状态；按插件 ID 隔离。 */
+data class PluginDependencyUiState(
+    val running: Boolean = false,
+    val ready: Boolean? = null,
+    val message: String? = null
+)
+
 @HiltViewModel
 class PluginsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -54,7 +63,8 @@ class PluginsViewModel @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val pathHomeResolver: PathHomeResolver,
     private val workspaceRepository: WorkspaceRepository,
-    private val commandEngine: CommandEngine
+    private val commandEngine: CommandEngine,
+    private val eventBus: PluginEventBus
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -63,6 +73,9 @@ class PluginsViewModel @Inject constructor(
 
     private val _importState = MutableStateFlow<PluginImportState>(PluginImportState.Idle)
     val importState: StateFlow<PluginImportState> = _importState.asStateFlow()
+
+    private val _dependencyStates = MutableStateFlow<Map<String, PluginDependencyUiState>>(emptyMap())
+    val dependencyStates: StateFlow<Map<String, PluginDependencyUiState>> = _dependencyStates.asStateFlow()
 
     init {
         viewModelScope.launch(Dispatchers.IO) { manager.ensureLoaded() }
@@ -123,6 +136,22 @@ class PluginsViewModel @Inject constructor(
         viewModelScope.launch { manager.uninstall(id) }
     }
 
+    /** 准备依赖：在本地容器、插件安装目录执行；同一插件不并发启动两次。 */
+    fun prepareDependencies(id: String) {
+        if (_dependencyStates.value[id]?.running == true) return
+        _dependencyStates.update { it + (id to PluginDependencyUiState(running = true)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val state = when (val result = manager.prepareDependencies(id)) {
+                is PluginDependencyResult.Ready -> PluginDependencyUiState(ready = true)
+                is PluginDependencyResult.MissingRuntime ->
+                    PluginDependencyUiState(ready = false, message = result.message)
+                is PluginDependencyResult.Failed ->
+                    PluginDependencyUiState(ready = false, message = result.message)
+            }
+            _dependencyStates.update { it + (id to state) }
+        }
+    }
+
     /** 插件专属数据目录；设置页入口与桥必须使用同一落点。 */
     fun dataDirFor(pluginId: String): File = manager.dataDirFor(pluginId)
 
@@ -150,6 +179,7 @@ class PluginsViewModel @Inject constructor(
             homeResolver = pathHomeResolver,
             commandEngine = commandEngine,
             workspacePath = { workspaceRepository.currentPath() },
+            eventBus = eventBus,
             theme = theme,
             onClosePage = onClosePage,
             post = post

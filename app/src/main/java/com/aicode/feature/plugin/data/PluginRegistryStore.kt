@@ -22,13 +22,17 @@ data class PluginRecord(
     /** 安装来源标识，目前只有 `local`（本地导入）。 */
     val origin: String,
     val archiveSha256: String,
-    val manifestSha256: String
+    val manifestSha256: String,
+    /** 依赖是否已在本容器准备完成。 */
+    val dependenciesReady: Boolean = false,
+    /** 依赖输入文件的 sha256；变化后需要重新准备。 */
+    val dependenciesHash: String? = null
 )
 
 @Serializable
 private data class RegistryFile(val schema: Int = SCHEMA, val plugins: List<PluginRecord> = emptyList())
 
-private const val SCHEMA = 2
+private const val SCHEMA = 3
 
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {
@@ -38,7 +42,7 @@ class PluginRegistryStore(private val file: File) {
         if (!file.isFile) return emptyList()
         return try {
             val parsed = JSON.decodeFromString<RegistryFile>(file.readText())
-            if (parsed.schema != SCHEMA) throw IllegalStateException("schema=${parsed.schema}")
+            if (parsed.schema !in 1..SCHEMA) throw IllegalStateException("schema=${parsed.schema}")
             parsed.plugins.filter { record ->
                 PluginManifestParser.isValidPluginId(record.id).also { valid ->
                     if (!valid) FileLogger.w(TAG, "忽略 ID 非法的插件记录")

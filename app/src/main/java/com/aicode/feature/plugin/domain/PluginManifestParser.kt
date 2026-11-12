@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** 宿主实现的插件 API 版本；清单 `engines.pluginApi` 的范围必须包含它。 */
@@ -44,7 +45,8 @@ object PluginManifestParser {
         "description", "license", "engines", "runtime", "contributes", "configPage"
     )
     private val ENGINE_KEYS = setOf("pluginApi", "structuredUi")
-    private val RUNTIME_KEYS = setOf("type", "entry")
+    private val RUNTIME_KEYS = setOf("type", "entry", "command", "dependencies")
+    private val RUNTIME_DEPENDENCY_KEYS = setOf("tool", "file")
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler")
@@ -58,6 +60,8 @@ object PluginManifestParser {
 
     private const val MAX_NAME = 80
     private const val MAX_DESCRIPTION = 600
+    private const val MAX_COMMAND_PARTS = 16
+    private const val MAX_COMMAND_PART_CHARS = 200
     private const val MAX_LICENSE = 100
     private const val MAX_REPOSITORY = 300
     private const val MAX_LOCALES = 16
@@ -256,7 +260,7 @@ object PluginManifestParser {
             return apiText to uiText
         }
 
-        /** 缺省视为纯声明式包；存在时必须指定当前支持的运行时类型与包内入口。 */
+        /** 缺省视为纯声明式包；存在时必须指定运行时类型、包内入口与可选命令/依赖。 */
         private fun readRuntime(obj: JsonObject): PluginRuntimeRef? {
             val raw = obj["runtime"] ?: return null
             val runtime = raw as? JsonObject ?: return null.also { invalid("runtime") }
@@ -268,7 +272,7 @@ object PluginManifestParser {
                 if (runtime["type"] == null) missing("runtime.type") else invalid("runtime.type")
                 return null
             }
-            if (type != "javascript") {
+            if (type !in PluginRuntimeTypes.ALL) {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, "runtime.type")
                 return null
             }
@@ -277,11 +281,66 @@ object PluginManifestParser {
                 if (runtime["entry"] == null) missing("runtime.entry") else invalid("runtime.entry")
                 return null
             }
-            if (!isSafeRelativePath(entry) || !entry.endsWith(".js", ignoreCase = true)) {
+            if (!isSafeRelativePath(entry) || !entryMatchesType(entry, type)) {
                 invalid("runtime.entry")
                 return null
             }
-            return PluginRuntimeRef(type, entry)
+            val command = readCommand(runtime["command"])
+            val dependencies = readDependencies(runtime["dependencies"])
+            if (command == null && runtime["command"] != null) return null
+            if (dependencies == null && runtime["dependencies"] != null) return null
+            return PluginRuntimeRef(type, entry, command, dependencies)
+        }
+
+        private fun entryMatchesType(entry: String, type: String): Boolean = when (type) {
+            PluginRuntimeTypes.JAVASCRIPT ->
+                entry.endsWith(".js", true) || entry.endsWith(".mjs", true) || entry.endsWith(".cjs", true)
+            PluginRuntimeTypes.PYTHON -> entry.endsWith(".py", true)
+            else -> false
+        }
+
+        /** 命令数组直接交给 execve，不经 shell；限制长度并禁止绝对路径与控制字符。 */
+        private fun readCommand(raw: JsonElement?): List<String>? {
+            if (raw == null) return null
+            val array = raw as? JsonArray ?: return null.also { invalid("runtime.command") }
+            if (array.isEmpty() || array.size > MAX_COMMAND_PARTS) {
+                return null.also { invalid("runtime.command") }
+            }
+            val parts = array.map { item ->
+                (item as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()
+            }
+            if (parts.any { part ->
+                    part == null || part.isEmpty() || part.length > MAX_COMMAND_PART_CHARS ||
+                        part.any { it.isISOControl() } || part.startsWith('/') || part.contains("..")
+                }
+            ) {
+                invalid("runtime.command")
+                return null
+            }
+            return parts.filterNotNull()
+        }
+
+        private fun readDependencies(raw: JsonElement?): PluginDependencyRef? {
+            if (raw == null) return null
+            val obj = raw as? JsonObject ?: return null.also { invalid("runtime.dependencies") }
+            obj.keys.filter { it !in RUNTIME_DEPENDENCY_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "runtime.dependencies.$it")
+            }
+            val tool = obj["tool"]?.stringOrNull()?.trim()
+            val file = obj["file"]?.stringOrNull()?.trim()
+            if (tool != "npm" && tool != "pip") {
+                err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, "runtime.dependencies.tool")
+                return null
+            }
+            if (file == null || !isSafeRelativePath(file) || !file.endsWith(
+                    if (tool == "npm") ".json" else ".txt",
+                    ignoreCase = true
+                )
+            ) {
+                invalid("runtime.dependencies.file")
+                return null
+            }
+            return PluginDependencyRef(tool, file)
         }
 
         private class Contributes(

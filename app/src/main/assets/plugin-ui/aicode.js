@@ -5,6 +5,24 @@
   var nextId = 1;
 
   var backHandler = null;
+  var eventHandlers = [];
+
+  // 宿主推送插件事件：payload 是 JSON 字符串，形如 { name, payload }。
+  window.__aicodeEvent = function (payload) {
+    var event;
+    try {
+      event = payload ? JSON.parse(payload) : null;
+    } catch (e) {
+      return;
+    }
+    eventHandlers.slice().forEach(function (handler) {
+      try {
+        handler(event);
+      } catch (e) {
+        console.error('aicode: event handler failed', e);
+      }
+    });
+  };
 
   // 宿主返回键派发入口：页面注册的处理器同步返回 true 表示已消费，宿主不再退出插件页。
   window.__aicodeBack = function () {
@@ -74,6 +92,17 @@
       onBack: function (handler) {
         backHandler = typeof handler === 'function' ? handler : null;
         return Promise.resolve();
+      }
+    },
+    // 监听插件进程主动发出的事件；返回取消订阅函数。
+    events: {
+      on: function (handler) {
+        if (typeof handler !== 'function') return function () {};
+        eventHandlers.push(handler);
+        return function () {
+          var index = eventHandlers.indexOf(handler);
+          if (index >= 0) eventHandlers.splice(index, 1);
+        };
       }
     },
     // 在当前工作区执行一次性 Shell 命令，返回 { output, exitCode, truncated }。

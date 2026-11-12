@@ -212,6 +212,58 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun pythonRuntime_isParsed() {
+        val manifest = success(
+            toolsManifest(runtimeBlock = "\"runtime\": {\"type\": \"python\", \"entry\": \"dist/main.py\"},")
+        )
+        assertEquals(PluginRuntimeRef("python", "dist/main.py"), manifest.runtime)
+    }
+
+    @Test
+    fun runtimeEntryMustMatchType() {
+        assertRejected(
+            toolsManifest(runtimeBlock = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.py\"},"),
+            PluginErrorCode.FIELD_INVALID,
+            "runtime.entry"
+        )
+    }
+
+    @Test
+    fun runtimeDependencies_areParsed() {
+        val manifest = success(
+            toolsManifest(
+                runtimeBlock = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\", " +
+                    "\"dependencies\": {\"tool\": \"npm\", \"file\": \"package.json\"}},"
+            )
+        )
+        assertEquals(PluginDependencyRef("npm", "package.json"), manifest.runtime?.dependencies)
+    }
+
+    @Test
+    fun dependencyFileExtension_mustMatchTool() {
+        assertRejected(
+            toolsManifest(
+                runtimeBlock = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\", " +
+                    "\"dependencies\": {\"tool\": \"npm\", \"file\": \"requirements.txt\"}},"
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "runtime.dependencies.file"
+        )
+    }
+
+    @Test
+    fun commandWithAbsolutePath_isRejected() {
+        assertRejected(
+            toolsManifest(
+                runtimeBlock = "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\", " +
+                    "\"command\": [\"/usr/bin/node\", \"dist/main.js\"]},"
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "runtime.command"
+        )
+    }
+
+    @Test
     fun invalidToolHandler_isRejected() {
         assertRejected(toolsManifest(handler = "bad handler"), PluginErrorCode.FIELD_INVALID, "contributes.tools[0].handler")
     }

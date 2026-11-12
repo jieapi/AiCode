@@ -37,8 +37,24 @@ data class PluginWorkspaceToolRef(
     val pageFile: String
 )
 
-/** 插件业务逻辑入口：发布包里已打包的 JavaScript 文件，由隔离运行时加载。 */
-data class PluginRuntimeRef(val type: String, val entry: String)
+/** 插件运行时类型：`javascript` 用 node 启动，`python` 用 python3 启动。 */
+object PluginRuntimeTypes {
+    const val JAVASCRIPT = "javascript"
+    const val PYTHON = "python"
+
+    val ALL = setOf(JAVASCRIPT, PYTHON)
+}
+
+/** `contributes.runtime.dependencies` 声明的依赖输入。 */
+data class PluginDependencyRef(val tool: String, val file: String)
+
+/** 插件业务逻辑入口：容器内进程启动所需的信息。 */
+data class PluginRuntimeRef(
+    val type: String,
+    val entry: String,
+    val command: List<String>? = null,
+    val dependencies: PluginDependencyRef? = null
+)
 
 /** `contributes.tools` 声明的 AI 可调用工具。`handler` 是 runtime 导出的 handlers 表里的稳定键。 */
 data class PluginToolRef(
