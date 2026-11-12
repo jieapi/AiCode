@@ -1,6 +1,7 @@
 package com.aicode.feature.terminal.data.repository
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -26,7 +27,9 @@ data class TerminalSettings(
     val fontSizeSp: Int = 12,
     val cursorStyle: Int = 0, // 0=Block, 1=Underline, 2=Bar
     /** 字体标识：空=系统等宽，TerminalFontManager.BUILTIN_PATH=内置 JetBrains Mono NL，其余为导入字体的绝对路径。 */
-    val fontPath: String = TerminalFontManager.BUILTIN_PATH
+    val fontPath: String = TerminalFontManager.BUILTIN_PATH,
+    /** 是否在终端标签栏显示插件创建的命令标签；默认隐藏。 */
+    val showPluginTabs: Boolean = false
 ) {
     val theme: TerminalThemePreset
         get() = TerminalThemePreset.findById(themeId)
@@ -42,6 +45,7 @@ class TerminalSettingsRepository @Inject constructor(
         val FONT_SIZE_SP_KEY = intPreferencesKey("terminal_font_size_sp")
         val CURSOR_STYLE_KEY = intPreferencesKey("terminal_cursor_style")
         val FONT_PATH_KEY = stringPreferencesKey("terminal_font_path")
+        val SHOW_PLUGIN_TABS_KEY = booleanPreferencesKey("terminal_show_plugin_tabs")
     }
 
     val settingsFlow: Flow<TerminalSettings> = context.terminalDataStore.data.map { prefs ->
@@ -54,7 +58,8 @@ class TerminalSettingsRepository @Inject constructor(
                 null -> TerminalFontManager.BUILTIN_PATH
                 "", TerminalFontManager.BUILTIN_PATH -> saved
                 else -> if (File(saved).isFile) saved else TerminalFontManager.BUILTIN_PATH
-            }
+            },
+            showPluginTabs = prefs[SHOW_PLUGIN_TABS_KEY] ?: false
         )
     }
 
@@ -72,5 +77,9 @@ class TerminalSettingsRepository @Inject constructor(
 
     suspend fun setFontPath(path: String) {
         context.terminalDataStore.edit { it[FONT_PATH_KEY] = path }
+    }
+
+    suspend fun setShowPluginTabs(enabled: Boolean) {
+        context.terminalDataStore.edit { it[SHOW_PLUGIN_TABS_KEY] = enabled }
     }
 }

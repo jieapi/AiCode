@@ -165,7 +165,7 @@ stdio 通过本机 PRoot 进程运行，见 [LinuxContainerEngine.kt:670](../../
 
 插件逻辑在手机端，命令跟随当前工作区；页面命令在插件启用后直接执行，不额外逐条确认。AI 调用相关工具仍保留宿主先评估和 ASK 代审核链，不将两者混在一起。
 
-页面形态见 [06-structured-ui.md](06-structured-ui.md)，页面入口、任务与命令边界见 [07-build-plugins.md](07-build-plugins.md)。`terminal.run` 共享标签与任务生命周期尚待实现。
+页面形态见 [06-structured-ui.md](06-structured-ui.md)，页面入口、任务与命令边界见 [07-build-plugins.md](07-build-plugins.md)。`terminal.run` 共享标签已实现，标签生命周期由插件维护。
 
 ## 11. 注册提供商
 

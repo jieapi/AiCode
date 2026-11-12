@@ -129,6 +129,7 @@ App 按现有规则判断
 | 设置 → 插件：列表、详情、导入预览 | 已实现，未真机验证 | `feature/plugin/presentation/`，接线在 `SettingsScreen.kt` |
 | 贡献：工作区工具（HTML 页面 + 页面桥） | 已实现；页面统一为 HTML，命令由页面调用宿主 `bash`，运行态回传待做 | `contributes.workspaceTools`、`workspace.tools`、`PluginContentLoader.loadWorkspaceTool`、`ProjectToolsRepository` |
 | 右抽屉项目工具入口、全部工具页、工具详情页 | 已提交（`c0223c8e`），未真机验证 | `feature/plugin/presentation/drawer/`、`MainActivity.kt` 的右抽屉与路由 |
+| 插件共享终端标签（`terminal.run/poll/stop/close`，默认隐藏） | 已实现，待真机验证 | `PluginTerminalRunner`、`TerminalSessionProvider.startPluginCommand`、终端设置「显示插件运行」 |
 | 贡献：AI 工具（`runtime` + `tools.register` + 容器进程 handler） | 已实现；2026-11-10 真机验证的是旧沙箱实现，容器进程版待真机验证 | `feature/plugin/runtime/` 的 `PluginRuntimeManager`、`PluginToolAdapter`、`PluginToolManager` |
 | 贡献：MCP 服务器（HTTP/stdio，复用 McpManager） | 已实现，冒烟编译与插件单测通过，待真机验证 | `contributes.mcp`、`mcp.register` / `mcp.connect`、`PluginContentLoader.loadMcp`、`McpManager.effectiveServers` |
 | 贡献：生命周期 hooks（只读；`contributes.hooks`，事件 `agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished`、`agent.compaction`） | 已实现，冒烟编译、插件单测与真机验证均通过（2026-11-10） | `PluginHookDispatcher`、`PluginManifestParser` 的 hooks 解析、`StatefulAgentWorkflow.executeEvents` 的派发 |
@@ -154,15 +155,17 @@ App 按现有规则判断
 | 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、启用即信任、全局作用域已实现；在线索引本轮不做 |
 | 3 通用 UI | 已定方案 | 唯一形态是 HTML 页面（WebView + 宿主 bridge + Vue 组件库）；声明式结构化 UI 引擎不再实施 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
-| 5 右抽屉、配置与受控命令 | 进行中 | 右抽屉、全部工具页、详情页已接通；抽屉交互修正已冒烟编译通过，待真机验证；命令仍只发到终端，没有输出流、进度、错误与停止 |
+| 5 右抽屉、配置与受控命令 | 部分完成 | 右抽屉、全部工具页、详情页已接通；`bash` 同步 + `terminal.run` 共享标签已实现，标签默认隐藏、终端设置开启后可见；待真机验证 |
 | 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）的 allow/deny/pass；`planMode` 与插件自身工具仍不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform、tips 与 Shizuku 未开始 |
 | 7 目录分发、发布与安全验收 | 本轮不做 | 在线索引保留规划；官方标识用官方索引地址白名单，仓库尚未创建；不在 F-Droid 上架 |
 
 ### 8.3 当前进度
 
-当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。工作区工具页面统一为 HTML，命令由页面通过宿主桥执行；共享终端标签与运行态回传待做。
+当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash`/`host.terminal.*` 使用宿主能力。工作区工具页面统一为 HTML，命令由页面通过宿主桥执行；共享终端标签已实现，运行状态由插件页面轮询展示。
 
 2026-11-12 设计收敛：通用 UI 唯一形态定为 HTML 页面（WebView + 宿主 bridge + Vue 组件库），删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0（此前 1.1.0-1.5.0 的功能全部归入 1.0.0）；插件启用即信任、全局安装与启用；不在 F-Droid 上架；官方标识用官方索引地址白名单（仓库未创建）；在线索引本轮不做；备份不含插件；外部 MCP/技能脚本不做强隔离；tips 用对话内提示条；Shizuku 由插件声明范围，授权后范围内直接执行；增加开发者侧载；代审核开放高危 ASK。命令侧定为 `bash` 同步 + `terminal.run` 共享标签，由插件显式选择，标签生命周期由插件维护，后台运行默认隐藏、终端设置开启后可见。提供商首选宿主内嵌 handler。
+
+2026-11-12：新增插件共享终端标签——`terminal.run` 创建带插件归属的后台标签，`terminal.poll` 按偏移读增量输出与状态，`terminal.stop` 发 Ctrl-C（超时关闭），`terminal.close` 由插件维护生命周期。标签默认不在终端页显示，需在「终端设置 → 显示插件运行」开启；`TerminalSessionProvider.listTabs` 不返回插件标签，AI 的 terminal 工具不能操作。页面桥与插件进程分别暴露 `terminal.*` 与 `host.terminal.*`。编译通过，待真机验证。
 
 2026-11-12：新增 `app.started` 启动事件与 `runtime.resident`（PluginApi 1.5.0）——App 主进程 onCreate 完成后派发一次，payload 为 `launchId`/`startedAt`/`appVersion`/`process`；声明该事件的插件会在此时拉起容器内进程。`runtime.resident: true` 的进程跳过 10 分钟空闲回收，停用/卸载/版本替换与 App 进程结束仍会关闭。容器未就绪时启动 hook 失败只记日志，后续调用仍按需启动。
 
@@ -184,13 +187,13 @@ App 按现有规则判断
 
 ### 8.4 待办（按依赖顺序）
 
-1. **命令执行与共享终端标签**（形态已定）
-   - `bash` 保持一次性同步返回；新增 `terminal.run`，由插件显式选择是否走共享标签。
-   - 标签生命周期由插件维护（如 `keepAlive` 参数）；插件后台运行默认隐藏，终端设置开启「显示插件运行」后才在终端页可见。
-   - 增量输出：现有 `TerminalSessionProvider` 只有 `getTabOutput` 屏幕快照与 `TabFinishedEvent`（尾部 50 行、`replay = 0`），不能作为实时日志协议；需要在 `TerminalSession` 输出泵增加可选原始字节回调，再由 Provider 暴露 per-tab 有界输出流与退出状态。主线程回调只做拷贝入队，解析与渲染放消费端。
-   - 状态机：运行中 / 成功 / 失败 / 已取消。本地退出码取会话 `exitStatus`；远程依赖 `[command exited: N]` 标记，`notify = false` 当前不打印标记，通道异常时不能误报成功。
-   - 停止：`writeBytesToTab(tabId, 0x03)` 发 Ctrl-C，超时再 `closeTab`；`closeTab` 不触发 `TabFinishedEvent`，需要自行记为已取消。
-   - 运行状态由插件或页面展示；共享标签保留完整输出并允许手动交互，不接管用户已有标签。
+1. **命令执行与共享终端标签**（已实现，待真机验证）
+   - `bash` 保持一次性同步返回；`terminal.run` 创建共享标签，由插件显式选择。
+   - 标签带插件归属，`TerminalSessionProvider.listTabs` 不返回；默认隐藏，终端设置开启「显示插件运行」后可见；停用/卸载关闭。
+   - 输出：`TerminalSessionProvider.tabOutput` 的原始字节流累积到 128 KiB 有界缓冲，`terminal.poll(tabId, offset)` 返回增量、状态与退出码。
+   - 状态机：运行中 / 已完成 / 已取消；本地与远程都以 `[command exited: N]` 兜底收尾，通道异常时不误报成功。
+   - 停止：`writeBytesToTab(tabId, 0x03)` 发 Ctrl-C，2 秒未退出则 `closeTab`；`close` 由插件维护生命周期。
+   - 待真机验证：长输出、Ctrl-C、SSH 模式、终端设置开关、插件停用清理。
 2. **提供商注册**（首选宿主内嵌 handler）
    - 插件进程提供 provider 请求/响应转换 handler，宿主直接调用，不新增 HTTP 端口；流式响应用 JSON-RPC 分块事件。
    - 保留「插件直接声明外部固定地址」的兼容形态；插件起兼容 HTTP 服务不作为首选。

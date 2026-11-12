@@ -98,12 +98,13 @@ class TerminalSessionManager @Inject constructor(
     fun hasBackgroundTabs(): Boolean =
         _tabs.value.any { it.isBackground && it.runState is RunState.Running }
 
-    /** 终端页进入时调用：没有任何标签则建一个交互 shell。幂等。 */
+    /** 终端页进入时调用：没有用户标签则建一个交互 shell。幂等；不会把插件标签设为当前。 */
     suspend fun ensureInitialTab() {
-        if (_tabs.value.isEmpty()) {
+        val firstUserTab = _tabs.value.firstOrNull { it.ownerPluginId == null }
+        if (firstUserTab == null) {
             createInteractiveTab()
         } else if (_activeTabId.value == null) {
-            _activeTabId.value = _tabs.value.first().id
+            _activeTabId.value = firstUserTab.id
         }
     }
 
@@ -222,6 +223,42 @@ class TerminalSessionManager @Inject constructor(
         return id
     }
 
+    /**
+     * 插件命令标签：执行完命令后 exit，标签保留为 Finished，由插件关闭；不设为当前标签。
+     */
+    override suspend fun startPluginCommand(command: String, title: String?, pluginId: String): String {
+        ensureContainer()
+        val id = nextId()
+        val shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
+            "$command; ec=\$?; echo \"[command exited: \$ec]\"; exit \$ec"
+        val (session, client) = buildSession(id, shellCommand)
+        addTab(
+            TerminalTab(
+                id = id,
+                title = title ?: id,
+                session = session,
+                isBackground = true,
+                command = command,
+                notifyOnExit = false,
+                ownerPluginId = pluginId,
+                client = client,
+                runState = RunState.Running
+            )
+        )
+        monitorBackgroundExit(id)
+        startKeepaliveService()
+        FileLogger.i(TAG, "插件命令标签 $id（$pluginId）: $command")
+        return id
+    }
+
+    override fun tabStatus(id: String): TerminalTabStatus? {
+        val tab = tab(id) ?: return null
+        return when (val state = tab.runState) {
+            is RunState.Running -> TerminalTabStatus(running = true, exitCode = null)
+            is RunState.Finished -> TerminalTabStatus(running = false, exitCode = state.exitCode)
+        }
+    }
+
     private fun runningTab(id: String): TerminalTab? {
         val t = tab(id) ?: return null
         return if (t.runState is RunState.Running) t else null
@@ -276,15 +313,18 @@ class TerminalSessionManager @Inject constructor(
     override fun tabOutput(id: String): Flow<ByteArray>? = outputChannels[id]?.receiveAsFlow()
 
     /** 列出全部标签的摘要（id/标题/是否后台/运行状态/命令），供 AI 选目标。 */
-    override fun listTabs(): List<TabInfo> = _tabs.value.map {
-        TabInfo(
-            id = it.id,
-            title = it.title,
-            isBackground = it.isBackground,
-            running = it.runState is RunState.Running,
-            command = it.command
-        )
-    }
+    override fun listTabs(): List<TabInfo> = _tabs.value
+        .filter { it.ownerPluginId == null }
+        .map {
+            TabInfo(
+                id = it.id,
+                title = it.title,
+                isBackground = it.isBackground,
+                running = it.runState is RunState.Running,
+                command = it.command,
+                ownerPluginId = it.ownerPluginId
+            )
+        }
 
     /** 切换当前标签。 */
     fun activate(id: String) {

@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import com.aicode.core.ui.AdaptiveModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -78,7 +79,8 @@ fun TerminalSettingsSheet(
     onSelectTheme: (String) -> Unit,
     onChangeFontSize: (Int) -> Unit,
     onChangeCursorStyle: (Int) -> Unit,
-    onChangeFontPath: (String) -> Unit
+    onChangeFontPath: (String) -> Unit,
+    onChangeShowPluginTabs: (Boolean) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -110,6 +112,30 @@ fun TerminalSettingsSheet(
 
             // 实时预览卡片
             TerminalPreviewCard(settings = settings.copy(fontSizeSp = sliderFontSize.roundToInt()))
+
+            Spacer(Modifier.height(Spacing.md))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.terminal_show_plugin_tabs),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = stringResource(R.string.terminal_show_plugin_tabs_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = settings.showPluginTabs,
+                    onCheckedChange = onChangeShowPluginTabs
+                )
+            }
 
             Spacer(Modifier.height(Spacing.lg))
 

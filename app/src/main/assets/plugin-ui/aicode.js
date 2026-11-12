@@ -116,6 +116,24 @@
       if (options && options.timeout != null) params.timeout = Number(options.timeout);
       return call('bash', params);
     },
+    // 插件显式选择共享终端标签：命令在后台运行，页面关闭也不会停止。
+    // run 返回 { tabId, state }；用 poll 按偏移读增量输出，stop 发 Ctrl-C，close 关闭标签。
+    terminal: {
+      run: function (command, options) {
+        var params = { command: String(command) };
+        if (options && options.title != null) params.title = String(options.title);
+        return call('terminal.run', params);
+      },
+      poll: function (tabId, offset) {
+        return call('terminal.poll', { tabId: String(tabId), offset: Number(offset) || 0 });
+      },
+      stop: function (tabId) {
+        return call('terminal.stop', { tabId: String(tabId) });
+      },
+      close: function (tabId) {
+        return call('terminal.close', { tabId: String(tabId) });
+      }
+    },
     fs: {
       read: function (path) {
         return call('fs.read', { path: String(path) });

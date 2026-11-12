@@ -1562,7 +1562,8 @@ fun SettingsScreen(
             onSelectTheme = { viewModel.setTerminalTheme(it) },
             onChangeFontSize = { viewModel.setTerminalFontSize(it) },
             onChangeCursorStyle = { viewModel.setTerminalCursorStyle(it) },
-            onChangeFontPath = { viewModel.setTerminalFontPath(it) }
+            onChangeFontPath = { viewModel.setTerminalFontPath(it) },
+            onChangeShowPluginTabs = { viewModel.setTerminalShowPluginTabs(it) }
         )
     }
 

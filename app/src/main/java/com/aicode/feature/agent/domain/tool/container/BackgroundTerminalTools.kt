@@ -327,7 +327,9 @@ class TerminalSessionTool @Inject constructor(
         }
         val submit = args["submit"]?.asPlainString()?.toBooleanStrictOrNull() ?: true
 
-        val before = withContext(Dispatchers.Main) { sessionManager.getTabOutput(tabId) }
+        val before = withContext(Dispatchers.Main) {
+            if (sessionManager.listTabs().none { it.id == tabId }) null else sessionManager.getTabOutput(tabId)
+        }
         if (before == null) {
             emit(ToolStreamEvent.Completed(ToolResult.Error("未找到终端标签：$tabId")))
             return
@@ -423,6 +425,9 @@ class TerminalSessionTool @Inject constructor(
         val input = args["input"]?.asPlainString()
             ?: return@withContext ToolResult.Error("send 操作缺少必需参数：input")
         val submit = args["submit"]?.asPlainString()?.toBooleanStrictOrNull() ?: true
+        if (sessionManager.listTabs().none { it.id == tabId }) {
+            return@withContext ToolResult.Error("未找到终端标签：$tabId", "TERMINAL_NOT_FOUND")
+        }
         val ok = sessionManager.sendInput(tabId, input, appendNewline = submit)
         if (ok) {
             FileLogger.i(TAG, "向 $tabId 发送输入: $input")
@@ -448,6 +453,9 @@ class TerminalSessionTool @Inject constructor(
             ?: return@withContext ToolResult.Error("key 操作缺少必需参数：tab_id")
         val key = args["key"]?.asPlainString()
             ?: return@withContext ToolResult.Error("key 操作缺少必需参数：key")
+        if (sessionManager.listTabs().none { it.id == tabId }) {
+            return@withContext ToolResult.Error("未找到终端标签：$tabId", "TERMINAL_NOT_FOUND")
+        }
         val normalized = normalizeKey(key)
         val ok = when (normalized) {
             "ctrl+c" -> sessionManager.writeBytesToTab(tabId, 0x03)
@@ -504,6 +512,9 @@ class TerminalSessionTool @Inject constructor(
                 )
             }
         }
+        if (sessionManager.listTabs().none { it.id == tabId }) {
+            return@withContext ToolResult.Error("未找到终端标签：$tabId", "TERMINAL_NOT_FOUND")
+        }
         val output = sessionManager.getTabOutput(tabId)
             ?: return@withContext ToolResult.Error("未找到终端标签：$tabId")
         if (regex == null) {
@@ -532,6 +543,10 @@ class TerminalSessionTool @Inject constructor(
         val closed = mutableListOf<String>()
         val missing = mutableListOf<String>()
         ids.forEach { id ->
+            if (sessionManager.listTabs().none { it.id == id }) {
+                missing += id
+                return@forEach
+            }
             if (sessionManager.closeTab(id)) {
                 closed += id
                 FileLogger.i(TAG, "关闭终端标签: $id")

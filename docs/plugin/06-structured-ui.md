@@ -21,10 +21,14 @@
 | `ui.close` | 关闭页面 |
 | `fs.read` / `fs.write` / `fs.list` / `fs.delete` / `fs.stat` | 经 `PluginHostPaths` 读写插件目录、工作区与 `.aicode`；保护目录拒绝 |
 | `bash` | 在当前工作区执行一次性同步命令，返回 `{output, exitCode, truncated}`；受超时与长度限制 |
+| `terminal.run` | 新建共享终端标签，返回 `{tabId, state}`；由插件显式选择，命令在后台运行 |
+| `terminal.poll` | 按 `tabId` 与 `offset` 读取增量输出、状态与退出码；输出有界，超出时 `truncated` 为 true |
+| `terminal.stop` | 发送 Ctrl-C；超时仍未退出则关闭标签 |
+| `terminal.close` | 关闭标签；标签生命周期由插件维护 |
 | `plugin.invoke` | 调用同插件常驻进程的 `ui.invoke` handler，单次 60 秒；不能跨插件 |
 | `aicode.events.on` | 接收 `plugin.event`；只转发同插件事件 |
 
-`terminal.run`（共享终端标签）尚未实现，见 [00-overview.md](00-overview.md) 第 8.4 节。
+插件创建的终端标签默认不在用户终端页显示；在「设置 → 终端设置 → 显示插件运行」开启后才可见。标签归属创建它的插件，其他插件与 AI 的 terminal 工具不能列出或操作。
 
 ## 3. 主题与组件
 

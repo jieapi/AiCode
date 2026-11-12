@@ -340,7 +340,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | --- | --- |
 | 能力 | 工作区工具随插件启用生效；逐项能力字段已移除 |
 | 贡献 | `contributes.workspaceTools[]`，每项 `{id, title, pageFile}`，`icon` / `category` 可选；`pageFile` 为包内 `.html` |
-| 页面 | `pageFile` 由 WebView 加载，缺失或越出包目录时报错；页面通过宿主桥读写文件、执行同步 `bash` |
+| 页面 | `pageFile` 由 WebView 加载，缺失或越出包目录时报错；页面通过宿主桥读写文件、执行同步 `bash`，或用 `terminal.*` 创建共享终端标签 |
 | 数据 | 当前项目已启用的工具与参数保存在 `<workspace>/.aicode/tools.json`；插件启停、安装、卸载时重新读取该文件，不会自动移除或刷新已添加条目 |
 | UI | 右侧项目工具抽屉、全部工具页、工具详情页；提交只把命令模板发到终端标签，没有输出流与运行状态 |
 
@@ -365,7 +365,7 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | --- | --- |
 | 顶层字段 | `runtime` 接受 `{type, entry, command?, dependencies?, resident?}`；`type` 为 `javascript`（node）或 `python`（python3）；`dependencies` 为 `{tool: npm|pip, file}`；`resident: true` 不参与空闲回收 |
 | 运行位置 | 本地容器内子进程，cwd 为插件安装目录；SSH 模式下仍在手机端 |
-| 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`/`ui.invoke`；插件可发 `host.fs.*`、`host.bash`、`host.notify` 与 `plugin.event` |
+| 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`/`ui.invoke`；插件可发 `host.fs.*`、`host.bash`、`host.terminal.*`、`host.notify` 与 `plugin.event` |
 | 依赖 | 详情页手动「准备依赖」：npm `npm ci`/`npm install`，pip 创建 `.venv`；缺少运行时只提示，不自动装系统包 |
 | 生命周期 | 按插件版本惰性启动，空闲 10 分钟回收（`runtime.resident: true` 跳过），停用/卸载/版本替换关闭；单次调用 120s，观察 hook 30s，等待型 hook 10s/合计 20s |
 | 事件 | `plugin.event` 推送到同插件已打开的页面（`aicode.events.on`），不跨插件转发；页面用 `aicode.invoke` 调同插件进程的 `ui.invoke`，单次 60 秒 |
@@ -439,4 +439,4 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 ### 暂未实现
 
-`environments`、`services`、`providers` 等贡献；hooks 的响应 transform 与更多可变字段；`terminal.run` 共享终端标签、运行状态与停止；tips；Shizuku；在线索引安装与更新、官方标识；Skill 随包脚本。工作区工具页面可自行调用 `bash`，但宿主没有统一运行面板与流式输出。AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。
+`environments`、`services`、`providers` 等贡献；hooks 的响应 transform 与更多可变字段；tips；Shizuku；在线索引安装与更新、官方标识；Skill 随包脚本。工作区工具页面可用 `bash` 同步执行，或用 `terminal.*` 创建共享标签；宿主不提供统一运行面板，运行状态由插件页面轮询展示。AI 工具与 hooks 的运行时设备兼容、强终止和崩溃恢复仍待验证，归入 [00](00-overview.md) 第 8.4 节。技能设置页与子代理设置页目前不列出插件内容（它们是可编辑文件列表），插件提供的内容在“设置 → 插件 → 详情”里查看。

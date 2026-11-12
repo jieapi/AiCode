@@ -84,7 +84,7 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 
 插件启用后，清单声明的技能、子代理、AI 工具、工作区工具、设置页、hook 和 MCP 都会生效，不再逐项授权。安装确认只展示它会提供什么。
 
-- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，可以执行 `aicode.bash`，也可以用 `aicode.invoke` 调用同一插件常驻进程的 handler。
+- 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，可以执行 `aicode.bash`、用 `aicode.terminal` 创建共享终端标签，也可以用 `aicode.invoke` 调用同一插件常驻进程的 handler。
 - 命令与 MCP 进程内部不受宿主路径限制；只安装你信任来源的插件。
 - `aicode://` 下的 `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件给自己扩权或读取密钥。
 - 插件 AI 工具与 hook 在本地容器的插件子进程中运行，可以读写自己目录与授权范围内的文件、执行命令、访问网络；host API 的路径限制只约束这些接口，不约束进程自身。
@@ -199,6 +199,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 宿主 → 插件 | `ui.invoke` | 插件页面调用常驻进程：`params: {handler, args}`，返回 `result` |
 | 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
+| 插件 → 宿主 | `host.terminal.run` / `poll` / `stop` / `close` | 创建、轮询、停止、关闭共享终端标签，参数与页面桥 `terminal.*` 一致 |
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
 | 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
 
@@ -436,7 +437,7 @@ const off = aicode.events.on((event) => {
 
 工作区工具通过 `contributes.workspaceTools` 声明，`pageFile` 指向包内 HTML 页面。用户可以在右侧项目工具抽屉里添加并打开；页面通过 `window.aicode` 桥读写数据、执行命令或发事件。命令与文件操作需要你打开页面并点击对应操作才会发生。
 
-当前版本由插件页面通过 `aicode.bash` 同步执行命令并在页面内展示输出；宿主暂不提供统一运行面板、流式日志与停止按钮。共享终端标签（`terminal.run`）尚未实现。
+短命令可以用 `aicode.bash` 同步执行；需要后台运行、实时输出或停止时，用 `aicode.terminal.run` 创建共享标签，再用 `terminal.poll(tabId, offset)` 按偏移取增量输出、`terminal.stop` 发送 Ctrl-C、`terminal.close` 关闭。标签默认不在终端页显示，用户在「设置 → 终端设置 → 显示插件运行」开启后才可见；标签归属创建它的插件，其他插件和 AI 的 terminal 工具不能操作。
 
 ## 插件专属配置页面与设置页入口
 
@@ -507,6 +508,10 @@ const off = aicode.events.on((event) => {
 | `aicode.toast(message)` | 轻提示 |
 | `aicode.invoke(handler, args)` | 调用同一插件常驻进程的 handler，返回其 `result`；不支持跨插件 |
 | `aicode.bash(command, options)` | 在当前工作区执行一次性 Shell 命令，返回 `{ output, exitCode, truncated }` |
+| `aicode.terminal.run(command, options)` | 创建共享终端标签，返回 `{ tabId, state }`；`options.title` 可选 |
+| `aicode.terminal.poll(tabId, offset)` | 返回 `{ output, offset, state, exitCode?, truncated }`；`state` 为 `running` / `finished` / `cancelled` |
+| `aicode.terminal.stop(tabId)` | 发送 Ctrl-C；超时仍未退出则关闭标签 |
+| `aicode.terminal.close(tabId)` | 关闭标签；标签生命周期由插件维护 |
 | `aicode.ui.close()` | 退出插件页，回到设置页（App 级返回） |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理 |
 
@@ -515,6 +520,8 @@ const off = aicode.events.on((event) => {
 `aicode.invoke` 只允许调用当前页面对应插件的进程，参数与返回值都走 JSON；它会让宿主按需启动该插件的 runtime，单次等待上限 60 秒。插件进程需要处理 `ui.invoke` 方法，否则会返回 `METHOD_UNKNOWN`。
 
 `aicode.bash` 在插件页面所属工作区执行命令，返回 stdout/stderr 合并输出、退出码与是否被截断；`options.timeout` 以秒计，默认 30、上限 300。它适合版本检测、状态查询这类短命令，不要用来启动常驻进程或交互式程序；命令执行环境的初始化由终端页负责，未初始化时返回的退出码为 `null`，输出里会带引导提示。
+
+`aicode.terminal` 在共享终端标签里后台运行命令，页面关闭不会停止。输出按偏移轮询，宿主只保留最近 128 KiB，超出后 `truncated` 为 true。插件停用或卸载时，宿主会关闭它创建的全部标签。
 
 路径必须以虚拟根开头：
 

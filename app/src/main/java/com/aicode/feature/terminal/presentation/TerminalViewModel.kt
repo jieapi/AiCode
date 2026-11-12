@@ -91,6 +91,10 @@ class TerminalViewModel @Inject constructor(
         viewModelScope.launch { terminalSettingsRepository.setFontPath(path) }
     }
 
+    fun setShowPluginTabs(enabled: Boolean) {
+        viewModelScope.launch { terminalSettingsRepository.setShowPluginTabs(enabled) }
+    }
+
     init {
         prepare()
     }

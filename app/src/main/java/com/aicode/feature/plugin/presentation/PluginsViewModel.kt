@@ -17,6 +17,7 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
+import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -66,7 +67,8 @@ class PluginsViewModel @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val commandEngine: CommandEngine,
     private val eventBus: PluginEventBus,
-    private val pluginRuntimeManager: PluginRuntimeManager
+    private val pluginRuntimeManager: PluginRuntimeManager,
+    private val pluginTerminalRunner: PluginTerminalRunner
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -131,11 +133,17 @@ class PluginsViewModel @Inject constructor(
     }
 
     fun setEnabled(id: String, enabled: Boolean) {
-        viewModelScope.launch { manager.setEnabled(id, enabled) }
+        viewModelScope.launch {
+            manager.setEnabled(id, enabled)
+            if (!enabled) pluginTerminalRunner.closePlugin(id)
+        }
     }
 
     fun uninstall(id: String) {
-        viewModelScope.launch { manager.uninstall(id) }
+        viewModelScope.launch {
+            manager.uninstall(id)
+            pluginTerminalRunner.closePlugin(id)
+        }
     }
 
     /** 准备依赖：在本地容器、插件安装目录执行；同一插件不并发启动两次。 */
@@ -184,6 +192,7 @@ class PluginsViewModel @Inject constructor(
             eventBus = eventBus,
             pluginManager = manager,
             pluginRuntimeManager = pluginRuntimeManager,
+            terminalRunner = pluginTerminalRunner,
             theme = theme,
             onClosePage = onClosePage,
             post = post

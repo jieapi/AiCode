@@ -84,12 +84,13 @@ class RemoteTerminalSessionManager @Inject constructor(
     private fun ensureRemote(): Boolean =
         modeHolder.currentMode() == ExecutionMode.REMOTE_SSH && connection.isConnected()
 
-    /** 终端页进入时调用：没有任何标签则建一个交互 shell。幂等。 */
+    /** 终端页进入时调用：没有用户标签则建一个交互 shell。幂等；不会把插件标签设为当前。 */
     suspend fun ensureInitialTab() {
-        if (_tabs.value.isEmpty()) {
+        val firstUserTab = _tabs.value.firstOrNull { it.ownerPluginId == null }
+        if (firstUserTab == null) {
             createInteractiveTab()
         } else if (_activeTabId.value == null) {
-            _activeTabId.value = _tabs.value.first().id
+            _activeTabId.value = firstUserTab.id
         }
     }
 
@@ -109,10 +110,33 @@ class RemoteTerminalSessionManager @Inject constructor(
         sourceSessionId: String?
     ): String {
         if (!ensureRemote()) throw IllegalStateException("非远程模式或 SSH 未连接")
-        val id = openShellTab(command, isBackground = true, notify = notify, title = title, sourceSessionId = sourceSessionId)
+        val id = openShellTab(
+            command, isBackground = true, notify = notify, title = title,
+            sourceSessionId = sourceSessionId, exitOnFinish = notify
+        )
         if (notify) monitorBackgroundExit(id)
         FileLogger.i(TAG, "后台命令标签 $id: $command")
         return id
+    }
+
+    /** 插件命令标签：执行完命令后退出 shell，标签保留为 Finished，由插件关闭。 */
+    override suspend fun startPluginCommand(command: String, title: String?, pluginId: String): String {
+        if (!ensureRemote()) throw IllegalStateException("非远程模式或 SSH 未连接")
+        val id = openShellTab(
+            command, isBackground = true, notify = false, title = title,
+            sourceSessionId = null, ownerPluginId = pluginId, exitOnFinish = true
+        )
+        monitorBackgroundExit(id)
+        FileLogger.i(TAG, "插件命令标签 $id（$pluginId）: $command")
+        return id
+    }
+
+    override fun tabStatus(id: String): TerminalTabStatus? {
+        val tab = tab(id) ?: return null
+        return when (val state = tab.runState) {
+            is RunState.Running -> TerminalTabStatus(running = true, exitCode = null)
+            is RunState.Finished -> TerminalTabStatus(running = false, exitCode = state.exitCode)
+        }
     }
 
     /**
@@ -124,7 +148,9 @@ class RemoteTerminalSessionManager @Inject constructor(
         isBackground: Boolean,
         notify: Boolean,
         title: String?,
-        sourceSessionId: String?
+        sourceSessionId: String?,
+        ownerPluginId: String? = null,
+        exitOnFinish: Boolean = false
     ): String {
         val id = nextId()
         // sshj startSession/startShell 走网络 I/O，必须离开主线程，否则 NetworkOnMainThreadException。
@@ -153,7 +179,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             // onSessionFinished 触发；标记同时供 monitorBackgroundExit 解析真实退出码
             //（SSH shell 不透传退出码，waitForExit 恒返回 0）。
             // notify=false：exec /bin/sh 保活，标签可复用。
-            val init = if (notify) {
+            val init = if (notify || exitOnFinish) {
                 "$command; ec=\$?; echo \"$EXIT_MARKER_PREFIX\$ec]\"; exit \$ec"
             } else {
                 "$command; ec=\$?; echo \"$EXIT_MARKER_PREFIX\$ec]\"; exec /bin/sh"
@@ -168,6 +194,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             command = command,
             notifyOnExit = notify,
             sourceSessionId = sourceSessionId,
+            ownerPluginId = ownerPluginId,
             runState = RunState.Running
         )
         addTab(tab)
@@ -209,15 +236,18 @@ class RemoteTerminalSessionManager @Inject constructor(
 
     override fun tabOutput(id: String): Flow<ByteArray>? = outputChannels[id]?.receiveAsFlow()
 
-    override fun listTabs(): List<TabInfo> = _tabs.value.map {
-        TabInfo(
-            id = it.id,
-            title = it.title,
-            isBackground = it.isBackground,
-            running = it.runState is RunState.Running,
-            command = it.command
-        )
-    }
+    override fun listTabs(): List<TabInfo> = _tabs.value
+        .filter { it.ownerPluginId == null }
+        .map {
+            TabInfo(
+                id = it.id,
+                title = it.title,
+                isBackground = it.isBackground,
+                running = it.runState is RunState.Running,
+                command = it.command,
+                ownerPluginId = it.ownerPluginId
+            )
+        }
 
     override fun closeTab(id: String): Boolean {
         val tab = tab(id) ?: return false
