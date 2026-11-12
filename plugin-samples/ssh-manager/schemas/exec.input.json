@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "serverId": {
+      "type": "string",
+      "description": "服务器 ID，必须已配置。"
+    },
+    "command": {
+      "type": "string",
+      "description": "要在远端执行的命令。"
+    },
+    "timeout": {
+      "type": "integer",
+      "description": "超时秒数，默认 30，最大 120。"
+    }
+  },
+  "required": ["serverId", "command"]
+}

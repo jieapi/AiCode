@@ -1,0 +1,92 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.ssh-manager",
+  "name": {
+    "default": "SSH Manager",
+    "zh-CN": "SSH 管理",
+    "en": "SSH Manager"
+  },
+  "version": "1.1.4",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "default": "Resident demo plugin: connects enabled SSH servers at app startup and exposes status/exec tools to the AI.",
+    "zh-CN": "常驻示例插件：App 启动时连接启用的 SSH 服务器，并向 AI 提供状态查看与远程命令工具。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": ">=1.5.0 <2.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js",
+    "resident": true,
+    "dependencies": {
+      "tool": "npm",
+      "file": "package.json"
+    }
+  },
+  "contributes": {
+    "hooks": [
+      {
+        "id": "boot",
+        "event": "app.started",
+        "handler": "hooks.boot"
+      }
+    ],
+    "settingsPages": [
+      {
+        "id": "servers",
+        "title": {
+          "default": "SSH Servers",
+          "zh-CN": "SSH 服务器",
+          "en": "SSH Servers"
+        },
+        "anchor": "settings.environment",
+        "page": "pages/servers.html",
+        "icon": "settings"
+      }
+    ],
+    "tools": [
+      {
+        "id": "server-list",
+        "title": {
+          "default": "Server List",
+          "zh-CN": "服务器列表"
+        },
+        "description": {
+          "default": "List configured SSH servers and their connection status.",
+          "zh-CN": "列出已配置的 SSH 服务器及连接状态。"
+        },
+        "inputSchema": "schemas/list.input.json",
+        "handler": "tools.list"
+      },
+      {
+        "id": "server-status",
+        "title": {
+          "default": "Server Status",
+          "zh-CN": "服务器状态"
+        },
+        "description": {
+          "default": "Show connection status for all servers, or run uptime/disk checks on one serverId.",
+          "zh-CN": "查看所有服务器连接状态；指定 serverId 时额外执行 uptime 与磁盘检查。"
+        },
+        "inputSchema": "schemas/status.input.json",
+        "handler": "tools.status"
+      },
+      {
+        "id": "server-exec",
+        "title": {
+          "default": "Server Exec",
+          "zh-CN": "远程命令"
+        },
+        "description": {
+          "default": "Execute a command on a connected SSH server and return its output.",
+          "zh-CN": "在已连接的 SSH 服务器上执行命令并返回输出。"
+        },
+        "inputSchema": "schemas/exec.input.json",
+        "handler": "tools.exec"
+      }
+    ]
+  }
+}

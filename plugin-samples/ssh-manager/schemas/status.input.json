@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "serverId": {
+      "type": "string",
+      "description": "服务器 ID；省略时只返回所有服务器的连接状态。"
+    }
+  },
+  "required": []
+}
