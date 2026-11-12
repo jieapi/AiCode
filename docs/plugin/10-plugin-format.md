@@ -129,7 +129,7 @@ community.workbench-kit-1.0.0.zip
 
 - `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写。
 - 命令与 MCP 进程内部不受宿主路径限制，不能承诺细粒度沙箱。
-- 插件 JS handler（AI 工具、hook）运行在独立 JavaScript isolate 中，宿主没有注入文件、命令或网络 API。
+- 插件业务进程（AI 工具、hook）在本地容器的插件安装目录中运行，与 Bash 同级；host API 只限制宿主接口的路径，不限制进程自身。
 - Shizuku 这类宿主能真正拦截的系统能力，接入时再以独立的高危确认项加入清单。
 
 ## 7. contributes 的固定位置
@@ -359,6 +359,19 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 | 结果 | handler 返回的 JSON 作为工具结果；异常、超时、沙箱终止作为工具错误返回 |
 | 已验证 | `agent.run.finished` 元数据与 Hook → isolate 状态共享（第一版两个事件）；扩到七个事件后仅编译/单测通过 |
 | 未验证 | started/finished 顺序、取消路径、设备 WebView 支持矩阵、Promise 返回、真正终止死循环、崩溃恢复 |
+
+### 第五切片（已实现，编译/单测通过，待真机验证）：容器内进程运行时
+
+| 项 | 行为 |
+| --- | --- |
+| 顶层字段 | `runtime` 接受 `{type, entry, command?, dependencies?}`；`type` 为 `javascript`（node）或 `python`（python3）；`dependencies` 为 `{tool: npm|pip, file}` |
+| 运行位置 | 本地容器内子进程，cwd 为插件安装目录；SSH 模式下仍在手机端 |
+| 协议 | stdin/stdout NDJSON JSON-RPC；宿主发 `tool.invoke`/`hook.invoke`；插件可发 `host.fs.*`、`host.bash` 与 `plugin.event` |
+| 依赖 | 详情页手动「准备依赖」：npm `npm ci`/`npm install`，pip 创建 `.venv`；缺少运行时只提示，不自动装系统包 |
+| 生命周期 | 按插件版本惰性启动，空闲 10 分钟回收，停用/卸载关闭；单次调用 120s，hook 30s |
+| 事件 | `plugin.event` 推送到同插件已打开的页面（`aicode.events.on`），不跨插件转发 |
+| 安全 | 启用即信任；进程拥有容器内文件、网络与命令能力；host API 不构成安全边界 |
+| 旧实现 | 本文第三切片的 JavaScriptSandbox/isolate 记录为历史，不再使用 |
 
 ### 第四切片（已实现，编译/单测通过，待真机验证）：MCP 服务器
 

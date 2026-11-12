@@ -149,7 +149,7 @@ App 按现有规则判断
 | 阶段 | 状态 | 当前落点 |
 | --- | --- | --- |
 | 0 产品与安全定义 | 进行中 | 决策表仍有未定项，见 05 第 4 节 |
-| 1 运行时与 UI 协议 PoC | 部分完成 | 已接入 JavaScriptSandbox，打通「加载 `dist/main.js` → handler → AI 工具」；取消、崩溃恢复、设备兼容矩阵仍待验证 |
+| 1 运行时与 UI 协议 PoC | 部分完成 | 运行时已改为本地容器内的插件子进程（javascript/python），可引用依赖并通过 JSON-RPC 调用宿主文件/命令 API；真机验证待补 |
 | 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、逐项授权已实现；在线索引未开始 |
 | 3 通用结构化 UI | 部分完成 | 现有 AdaptiveCard 渲染可复用；状态绑定、表单、事件、通用布局未实现 |
 | 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；提供商未实现 |
@@ -159,7 +159,9 @@ App 按现有规则判断
 
 ### 8.3 当前进度
 
-当前同时有两条链路：声明式工作区工具（页面 JSON + 命令模板，提交后发到终端标签，没有运行态回传）和 AI 工具（`runtime` + `dist/main.js`，在 JavaScriptSandbox 中调用 handler，结果回给模型）。AI 工具已冒烟编译并通过插件单测，尚未真机验证。
+当前 AI 工具与 hooks 统一在本地容器的插件子进程里运行（`runtime` + `dist/main.js`），通过 NDJSON JSON-RPC 调用 handler，并可通过 `host.fs.*`/`host.bash` 使用宿主能力。声明式工作区工具仍只有 HTML 页面，没有运行态回传。
+
+2026-11-12：运行时重构为容器内进程——移除 AndroidX JavaScriptSandbox 与 isolate，`runtime.type` 支持 `javascript`（node）与 `python`（python3）；插件目录与依赖装在 `~/.aicode/plugins`，可声明 npm/pip 依赖并在设置页手动准备；host API 复用页面桥的四根与保护目录；`plugin.event` 可推送到同插件已打开的页面。编译与插件单测通过，真机验证待补。
 
 2026-11-10：新增生命周期 hooks 第一切片（已通过冒烟编译、插件单测与真机验证）——清单支持 `contributes.hooks[]`（每项 `{id,event,handler}`，`handler` 为 `dist/main.js` 的 `globalThis.aicode.handlers` 键）与权限 `agent.events`（`scope.ids` 覆盖全部 hook id，`scope.events` 覆盖 hooks 使用的事件集合，必须同时申请）；hooks 需要 `runtime`。首个切片只暴露 `agent.run.started` / `agent.run.finished`，payload 只有 `runId`、`sessionId`、`mode`、`status`、`toolCalls`、`errorCode`，`status` 为 `started` / `success` / `error` / `cancelled`，不含消息正文；宿主异步派发，失败只记日志、不阻塞 Agent；只读，不能修改请求或自动批准工具。同日随后把只读事件扩到七个：新增 `agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`，payload 增加 `scope`（`main`/`subagent`）、`agentName`、请求与工具标识、usage 与耗时；hook 可返回 `{logs:[...]}` 写应用日志（上限 50 行、单行 500 字符）。扩展已通过冒烟编译与插件单测，真机验证待补。
 

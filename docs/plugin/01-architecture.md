@@ -42,6 +42,8 @@
 
 ### 2.1 建议：JavaScript 逻辑，TypeScript 发布前编译
 
+状态：以下选型结论已由 2.4 节的容器进程运行时取代；2.2、2.3 保留为当时的验证记录。
+
 理由：工具 handler、事件处理、异步交互和结构化贡献适合 JavaScript；作者可以用 TypeScript 获得 SDK 类型提示。手机只执行发布包中的 JavaScript，不需要在使用者设备安装 Node、npm 或 TypeScript 编译器。
 
 需要明确：JavaScript 不等于 Node.js。除非后续单独实现并授权，插件不能直接使用 Node 的文件系统、子进程、网络模块，也不能调用 Android 类或 JVM 反射。第三方依赖由作者在发布前打包，不能以运行时下载额外代码的方式绕过包校验和更新授权。
@@ -52,7 +54,7 @@
 | 自带 JS 引擎 + Android 隔离服务 | 对引擎版本、终止机制和消息协议控制更强 | 增加 JNI、ABI、包体、引擎安全更新和隔离服务维护成本；不能把普通 `:plugin` 同 UID 进程称为隔离 | 备选方案，未经比较与确认不作为自动回退 |
 | 普通 WebView + JavaScript bridge | UI 表现能力强、工程内已有 WebView | DOM、导航、网络和 bridge 增加攻击面；不能仅凭“用了 WebView”保证按插件授权或故障隔离 | 不建议作为仅逻辑插件的默认后端 |
 | App 内动态 DEX / Kotlin / Java | 易访问现有 Android 功能 | 不可信代码与宿主同权限，无法靠 SDK 约定限制反射、文件或系统访问 | 不作为不可信插件的默认方案 |
-| 现有 PRoot 中 Python / Shell / Node | 易复用脚本生态 | 现有执行链不是按插件隔离的安全边界，能访问已挂载目录 | 可作为显式授权的外部执行能力讨论，不当作插件沙箱 |
+| 现有 PRoot 中 Python / Shell / Node | 易复用脚本生态，可直接引用依赖 | 不是按插件隔离的安全边界，能访问已挂载目录 | **已采用**：插件工具/hook 在容器内子进程运行，见 2.4 |
 
 语言与引擎分别决策。若优先候选不满足兼容性或终止要求，需要回到方案选择，不静默换成主进程执行、普通 WebView 或 PRoot。
 
@@ -84,7 +86,19 @@
 
 未核实：JS 环境是否具备 `setTimeout`、`TextEncoder`、`URL` 等常见全局，以及 F-Droid 对该库的构建影响。
 
-对设计的含义：需要“崩溃恢复上限 + 疑似肇事插件自动停用”；不能把某个插件打崩进程当成只影响它自己。
+对设计的含义：以上限制促成了 2.4 的调整；不再把插件逻辑交给 isolate 执行。
+
+### 2.4 2026-11 调整：运行时改为容器内进程
+
+已实现：移除 AndroidX JavaScriptSandbox，插件工具与 hook 统一在本地容器的子进程里运行。
+
+- `runtime.type` 支持 `javascript`（node）与 `python`（python3），可用 `command` 覆盖启动命令。
+- 进程 cwd 是插件安装目录 `~/.aicode/plugins/installed/<id>`，可直接读取包内文件、`node_modules` 与 `.venv`。
+- 宿主与插件通过 stdin/stdout 的 NDJSON JSON-RPC 通信：宿主发 `tool.invoke`/`hook.invoke`，插件可发 `host.fs.*`、`host.bash` 与 `plugin.event`。
+- 依赖由设置页手动「准备依赖」：npm 执行 `npm ci`/`npm install`，pip 创建 `.venv`；缺少 node/python 时只提示，不自动安装系统包。
+- 生命周期：按插件版本惰性启动、空闲 10 分钟回收、崩溃不自动无限重启；停用/卸载立即关闭。
+- 安全边界变为「启用即信任」：进程与 Bash 同级，拥有容器内文件、网络与命令能力。host API 的路径限制只约束这些接口，不约束进程自身。
+- SSH 模式下插件进程仍跑本地容器，与 MCP stdio 一致；插件包与依赖不上传远端。
 
 ## 3. 宿主能力接口与调用身份
 
@@ -133,14 +147,14 @@ Skill 运行所需资源是否允许另行发布到远端，是单独授权的�
 | [SkillRepository.kt:18](../../app/src/main/java/com/aicode/feature/agent/domain/skill/SkillRepository.kt:18) | 直接聚合全局和项目目录来源 | 增加插件来源时要同时修改列表、加载和管理路径 |
 | [AgentDefinitionRepository.kt:17](../../app/src/main/java/com/aicode/feature/agent/domain/subagent/AgentDefinitionRepository.kt:17) | 定义聚合、启停、派发与版本管理集中在仓库 | 插件来源需要保留归属及缓存失效语义 |
 | [WorkspacePathMapper.kt:94](../../app/src/main/java/com/aicode/feature/workspace/domain/WorkspacePathMapper.kt:94) | `/root/.aicode` 映射到 App 的配置目录 | 不把新插件授权记录放进同一可写映射中 |
-| [LinuxContainerEngine.kt:721](../../app/src/main/java/com/aicode/feature/agent/domain/container/LinuxContainerEngine.kt:721) | PRoot 绑定系统目录、工作区和 `.aicode` | stdio 进程不继承 JS 沙箱的安全承诺 |
+| [LinuxContainerEngine.kt:721](../../app/src/main/java/com/aicode/feature/agent/domain/container/LinuxContainerEngine.kt:721) | PRoot 绑定系统目录、工作区和 `.aicode` | 插件进程与 MCP stdio 共用这条启动链路 |
 | [app/build.gradle.kts:104](../../app/build.gradle.kts:104) | minSdk 26、targetSdk 28，按 ABI 区分 flavor | 插件计划不调整 SDK 或 ABI 规则 |
 
 ## 6. 明确的安全承诺范围
 
 建议承诺的是：插件逻辑不能未经授权直接获得宿主能力；授权后的宿主调用可归属、可撤销后续访问、可审计。
 
-不能承诺的是：使用者授权 Bash/terminal、任意 Shizuku 命令或现有 stdio 进程后，命令内部仍受 JS 沙箱限制；提示词内容不会影响 AI 后续行为；撤权能撤销已经发生的文件、网络和系统副作用。
+不能承诺的是：使用者授权 Bash/terminal、任意 Shizuku 命令或插件进程后，进程内部仍受宿主路径限制；提示词内容不会影响 AI 后续行为；停用能撤销已经发生的文件、网络和系统副作用。
 
 若产品要求“包括第三方 MCP server 和任意脚本在内的所有代码都必须保持强隔离”，需要为这些执行路径另做架构，不能只复用现有启动流程。这个目标尚未确认。
 
