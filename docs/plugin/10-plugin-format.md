@@ -388,13 +388,13 @@ check/prepare 的 JavaScript handler 仍在手机，只有实际检查/安装命
 
 | 项 | 行为 |
 | --- | --- |
-| 贡献 | `contributes.providers[]`，每项 `{id, name, description?, format, baseUrl, models}` |
+| 贡献 | `contributes.providers[]`，每项 `{id, name, description?, format, baseUrl}` |
 | 格式 | 第一版 `format` 只接受 `openai`；`baseUrl` 必须是 `http`/`https` 绝对地址，拒绝账号、查询、片段，最长 2048 |
-| 注册 | 插件启用即生效；宿主生成只读 `AIProviderConfig`，id 为 `plugin:<插件ID>:<局部ID>`，不写入用户 `providers.json` |
+| 注册 | 插件启用或安装时注册为普通提供商记录，id 为 `plugin:<插件ID>:<局部ID>`；与用户自建条目同权，可改名、改地址、改凭据、启停与删除；插件停用/卸载时删除 |
 | 调用 | 复用现有 `OpenAIAdapter`，按 `baseUrl` + `v1/chat/completions` 请求；插件负责兼容服务启动、就绪与上游转换 |
-| 模型 | 清单不声明模型；使用者在设置页经兼容服务 `/v1/models` 拉取后按需添加，选择单独持久化 |
-| 凭据 | 宿主只发占位 Key，插件服务自行处理上游凭据；宿主不读取其他渠道 Key |
-| 状态 | 清单解析、注册、按需添加模型已实现；服务生命周期与 SSH 场景待验证 |
+| 模型 | 清单不声明模型；使用者在设置页经兼容服务 `/v1/models` 拉取后按需添加，模型与选中模型走现有提供商存储 |
+| 凭据 | 默认发占位 Key，插件服务自行处理上游凭据；使用者可按插件要求改成实际凭据 |
+| 状态 | 清单解析、自动注册与清理、模型添加与选择已实现；服务就绪探测与 SSH 场景待验证 |
 
 ### 第五切片（已实现）：生命周期 hooks
 

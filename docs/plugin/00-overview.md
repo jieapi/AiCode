@@ -138,7 +138,7 @@ App 按现有规则判断
 | 贡献：代审核 hooks（`agent.permission.review`，全部 ASK 三态 allow/deny/pass） | 已实现，冒烟编译与插件单测通过；真机验证待补 | `PluginHookDispatcher.reviewPermission`、`PluginHookTransform.parseReview`、`StatefulAgentWorkflow.requestPermissionIfNeeded` |
 | 启动事件与常驻运行时（`app.started`、`runtime.resident`） | 已实现，冒烟编译与单测待本次验证 | `AIEditorApp.onCreate`、`PluginHookDispatcher.dispatchAppStarted`、`PluginRuntimeManager.pruneIdle` |
 | 设置页入口与插件配置页（HTML） | 已实现 | `contributes.settingsPages`、`configPage`、`PluginWebPanelScreen` |
-| 贡献：插件提供商（OpenAI 兼容服务 + 只读注册） | 部分实现，待真机验证 | `contributes.providers`、`PluginProviderRegistry`、设置页插件标记 |
+| 贡献：插件提供商（OpenAI 兼容服务 + 自动注册为可写提供商） | 部分实现，待真机验证 | `contributes.providers`、`PluginProviderRegistrar`、设置页插件标记 |
 | 服务环境、tips / Shizuku | 未实现 | 见 [03](03-permissions-and-interaction.md)、[12](12-service-dependencies.md) |
 | 开发者侧载 / 调试模式 | 未实现（已定要做） | 普通 `.zip` 导入已可用 |
 | 在线索引安装 / 更新、官方标识、非官方逐次手输确认 | 本轮不做，保留阶段 7 | 见 [04](04-distribution.md)、[11](11-index-format.md) |
@@ -155,7 +155,7 @@ App 按现有规则判断
 | 1 运行时与 UI 协议 PoC | 部分完成 | 运行时已改为本地容器内的插件子进程（javascript/python），可引用依赖并通过 JSON-RPC 调用宿主文件/命令 API；真机验证待补 |
 | 2 插件包、管理与授权 | 部分完成 | 本地 `.zip` 导入、替换、启停、启用即信任、全局作用域已实现；在线索引本轮不做 |
 | 3 通用 UI | 已定方案 | 唯一形态是 HTML 页面（WebView + 宿主 bridge + Vue 组件库）；声明式结构化 UI 引擎不再实施 |
-| 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；插件提供商已接入 OpenAI 兼容服务与只读注册，服务生命周期待验证 |
+| 4 工具、内容与提供商 | 部分完成 | 技能、子代理、工作区工具、AI 工具、MCP 已实现；插件提供商已接入 OpenAI 兼容服务并自动注册为可写提供商，服务就绪探测待验证 |
 | 5 右抽屉、配置与受控命令 | 部分完成 | 右抽屉、全部工具页、详情页已接通；`bash` 同步 + `terminal.run` 共享标签已实现，标签默认隐藏、终端设置开启后可见；待真机验证 |
 | 6 生命周期、代审核与双向交互 | 部分完成 | 只读 hooks 已扩到八个事件（App 启动、运行开始/结束、请求开始/结束、工具开始/结束、上下文压缩）。可写 hooks 已实现：`agent.tool.before` 可拒绝或改写参数（改写后重新走完整权限判断），`agent.tool.after` 可改写成功结果的 `data`，`agent.http.before` 可改写 provider 请求的 URL/headers/body。代审核 `agent.permission.review` 已开放全部 ASK（含 Shizuku、elevate、配置修改、删除子代理、危险 rm）的 allow/deny/pass；`planMode` 与插件自身工具仍不代审。单 hook 10 秒、合计 20 秒，失败按未改动/不处理继续。响应 transform、tips 与 Shizuku 未开始 |
 | 7 目录分发、发布与安全验收 | 本轮不做 | 在线索引保留规划；官方标识用官方索引地址白名单，仓库尚未创建；不在 F-Droid 上架 |
@@ -166,7 +166,7 @@ App 按现有规则判断
 
 2026-11-12 设计收敛：通用 UI 唯一形态定为 HTML 页面（WebView + 宿主 bridge + Vue 组件库），删除 `engines.structuredUi`，`pluginApi` 重置为 1.0.0（此前 1.1.0-1.5.0 的功能全部归入 1.0.0）；插件启用即信任、全局安装与启用；不在 F-Droid 上架；官方标识用官方索引地址白名单（仓库未创建）；在线索引本轮不做；备份不含插件；外部 MCP/技能脚本不做强隔离；tips 用对话内提示条；Shizuku 由插件声明范围，授权后范围内直接执行；增加开发者侧载；代审核开放高危 ASK。命令侧定为 `bash` 同步 + `terminal.run` 共享标签，由插件显式选择，标签生命周期由插件维护，后台运行默认隐藏、终端设置开启后可见。提供商改为插件提供 OpenAI 兼容服务，宿主只登记 baseUrl 与模型。
 
-2026-11-12：新增插件提供商（第一版）——清单支持 `contributes.providers[]`（`id`/`name`/`description?`/`format`/`baseUrl`），只接受 OpenAI 兼容格式；插件负责启动兼容服务，宿主把它登记为只读 `AIProviderConfig` 并复用 `OpenAIAdapter`。设置页显示“插件”标记；可以打开条目，经 `/v1/models` 拉取后按需添加模型；删除、启停、排序由宿主拒绝。服务未启动时请求失败，不回退其他渠道。编译与插件单测通过，真机验证待补。
+2026-11-12：插件提供商改为自动注册为可写提供商——清单支持 `contributes.providers[]`（`id`/`name`/`description?`/`format`/`baseUrl`），只接受 OpenAI 兼容格式；插件启用或安装时在提供商表中创建 `plugin:<插件ID>:<局部ID>` 记录，复用 `OpenAIAdapter`，用户可像普通渠道一样改名、改地址、改凭据、拉取与选择模型；插件停用/卸载时删除该插件注册的记录。设置页保留“插件”标记。服务未启动时请求失败，不回退其他渠道。编译与插件单测通过，真机验证待补。
 
 2026-11-12：新增插件共享终端标签——`terminal.run` 创建带插件归属的后台标签，`terminal.poll` 按偏移读增量输出与状态，`terminal.stop` 发 Ctrl-C（超时关闭），`terminal.close` 由插件维护生命周期。标签默认不在终端页显示，需在「终端设置 → 显示插件运行」开启；`TerminalSessionProvider.listTabs` 不返回插件标签，AI 的 terminal 工具不能操作。页面桥与插件进程分别暴露 `terminal.*` 与 `host.terminal.*`。编译通过，待真机验证。
 
@@ -198,9 +198,9 @@ App 按现有规则判断
    - 停止：`writeBytesToTab(tabId, 0x03)` 发 Ctrl-C，2 秒未退出则 `closeTab`；`close` 由插件维护生命周期。
    - 待真机验证：长输出、Ctrl-C、SSH 模式、终端设置开关、插件停用清理。
 2. **提供商注册**（部分实现）
-   - 插件在 `contributes.providers` 登记 OpenAI 兼容服务的 `baseUrl` 与模型；宿主复用 `OpenAIAdapter`，不新增上游适配器。
-   - 清单解析、`PluginProviderRegistry` 与设置页只读展示已实现。
-   - 待补：服务启动/就绪检测、模型选择、SSH 场景与真机验证；停用或卸载时不静默回退其他付费渠道。
+   - 插件在 `contributes.providers` 登记 OpenAI 兼容服务的 `baseUrl`；宿主复用 `OpenAIAdapter`，不新增上游适配器。
+   - 插件启用或安装时自动注册为可写提供商记录，停用或卸载时删除；设置页保留插件标记，模型与选中模型走现有存储。
+   - 待补：服务就绪检测、SSH 场景与真机验证；停用或卸载时不静默回退其他付费渠道。
 3. **tips 与 Shizuku**
    - tips：对话内可关闭提示条，支持操作按钮；与系统通知（`host.notify`）分开。
    - Shizuku：插件声明用途/范围，授权后范围内直接执行，不逐次弹窗；系统授权、撤销与范围变化仍需重新检查。

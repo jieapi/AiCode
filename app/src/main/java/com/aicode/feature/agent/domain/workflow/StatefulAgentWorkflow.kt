@@ -59,7 +59,7 @@ import com.aicode.feature.agent.domain.provider.AllKeysFailedException
 import com.aicode.feature.agent.domain.provider.KeySwitchOutcome
 import com.aicode.feature.agent.domain.provider.isKeySwitchFailure
 import com.aicode.feature.agent.domain.provider.OpenAIAdapter
-import com.aicode.feature.plugin.runtime.PluginProviderRegistry
+import com.aicode.feature.plugin.runtime.PluginProviderIds
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.ModelContextPolicy
 import com.aicode.feature.agent.domain.provider.StreamApiException
@@ -126,7 +126,6 @@ class StatefulAgentWorkflow @Inject constructor(
     private val eventInjector: AgentEventInjector,
     private val fileAccess: FileAccessProvider,
     private val pluginHookDispatcher: PluginHookDispatcher,
-    private val pluginProviderRegistry: PluginProviderRegistry,
     @param:ApplicationContext private val appContext: Context
 ) : AgentWorkflow {
 
@@ -246,8 +245,8 @@ class StatefulAgentWorkflow @Inject constructor(
             val boundModel = session?.model
             if (!boundProviderId.isNullOrBlank()) {
                 val config = findProviderConfig(boundProviderId)
-                if (config == null && PluginProviderRegistry.isPluginId(boundProviderId)) {
-                    throw IllegalStateException("插件提供商已停用或卸载，请重新选择模型")
+                if (config == null && PluginProviderIds.isPluginId(boundProviderId)) {
+                    throw IllegalStateException("插件提供商已被删除，或提供它的插件已停用/卸载，请重新选择模型")
                 }
                 if (config != null && config.isEnabled && config.hasUsableApiKey) {
                     // 绑定的模型可能已被移出该 provider 的模型列表，此时绑定失效、继续往下回退默认模型
@@ -261,8 +260,8 @@ class StatefulAgentWorkflow @Inject constructor(
         val defaultModel = defaultModelSettingsRepository.getDefaultModel()
         if (defaultProviderId.isNotBlank() && defaultModel.isNotBlank()) {
             val config = findProviderConfig(defaultProviderId)
-            if (config == null && PluginProviderRegistry.isPluginId(defaultProviderId)) {
-                throw IllegalStateException("默认插件提供商已停用或卸载，请重新选择模型")
+            if (config == null && PluginProviderIds.isPluginId(defaultProviderId)) {
+                throw IllegalStateException("默认插件提供商已被删除，或提供它的插件已停用/卸载，请重新选择模型")
             }
             if (config != null && config.isEnabled && config.hasUsableApiKey && defaultModel in config.models) {
                 return config.copy(selectedModel = defaultModel)
@@ -286,9 +285,9 @@ class StatefulAgentWorkflow @Inject constructor(
         return result.compacted
     }
 
-    /** 用户配置优先；插件提供商是只读来源，不写入 providers.json。 */
+    /** 插件提供商注册后就是普通提供商记录，直接查仓库即可。 */
     private suspend fun findProviderConfig(id: String): AIProviderConfig? =
-        aiProviderRepository.getProviderById(id) ?: pluginProviderRegistry.find(id)
+        aiProviderRepository.getProviderById(id)
 
     /**
      * 根据 [config] 创建一个全新的、独立的 [AIProvider] 实例。

@@ -317,17 +317,9 @@ fun ProviderEditorScreen(
         baseUrl = baseUrl.ifBlank { defaultProviderBaseUrl(type) },
         useFullUrl = useFullUrl,
         isEnabled = isEnabled,
-        defaultModel = if (initialProvider?.pluginId != null) {
-            models.firstOrNull().orEmpty()
-        } else {
-            initialProvider?.defaultModel ?: ""
-        },
+        defaultModel = initialProvider?.defaultModel ?: "",
         models = models.toList(),
-        selectedModel = if (initialProvider?.pluginId != null) {
-            models.firstOrNull().orEmpty()
-        } else {
-            initialProvider?.selectedModel ?: ""
-        },
+        selectedModel = initialProvider?.selectedModel ?: "",
         useResponseApi = useResponseApi,
         anthropicCacheBreakpoints = anthropicCacheBreakpoints,
         openaiChatCacheKey = openaiChatCacheKey,
@@ -341,9 +333,7 @@ fun ProviderEditorScreen(
         proxyPort = proxyPort,
         proxyUsername = proxyUsername,
         proxyPassword = proxyPassword,
-        scriptParams = scriptParams.filter { it.first.isNotBlank() }.toMap(),
-        pluginId = initialProvider?.pluginId,
-        pluginProviderId = initialProvider?.pluginProviderId
+        scriptParams = scriptParams.filter { it.first.isNotBlank() }.toMap()
     ).sanitized()
 
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型 / DIY 脚本参数。
@@ -490,13 +480,6 @@ fun ProviderEditorScreen(
                             .padding(bottom = 70.dp),
                         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                    if (initialProvider?.pluginId != null) {
-                        Text(
-                            text = stringResource(R.string.provider_plugin_readonly_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     // ── 基本信息 ──
                     SettingsGroupHeader(text = stringResource(R.string.provider_section_basic))
                     SettingsGroup(

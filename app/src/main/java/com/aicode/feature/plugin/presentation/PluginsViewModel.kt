@@ -16,6 +16,7 @@ import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
@@ -68,7 +69,8 @@ class PluginsViewModel @Inject constructor(
     private val commandEngine: CommandEngine,
     private val eventBus: PluginEventBus,
     private val pluginRuntimeManager: PluginRuntimeManager,
-    private val pluginTerminalRunner: PluginTerminalRunner
+    private val pluginTerminalRunner: PluginTerminalRunner,
+    private val pluginProviderRegistrar: PluginProviderRegistrar
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -112,9 +114,12 @@ class PluginsViewModel @Inject constructor(
         val state = _importState.value as? PluginImportState.Preview ?: return
         if (state.installing) return
         _importState.value = state.copy(installing = true, error = null)
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             when (val result = manager.install(state.preview.token)) {
-                is PluginInstallResult.Installed -> _importState.value = PluginImportState.Idle
+                is PluginInstallResult.Installed -> {
+                    syncProviders(result.pluginId)
+                    _importState.value = PluginImportState.Idle
+                }
                 is PluginInstallResult.Failed -> _importState.update { current ->
                     (current as? PluginImportState.Preview)?.copy(installing = false, error = result.error) ?: current
                 }
@@ -133,16 +138,35 @@ class PluginsViewModel @Inject constructor(
     }
 
     fun setEnabled(id: String, enabled: Boolean) {
-        viewModelScope.launch {
-            manager.setEnabled(id, enabled)
+        viewModelScope.launch(Dispatchers.IO) {
+            if (manager.setEnabled(id, enabled)) {
+                if (enabled) syncProviders(id) else removeProviders(id)
+            }
             if (!enabled) pluginTerminalRunner.closePlugin(id)
         }
     }
 
     fun uninstall(id: String) {
-        viewModelScope.launch {
-            manager.uninstall(id)
+        viewModelScope.launch(Dispatchers.IO) {
+            if (manager.uninstall(id)) removeProviders(id)
             pluginTerminalRunner.closePlugin(id)
+        }
+    }
+
+    /** 提供商注册失败不影响安装/启停本身；插件页重新切换一次即可重试。 */
+    private suspend fun syncProviders(pluginId: String) {
+        try {
+            pluginProviderRegistrar.sync(pluginId)
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "同步插件提供商失败: $pluginId", e)
+        }
+    }
+
+    private suspend fun removeProviders(pluginId: String) {
+        try {
+            pluginProviderRegistrar.removeAll(pluginId)
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "移除插件提供商失败: $pluginId", e)
         }
     }
 

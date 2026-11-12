@@ -1734,7 +1734,6 @@
     <string name="terminal_font_size_title">Font Size</string>
     <string name="terminal_cursor_style_title">Cursor Style</string>
     <string name="provider_source_plugin">Plugin</string>
-    <string name="provider_plugin_readonly_hint">This provider is declared by a plugin. Name, URL and credentials are read-only; fetch and add models on the Models tab.</string>
     <string name="terminal_show_plugin_tabs">Show plugin runs</string>
     <string name="terminal_show_plugin_tabs_desc">Show terminal tabs created by plugins</string>
     <string name="terminal_cursor_block">Block</string>

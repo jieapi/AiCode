@@ -49,6 +49,7 @@ import com.aicode.core.ui.SelectionActionBar
 import com.aicode.core.ui.SelectionActionButton
 import com.aicode.core.ui.SelectionActionIconButton
 import com.aicode.core.ui.SwipeToDeleteRow
+import com.aicode.feature.plugin.runtime.PluginProviderIds
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
@@ -76,7 +77,7 @@ internal fun ProvidersSection(
     onBatchSetEnabled: (Set<String>, Boolean) -> Unit
 ) {
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
-    val allKeys = remember(providers) { providers.filter { it.pluginId == null }.map { it.id } }
+    val allKeys = remember(providers) { providers.map { it.id } }
 
     // 列表刷新（删除 / 外部改动）后剔除已消失的选中项；全空了就退出多选，避免顶栏按钮停在选中态。
     LaunchedEffect(allKeys, selection.isActive) {
@@ -169,12 +170,12 @@ internal fun ProvidersSection(
                         ProviderItem(
                             provider = provider,
                             onEdit = { onEdit(provider) },
-                            onDelete = { if (provider.pluginId == null) onDelete(provider) },
-                            deleteEnabled = provider.pluginId == null,
+                            onDelete = { onDelete(provider) },
+                            deleteEnabled = true,
                             selectionMode = selection.isActive,
                             selected = selection.isSelected(provider.id),
-                            onToggleSelect = { if (provider.pluginId == null) selection.toggle(provider.id) },
-                            dragModifier = if (selection.isActive || provider.pluginId != null) {
+                            onToggleSelect = { selection.toggle(provider.id) },
+                            dragModifier = if (selection.isActive) {
                                 Modifier
                             } else {
                                 Modifier.longPressDraggableHandle(
@@ -314,7 +315,7 @@ fun ProviderItem(
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        if (provider.pluginId != null) {
+                        if (PluginProviderIds.isPluginId(provider.id)) {
                             McpPill(
                                 text = stringResource(R.string.provider_source_plugin),
                                 textColor = MaterialTheme.colorScheme.primary,
