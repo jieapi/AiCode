@@ -52,7 +52,18 @@ data class PluginSettingsPage(
 }
 
 /** 已校验存在性的插件业务入口文件。 */
-data class PluginRuntimeEntry(val type: String, val entryFile: File)
+/** 已解析的插件运行时：进程入口、启动命令与依赖，工具与 hook 共用。 */
+data class PluginRuntime(
+    val pluginId: String,
+    val type: String,
+    val installDir: File,
+    val entryFile: File,
+    val command: List<String>,
+    val dependencies: PluginDependency? = null
+)
+
+/** 已校验存在的依赖输入文件。 */
+data class PluginDependency(val tool: String, val file: File)
 
 /** 已解析的 AI 工具贡献：schema 已读入，handler 留给运行时按需调用。 */
 data class PluginTool(
@@ -62,18 +73,18 @@ data class PluginTool(
     val description: LocalizedText,
     val inputSchema: JsonObject,
     val handler: String,
-    val runtimeEntry: File
+    val runtime: PluginRuntime
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
-/** 已解析的生命周期 hook；[runtimeEntry] 与工具共用插件 runtime 的入口文件。 */
+/** 已解析的生命周期 hook；[runtime] 与工具共用同一个插件运行时。 */
 data class PluginHook(
     val pluginId: String,
     val localId: String,
     val event: String,
     val handler: String,
-    val runtimeEntry: File
+    val runtime: PluginRuntime
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
@@ -93,7 +104,7 @@ data class PluginContent(
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
     val settingsPages: List<PluginSettingsPage> = emptyList(),
-    val runtime: PluginRuntimeEntry? = null,
+    val runtime: PluginRuntime? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
@@ -125,7 +136,7 @@ object PluginContentLoader {
             loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         val settingsPages = manifest.settingsPages.mapNotNull { loadSettingsPage(dir, manifest.id, it, errors) }
-        val runtime = manifest.runtime?.let { loadRuntimeEntry(dir, it, errors) }
+        val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
@@ -175,11 +186,12 @@ object PluginContentLoader {
         if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-') c else '_'
     }.joinToString("").ifBlank { "server" }
 
-    private fun loadRuntimeEntry(
+    private fun loadRuntime(
         dir: File,
+        pluginId: String,
         ref: PluginRuntimeRef,
         errors: MutableList<PluginError>
-    ): PluginRuntimeEntry? {
+    ): PluginRuntime? {
         val file = File(dir, ref.entry)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
         if (!inside || !file.isFile) {
@@ -190,14 +202,36 @@ object PluginContentLoader {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.entry}: too large")
             return null
         }
-        return PluginRuntimeEntry(ref.type, file)
+        val dependency = ref.dependencies?.let { dep ->
+            val depFile = File(dir, dep.file)
+            val depInside = depFile.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+            if (!depInside || !depFile.isFile) {
+                errors += PluginError(PluginErrorCode.FILE_MISSING, dep.file)
+                return null
+            }
+            PluginDependency(dep.tool, depFile)
+        }
+        return PluginRuntime(
+            pluginId = pluginId,
+            type = ref.type,
+            installDir = dir,
+            entryFile = file,
+            command = ref.command ?: defaultCommand(ref.type, ref.entry),
+            dependencies = dependency
+        )
+    }
+
+    private fun defaultCommand(type: String, entry: String): List<String> = when (type) {
+        PluginRuntimeTypes.JAVASCRIPT -> listOf("node", entry)
+        PluginRuntimeTypes.PYTHON -> listOf("python3", entry)
+        else -> emptyList()
     }
 
     private fun loadTool(
         dir: File,
         pluginId: String,
         ref: PluginToolRef,
-        runtime: PluginRuntimeEntry?,
+        runtime: PluginRuntime?,
         errors: MutableList<PluginError>
     ): PluginTool? {
         if (runtime == null) return null
@@ -219,14 +253,14 @@ object PluginContentLoader {
             description = ref.description,
             inputSchema = schema,
             handler = ref.handler,
-            runtimeEntry = runtime.entryFile
+            runtime = runtime
         )
     }
 
     private fun loadHook(
         pluginId: String,
         ref: PluginHookRef,
-        runtime: PluginRuntimeEntry?
+        runtime: PluginRuntime?
     ): PluginHook? {
         if (runtime == null) return null
         return PluginHook(
@@ -234,7 +268,7 @@ object PluginContentLoader {
             localId = ref.id,
             event = ref.event,
             handler = ref.handler,
-            runtimeEntry = runtime.entryFile
+            runtime = runtime
         )
     }
 

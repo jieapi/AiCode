@@ -87,7 +87,7 @@ AiCode 按「完整语言标签（`zh-CN`）→ 语言（`zh`）→ `default` �
 - 插件页面通过宿主桥读写 `data://`、只读 `plugin://`、`workspace://` 和 `aicode://`，并可以执行 `aicode.bash`。
 - 命令与 MCP 进程内部不受宿主路径限制；只安装你信任来源的插件。
 - `aicode://` 下的 `permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件给自己扩权或读取密钥。
-- 插件 JS handler（AI 工具、hook）运行在独立 JavaScript isolate 中，宿主没有注入文件、命令或网络 API；它们只能计算并返回结果。
+- 插件 AI 工具与 hook 在本地容器的插件子进程中运行，可以读写自己目录与授权范围内的文件、执行命令、访问网络；host API 的路径限制只约束这些接口，不约束进程自身。
 - 后续如果接入 Shizuku 这类宿主能真正拦截的系统能力，会单独增加确认开关。
 
 ## 技能文件
@@ -148,7 +148,7 @@ description: 记录项目笔记；当用户要求总结或归档当前讨论时�
 
 ## AI 工具与运行时
 
-AI 工具需要 `runtime` 和 `tools.register`，包内放一个已打包的 JavaScript 入口。AiCode 在独立的 JavaScript 沙箱里加载入口，通过 `globalThis.aicode.handlers` 调用工具；沙箱没有 Android Context、文件或网络接口。
+AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器的子进程里运行它，工作目录是插件自己的安装目录；进程通过 stdin/stdout 的 NDJSON JSON-RPC 与宿主通信，可以读写文件、执行命令、发事件。
 
 ```json
 {
@@ -167,21 +167,50 @@ AI 工具需要 `runtime` 和 `tools.register`，包内放一个已打包的 Jav
 }
 ```
 
-`schemas/echo.input.json` 必须是顶层 `type: object` 的 JSON Schema。`dist/main.js` 导出 handler 表：
+- `type` 支持 `javascript`（用 `node` 启动）与 `python`（用 `python3` 启动）；可用 `command` 覆盖启动命令。
+- 可选 `dependencies` 声明依赖输入文件：
+  ```json
+  "dependencies": {"tool": "npm", "file": "package.json"}
+  ```
+  在插件详情页点「准备依赖」会在插件目录执行 `npm ci`/`npm install` 或 `python3 -m venv` + `pip install`。容器缺少 node/npm 或 python3 时只提示去终端「环境安装」，不会自动装系统包。
+
+### 进程协议
+
+宿主与插件都按行读写 JSON：
+
+| 方向 | 方法 | 说明 |
+| --- | --- | --- |
+| 宿主 → 插件 | `tool.invoke` | `params: {handler, args}`，返回 `result` |
+| 宿主 → 插件 | `hook.invoke` | `params: {handler, args}`，返回 `result` |
+| 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
+| 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
+| 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
+
+入口至少要实现一个消息循环：
 
 ```js
-globalThis.aicode = {
-  handlers: {
-    "tools.echo": (args) => ({ text: String(args.text ?? "") })
-  }
+const readline = require('readline');
+const handlers = {
+  'tools.echo': (args) => ({ text: String(args.text ?? '') })
 };
+
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const message = JSON.parse(line);
+  if (!message.method || message.id === undefined) return; // 宿主对 host API 的响应 / 通知
+  const handler = handlers[message.params.handler];
+  const respond = (payload) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, ...payload }) + '\n');
+  if (typeof handler !== 'function') return respond({ error: { code: 'HANDLER_NOT_FOUND', message: message.params.handler } });
+  Promise.resolve(handler(message.params.args || {}))
+    .then((result) => respond({ result: result === undefined ? null : result }))
+    .catch((error) => respond({ error: { code: 'PLUGIN_ERROR', message: String(error && error.message || error) } }));
+});
 ```
 
-- handler 可以返回字符串、数字、布尔、数组或对象；抛出的异常会作为工具错误返回给 AI；
-- 支持异步 handler 取决于设备 WebView 是否支持 Promise 返回；不支持时同步 handler 仍可用；
-- 工具对 AI 暴露的名字由宿主生成，形如 `plugin__community_demo-kit__echo`，不会和内置工具重名；
-- 每次调用仍走工具授权，PLAN 模式下按外部工具拦截；
-- 沙箱是弱隔离：设备不支持 JavaScriptEngine 时工具不会注册；运行超时或沙箱崩溃会返回错误，不能保证强制终止所有死循环。
+- handler 可以返回字符串、数字、布尔、数组或对象；抛出的异常会作为工具错误返回给 AI。
+- 工具对 AI 暴露的名字由宿主生成，形如 `plugin__community_demo-kit__echo`，不会和内置工具重名。
+- 每次调用仍走 AI 工具权限判断，PLAN 模式下按外部工具拦截。
+- 进程与 Bash 同级，拥有容器内文件、网络与命令能力；host API 的路径限制只约束这些接口，不约束进程自身。只安装可信插件。
+- 进程启动或调用失败会以工具错误返回；超时会结束该次进程，避免死循环持续占用。
 
 ## 生命周期 hooks
 
@@ -262,12 +291,35 @@ handler 可以返回 `{ logs: ["..."] }`，宿主把每行写进应用日志（�
 - 宿主异步派发，hook 不进入 Agent 主流程：卡住或抛错只记日志，不阻塞这一轮对话，也不改变运行结果；
 - **只读**：不能修改请求、消息、工具参数或响应，不能自动批准任何工具，也不能影响工具授权与模式限制；
 - 本切片没有 `transform`：能改写内容的 hooks 属于后续能力，写进清单会被拒绝安装；
-- hook 与 AI 工具共用插件的 JavaScript 沙箱，同样没有 Android Context、文件或网络接口，设备不支持 JavaScriptEngine 时 hooks 不会触发；
+- hook 与 AI 工具共用同一个插件进程；进程拥有容器内的文件与命令能力，hook 的只读限制来自宿主只传运行元数据，不是运行时沙箱；
 - 单项调用超时 30 秒，超时会关闭该插件的运行时；连续失败目前不会自动停用插件。
+
+## 插件事件
+
+进程可以主动发事件，宿主会把它推给同一插件已打开的页面：
+
+```js
+process.stdout.write(JSON.stringify({
+  jsonrpc: '2.0',
+  method: 'plugin.event',
+  params: { name: 'echo.done', payload: { length: 4 } }
+}) + '\n');
+```
+
+页面侧：
+
+```js
+const off = aicode.events.on((event) => {
+  console.log(event.name, event.payload);
+});
+```
+
+- 事件只发给同一插件、当前已加载的页面；没有页面时丢弃，不排队。
+- 不跨插件转发，也不会注入会话或触发新的 AI 推理。
 
 ## 工作区工具页面
 
-工作区工具通过 `workspace-tools.register` 和 `contributes.workspaceTools` 声明，`pageFile` 指向包内 AdaptiveCard JSON。用户可以在右侧项目工具抽屉里添加并运行；页面里的 `submit` 按钮把 `commandTemplate` 插值后在终端标签执行。命令模板属于可执行内容，安装预览会显示工具条目，但最终命令仍需用户点击运行。
+工作区工具通过 `contributes.workspaceTools` 声明，`pageFile` 指向包内 HTML 页面。用户可以在右侧项目工具抽屉里添加并打开；页面通过 `window.aicode` 桥读写数据、执行命令或发事件。命令与文件操作需要你打开页面并点击对应操作才会发生。
 
 运行后宿主把终端原始输出清洗成日志回填到详情页的运行面板（最多保留最后 500 行），并从命令结束时打印的 `[command exited: N]` 标记识别退出码；非零退出显示为失败，不会误报成功。命令在保活标签里执行，结束后 shell 仍可继续使用，面板停止接收后续输出。
 

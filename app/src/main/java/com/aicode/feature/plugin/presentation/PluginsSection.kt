@@ -426,7 +426,9 @@ internal fun PluginDetailSection(
     onToggleEnabled: (Boolean) -> Unit,
     onUninstall: () -> Unit,
     bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
-    onClosePage: () -> Unit = {}
+    onClosePage: () -> Unit = {},
+    dependencyState: PluginDependencyUiState? = null,
+    onPrepareDependencies: () -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
@@ -509,7 +511,9 @@ internal fun PluginDetailSection(
                 hasConfigPage = hasConfigPage,
                 onNavigateToConfigTab = { selectedTab = 1 },
                 onToggleEnabled = onToggleEnabled,
-                onUninstall = onUninstall
+                onUninstall = onUninstall,
+                dependencyState = dependencyState,
+                onPrepareDependencies = onPrepareDependencies
             )
         } else {
             // Tab 1: 插件自己的专属 WebView 配置页面
@@ -534,7 +538,9 @@ private fun PluginNativeConfigContent(
     hasConfigPage: Boolean,
     onNavigateToConfigTab: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onUninstall: () -> Unit
+    onUninstall: () -> Unit,
+    dependencyState: PluginDependencyUiState? = null,
+    onPrepareDependencies: () -> Unit = {}
 ) {
     val manifest = plugin.manifest
     var confirmUninstall by remember { mutableStateOf(false) }
@@ -677,6 +683,54 @@ private fun PluginNativeConfigContent(
                 rows.forEachIndexed { index, (title, description) ->
                     if (index > 0) SettingsDivider()
                     ContentRow(title = title, description = description, active = plugin.isActive)
+                }
+            }
+        }
+
+        val dependency = plugin.content.runtime?.dependencies
+        if (dependency != null) {
+            SettingsGroupHeader(text = stringResource(R.string.plugins_section_dependencies))
+            SettingsGroup {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        val ready = dependencyState?.ready ?: plugin.record.dependenciesReady
+                        Text(
+                            text = stringResource(
+                                if (ready) R.string.plugins_dependencies_ready
+                                else R.string.plugins_dependencies_missing
+                            ),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = dependency.file.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        dependencyState?.message?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    TextButton(
+                        onClick = onPrepareDependencies,
+                        enabled = dependencyState?.running != true
+                    ) {
+                        Text(
+                            stringResource(
+                                if (dependencyState?.running == true) R.string.plugins_dependencies_preparing
+                                else R.string.plugins_dependencies_prepare
+                            )
+                        )
+                    }
                 }
             }
         }

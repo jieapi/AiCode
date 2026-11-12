@@ -10,6 +10,8 @@ import com.aicode.feature.plugin.data.PackageReadResult
 import com.aicode.feature.plugin.data.PluginPackageReader
 import com.aicode.feature.plugin.data.PluginRecord
 import com.aicode.feature.plugin.data.PluginRegistryStore
+import com.aicode.feature.plugin.runtime.PluginDependencyPreparer
+import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
@@ -89,15 +91,21 @@ class PluginManager internal constructor(
     private val hostApi: SemVer,
     private val clock: () -> Long,
     private val registryFile: File = File(rootDir, "registry.json"),
-    private val legacyRootDir: File? = null
+    private val legacyRootDir: File? = null,
+    private val dependencyPreparer: PluginDependencyPreparer? = null
 ) {
     @Inject
-    constructor(@ApplicationContext context: Context, installer: ContainerInstaller) : this(
+    constructor(
+        @ApplicationContext context: Context,
+        installer: ContainerInstaller,
+        dependencyPreparer: PluginDependencyPreparer
+    ) : this(
         File(installer.aicodeDir, PLUGINS_DIR),
         PluginApi.VERSION,
         System::currentTimeMillis,
         File(context.filesDir, REGISTRY_FILE),
-        File(context.filesDir, PLUGINS_DIR)
+        File(context.filesDir, PLUGINS_DIR),
+        dependencyPreparer
     )
 
     private val installedDir = File(rootDir, "installed")
@@ -196,6 +204,36 @@ class PluginManager internal constructor(
 
     /** 插件专属数据目录，对应桥里的 `data://` 根。 */
     fun dataDirFor(pluginId: String): File = File(dataRoot, pluginId)
+
+    /**
+     * 在本地容器、插件安装目录里准备依赖；长操作不持锁，失败时保留未准备状态。
+     * 没有运行时的纯声明式插件与没有依赖声明的运行时直接视为无需准备。
+     */
+    suspend fun prepareDependencies(id: String): PluginDependencyResult = withContext(Dispatchers.IO) {
+        ensureLoaded()
+        val plugin = _plugins.value.firstOrNull { it.id == id }
+            ?: return@withContext PluginDependencyResult.Failed("插件不存在")
+        val runtime = plugin.content.runtime
+            ?: return@withContext PluginDependencyResult.Failed("插件没有运行时，无需依赖")
+        val preparer = dependencyPreparer
+            ?: return@withContext PluginDependencyResult.Failed("依赖准备不可用")
+        val result = preparer.prepare(runtime)
+        mutateRecords { current ->
+            current.map { installed ->
+                if (installed.id != id) installed else {
+                    val record = when (result) {
+                        is PluginDependencyResult.Ready -> installed.record.copy(
+                            dependenciesReady = true,
+                            dependenciesHash = result.hash
+                        )
+                        else -> installed.record.copy(dependenciesReady = false, dependenciesHash = null)
+                    }
+                    installed.copy(record = record)
+                }
+            }
+        }
+        result
+    }
 
     /** 当前生效的插件 AI 工具：插件启用即可用。 */
     fun activeTools(): List<PluginTool> {
@@ -418,8 +456,23 @@ class PluginManager internal constructor(
         }
         return when (val content = PluginContentLoader.load(dir, manifest)) {
             is ContentLoadResult.Failed -> InstalledPlugin(record, PluginStatus.CORRUPTED, manifest, PluginContent(), content.errors)
-            is ContentLoadResult.Ok -> InstalledPlugin(record, PluginStatus.OK, manifest, content.content)
+            is ContentLoadResult.Ok -> InstalledPlugin(
+                refreshDependencyState(record, content.content),
+                PluginStatus.OK,
+                manifest,
+                content.content
+            )
         }
+    }
+
+    /** 依赖文件被改动后，准备状态失效；这里只修正视图，不写盘。 */
+    private fun refreshDependencyState(record: PluginRecord, content: PluginContent): PluginRecord {
+        val dependency = content.runtime?.dependencies ?: return record.copy(dependenciesReady = true)
+        val hash = runCatching {
+            PluginPackageReader.sha256Hex(dependency.file.readBytes())
+        }.getOrNull() ?: return record.copy(dependenciesReady = false)
+        return if (record.dependenciesHash == hash) record.copy(dependenciesReady = true)
+        else record.copy(dependenciesReady = false)
     }
 
     /**

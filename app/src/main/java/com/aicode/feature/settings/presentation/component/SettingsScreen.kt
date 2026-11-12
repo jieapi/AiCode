@@ -410,6 +410,7 @@ fun SettingsScreen(
     val pluginsViewModel: PluginsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val plugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
     val pluginsLoaded by pluginsViewModel.loaded.collectAsStateWithLifecycle()
+    val pluginDependencyStates by pluginsViewModel.dependencyStates.collectAsStateWithLifecycle()
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val pluginLanguageTag = currentLanguageTag()
@@ -1407,7 +1408,9 @@ fun SettingsScreen(
                         },
                         onClosePage = {
                             section = SettingsSection.Plugins
-                        }
+                        },
+                        dependencyState = pluginDependencyStates[plugin.id],
+                        onPrepareDependencies = { pluginsViewModel.prepareDependencies(plugin.id) }
                     )
                 }
                 SettingsSection.About -> AboutSection(

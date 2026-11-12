@@ -194,7 +194,6 @@ class PluginHookDispatcher @Inject constructor(
 
     private fun dispatch(event: String, payload: JsonObject) {
         scope.launch {
-            if (!runtime.isSupported()) return@launch
             val targets = try {
                 pluginManager.ensureLoaded()
                 pluginManager.plugins.value
@@ -223,9 +222,11 @@ class PluginHookDispatcher @Inject constructor(
             val result = runtime.invoke(
                 pluginId = hook.pluginId,
                 version = version,
-                entryFile = hook.runtimeEntry,
+                runtime = hook.runtime,
                 handler = hook.handler,
-                args = payload
+                args = payload,
+                method = "hook.invoke",
+                timeoutMs = HOOK_TIMEOUT_MS
             )
             writeHookLogs(hook, result)
         } catch (e: CancellationException) {
@@ -265,6 +266,7 @@ class PluginHookDispatcher @Inject constructor(
 
     private companion object {
         const val TAG = "PluginHook"
+        const val HOOK_TIMEOUT_MS = 30_000L
         const val MAX_LOG_LINES = 50
         const val MAX_LOG_CHARS = 500
     }

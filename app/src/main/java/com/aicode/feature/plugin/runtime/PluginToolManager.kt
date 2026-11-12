@@ -35,10 +35,6 @@ class PluginToolManager @Inject constructor(
 
     fun start(scope: CoroutineScope) {
         if (!started.compareAndSet(false, true)) return
-        if (!runtime.isSupported()) {
-            FileLogger.w(TAG, "设备不支持 JavaScriptEngine，插件 AI 工具不注册")
-            return
-        }
         scope.launch {
             withContext(Dispatchers.IO) { pluginManager.ensureLoaded() }
             pluginManager.plugins.collect { plugins ->
@@ -53,7 +49,7 @@ class PluginToolManager @Inject constructor(
             .filter { it.isActive }
             .flatMap { plugin ->
                 val manifest = plugin.manifest ?: return@flatMap emptyList()
-                val runtimeEntry = plugin.content.runtime ?: return@flatMap emptyList()
+                plugin.content.runtime ?: return@flatMap emptyList()
                 val pluginName = manifest.name.resolve(Locale.getDefault().toLanguageTag())
                 plugin.content.tools
                     .map { tool ->

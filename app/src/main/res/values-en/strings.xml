@@ -2091,6 +2091,11 @@
     <string name="plugins_hint_incompatible">This plugin isn\'t compatible with this version of AiCode, so it can\'t be enabled.</string>
     <string name="plugins_section_summary">About</string>
     <string name="plugins_section_info">Details</string>
+    <string name="plugins_section_dependencies">Dependencies</string>
+    <string name="plugins_dependencies_ready">Dependencies ready</string>
+    <string name="plugins_dependencies_missing">Dependencies not prepared</string>
+    <string name="plugins_dependencies_prepare">Prepare</string>
+    <string name="plugins_dependencies_preparing">Preparing…</string>
     <string name="plugins_section_contents">What it provides</string>
     <string name="plugins_info_version">Version</string>
     <string name="plugins_info_publisher">Publisher</string>

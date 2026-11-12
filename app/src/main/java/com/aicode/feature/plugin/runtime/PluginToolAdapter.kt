@@ -68,16 +68,17 @@ class PluginToolAdapter(
             val result = runtime.invoke(
                 pluginId = pluginId,
                 version = pluginVersion,
-                entryFile = tool.runtimeEntry,
+                runtime = tool.runtime,
                 handler = tool.handler,
-                args = JsonObject(args)
+                args = JsonObject(args),
+                method = "tool.invoke"
             )
             ToolResult.Success(result)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: PluginRuntimeException) {
+        } catch (e: PluginProcessException) {
             FileLogger.w(TAG, "插件工具执行失败: $pluginId/${tool.localId} (${e.code})")
-            ToolResult.Error(e.message ?: context.getString(R.string.plugin_runtime_failed), e.code)
+            ToolResult.Error(e.message, e.code)
         } catch (e: Exception) {
             FileLogger.e(TAG, "插件工具执行异常: $pluginId/${tool.localId}", e)
             ToolResult.Error(

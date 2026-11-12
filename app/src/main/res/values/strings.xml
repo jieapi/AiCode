@@ -2090,6 +2090,11 @@
     <string name="plugins_hint_incompatible">这个插件与当前版本的 AiCode 不兼容，无法启用。</string>
     <string name="plugins_section_summary">简介</string>
     <string name="plugins_section_info">信息</string>
+    <string name="plugins_section_dependencies">依赖环境</string>
+    <string name="plugins_dependencies_ready">依赖已就绪</string>
+    <string name="plugins_dependencies_missing">依赖未准备</string>
+    <string name="plugins_dependencies_prepare">准备依赖</string>
+    <string name="plugins_dependencies_preparing">准备中…</string>
     <string name="plugins_section_contents">提供的内容</string>
     <string name="plugins_info_version">版本</string>
     <string name="plugins_info_publisher">发布者</string>
