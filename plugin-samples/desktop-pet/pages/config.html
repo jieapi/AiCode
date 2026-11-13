@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>桌面宠物示例</title>
+  <script src="/__aicode/aicode.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--aicode-bg, #f6f8fa);
+      color: var(--aicode-on-surface, #1f2328);
+    }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    p { line-height: 1.6; color: var(--aicode-on-surface-variant, #59636e); }
+    .card {
+      max-width: 560px;
+      padding: 18px;
+      border-radius: 14px;
+      background: var(--aicode-surface, #fff);
+      border: 1px solid rgba(127, 127, 127, .18);
+    }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 15px;
+      color: #fff;
+      background: var(--aicode-primary, #0969da);
+    }
+    button.secondary { background: #6e7781; }
+    button.size { background: rgba(127, 127, 127, .18); color: inherit; }
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-top: 16px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    .toggle input { width: 18px; height: 18px; }
+    .hint { margin: 6px 0 0; font-size: 12px; color: var(--aicode-on-surface-variant, #59636e); }
+    pre {
+      margin-top: 16px;
+      padding: 12px;
+      min-height: 64px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border-radius: 10px;
+      background: rgba(127, 127, 127, .1);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>桌面宠物示例</h1>
+    <p>这个页面只调用宿主提供的 <code>aicode.overlay</code>。宠物窗口、权限、拖拽和点击识别全部由 AiCode 宿主完成，插件里没有 Android 原生代码。</p>
+    <div class="row">
+      <button id="show">显示桌宠（中）</button>
+      <button id="hide" class="secondary">关闭桌宠</button>
+    </div>
+    <div class="row">
+      <button class="size" data-width="90" data-height="110">小</button>
+      <button class="size" data-width="110" data-height="130">中</button>
+      <button class="size" data-width="150" data-height="180">大</button>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="autostart">
+      <span>随 App 启动显示桌宠</span>
+    </label>
+    <p class="hint">开启后，下次启动 AiCode 时由插件的 app.started hook 自动拉起；当前这次不会立即显示。</p>
+    <pre id="log">尚未创建浮层。</pre>
+  </div>
+
+  <script>
+    (function () {
+      var log = document.getElementById('log');
+      var autostart = document.getElementById('autostart');
+      var overlayId = null;
+      var settings = { autoStart: false, width: 110, height: 130 };
+      var SETTINGS_PATH = 'data://pet-settings.json';
+
+      function write(text) {
+        log.textContent = text;
+      }
+
+      async function loadSettings() {
+        try {
+          var file = await aicode.fs.read(SETTINGS_PATH);
+          settings = Object.assign(settings, JSON.parse(file.content || '{}'));
+        } catch (error) {
+          // 首次运行还没有设置文件。
+        }
+        autostart.checked = settings.autoStart === true;
+      }
+
+      async function saveSettings() {
+        try {
+          await aicode.fs.write(SETTINGS_PATH, JSON.stringify(settings));
+        } catch (error) {
+          write('保存设置失败：' + (error.code || 'ERROR') + ' ' + error.message);
+        }
+      }
+
+      async function show(width, height) {
+        try {
+          var info = await aicode.overlay.create({ surface: 'pet', width: width, height: height });
+          overlayId = info.overlayId;
+          if (info.width !== width || info.height !== height) {
+            await aicode.overlay.update(overlayId, { width: width, height: height });
+          }
+          write('已创建：' + width + '×' + height + 'dp\n在桌面上拖动宠物试试。');
+        } catch (error) {
+          write('创建失败：' + (error.code || 'ERROR') + ' ' + error.message);
+        }
+      }
+
+      document.getElementById('show').addEventListener('click', function () {
+        show(settings.width, settings.height);
+      });
+
+      document.querySelectorAll('.size').forEach(function (button) {
+        button.addEventListener('click', function () {
+          settings.width = Number(button.dataset.width);
+          settings.height = Number(button.dataset.height);
+          saveSettings();
+          show(settings.width, settings.height);
+        });
+      });
+
+      autostart.addEventListener('change', function () {
+        settings.autoStart = autostart.checked;
+        saveSettings();
+        write(settings.autoStart ? '已开启随 App 启动。' : '已关闭随 App 启动。');
+      });
+
+      document.getElementById('hide').addEventListener('click', async function () {
+        try {
+          await aicode.overlay.close(overlayId);
+          overlayId = null;
+          write('已关闭。');
+        } catch (error) {
+          write('关闭失败：' + (error.code || 'ERROR') + ' ' + error.message);
+        }
+      });
+
+      loadSettings();
+    })();
+  </script>
+</body>
+</html>

@@ -151,6 +151,9 @@ private fun PluginPreviewSheet(
             if (manifest.shizuku != null) {
                 Notice(stringResource(R.string.plugins_preview_shizuku_notice))
             }
+            if (manifest.overlay != null) {
+                Notice(stringResource(R.string.plugins_preview_overlay_notice))
+            }
             preview.installedVersion?.let { installed ->
                 Notice(
                     stringResource(
@@ -245,6 +248,10 @@ private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
     } + listOfNotNull(
         preview.content.shizuku?.let {
             stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
+        },
+        preview.content.overlay?.let {
+            stringResource(R.string.plugins_content_overlay, it.purpose) to
+                it.surfaces.joinToString { surface -> surface.localId }
         }
     )
 

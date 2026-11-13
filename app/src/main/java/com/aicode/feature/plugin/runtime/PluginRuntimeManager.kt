@@ -10,6 +10,8 @@ import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginRuntime
 import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
+import com.aicode.feature.plugin.overlay.PluginOverlayException
+import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
@@ -54,7 +56,8 @@ class PluginRuntimeManager @Inject constructor(
     private val notifier: PluginNotifier,
     private val terminalRunner: PluginTerminalRunner,
     private val shizukuRunner: PluginShizukuRunner,
-    private val tipManager: PluginTipManager
+    private val tipManager: PluginTipManager,
+    private val overlayManager: PluginOverlayManager
 ) {
 
     private class Entry(
@@ -69,6 +72,29 @@ class PluginRuntimeManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
+        overlayManager.setEventSink { pluginId, overlayId, payload ->
+            scope.launch {
+                val plugin = pluginManager.plugins.value.firstOrNull { it.id == pluginId && it.isActive }
+                    ?: return@launch
+                val runtime = plugin.content.runtime ?: return@launch
+                runCatching {
+                    invoke(
+                        pluginId = pluginId,
+                        version = plugin.record.version,
+                        runtime = runtime,
+                        handler = "overlay.message",
+                        args = buildJsonObject {
+                            put("overlayId", overlayId)
+                            put("payload", payload)
+                        },
+                        method = "ui.invoke",
+                        timeoutMs = OVERLAY_MESSAGE_TIMEOUT_MS
+                    )
+                }.onFailure {
+                    FileLogger.w(TAG, "overlay message failed: $pluginId", it)
+                }
+            }
+        }
         scope.launch {
             while (isActive) {
                 delay(IDLE_CHECK_MS)
@@ -193,6 +219,10 @@ class PluginRuntimeManager @Inject constructor(
             "host.bash" -> bash(params)
             "host.notify" -> notifier.notify(pluginId, params)
             "host.shizuku.exec" -> shizukuExec(pluginId, params)
+            "host.overlay.create" -> overlayCreate(pluginId, params)
+            "host.overlay.close" -> overlayClose(pluginId, params)
+            "host.overlay.postMessage" -> overlayPostMessage(pluginId, params)
+            "host.overlay.update" -> overlayUpdate(pluginId, params)
             "host.tip" -> tip(pluginId, params)
             "host.terminal.run" -> terminalRun(pluginId, params)
             "host.terminal.poll" -> terminalPoll(pluginId, params)
@@ -220,6 +250,33 @@ class PluginRuntimeManager @Inject constructor(
         } catch (e: PluginShizukuException) {
             throw PluginProcessException(e.code, e.message.orEmpty())
         }
+    }
+
+    private suspend fun overlayCreate(pluginId: String, params: JsonObject): JsonElement = try {
+        val surface = (params["surface"] as? JsonPrimitive)?.contentOrNull
+        overlayManager.create(pluginId, surface, params)
+    } catch (e: PluginOverlayException) {
+        throw PluginProcessException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayClose(pluginId: String, params: JsonObject): JsonElement = try {
+        overlayManager.close(pluginId, PluginHostPaths.requireString(params, "overlayId"))
+    } catch (e: PluginOverlayException) {
+        throw PluginProcessException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayPostMessage(pluginId: String, params: JsonObject): JsonElement = try {
+        val overlayId = PluginHostPaths.requireString(params, "overlayId")
+        val payload = params["payload"] ?: kotlinx.serialization.json.JsonNull
+        overlayManager.postMessage(pluginId, overlayId, payload)
+    } catch (e: PluginOverlayException) {
+        throw PluginProcessException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayUpdate(pluginId: String, params: JsonObject): JsonElement = try {
+        overlayManager.update(pluginId, PluginHostPaths.requireString(params, "overlayId"), params)
+    } catch (e: PluginOverlayException) {
+        throw PluginProcessException(e.code, e.message.orEmpty())
     }
 
     private suspend fun bash(params: JsonObject): JsonElement {        val command = PluginHostPaths.requireString(params, "command")
@@ -320,5 +377,6 @@ class PluginRuntimeManager @Inject constructor(
         const val IDLE_CHECK_MS = 60_000L
         const val MAX_TERMINAL_TITLE_CHARS = 120
         const val DEFAULT_SHIZUKU_TIMEOUT_SECONDS = 120L
+        const val OVERLAY_MESSAGE_TIMEOUT_MS = 30_000L
     }
 }

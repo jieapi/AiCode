@@ -11,6 +11,8 @@ import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.overlay.PluginOverlayException
+import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginProcessException
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -67,6 +70,7 @@ class PluginWebBridge(
     private val terminalRunner: PluginTerminalRunner,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
+    private val overlayManager: PluginOverlayManager,
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
@@ -257,6 +261,10 @@ class PluginWebBridge(
         }
         "bash" -> bash(params)
         "shizuku.exec" -> shizukuExec(params)
+        "overlay.create" -> overlayCreate(params)
+        "overlay.update" -> overlayUpdate(params)
+        "overlay.close" -> overlayClose(params)
+        "overlay.postMessage" -> overlayPostMessage(params)
         "tip" -> tip(params)
         "plugin.invoke" -> invokePlugin(params)
         "terminal.run" -> terminalRun(params)
@@ -294,6 +302,36 @@ class PluginWebBridge(
         } catch (e: PluginProcessException) {
             throw PluginHostException(e.code, e.message)
         }
+    }
+
+    /** 从设置页创建宿主托管的系统浮层；权限与页面声明由 OverlayManager 校验。 */
+    private suspend fun overlayCreate(params: JsonObject): JsonElement = try {
+        val surface = (params["surface"] as? JsonPrimitive)?.contentOrNull
+        overlayManager.create(page.pluginId, surface, params)
+    } catch (e: PluginOverlayException) {
+        throw PluginHostException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayClose(params: JsonObject): JsonElement = try {
+        val overlayId = PluginHostPaths.requireString(params, "overlayId")
+        overlayManager.close(page.pluginId, overlayId)
+    } catch (e: PluginOverlayException) {
+        throw PluginHostException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayUpdate(params: JsonObject): JsonElement = try {
+        val overlayId = PluginHostPaths.requireString(params, "overlayId")
+        overlayManager.update(page.pluginId, overlayId, params)
+    } catch (e: PluginOverlayException) {
+        throw PluginHostException(e.code, e.message.orEmpty())
+    }
+
+    private fun overlayPostMessage(params: JsonObject): JsonElement = try {
+        val overlayId = PluginHostPaths.requireString(params, "overlayId")
+        val payload = params["payload"] ?: JsonNull
+        overlayManager.postMessage(page.pluginId, overlayId, payload)
+    } catch (e: PluginOverlayException) {
+        throw PluginHostException(e.code, e.message.orEmpty())
     }
 
     /** 页面请求一条对话内提示；动作按钮会回调页面所属插件的 handler。 */

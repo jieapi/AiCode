@@ -1,5 +1,6 @@
 package com.aicode.feature.plugin.presentation
 
+import android.provider.Settings
 import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -52,6 +54,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
@@ -84,6 +89,7 @@ import compose.icons.feathericons.BookOpen
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Cloud
 import compose.icons.feathericons.Github
+import compose.icons.feathericons.Monitor
 import compose.icons.feathericons.Package
 import compose.icons.feathericons.Search
 import compose.icons.feathericons.Server
@@ -423,7 +429,9 @@ internal fun PluginDetailSection(
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
     shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
-    onSetShizukuGranted: (Boolean) -> Unit = {}
+    onSetShizukuGranted: (Boolean) -> Unit = {},
+    overlayGranted: Boolean = false,
+    onSetOverlayGranted: (Boolean) -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
@@ -508,7 +516,9 @@ internal fun PluginDetailSection(
                 onPrepareDependencies = onPrepareDependencies,
                 shizukuGranted = shizukuGranted,
                 shizukuState = shizukuState,
-                onSetShizukuGranted = onSetShizukuGranted
+                onSetShizukuGranted = onSetShizukuGranted,
+                overlayGranted = overlayGranted,
+                onSetOverlayGranted = onSetOverlayGranted
             )
         } else {
             // Tab 1: 插件自己的专属 WebView 配置页面
@@ -535,10 +545,23 @@ private fun PluginNativeConfigContent(
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
     shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
-    onSetShizukuGranted: (Boolean) -> Unit = {}
+    onSetShizukuGranted: (Boolean) -> Unit = {},
+    overlayGranted: Boolean = false,
+    onSetOverlayGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var canDrawOverlays by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                canDrawOverlays = Settings.canDrawOverlays(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Column(
         modifier = Modifier
@@ -628,6 +651,52 @@ private fun PluginNativeConfigContent(
             }
         }
 
+        plugin.content.overlay?.let { declaration ->
+            SettingsGroupHeader(text = stringResource(R.string.plugins_overlay_section))
+            SettingsGroup {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.plugins_overlay_scope),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = declaration.purpose,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = stringResource(
+                                if (overlayGranted) R.string.plugins_overlay_authorized_hint
+                                else R.string.plugins_overlay_unauthorized_hint
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (overlayGranted) MaterialTheme.semanticColors.success
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (!canDrawOverlays) {
+                            Text(
+                                text = stringResource(R.string.plugins_overlay_system_missing),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    AppSwitch(
+                        checked = overlayGranted,
+                        onCheckedChange = onSetOverlayGranted,
+                        enabled = plugin.isActive && canDrawOverlays
+                    )
+                }
+            }
+        }
+
         if (manifest != null) {
             SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
             SettingsGroup {
@@ -701,6 +770,13 @@ private fun PluginNativeConfigContent(
                     items += PluginContentItem(
                         FeatherIcons.Terminal,
                         stringResource(R.string.plugins_shizuku_section),
+                        declaration.purpose
+                    )
+                }
+                plugin.content.overlay?.let { declaration ->
+                    items += PluginContentItem(
+                        FeatherIcons.Monitor,
+                        stringResource(R.string.plugins_overlay_section),
                         declaration.purpose
                     )
                 }

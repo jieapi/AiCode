@@ -54,6 +54,8 @@ object PluginManifestParser {
     private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
+    private val OVERLAY_KEYS = setOf("purpose", "surfaces")
+    private val OVERLAY_SURFACE_KEYS = setOf("id", "page", "width", "height", "draggable")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -71,6 +73,11 @@ object PluginManifestParser {
     private const val MAX_IDS_PER_TYPE = 64
     private const val MAX_PROVIDER_URL = 2048
     private const val MAX_SHIZUKU_PURPOSE = 200
+    private const val MAX_OVERLAY_PURPOSE = 200
+    private const val MAX_OVERLAY_SURFACES = 3
+    private const val MIN_OVERLAY_EDGE = 48
+    private const val MAX_OVERLAY_WIDTH = 720
+    private const val MAX_OVERLAY_HEIGHT = 1200
     const val MAX_PATH_LENGTH = 200
     const val MAX_PATH_DEPTH = 8
 
@@ -133,6 +140,7 @@ object PluginManifestParser {
                     mcp = contributes.mcp,
                     providers = contributes.providers,
                     shizuku = contributes.shizuku,
+                    overlay = contributes.overlay,
                     configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage")
                 )
             )
@@ -356,6 +364,7 @@ object PluginManifestParser {
             val mcp: List<PluginMcpRef>,
             val providers: List<PluginProviderRef>,
             val shizuku: PluginShizukuRef?,
+            val overlay: PluginOverlayRef?,
             val configPage: String?
         )
 
@@ -366,7 +375,7 @@ object PluginManifestParser {
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
                     it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
-                    it != "shizuku" && it != "configPage"
+                    it != "shizuku" && it != "overlay" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -388,15 +397,22 @@ object PluginManifestParser {
                     if (contributes["shizuku"] != null) ok = false
                     null
                 }
+            val overlay = readOverlay(contributes["overlay"], "contributes.overlay")
+                ?: run {
+                    if (contributes["overlay"] != null) ok = false
+                    null
+                }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
                 tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
-                shizuku == null && configPage == null
+                shizuku == null && overlay == null && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
-            return if (ok) Contributes(skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, shizuku, configPage) else null
+            return if (ok) Contributes(
+                skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, shizuku, overlay, configPage
+            ) else null
         }
 
         private fun readConfigPage(raw: JsonElement?, path: String): String? {
@@ -598,6 +614,96 @@ object PluginManifestParser {
                 return null
             }
             return PluginShizukuRef(purpose)
+        }
+
+        private fun readOverlay(raw: JsonElement?, path: String): PluginOverlayRef? {
+            if (raw == null) return null
+            val obj = raw as? JsonObject ?: return null.also { invalid(path) }
+            var ok = true
+            obj.keys.filter { it !in OVERLAY_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.$it")
+                ok = false
+            }
+            val purpose = obj["purpose"]?.stringOrNull()?.trim()
+            if (purpose.isNullOrEmpty() || purpose.length > MAX_OVERLAY_PURPOSE) {
+                invalid("$path.purpose")
+                ok = false
+            }
+            val surfaces = mutableListOf<PluginOverlaySurfaceRef>()
+            val rawSurfaces = obj["surfaces"]
+            if (rawSurfaces != null) {
+                val array = rawSurfaces as? JsonArray
+                if (array == null) {
+                    invalid("$path.surfaces")
+                    ok = false
+                } else if (array.size > MAX_OVERLAY_SURFACES) {
+                    invalid("$path.surfaces")
+                    ok = false
+                } else {
+                    val seen = mutableSetOf<String>()
+                    array.forEachIndexed { index, element ->
+                        val itemPath = "$path.surfaces[$index]"
+                        val item = element as? JsonObject
+                        if (item == null) {
+                            invalid(itemPath)
+                            ok = false
+                            return@forEachIndexed
+                        }
+                        item.keys.filter { it !in OVERLAY_SURFACE_KEYS }.forEach {
+                            err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                            ok = false
+                        }
+                        val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                        if (id == null || !seen.add(id)) {
+                            invalid("$itemPath.id")
+                            ok = false
+                        }
+                        val page = item["page"]?.stringOrNull()?.trim()
+                        val isHtml = page != null && (
+                            page.endsWith(".html", ignoreCase = true) || page.endsWith(".htm", ignoreCase = true)
+                            )
+                        if (page == null || !isSafeRelativePath(page) || !isHtml) {
+                            invalid("$itemPath.page")
+                            ok = false
+                        }
+                        val widthRaw = item["width"]
+                        val width = if (widthRaw == null) {
+                            240
+                        } else {
+                            (widthRaw as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+                                ?: run { invalid("$itemPath.width"); ok = false; 0 }
+                        }
+                        val heightRaw = item["height"]
+                        val height = if (heightRaw == null) {
+                            320
+                        } else {
+                            (heightRaw as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+                                ?: run { invalid("$itemPath.height"); ok = false; 0 }
+                        }
+                        if (width !in MIN_OVERLAY_EDGE..MAX_OVERLAY_WIDTH ||
+                            height !in MIN_OVERLAY_EDGE..MAX_OVERLAY_HEIGHT
+                        ) {
+                            invalid("$itemPath.size")
+                            ok = false
+                        }
+                        val draggableRaw = item["draggable"]
+                        val draggable = if (draggableRaw == null) {
+                            true
+                        } else {
+                            (draggableRaw as? JsonPrimitive)?.booleanOrNull
+                                ?: run { invalid("$itemPath.draggable"); ok = false; false }
+                        }
+                        if (id != null && page != null) {
+                            surfaces += PluginOverlaySurfaceRef(id, page, width, height, draggable)
+                        }
+                    }
+                }
+            }
+            if (surfaces.isEmpty()) {
+                invalid("$path.surfaces")
+                ok = false
+            }
+            return if (ok && purpose != null) PluginOverlayRef(purpose, surfaces) else null
         }
 
         private fun readWorkspaceTools(raw: JsonElement?, path: String): List<PluginWorkspaceToolRef>? {

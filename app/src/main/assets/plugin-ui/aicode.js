@@ -7,6 +7,24 @@
   // 页面内返回处理器栈：后注册的优先执行，返回 true 的处理器消费本次返回。
   var backHandlers = [];
   var eventHandlers = [];
+  var overlayHandlers = [];
+
+  // 宿主推送到浮层页面的消息：状态、点击/拖拽反馈都走这里。
+  window.__aicodeOverlayMessage = function (payload) {
+    var message;
+    try {
+      message = payload ? JSON.parse(payload) : null;
+    } catch (e) {
+      return;
+    }
+    overlayHandlers.slice().forEach(function (handler) {
+      try {
+        handler(message);
+      } catch (e) {
+        console.error('aicode: overlay handler failed', e);
+      }
+    });
+  };
 
   // 宿主推送插件事件：payload 是 JSON 字符串，形如 { name, payload }。
   window.__aicodeEvent = function (payload) {
@@ -145,6 +163,56 @@
           var index = eventHandlers.indexOf(handler);
           if (index >= 0) eventHandlers.splice(index, 1);
         };
+      }
+    },
+    // 宿主托管的系统浮层；普通页面可创建/关闭，浮层页面可读自身信息并接收消息。
+    overlay: {
+      create: function (options) {
+        var params = options || {};
+        if (params.surface != null) params.surface = String(params.surface);
+        return call('overlay.create', params);
+      },
+      update: function (overlayId, options) {
+        var params = options || {};
+        params.overlayId = String(overlayId);
+        return call('overlay.update', params);
+      },
+      close: function (overlayId) {
+        var params = {};
+        if (overlayId != null) params.overlayId = String(overlayId);
+        return call('overlay.close', params);
+      },
+      self: function () {
+        return call('overlay.self');
+      },
+      // 浮层页面上报拖拽区域，坐标单位为 CSS 像素。
+      setDragRegion: function (rect) {
+        return call('overlay.setDragRegion', {
+          left: Number(rect && rect.left) || 0,
+          top: Number(rect && rect.top) || 0,
+          width: Number(rect && rect.width) || 0,
+          height: Number(rect && rect.height) || 0
+        });
+      },
+      moveBy: function (dx, dy) {
+        return call('overlay.moveBy', { dx: Number(dx) || 0, dy: Number(dy) || 0 });
+      },
+      // 浮层页面调整自身尺寸，单位为 CSS 像素（dp）。
+      resize: function (width, height) {
+        return call('overlay.resize', { width: Number(width) || 0, height: Number(height) || 0 });
+      },
+      // 浮层页面接收宿主消息（状态、click、dragStart、dragEnd、longPress）。
+      onMessage: function (handler) {
+        if (typeof handler !== 'function') return function () {};
+        overlayHandlers.push(handler);
+        return function () {
+          var index = overlayHandlers.indexOf(handler);
+          if (index >= 0) overlayHandlers.splice(index, 1);
+        };
+      },
+      // 浮层页面把交互或状态回传给插件进程；需要插件实现 overlay.message handler。
+      postMessage: function (payload) {
+        return call('overlay.postMessage', { payload: payload === undefined ? null : payload });
       }
     },
     // 调用同一插件的常驻进程 handler，返回 handler 的 result；不支持跨插件调用。

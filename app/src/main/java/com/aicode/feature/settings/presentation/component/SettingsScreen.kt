@@ -415,6 +415,7 @@ fun SettingsScreen(
     val pluginsRefreshing by pluginsViewModel.refreshing.collectAsStateWithLifecycle()
     val pluginDependencyStates by pluginsViewModel.dependencyStates.collectAsStateWithLifecycle()
     val shizukuGrantedPluginIds by pluginsViewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
+    val overlayGrantedPluginIds by pluginsViewModel.overlayGrantedPluginIds.collectAsStateWithLifecycle()
     val shizukuState by pluginsViewModel.shizukuState.collectAsStateWithLifecycle()
     val pluginDevMode by pluginsViewModel.devMode.collectAsStateWithLifecycle()
     val pluginDevProjects by pluginsViewModel.devProjects.collectAsStateWithLifecycle()
@@ -1451,7 +1452,9 @@ fun SettingsScreen(
                         onPrepareDependencies = { pluginsViewModel.prepareDependencies(plugin.id) },
                         shizukuGranted = plugin.id in shizukuGrantedPluginIds,
                         shizukuState = shizukuState,
-                        onSetShizukuGranted = { pluginsViewModel.setShizukuGranted(plugin, it) }
+                        onSetShizukuGranted = { pluginsViewModel.setShizukuGranted(plugin, it) },
+                        overlayGranted = plugin.id in overlayGrantedPluginIds,
+                        onSetOverlayGranted = { pluginsViewModel.setOverlayGranted(plugin, it) }
                     )
                 }
                 SettingsSection.About -> AboutSection(

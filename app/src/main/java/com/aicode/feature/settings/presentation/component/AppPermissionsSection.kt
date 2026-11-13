@@ -42,6 +42,7 @@ import compose.icons.feathericons.Activity
 import compose.icons.feathericons.Bell
 import compose.icons.feathericons.Download
 import compose.icons.feathericons.Folder
+import compose.icons.feathericons.Monitor
 import compose.icons.feathericons.Power
 import compose.icons.feathericons.RefreshCw
 import compose.icons.feathericons.Shield
@@ -69,6 +70,7 @@ internal fun AppPermissionsSection(
     var apkInstallAllowed by remember { mutableStateOf(context.packageManager.canRequestPackageInstalls()) }
     var storageGranted by remember { mutableStateOf(checkStorageGranted(context)) }
     var batteryExempt by remember { mutableStateOf(isIgnoringBatteryOptimizations(context)) }
+    var overlayAllowed by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
 
     var showStorageDeniedDialog by remember { mutableStateOf(false) }
 
@@ -77,6 +79,7 @@ internal fun AppPermissionsSection(
         apkInstallAllowed = context.packageManager.canRequestPackageInstalls()
         storageGranted = checkStorageGranted(context)
         batteryExempt = isIgnoringBatteryOptimizations(context)
+        overlayAllowed = Settings.canDrawOverlays(context)
         onRefreshShizuku()
         onPauseOrDispose { }
     }
@@ -155,6 +158,25 @@ internal fun AppPermissionsSection(
                     }
                 },
                 trailing = { PermissionStatusText(allowed = batteryExempt) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Monitor,
+                title = stringResource(R.string.settings_permission_overlay),
+                subtitle = stringResource(R.string.settings_permission_overlay_desc),
+                onClick = {
+                    if (!overlayAllowed) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                            )
+                        }
+                    }
+                },
+                trailing = { PermissionStatusText(allowed = overlayAllowed) }
             )
             SettingsDivider()
             SettingsRow(

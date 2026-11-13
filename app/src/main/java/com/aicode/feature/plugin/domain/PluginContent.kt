@@ -123,6 +123,27 @@ data class PluginShizukuDefinition(
     val purpose: String
 )
 
+/** 已校验存在性的宿主托管浮层页面。 */
+data class PluginOverlaySurface(
+    val pluginId: String,
+    val localId: String,
+    val pageFile: String,
+    val installDir: File,
+    val pluginVersion: String,
+    val width: Int,
+    val height: Int,
+    val draggable: Boolean
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
+/** 已解析的悬浮窗声明；页面由宿主 WebView 加载。 */
+data class PluginOverlayDefinition(
+    val pluginId: String,
+    val purpose: String,
+    val surfaces: List<PluginOverlaySurface>
+)
+
 data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
@@ -134,6 +155,7 @@ data class PluginContent(
     val mcp: List<PluginMcpServer> = emptyList(),
     val providers: List<PluginProviderDefinition> = emptyList(),
     val shizuku: PluginShizukuDefinition? = null,
+    val overlay: PluginOverlayDefinition? = null,
     val configPage: PluginSettingsPage? = null
 )
 
@@ -191,6 +213,20 @@ object PluginContentLoader {
                 purpose = it.purpose
             )
         }
+        val overlay = manifest.overlay?.let { declaration ->
+            val surfaces = declaration.surfaces.mapNotNull { surface ->
+                loadOverlaySurface(dir, manifest.id, manifest.version.toString(), surface, errors)
+            }
+            if (surfaces.size == declaration.surfaces.size) {
+                PluginOverlayDefinition(
+                    pluginId = manifest.id,
+                    purpose = declaration.purpose,
+                    surfaces = surfaces
+                )
+            } else {
+                null
+            }
+        }
         return if (errors.isEmpty()) {
             ContentLoadResult.Ok(
                 PluginContent(
@@ -204,6 +240,7 @@ object PluginContentLoader {
                     mcp = mcp,
                     providers = providers,
                     shizuku = shizuku,
+                    overlay = overlay,
                     configPage = configPage
                 )
             )
@@ -363,6 +400,36 @@ object PluginContentLoader {
             pageFile = ref.pageFile,
             installDir = dir,
             pluginVersion = pluginVersion
+        )
+    }
+
+    /** 浮层页面只校验存在性与大小；页面由宿主 WebView 加载。 */
+    private fun loadOverlaySurface(
+        dir: File,
+        pluginId: String,
+        pluginVersion: String,
+        ref: PluginOverlaySurfaceRef,
+        errors: MutableList<PluginError>
+    ): PluginOverlaySurface? {
+        val file = File(dir, ref.page)
+        val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+        if (!inside || !file.isFile) {
+            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.page)
+            return null
+        }
+        if (file.length() > MAX_CONTENT_BYTES) {
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.page}: too large")
+            return null
+        }
+        return PluginOverlaySurface(
+            pluginId = pluginId,
+            localId = ref.id,
+            pageFile = ref.page,
+            installDir = dir,
+            pluginVersion = pluginVersion,
+            width = ref.width,
+            height = ref.height,
+            draggable = ref.draggable
         )
     }
 

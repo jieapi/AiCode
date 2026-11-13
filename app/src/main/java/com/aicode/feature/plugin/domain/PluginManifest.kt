@@ -165,6 +165,21 @@ data class PluginProviderRef(
  */
 data class PluginShizukuRef(val purpose: String)
 
+/** `contributes.overlay.surfaces[]` 声明的宿主托管浮层；页面由宿主 WebView 加载。 */
+data class PluginOverlaySurfaceRef(
+    val id: String,
+    val page: String,
+    val width: Int = 240,
+    val height: Int = 320,
+    val draggable: Boolean = true
+)
+
+/** `contributes.overlay` 声明插件使用系统悬浮窗；使用者需在插件详情中单独授权。 */
+data class PluginOverlayRef(
+    val purpose: String,
+    val surfaces: List<PluginOverlaySurfaceRef> = emptyList()
+)
+
 /**
  * 已通过结构校验的插件清单（`plugin.json`）。校验只证明格式合法，不代表可信：
  * 安装身份还取决于来源，清单里的 `id` / `publisher` 文本不是身份证明。
@@ -189,12 +204,14 @@ data class PluginManifest(
     val mcp: List<PluginMcpRef> = emptyList(),
     val providers: List<PluginProviderRef> = emptyList(),
     val shizuku: PluginShizukuRef? = null,
+    val overlay: PluginOverlayRef? = null,
     val configPage: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
             tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
+            (if (overlay != null) 1 + overlay.surfaces.size else 0) +
             (if (configPage != null) 1 else 0)
 }
 

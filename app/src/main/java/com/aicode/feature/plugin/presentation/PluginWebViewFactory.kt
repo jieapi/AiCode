@@ -32,6 +32,29 @@ internal object PluginWebViewFactory {
         return PAGE_BASE_URL + page.pageFile + version
     }
 
+    /** 插件浮层：透明 WebView，禁用滚动条与外部导航，页面资源仍只走虚拟域。 */
+    fun createOverlay(
+        context: Context,
+        page: PluginSettingsPage,
+        onPageFinished: (WebView) -> Unit,
+        onMainFrameError: () -> Unit
+    ): WebView = create(
+        context = context,
+        page = page,
+        dark = false,
+        backgroundColor = android.graphics.Color.TRANSPARENT,
+        themeVariables = { emptyMap() },
+        onPageFinished = onPageFinished,
+        onMainFrameError = onMainFrameError
+    ).apply {
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        settings.domStorageEnabled = true
+        isVerticalScrollBarEnabled = false
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = android.view.View.OVER_SCROLL_NEVER
+        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
         context: Context,

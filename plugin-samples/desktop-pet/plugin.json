@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.desktop-pet",
+  "name": {
+    "default": "Desktop Pet Demo",
+    "zh-CN": "桌面宠物示例"
+  },
+  "version": "1.3.0",
+  "publisher": "demo",
+  "repository": "https://github.com/example/desktop-pet-demo",
+  "description": {
+    "default": "A host-managed overlay demo: draggable pet, click reaction, no native pet code in the app.",
+    "zh-CN": "宿主托管浮层示例：可拖拽、可点击互动的桌宠，App 内没有任何宠物专用代码。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js",
+    "resident": true
+  },
+  "contributes": {
+    "overlay": {
+      "purpose": "在桌面上显示一个可拖拽的宠物",
+      "surfaces": [
+        {
+          "id": "pet",
+          "page": "pages/pet.html",
+          "draggable": true
+        }
+      ]
+    },
+    "hooks": [
+      {
+        "id": "boot",
+        "event": "app.started",
+        "handler": "hooks.boot"
+      }
+    ],
+    "configPage": "pages/config.html"
+  }
+}

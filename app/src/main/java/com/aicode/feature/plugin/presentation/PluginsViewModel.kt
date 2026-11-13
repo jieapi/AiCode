@@ -10,6 +10,7 @@ import com.aicode.feature.agent.domain.shizuku.ShizukuManager
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.plugin.data.PluginDevPackageBuilder
 import com.aicode.feature.plugin.data.PluginDevSettingsRepository
+import com.aicode.feature.plugin.data.PluginOverlayPermissionRepository
 import com.aicode.feature.plugin.data.PluginShizukuPermissionRepository
 import com.aicode.feature.plugin.domain.PluginManifestParser
 import com.aicode.feature.plugin.domain.ManifestParseResult
@@ -21,6 +22,7 @@ import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
@@ -99,6 +101,8 @@ class PluginsViewModel @Inject constructor(
     private val pluginTerminalRunner: PluginTerminalRunner,
     private val pluginProviderRegistrar: PluginProviderRegistrar,
     private val shizukuPermissionRepository: PluginShizukuPermissionRepository,
+    private val overlayPermissionRepository: PluginOverlayPermissionRepository,
+    private val overlayManager: PluginOverlayManager,
     private val shizukuManager: ShizukuManager,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
@@ -117,6 +121,14 @@ class PluginsViewModel @Inject constructor(
         combine(manager.plugins, shizukuPermissionRepository.grants) { plugins, grants ->
             plugins.filter { plugin ->
                 plugin.isActive && plugin.content.shizuku != null && grants.containsKey(plugin.id)
+            }.map { it.id }.toSet()
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** 已开启悬浮窗授权的插件；停用、卸载或撤销后自动从集合中消失。 */
+    val overlayGrantedPluginIds: StateFlow<Set<String>> =
+        combine(manager.plugins, overlayPermissionRepository.grants) { plugins, grants ->
+            plugins.filter { plugin ->
+                plugin.isActive && plugin.content.overlay != null && grants.containsKey(plugin.id)
             }.map { it.id }.toSet()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -264,6 +276,7 @@ class PluginsViewModel @Inject constructor(
             if (!enabled) {
                 pluginTerminalRunner.closePlugin(id)
                 tipManager.dismissPlugin(id)
+                overlayManager.closePlugin(id)
             }
         }
     }
@@ -273,9 +286,11 @@ class PluginsViewModel @Inject constructor(
             if (manager.uninstall(id)) {
                 removeProviders(id)
                 shizukuPermissionRepository.revoke(id)
+                overlayPermissionRepository.revoke(id)
             }
             pluginTerminalRunner.closePlugin(id)
             tipManager.dismissPlugin(id)
+            overlayManager.closePlugin(id)
         }
     }
 
@@ -287,6 +302,19 @@ class PluginsViewModel @Inject constructor(
                 shizukuPermissionRepository.grant(plugin.id)
             } else {
                 shizukuPermissionRepository.revoke(plugin.id)
+            }
+        }
+    }
+
+    /** 插件级悬浮窗授权；撤销时立即关闭该插件已经打开的窗口。 */
+    fun setOverlayGranted(plugin: InstalledPlugin, granted: Boolean) {
+        if (plugin.content.overlay == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (granted) {
+                overlayPermissionRepository.grant(plugin.id)
+            } else {
+                overlayPermissionRepository.revoke(plugin.id)
+                overlayManager.closePlugin(plugin.id)
             }
         }
     }
@@ -442,6 +470,7 @@ class PluginsViewModel @Inject constructor(
             terminalRunner = pluginTerminalRunner,
             shizukuRunner = shizukuRunner,
             tipManager = tipManager,
+            overlayManager = overlayManager,
             environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,
