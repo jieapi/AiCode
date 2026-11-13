@@ -5,7 +5,7 @@
     "default": "Desktop Pet Demo",
     "zh-CN": "桌面宠物示例"
   },
-  "version": "1.12.0",
+  "version": "1.14.0",
   "publisher": "demo",
   "repository": "https://github.com/example/desktop-pet-demo",
   "description": {
@@ -28,15 +28,10 @@
         {
           "id": "pet",
           "page": "pages/pet.html",
+          "width": 240,
+          "height": 320,
           "draggable": true,
           "snap": "both"
-        },
-        {
-          "id": "menu",
-          "page": "pages/menu.html",
-          "width": 150,
-          "height": 130,
-          "draggable": false
         }
       ]
     },

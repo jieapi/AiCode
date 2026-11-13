@@ -20,7 +20,7 @@
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
 | `ui-gallery` | `demo.gallery` | 设置页入口、配置页、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
-| `desktop-pet` | `demo.desktop-pet` | 两个浮层 surface、拖拽、点击、运行状态 hook | 系统浮层 |
+| `desktop-pet` | `demo.desktop-pet` | 单浮层 surface、长按展开菜单、拖拽、点击、运行状态 hook | 系统浮层 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
 | `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started` | 提供商 |
 | `env-guard` | `demo.env-guard` | `agent.tool.before` 可写 hook 拒绝 `.env` 访问 | 可写 hook |
@@ -102,7 +102,8 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 
 宿主托管浮层的完整示例：
 
-- 两个 surface：可拖拽的宠物和不可拖拽的菜单；
+- 单个 surface：可拖拽的宠物，长按后在下方展开菜单，收起后恢复位置；
+- 眨眼、摆耳、摇尾、拖拽回弹与贴边翻身动画，喂食和休息有独立动作；
 - `app.started` 时按配置创建浮层；
 - `agent.run.started`、`agent.tool.started`、`agent.tool.finished`、`agent.run.finished` 驱动表情；
 - 浮层页面使用 `overlay.self()`、`setDragRegion`、`onMessage`、`postMessage` 与进程通信。

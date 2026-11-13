@@ -8,7 +8,6 @@ const DEFAULTS = { autoStart: false, width: 110, height: 130, visibilityPolicy: 
 let hostSeq = 0;
 const hostPending = new Map();
 let overlayId = null;
-let menuOverlayId = null;
 let idleTimer = null;
 
 function send(message) {
@@ -74,6 +73,7 @@ async function boot() {
 }
 
 async function postState(state) {
+  clearTimeout(idleTimer);
   try {
     await hostCall('host.overlay.postMessage', {
       surface: 'pet',
@@ -109,46 +109,12 @@ async function postHint(text) {
   }
 }
 
-async function closeMenu() {
-  const id = menuOverlayId;
-  menuOverlayId = null;
-  if (!id) return;
-  try {
-    await hostCall('host.overlay.close', { overlayId: id });
-  } catch (e) {
-    // 菜单可能已被页面自己关闭。
-  }
-}
-
-async function openMenu(payload) {
-  await closeMenu();
-  const density = Number(payload.density) || 1;
-  const width = 150;
-  const height = 130;
-  const petX = Number(payload.x) || 0;
-  const petY = Number(payload.y) || 0;
-  const petHeight = Number(payload.height) || 130;
-  const x = Math.max(0, petX * density);
-  let y = petY * density - (height + 8) * density;
-  if (y < 0) y = (petY + petHeight + 8) * density;
-  const info = await hostCall('host.overlay.create', {
-    surface: 'menu',
-    width,
-    height,
-    x: Math.round(x),
-    y: Math.round(y),
-    visibilityPolicy: 'always'
-  });
-  menuOverlayId = info.overlayId;
-  return { ok: true, overlayId: menuOverlayId };
-}
-
 async function handleMenuAction(action) {
-  await closeMenu();
   if (action === 'feed') {
-    await postState('success');
-    await postHint('好吃！');
+    const result = postState('feeding');
     scheduleIdle();
+    await result;
+    await postHint('好吃！');
   } else if (action === 'sleep') {
     await postState('sleep');
     await postHint('晚安…');
@@ -188,7 +154,6 @@ const handlers = {
   // 浮层页面如果回传交互，这里先确认收到；需要状态动画时可在这里扩展。
   'overlay.message': (args) => {
     const payload = args.payload || {};
-    if (payload.type === 'longPress') return openMenu(payload);
     if (payload.type === 'menuAction') return handleMenuAction(payload.action);
     return { ok: true };
   }

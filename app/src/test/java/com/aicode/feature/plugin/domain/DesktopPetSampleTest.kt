@@ -22,7 +22,7 @@ class DesktopPetSampleTest {
     }
 
     @Test
-    fun desktopPet_loadsOverlaySurface() {
+    fun desktopPet_loadsSingleOverlaySurface() {
         val dir = sampleDir()
         assumeTrue("示例目录不在当前工作区", dir.isDirectory)
 
@@ -31,14 +31,16 @@ class DesktopPetSampleTest {
         val manifest = (parsed as ManifestParseResult.Success).manifest
         assertEquals("demo.desktop-pet", manifest.id)
         assertNotNull(manifest.overlay)
-        assertEquals(2, manifest.overlay?.surfaces?.size)
+        assertEquals(1, manifest.overlay?.surfaces?.size)
 
         val loaded = PluginContentLoader.load(dir, manifest)
         assertTrue("内容应加载成功：$loaded", loaded is ContentLoadResult.Ok)
         val content = (loaded as ContentLoadResult.Ok).content
         assertNotNull(content.overlay)
-        assertEquals("pet", content.overlay?.surfaces?.first()?.localId)
-        assertTrue(content.overlay?.surfaces?.any { it.localId == "menu" } == true)
+        val surface = content.overlay?.surfaces?.single()
+        assertEquals("pet", surface?.localId)
+        assertEquals(240, surface?.width)
+        assertEquals(320, surface?.height)
         assertNotNull("应带运行时而自启动 hook", content.runtime)
         assertTrue(content.hooks.any { it.event == PluginHookEvents.APP_STARTED })
         assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_STARTED })
