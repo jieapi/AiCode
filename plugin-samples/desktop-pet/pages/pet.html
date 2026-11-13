@@ -46,15 +46,15 @@
     .pet-pose {
       width: 100%;
       height: 100%;
-      transform-origin: 50% 65%;
-      transform: translate(0, 0) rotate(0deg);
+      transform-origin: 50% 50%;
+      transform: translate(0, 0) rotate(0deg) scale(1);
       transition: transform .44s cubic-bezier(.22, .8, .28, 1.12);
     }
     .pet-wrap.edge-left .pet-pose {
-      transform: translate(-24px, 8px) rotate(90deg);
+      transform: translate(0, 0) rotate(90deg) scale(.8);
     }
     .pet-wrap.edge-right .pet-pose {
-      transform: translate(24px, 8px) rotate(-90deg);
+      transform: translate(0, 0) rotate(-90deg) scale(.8);
     }
     .pet-wrap.edge-top .pet-pose { transform: translateY(-8px) rotate(180deg); }
     .pet-wrap.edge-bottom .pet-pose { transform: translateY(4px) rotate(0deg); }
@@ -144,7 +144,7 @@
       transform: rotate(18deg);
     }
     .pet.sleep .tail { animation: none; transform: rotate(38deg); }
-    .pet.sleep .zzz { opacity: 1; }
+    .pet.sleep .zzz { opacity: 1; animation: float 2s ease-in-out infinite; }
     .pet .zzz {
       position: absolute;
       right: 4px;
@@ -152,7 +152,7 @@
       color: #fff;
       font: 600 12px/1 system-ui, sans-serif;
       text-shadow: 0 1px 4px rgba(0, 0, 0, .35);
-      animation: float 2s ease-in-out infinite;
+      animation: none;
     }
     .pet .body {
       position: absolute;
@@ -471,7 +471,7 @@
               <div class="cheek right"></div>
             </div>
             <div class="food"></div>
-            <div class="zzz">Z z</div>
+            <div class="zzz" id="sleepMark" hidden aria-hidden="true">Z z</div>
           </div>
         </div>
       </div>
@@ -492,6 +492,8 @@
       var wrap = document.querySelector('.pet-wrap');
       var hint = document.getElementById('hint');
       var stateLabel = document.getElementById('stateLabel');
+      var sleepMark = document.getElementById('sleepMark');
+      var currentState = 'idle';
       var menu = document.getElementById('menu');
       var menuButtons = menu.querySelectorAll('button');
       var hintTimer = 0;
@@ -530,8 +532,13 @@
         });
       }
 
+      function postInteraction(type) {
+        aicode.overlay.postMessage({ type: type }).catch(function () {});
+      }
+
       async function setExpanded(value) {
         if (!initialized || transitioning || expanded === value) return false;
+        postInteraction('activity');
         var previous = expanded;
         transitioning = true;
         renderMenu();
@@ -587,6 +594,9 @@
       }
 
       function setState(state) {
+        currentState = state;
+        sleepMark.hidden = state !== 'sleep';
+        sleepMark.setAttribute('aria-hidden', String(state !== 'sleep'));
         pet.classList.remove('happy', 'landing', 'thinking', 'working', 'success', 'error', 'sleep', 'feeding');
         if (state && state !== 'idle') {
           pet.classList.add(state);
@@ -603,6 +613,7 @@
         stateLabel.classList.toggle('show', !!labels[state]);
       }
 
+      setState('idle');
       renderMenu();
       (async function () {
         try {
@@ -612,6 +623,7 @@
           applyWindowSize(self.width, self.height);
           await updateDragRegion();
           initialized = true;
+          postInteraction('petReady');
         } catch (error) {
           console.error(error);
         }
@@ -646,6 +658,8 @@
             void setExpanded(false);
             return;
           }
+          postInteraction('pet');
+          if (currentState === 'sleep') return;
           pet.classList.remove('happy');
           void pet.offsetWidth;
           pet.classList.add('happy');
@@ -655,11 +669,13 @@
         } else if (message.type === 'hint') {
           showHint(message.text || '');
         } else if (message.type === 'dragStart') {
+          postInteraction('activity');
           setEdge(null);
           pet.classList.remove('landing', 'happy');
           pet.classList.add('dragging');
           hint.classList.remove('show');
         } else if (message.type === 'dragEnd') {
+          postInteraction('activity');
           pet.classList.remove('dragging');
           if (!reducedMotion) pet.classList.add('landing');
           updatePosition(message);

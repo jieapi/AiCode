@@ -4,11 +4,16 @@ const readline = require('readline');
 
 const SETTINGS_PATH = 'data://pet-settings.json';
 const DEFAULTS = { autoStart: false, width: 110, height: 130, visibilityPolicy: 'always' };
+const IDLE_SLEEP_MS = 3 * 60 * 1000;
+const TOUCH_WAKE_CHANCE = 0.3;
 
 let hostSeq = 0;
 const hostPending = new Map();
 let overlayId = null;
+let overlayGeneration = 0;
 let idleTimer = null;
+let sleepTimer = null;
+let currentState = 'idle';
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -55,6 +60,8 @@ async function boot() {
         visibilityPolicy
       });
       overlayId = info.overlayId;
+      overlayGeneration++;
+      scheduleSleep();
       return { ok: true, overlayId: info.overlayId, width, height };
     } catch (error) {
       lastError = error;
@@ -72,8 +79,28 @@ async function boot() {
   };
 }
 
-async function postState(state) {
+function clearOverlayState() {
+  overlayGeneration++;
+  overlayId = null;
   clearTimeout(idleTimer);
+  clearTimeout(sleepTimer);
+  if (['feeding', 'success', 'error'].includes(currentState)) currentState = 'idle';
+}
+
+function scheduleSleep() {
+  clearTimeout(sleepTimer);
+  sleepTimer = null;
+  if (!overlayId || currentState !== 'idle') return;
+  sleepTimer = setTimeout(() => {
+    postState('sleep');
+  }, IDLE_SLEEP_MS);
+}
+
+async function postState(state) {
+  const generation = overlayGeneration;
+  currentState = state;
+  clearTimeout(idleTimer);
+  scheduleSleep();
   try {
     await hostCall('host.overlay.postMessage', {
       surface: 'pet',
@@ -81,7 +108,9 @@ async function postState(state) {
     });
     return { ok: true, state, logs: ['pet state -> ' + state] };
   } catch (error) {
-    if (error.code === 'OVERLAY_NOT_FOUND') overlayId = null;
+    if (error.code === 'OVERLAY_NOT_FOUND' && generation === overlayGeneration) {
+      clearOverlayState();
+    }
     return {
       ok: false,
       code: error.code || 'POST_FAILED',
@@ -119,12 +148,12 @@ async function handleMenuAction(action) {
     await postState('sleep');
     await postHint('晚安…');
   } else if (action === 'hide') {
+    clearOverlayState();
     try {
       await hostCall('host.overlay.close', { surface: 'pet' });
     } catch (e) {
       // 已关闭。
     }
-    overlayId = null;
   }
   return { ok: true };
 }
@@ -139,22 +168,44 @@ const handlers = {
       ? 'success'
       : (args.status === 'cancelled' ? 'idle' : 'error');
     const result = postState(state);
-    scheduleIdle();
+    if (state !== 'idle') scheduleIdle();
     return result;
   },
   // 配置页手动创建/关闭浮层时同步给常驻进程。
   'overlay.created': (args) => {
     if (args.overlayId) overlayId = String(args.overlayId);
+    overlayGeneration++;
+    scheduleSleep();
     return { ok: true };
   },
   'overlay.closed': () => {
-    overlayId = null;
+    clearOverlayState();
     return { ok: true };
   },
-  // 浮层页面如果回传交互，这里先确认收到；需要状态动画时可在这里扩展。
-  'overlay.message': (args) => {
+  'overlay.message': async (args) => {
     const payload = args.payload || {};
     if (payload.type === 'menuAction') return handleMenuAction(payload.action);
+    if (payload.type === 'petReady') {
+      if (args.overlayId) overlayId = String(args.overlayId);
+      overlayGeneration++;
+      scheduleSleep();
+      return hostCall('host.overlay.postMessage', {
+        surface: 'pet',
+        payload: { type: 'state', state: currentState }
+      });
+    }
+    if (payload.type === 'activity') {
+      scheduleSleep();
+    } else if (payload.type === 'pet') {
+      if (currentState !== 'sleep') {
+        scheduleSleep();
+      } else if (Math.random() < TOUCH_WAKE_CHANCE) {
+        await postState('idle');
+        await postHint('醒啦，陪你一会儿');
+      } else {
+        await postHint('呼噜…');
+      }
+    }
     return { ok: true };
   }
 };

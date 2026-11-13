@@ -103,7 +103,8 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 宿主托管浮层的完整示例：
 
 - 单个 surface：可拖拽的宠物，长按后在下方展开菜单，收起后恢复位置；
-- 眨眼、摆耳、摇尾、拖拽回弹与贴边翻身动画，喂食和休息有独立动作；
+- 眨眼、摆耳、摇尾、拖拽回弹与贴边翻身动画，侧躺时适配窗口留白；
+- 空闲 3 分钟自动休息，睡眠标志只在休息时出现；睡眠时每次抚摸有 30% 概率醒来，喂食和新任务也会唤醒；
 - `app.started` 时按配置创建浮层；
 - `agent.run.started`、`agent.tool.started`、`agent.tool.finished`、`agent.run.finished` 驱动表情；
 - 浮层页面使用 `overlay.self()`、`setDragRegion`、`onMessage`、`postMessage` 与进程通信。

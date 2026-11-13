@@ -84,6 +84,7 @@ function loadPage({ width = 110, height = 130, reducedMotion = false } = {}) {
     console
   }, { filename: 'desktop-pet/pet.html' });
   env.element = element;
+  env.menuActions = () => env.messages.filter(message => message.type === 'menuAction');
   env.click = id => element(id).listeners.click();
   env.open = async () => {
     env.receive({ type: 'longPress' });
@@ -98,12 +99,125 @@ test('菜单与宠物共用固定宽度舞台，贴边旋转使用独立且固�
   assert.match(html, /#stage\s*\{[^}]*width: var\(--pet-width\)/);
   assert.match(html, /\.pet-wrap\s*\{[^}]*width: var\(--pet-width\)/);
   assert.match(html, /\.menu\s*\{[^}]*position: absolute;[^}]*top: calc\(var\(--pet-height\) \+ 8px\)/);
-  assert.match(html, /\.pet-pose\s*\{[^}]*transform-origin: 50% 65%;[^}]*transition: transform/);
+  assert.match(html, /\.pet-pose\s*\{[^}]*transform-origin: 50% 50%;[^}]*transition: transform/);
   for (const edge of ['left', 'right', 'top', 'bottom']) {
     const rule = html.match(new RegExp('\\.pet-wrap\\.edge-' + edge + ' \\.pet-pose\\s*\\{([^}]*)\\}'));
     assert.ok(rule, edge);
     assert.doesNotMatch(rule[1], /transform-origin/);
   }
+});
+
+test('左右贴边后的呼吸、跳跃与落地动作不会裁切耳朵', () => {
+  const rotate = (point, degrees) => {
+    const angle = degrees * Math.PI / 180;
+    return [point[0] * Math.cos(angle) - point[1] * Math.sin(angle),
+      point[0] * Math.sin(angle) + point[1] * Math.cos(angle)];
+  };
+  const transform = (point, source, origin) => {
+    let result = [point[0] - origin[0], point[1] - origin[1]];
+    const functions = [...source.matchAll(/(translateX|translateY|translate|scaleX|scaleY|scale|rotate)\(([^)]*)\)/g)];
+    for (const [, name, args] of functions.reverse()) {
+      const values = args.split(',').map(value => parseFloat(value));
+      if (name === 'rotate') result = rotate(result, values[0]);
+      else if (name === 'translateX') result[0] += values[0];
+      else if (name === 'translateY') result[1] += values[0];
+      else if (name === 'translate') { result[0] += values[0]; result[1] += values[1] || 0; }
+      else if (name === 'scaleX') result[0] *= values[0];
+      else if (name === 'scaleY') result[1] *= values[0];
+      else { result[0] *= values[0]; result[1] *= values[1] == null ? values[0] : values[1]; }
+    }
+    return [result[0] + origin[0], result[1] + origin[1]];
+  };
+  const states = ['translateY(0)'];
+  for (const name of ['breathe', 'hop', 'land', 'think', 'work', 'eat']) {
+    const frames = html.match(new RegExp('@keyframes ' + name + ' \\{([\\s\\S]*?)\\n    \\}'))[1];
+    states.push(...[...frames.matchAll(/transform:\s*([^;]+);/g)].map(match => match[1]));
+  }
+  const radius = [12, 46, 16, 46].map(value => value * 54 / 62);
+  const arcs = [[radius[0], radius[0], 180], [54 - radius[1], radius[1], 270],
+    [54 - radius[2], 66 - radius[2], 0], [radius[3], 66 - radius[3], 90]];
+  const outline = arcs.flatMap(([x, y, start], index) => Array.from({ length: 9 }, (_, step) => {
+    const angle = (start + step * 90 / 8) * Math.PI / 180;
+    return [x + radius[index] * Math.cos(angle), y + radius[index] * Math.sin(angle)];
+  }));
+  const points = [];
+  for (const state of states) {
+    for (const side of ['left', 'right']) {
+      for (const earAngle of [10, 18, 30]) {
+        const origin = side === 'left' ? [40.5, 56.1] : [13.5, 56.1];
+        const ear = side === 'left' ? `rotate(-${earAngle}deg)` : `rotate(${earAngle}deg) scaleX(-1)`;
+        for (const vertex of outline) {
+          let point = transform(vertex, ear, origin);
+          point = [point[0] + (side === 'left' ? 10 : 108), point[1] + 34];
+          points.push({ point: transform(point, state, [85, 190]), state, side });
+        }
+      }
+    }
+  }
+  for (const edge of ['left', 'right']) {
+    const rule = html.match(new RegExp('\\.pet-wrap\\.edge-' + edge + ' \\.pet-pose\\s*\\{([^}]*)\\}'))[1];
+    const pose = rule.match(/translate\(0, 0\) rotate\((-?[\d.]+)deg\) scale\(([\d.]+)\)/);
+    assert.ok(pose);
+    const angle = Number(pose[1]);
+    const sideScale = Number(pose[2]);
+    for (const [width, height] of [[90, 110], [110, 130], [150, 180], [240, 320]]) {
+      const scale = Math.min(width / 170, height / 190) * 0.95;
+      for (let step = 20; step <= 21; step++) {
+        const progress = step / 20;
+        const shrink = 1 + (sideScale - 1) * progress;
+        for (const { point, state, side } of points) {
+          const turned = rotate([(point[0] - 85) * shrink, (point[1] - 95) * shrink], angle * progress);
+          const x = width / 2 + turned[0] * scale;
+          const y = height - 6 + (turned[1] - 95) * scale;
+          assert.ok(x >= 0 && x <= width && y >= 0 && y <= height,
+            `${edge}/${width}x${height}/${side}/${state}/${progress}: (${x}, ${y})`);
+        }
+      }
+    }
+  }
+});
+
+test('睡眠标志仅在睡眠时出现，默认不运行改变透明度的浮动动画', async () => {
+  assert.match(html, /id="sleepMark" hidden aria-hidden="true"/);
+  assert.match(html, /\.pet \.zzz\s*\{[^}]*animation: none/);
+  assert.match(html, /\.pet\.sleep \.zzz\s*\{[^}]*animation: float/);
+  const env = loadPage();
+  await flush();
+  assert.equal(env.element('sleepMark').hidden, true);
+  for (const state of ['sleep', 'idle', 'thinking', 'working', 'feeding', 'success', 'error', 'sleep']) {
+    env.receive({ type: 'state', state });
+    assert.equal(env.element('sleepMark').hidden, state !== 'sleep');
+    assert.equal(env.element('sleepMark').attributes['aria-hidden'], String(state !== 'sleep'));
+  }
+});
+
+test('睡眠时抚摸只上报唤醒尝试，不先播放清醒动作', async () => {
+  const env = loadPage();
+  await flush();
+  assert.equal(env.messages[0].type, 'petReady');
+  env.receive({ type: 'state', state: 'sleep' });
+  env.receive({ type: 'click' });
+  assert.equal(env.messages.at(-1).type, 'pet');
+  assert.equal(env.element('pet').classList.contains('sleep'), true);
+  assert.equal(env.element('pet').classList.contains('happy'), false);
+  assert.equal(env.element('sleepMark').hidden, false);
+  env.receive({ type: 'state', state: 'idle' });
+  assert.equal(env.element('sleepMark').hidden, true);
+});
+
+test('菜单和拖拽交互上报活动，供空闲计时重置', async () => {
+  const env = loadPage();
+  await flush();
+  await env.open();
+  assert.equal(env.messages.at(-1).type, 'activity');
+  env.receive({ type: 'dragStart' });
+  assert.equal(env.messages.at(-1).type, 'activity');
+  env.receive({ type: 'dragEnd', x: 30, y: 40 });
+  assert.equal(env.messages.at(-1).type, 'activity');
+  env.click('menuClose');
+  await flush();
+  assert.equal(env.messages.at(-1).type, 'activity');
+  env.finish();
 });
 
 test('互动动画优先于思考状态，后续状态更新会清理落地动画', async () => {
@@ -157,7 +271,7 @@ for (const action of ['feed', 'sleep', 'hide']) {
     assert.equal(env.info.y, anchor.y - 146);
     const result = env.click(action);
     await flush();
-    assert.equal(env.messages.length, 0);
+    assert.equal(env.menuActions().length, 0);
     assert.equal(env.element('menu').attributes['aria-hidden'], 'true');
     assert.equal(env.element('feed').disabled, true);
     assert.deepEqual(env.resizes.at(-1), {
@@ -165,7 +279,7 @@ for (const action of ['feed', 'sleep', 'hide']) {
     });
     env.finish();
     await result;
-    assert.deepEqual(env.messages, [{ type: 'menuAction', action }]);
+    assert.deepEqual(env.menuActions(), [{ type: 'menuAction', action }]);
     assert.equal(env.info.x, anchor.x);
     assert.equal(env.info.y, anchor.y);
     assert.equal(env.styles.get('--pet-width'), '110px');
@@ -189,10 +303,10 @@ test('展开和收起途中重复点击、长按不会打断尺寸动画或重�
   env.receive({ type: 'longPress' });
   await flush();
   assert.equal(env.resizes.length, 2);
-  assert.equal(env.messages.length, 0);
+  assert.equal(env.menuActions().length, 0);
   env.finish();
   await result;
-  assert.deepEqual(env.messages, [{ type: 'menuAction', action: 'sleep' }]);
+  assert.deepEqual(env.menuActions(), [{ type: 'menuAction', action: 'sleep' }]);
 });
 
 test('菜单展开后拖动并吸附会同步更新收起锚点', async () => {
@@ -226,7 +340,7 @@ test('关闭菜单按钮和点击宠物仅收起，不触发菜单动作', async
   await flush();
   env.finish();
   await flush();
-  assert.equal(env.messages.length, 0);
+  assert.equal(env.menuActions().length, 0);
   assert.equal(env.element('menu').attributes['aria-hidden'], 'true');
 });
 
@@ -249,14 +363,14 @@ test('收起失败保留可操作菜单，不派发动作，重试后可完成',
   await env.open();
   env.failResize = true;
   await env.click('feed');
-  assert.equal(env.messages.length, 0);
+  assert.equal(env.menuActions().length, 0);
   assert.equal(env.element('menu').attributes['aria-hidden'], 'false');
   assert.equal(env.element('feed').disabled, false);
   const result = env.click('feed');
   await flush();
   env.finish();
   await result;
-  assert.deepEqual(env.messages, [{ type: 'menuAction', action: 'feed' }]);
+  assert.deepEqual(env.menuActions(), [{ type: 'menuAction', action: 'feed' }]);
 });
 
 test('拖拽恢复直立、松手回弹、四边贴附与状态动画独立切换', async () => {
@@ -294,14 +408,14 @@ test('减少动态效果时菜单立即完成，交互不依赖 CSS 动画结束
   assert.equal(env.resizes[0].options.animate, false);
   await env.click('feed');
   assert.equal(env.pending, null);
-  assert.deepEqual(env.messages, [{ type: 'menuAction', action: 'feed' }]);
+  assert.deepEqual(env.menuActions(), [{ type: 'menuAction', action: 'feed' }]);
 });
 
 function loadRuntime() {
   let onLine;
   let seq = 0;
   const pending = new Map();
-  const env = { calls: [], timers: new Map() };
+  const env = { calls: [], timers: new Map(), now: 0, random: 0.9 };
   const receive = message => onLine(JSON.stringify(message));
   vm.runInNewContext(runtimeSource, {
     require(name) {
@@ -320,15 +434,22 @@ function loadRuntime() {
             else callback.resolve(message.result);
           } else {
             env.calls.push(message);
-            const respond = () => receive({ id: message.id, result: { ok: true } });
+            const respond = error => receive(error
+              ? { id: message.id, error }
+              : { id: message.id, result: { ok: true } });
             if (env.holdResponse && env.holdResponse(message)) env.releaseResponse = respond;
             else queueMicrotask(respond);
           }
         }
       }
     },
-    setTimeout(callback, delay) { const id = Symbol('timer'); env.timers.set(id, { callback, delay }); return id; },
-    clearTimeout(id) { env.timers.delete(id); }
+    setTimeout(callback, delay) {
+      const id = Symbol('timer');
+      env.timers.set(id, { callback, delay, due: env.now + delay });
+      return id;
+    },
+    clearTimeout(id) { env.timers.delete(id); },
+    Math: Object.assign(Object.create(Math), { random: () => env.random })
   }, { filename: 'desktop-pet/main.js' });
   env.invoke = (handler, args = {}) => new Promise((resolve, reject) => {
     const id = 'invoke-' + (++seq);
@@ -336,6 +457,20 @@ function loadRuntime() {
     receive({ id, method: 'hook.invoke', params: { handler, args } });
   });
   env.action = action => env.invoke('overlay.message', { payload: { type: 'menuAction', action } });
+  env.message = payload => env.invoke('overlay.message', { overlayId: 'demo.desktop-pet:pet', payload });
+  env.advance = async milliseconds => {
+    const target = env.now + milliseconds;
+    for (let step = 0; step < 32; step++) {
+      const next = [...env.timers].filter(([, timer]) => timer.due <= target)
+        .sort((a, b) => a[1].due - b[1].due)[0];
+      if (!next) { env.now = target; return; }
+      env.now = next[1].due;
+      env.timers.delete(next[0]);
+      next[1].callback();
+      await flush();
+    }
+    assert.fail('定时器执行次数超过上限');
+  };
   env.states = () => env.calls.filter(call => call.method === 'host.overlay.postMessage')
     .map(call => call.params.payload).filter(payload => payload.type === 'state').map(payload => payload.state);
   return env;
@@ -387,6 +522,168 @@ for (const phase of ['state', 'hint']) {
     });
   }
 }
+
+test('桌宠显示后空闲满三分钟才自动睡眠', async () => {
+  const env = loadRuntime();
+  await env.message({ type: 'petReady' });
+  assert.deepEqual(env.states(), ['idle']);
+  assert.equal([...env.timers.values()][0].delay, 180000);
+  await env.advance(179999);
+  assert.deepEqual(env.states(), ['idle']);
+  await env.advance(1);
+  assert.deepEqual(env.states(), ['idle', 'sleep']);
+  assert.equal(env.timers.size, 0);
+});
+
+for (const type of ['activity', 'pet']) {
+  test(`${type} 交互会从最后一次活动重新计算三分钟`, async () => {
+    const env = loadRuntime();
+    await env.message({ type: 'petReady' });
+    await env.advance(120000);
+    await env.message({ type });
+    await env.advance(179999);
+    assert.equal(env.states().at(-1), 'idle');
+    await env.advance(1);
+    assert.equal(env.states().at(-1), 'sleep');
+  });
+}
+
+for (const hook of ['hooks.agentRunStarted', 'hooks.agentToolStarted', 'hooks.agentToolFinished']) {
+  test(`${hook} 期间不会自动睡觉，任务完成待机后重新计时`, async () => {
+    const env = loadRuntime();
+    await env.message({ type: 'petReady' });
+    await env.advance(179000);
+    await env.invoke(hook);
+    await env.advance(300000);
+    assert.equal(env.states().includes('sleep'), false);
+    await env.invoke('hooks.agentRunFinished', { status: 'success' });
+    await env.advance(2999);
+    assert.equal(env.states().at(-1), 'success');
+    await env.advance(1);
+    assert.equal(env.states().at(-1), 'idle');
+    await env.advance(180000);
+    assert.equal(env.states().at(-1), 'sleep');
+  });
+}
+
+test('进食结束进入待机后开始三分钟计时', async () => {
+  const env = loadRuntime();
+  await env.message({ type: 'petReady' });
+  await env.action('feed');
+  await env.advance(2999);
+  assert.equal(env.states().at(-1), 'feeding');
+  await env.advance(1);
+  assert.equal(env.states().at(-1), 'idle');
+  await env.advance(180000);
+  assert.equal(env.states().at(-1), 'sleep');
+});
+
+for (const random of [0, 0.299, 0.3, 0.9]) {
+  test(`睡眠抚摸按30%概率唤醒，随机值${random}`, async () => {
+    const env = loadRuntime();
+    env.random = random;
+    await env.message({ type: 'petReady' });
+    await env.action('sleep');
+    await env.message({ type: 'pet' });
+    const awake = random < 0.3;
+    assert.equal(env.states().at(-1), awake ? 'idle' : 'sleep');
+    assert.equal(env.timers.size, awake ? 1 : 0);
+    if (awake) {
+      await env.advance(180000);
+      assert.equal(env.states().at(-1), 'sleep');
+    }
+  });
+}
+
+test('长按、拖动不直接唤醒，明确喂食或新任务会切换状态', async () => {
+  const env = loadRuntime();
+  env.random = 0;
+  await env.message({ type: 'petReady' });
+  await env.action('sleep');
+  await env.message({ type: 'activity' });
+  assert.equal(env.states().at(-1), 'sleep');
+  assert.equal(env.timers.size, 0);
+  await env.action('feed');
+  assert.equal(env.states().at(-1), 'feeding');
+  await env.action('sleep');
+  await env.invoke('hooks.agentRunStarted');
+  assert.equal(env.states().at(-1), 'thinking');
+  assert.equal(env.timers.size, 0);
+});
+
+test('页面重新就绪会同步已有睡眠状态，关闭后停止定时器', async () => {
+  const env = loadRuntime();
+  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.action('sleep');
+  await env.message({ type: 'petReady' });
+  assert.deepEqual(env.states(), ['sleep', 'sleep']);
+  await env.action('feed');
+  await env.invoke('overlay.closed');
+  assert.equal(env.timers.size, 0);
+  await env.advance(300000);
+  assert.equal(env.states().at(-1), 'feeding');
+});
+
+for (const state of ['feeding', 'success', 'error']) {
+  test(`${state} 期间关闭再重开会回到待机并自动睡眠`, async () => {
+    const env = loadRuntime();
+    await env.message({ type: 'petReady' });
+    if (state === 'feeding') await env.action('feed');
+    else await env.invoke('hooks.agentRunFinished', { status: state === 'success' ? 'success' : 'failed' });
+    await env.invoke('overlay.closed');
+    await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+    await env.message({ type: 'petReady' });
+    assert.equal(env.states().at(-1), 'idle');
+    assert.equal(env.timers.size, 1);
+    await env.advance(180000);
+    assert.equal(env.states().at(-1), 'sleep');
+  });
+}
+
+test('旧窗口迟到的不存在错误不会取消新窗口的空闲计时', async () => {
+  const env = loadRuntime();
+  await env.message({ type: 'petReady' });
+  env.holdResponse = call => call.params.payload && call.params.payload.state === 'feeding';
+  const feeding = env.action('feed');
+  await flush();
+  const release = env.releaseResponse;
+  env.holdResponse = null;
+  await env.invoke('overlay.closed');
+  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.message({ type: 'petReady' });
+  release({ code: 'OVERLAY_NOT_FOUND', message: 'old overlay closed' });
+  await feeding;
+  assert.equal(env.states().at(-1), 'idle');
+  assert.equal(env.timers.size, 1);
+  await env.advance(180000);
+  assert.equal(env.states().at(-1), 'sleep');
+});
+
+test('隐藏请求迟到回包不会清除重新显示后的空闲计时', async () => {
+  const env = loadRuntime();
+  await env.message({ type: 'petReady' });
+  env.holdResponse = call => call.method === 'host.overlay.close';
+  const hiding = env.action('hide');
+  await flush();
+  const release = env.releaseResponse;
+  env.holdResponse = null;
+  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.message({ type: 'petReady' });
+  release();
+  await hiding;
+  await env.message({ type: 'pet' });
+  await env.advance(180000);
+  assert.equal(env.states().at(-1), 'sleep');
+});
+
+test('隐藏桌宠会同时清除待机与睡眠定时器', async () => {
+  const env = loadRuntime();
+  await env.message({ type: 'petReady' });
+  await env.action('hide');
+  assert.equal(env.timers.size, 0);
+  await env.advance(300000);
+  assert.equal(env.states().at(-1), 'idle');
+});
 
 test('新一轮思考和工具工作不会被上一轮的定时器覆盖', async () => {
   const env = loadRuntime();

@@ -255,7 +255,7 @@ const handlers = {
 
 ## 示例
 
-`plugin-samples/desktop-pet` 演示单 surface：宠物会眨眼、摆耳、摇尾，拖拽松手有落地回弹，靠近屏幕边缘后以翻身动画贴边。长按宠物会在下方展开菜单，点喂食、休息或关闭按钮后收起；菜单展开和收起时保持宠物宽度与大小，动画完成后再执行喂食或休息，并恢复展开前的位置。喂食时会低头咀嚼，休息时闭眼并放慢呼吸。该示例声明了 `app.started`、`agent.run.started`、`agent.tool.started`、`agent.tool.finished`、`agent.run.finished` 五个只读 hook，以 AI 运行状态驱动宠物表情。
+`plugin-samples/desktop-pet` 演示单 surface：宠物会眨眼、摆耳、摇尾，拖拽松手有落地回弹，靠近屏幕边缘后以翻身动画贴边。长按宠物会在下方展开菜单，点喂食、休息或关闭按钮后收起；菜单展开和收起时保持宠物宽度与大小，动画完成后再执行喂食或休息，并恢复展开前的位置。喂食时会低头咀嚼，休息时闭眼并放慢呼吸，睡眠标志仅在休息时出现。连续空闲 3 分钟会自动休息，抚摸、拖动和菜单操作会重计空闲时间；思考、工作和进食期间不计时。睡眠时每次抚摸有 30% 概率醒来，未醒来则继续睡；喂食或新任务会切换到相应状态。该示例声明了 `app.started`、`agent.run.started`、`agent.tool.started`、`agent.tool.finished`、`agent.run.finished` 五个只读 hook，以 AI 运行状态驱动宠物表情。
 
 `plugin-samples/background-approval` 演示后台审批：`app.started` 时创建悬浮球，`agent.permission.review` 收到审批请求后将悬浮球展开为面板；App 在前台时直接返回 `pass`，交回应用内确认框。
 
