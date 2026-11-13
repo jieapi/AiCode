@@ -62,7 +62,21 @@ object PluginThemeTokens {
         "--aicode-switch-track" to if (isDark(scheme)) "#334155" else "#E2E8F0",
         "--aicode-switch-thumb" to if (isDark(scheme)) "#F8FAFC" else "#FFFFFF",
         "--aicode-font-sans" to "system-ui, -apple-system, \"Noto Sans CJK SC\", sans-serif",
-        "--aicode-font-mono" to "ui-monospace, \"Roboto Mono\", monospace"
+        "--aicode-font-mono" to "ui-monospace, \"Roboto Mono\", monospace",
+        "--aicode-text-field-border" to if (isDark(scheme)) {
+            scheme.outlineVariant.copy(alpha = 0.6f).toCss()
+        } else {
+            scheme.outlineVariant.toCss()
+        },
+        "--aicode-text-field-focused-bg" to if (isDark(scheme)) {
+            scheme.surfaceVariant.copy(alpha = 0.8f).toCss()
+        } else {
+            semantic.cardSurface.toCss()
+        },
+        "--aicode-text-field-disabled-border" to scheme.outlineVariant
+            .copy(alpha = if (isDark(scheme)) 0.3f else 0.5f).toCss(),
+        "--aicode-text-field-disabled-text" to scheme.onSurface.copy(alpha = 0.38f).toCss(),
+        "--aicode-dialog-surface" to scheme.surfaceContainerHigh.toCss()
     )
 
     fun css(variables: Map<String, String>): String =

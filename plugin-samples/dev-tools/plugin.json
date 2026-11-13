@@ -5,7 +5,7 @@
     "default": "Dev Tools",
     "zh-CN": "开发工具"
   },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "community",
   "repository": "https://github.com/community/dev-tools",
   "description": {

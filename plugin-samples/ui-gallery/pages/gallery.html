@@ -146,7 +146,9 @@
     <aicode-group title="底部弹窗与对话框">
       <aicode-row title="打开底部弹窗" subtitle="AicodeBottomSheet · 下拉或点击小白条关闭" @click="sheetOpen = true"></aicode-row>
       <aicode-divider></aicode-divider>
-      <aicode-row title="打开确认对话框" subtitle="AicodeDialog" @click="dialogOpen = true"></aicode-row>
+      <aicode-row title="打开输入弹窗" subtitle="名称输入与保存" @click="dialogName = name; inputDialogOpen = true"></aicode-row>
+      <aicode-divider></aicode-divider>
+      <aicode-row title="打开文字确认弹窗" subtitle="说明文字与确认操作" @click="dialogOpen = true"></aicode-row>
     </aicode-group>
 
     <p class="demo-hint">页面里所有组件都来自宿主注入的 AicodeUI，插件不需要打包 Vue 或组件代码。</p>
@@ -157,6 +159,14 @@
       AdaptiveModalBottomSheet 一致。</p>
     <aicode-button variant="primary" @click="sheetOpen = false">关闭</aicode-button>
   </aicode-bottom-sheet>
+
+  <aicode-dialog v-model="inputDialogOpen" title="修改名称"
+    confirm-text="保存" cancel-text="取消" :confirm-disabled="!dialogName.trim()"
+    @confirm="name = dialogName; toast('已保存')">
+    <aicode-field label="名称">
+      <aicode-input v-model="dialogName" placeholder="输入名称"></aicode-input>
+    </aicode-field>
+  </aicode-dialog>
 
   <aicode-dialog v-model="dialogOpen" title="确认操作"
     message="这是宿主提供的确认对话框，样式与 App 的 AlertDialog 一致。"
@@ -185,6 +195,8 @@
           content: '',
           scope: 'project',
           sheetOpen: false,
+          inputDialogOpen: false,
+          dialogName: '',
           dialogOpen: false,
           markdown: '# 标题\n\n- 列表项\n- **粗体**\n\n```\ncode\n```'
         };
