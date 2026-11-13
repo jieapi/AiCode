@@ -5,6 +5,7 @@ import com.aicode.feature.plugin.domain.PluginHook
 import com.aicode.feature.plugin.domain.PluginHookEvents
 import com.aicode.feature.plugin.domain.PluginHookModes
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.plugin.overlay.AppForegroundMonitor
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -35,7 +36,8 @@ import java.util.UUID
 @Singleton
 class PluginHookDispatcher @Inject constructor(
     private val pluginManager: PluginManager,
-    private val runtime: PluginRuntimeManager
+    private val runtime: PluginRuntimeManager,
+    private val appForegroundMonitor: AppForegroundMonitor
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -381,7 +383,7 @@ class PluginHookDispatcher @Inject constructor(
         if (sessionId == null) return PermissionReviewHookResult(PermissionReviewDecision.PASS)
         val targets = hooksFor(PluginHookEvents.AGENT_PERMISSION_REVIEW, PluginHookModes.REVIEW)
         if (targets.isEmpty()) return PermissionReviewHookResult(PermissionReviewDecision.PASS)
-        val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
+        val deadline = System.currentTimeMillis() + REVIEW_TOTAL_TIMEOUT_MS
         for ((version, hook) in targets) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
@@ -397,8 +399,9 @@ class PluginHookDispatcher @Inject constructor(
                 put("callId", callId)
                 put("toolName", toolName)
                 put("arguments", arguments)
+                put("appForeground", appForegroundMonitor.current())
             }
-            val result = invokeTransform(version, hook, payload, remaining) ?: continue
+            val result = invokeTransform(version, hook, payload, remaining, REVIEW_HOOK_TIMEOUT_MS) ?: continue
             val review = PluginHookTransform.parseReview(result)
             if (review == null) {
                 FileLogger.w(TAG, "忽略格式错误的代审核返回值: ${hook.pluginId}/${hook.localId}")
@@ -444,7 +447,8 @@ class PluginHookDispatcher @Inject constructor(
         version: String,
         hook: PluginHook,
         payload: JsonObject,
-        timeoutMs: Long
+        timeoutMs: Long,
+        maxTimeoutMs: Long = TRANSFORM_HOOK_TIMEOUT_MS
     ): JsonElement? = try {
         val result = runtime.invoke(
             pluginId = hook.pluginId,
@@ -453,7 +457,7 @@ class PluginHookDispatcher @Inject constructor(
             handler = hook.handler,
             args = payload,
             method = "hook.invoke",
-            timeoutMs = timeoutMs.coerceAtMost(TRANSFORM_HOOK_TIMEOUT_MS)
+            timeoutMs = timeoutMs.coerceAtMost(maxTimeoutMs)
         )
         writeHookLogs(hook, result)
         result
@@ -541,6 +545,10 @@ class PluginHookDispatcher @Inject constructor(
         const val HOOK_TIMEOUT_MS = 30_000L
         const val TRANSFORM_HOOK_TIMEOUT_MS = 10_000L
         const val TRANSFORM_TOTAL_TIMEOUT_MS = 20_000L
+
+        /** 代审核等的是人：给用户离开手机后回来的时间，但仍保留有界等待。 */
+        const val REVIEW_HOOK_TIMEOUT_MS = 5 * 60_000L
+        const val REVIEW_TOTAL_TIMEOUT_MS = 5 * 60_000L
         const val MAX_LOG_LINES = 50
         const val MAX_LOG_CHARS = 500
         const val DEFAULT_DENY_REASON = "插件阻止了该工具调用"

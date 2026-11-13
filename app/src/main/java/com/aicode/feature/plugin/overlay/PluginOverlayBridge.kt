@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
@@ -38,7 +39,7 @@ internal class PluginOverlayBridge(
     private val onPageMessage: (JsonElement) -> Unit,
     private val onClose: () -> Unit
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -88,7 +89,7 @@ internal class PluginOverlayBridge(
             if (policy !in VISIBILITY_POLICIES) {
                 throw PluginHostException("PARAM_INVALID", "unsupported visibility policy: $policy")
             }
-            mainHandler.post { window.setVisibilityPolicy(policy) }
+            window.setVisibilityPolicy(policy)
             JsonNull
         }
 
@@ -105,14 +106,14 @@ internal class PluginOverlayBridge(
             if (width <= 0f || height <= 0f) {
                 throw PluginHostException("PARAM_INVALID", "drag region must be positive")
             }
-            mainHandler.post { window.setDragRegion(RectF(left, top, left + width, top + height)) }
+            window.setDragRegion(RectF(left, top, left + width, top + height))
             JsonNull
         }
 
         "overlay.moveBy" -> {
             val dx = (params["dx"] as? JsonPrimitive)?.floatOrNull ?: 0f
             val dy = (params["dy"] as? JsonPrimitive)?.floatOrNull ?: 0f
-            mainHandler.post { window.moveBy(dx, dy) }
+            window.moveBy(dx, dy)
             JsonNull
         }
 
@@ -124,7 +125,13 @@ internal class PluginOverlayBridge(
             ) {
                 throw PluginHostException("PARAM_INVALID", "overlay size out of range")
             }
-            mainHandler.post { window.resize(width, height) }
+            val animate = (params["animate"] as? JsonPrimitive)?.booleanOrNull ?: false
+            val x = if (params.containsKey("x")) requireFloat(params, "x") else null
+            val y = if (params.containsKey("y")) requireFloat(params, "y") else null
+            if (x?.isFinite() == false || y?.isFinite() == false) {
+                throw PluginHostException("PARAM_INVALID", "overlay position must be finite")
+            }
+            window.resize(width, height, animate, x, y)
             buildJsonObject {
                 put("width", width)
                 put("height", height)

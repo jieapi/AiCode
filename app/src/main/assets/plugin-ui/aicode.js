@@ -204,8 +204,14 @@
         return call('overlay.moveBy', { dx: Number(dx) || 0, dy: Number(dy) || 0 });
       },
       // 浮层页面调整自身尺寸，单位为 CSS 像素（dp）。
-      resize: function (width, height) {
-        return call('overlay.resize', { width: Number(width) || 0, height: Number(height) || 0 });
+      resize: function (width, height, options) {
+        var params = { width: Number(width) || 0, height: Number(height) || 0 };
+        if (options) {
+          params.animate = options.animate === true;
+          if (options.x != null) params.x = Number(options.x);
+          if (options.y != null) params.y = Number(options.y);
+        }
+        return call('overlay.resize', params);
       },
       // 浮层页面设置可见性策略：always / foreground / background。
       setVisibilityPolicy: function (policy) {

@@ -1,7 +1,11 @@
 package com.aicode.feature.plugin.overlay
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
@@ -10,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.animation.PathInterpolator
 import android.webkit.WebView
 import android.widget.FrameLayout
 import kotlinx.serialization.json.JsonElement
@@ -18,6 +23,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.json.JSONObject
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 /**
  * 单个插件浮层的窗口内容：透明 WebView + 可拖拽手柄。
@@ -40,6 +46,7 @@ internal class PluginOverlayWindow(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val dragHandle = View(context)
+    private val contentView = FrameLayout(context)
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val density = resources.displayMetrics.density
     private var bridge: PluginOverlayBridge? = null
@@ -47,12 +54,16 @@ internal class PluginOverlayWindow(
     private var visibilityPolicy = initialVisibilityPolicy
     private var appForeground = initialForeground
     private var requestedVisible = true
+    private var resizeAnimator: ValueAnimator? = null
+    private var logicalWidthDp = (layoutParams.width / density).toInt()
+    private var logicalHeightDp = (layoutParams.height / density).toInt()
 
     private var downRawX = 0f
     private var downRawY = 0f
     private var startX = 0
     private var startY = 0
     private var dragging = false
+    private var touchActive = false
     private var longPressFired = false
 
     private val longPressRunnable = Runnable {
@@ -64,9 +75,10 @@ internal class PluginOverlayWindow(
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
-        addView(webView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(contentView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        contentView.addView(webView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         dragHandle.setBackgroundColor(Color.TRANSPARENT)
-        addView(
+        contentView.addView(
             dragHandle,
             LayoutParams(layoutParams.width, layoutParams.height).apply {
                 gravity = Gravity.TOP or Gravity.START
@@ -97,8 +109,8 @@ internal class PluginOverlayWindow(
         put("pluginId", pluginId)
         put("width", widthDp())
         put("height", heightDp())
-        put("x", (layoutParams.x / density).toInt())
-        put("y", (layoutParams.y / density).toInt())
+        put("x", (layoutParams.x + contentView.translationX) / density)
+        put("y", (layoutParams.y + contentView.translationY) / density)
         put("density", density)
         put("draggable", draggable)
         put("visibilityPolicy", visibilityPolicy)
@@ -129,31 +141,102 @@ internal class PluginOverlayWindow(
     }
 
     /** 插件运行时调整窗口尺寸；尺寸单位为 dp，页面会收到 resize 消息。 */
-    fun resize(widthDp: Int, heightDp: Int) {
-        val oldWidth = widthDp()
-        val oldHeight = heightDp()
+    fun resize(
+        widthDp: Int,
+        heightDp: Int,
+        animate: Boolean = false,
+        x: Float? = null,
+        y: Float? = null
+    ) {
+        resizeAnimator?.cancel()
+        mainHandler.removeCallbacks(longPressRunnable)
+        touchActive = false
+        dragging = false
+        dragHandle.isPressed = false
+        val fromWidth = contentView.clipBounds?.width() ?: layoutParams.width
+        val fromHeight = contentView.clipBounds?.height() ?: layoutParams.height
+        val fromX = (layoutParams.x + contentView.translationX).roundToInt()
+        val fromY = (layoutParams.y + contentView.translationY).roundToInt()
+        val toWidth = (widthDp * density).toInt().coerceAtLeast(1)
+        val toHeight = (heightDp * density).toInt().coerceAtLeast(1)
+        val metrics = resources.displayMetrics
+        val toX = (x?.times(density) ?: fromX.toFloat()).roundToInt()
+            .coerceIn(0, (metrics.widthPixels - toWidth).coerceAtLeast(0))
+        val toY = (y?.times(density) ?: fromY.toFloat()).roundToInt()
+            .coerceIn(0, (metrics.heightPixels - toHeight).coerceAtLeast(0))
         val wasFull = dragRegionCss.left <= 0f &&
             dragRegionCss.top <= 0f &&
-            dragRegionCss.right >= oldWidth &&
-            dragRegionCss.bottom >= oldHeight
-        layoutParams.width = (widthDp * density).toInt().coerceAtLeast(1)
-        layoutParams.height = (heightDp * density).toInt().coerceAtLeast(1)
-        if (wasFull) {
-            dragRegionCss = RectF(0f, 0f, widthDp.toFloat(), heightDp.toFloat())
-        } else {
-            dragRegionCss.right = dragRegionCss.right.coerceAtMost(widthDp.toFloat())
-            dragRegionCss.bottom = dragRegionCss.bottom.coerceAtMost(heightDp.toFloat())
+            dragRegionCss.right >= widthDp() &&
+            dragRegionCss.bottom >= heightDp()
+        logicalWidthDp = widthDp
+        logicalHeightDp = heightDp
+
+        fun finishResize() {
+            layoutParams.width = toWidth
+            layoutParams.height = toHeight
+            layoutParams.x = toX
+            layoutParams.y = toY
+            contentView.translationX = 0f
+            contentView.translationY = 0f
+            contentView.clipBounds = null
+            if (wasFull) dragRegionCss = RectF(0f, 0f, widthDp.toFloat(), heightDp.toFloat())
+            applyDragRegion()
+            runCatching { windowManager.updateViewLayout(this, layoutParams) }
+            if (x != null || y != null) onPositionChanged(layoutParams.x, layoutParams.y)
+            postMessage(
+                buildJsonObject {
+                    put("type", "resize")
+                    put("width", widthDp)
+                    put("height", heightDp)
+                    put("x", layoutParams.x / density)
+                    put("y", layoutParams.y / density)
+                }
+            )
         }
-        applyDragRegion()
-        clampPosition()
+
+        if (!animate || visibility != View.VISIBLE) {
+            finishResize()
+            return
+        }
+        // 系统窗口重布局代价高；动画期间仅更新内容裁剪与平移。
+        val envelopeX = minOf(fromX, toX)
+        val envelopeY = minOf(fromY, toY)
+        layoutParams.x = envelopeX
+        layoutParams.y = envelopeY
+        layoutParams.width = maxOf(fromX + fromWidth, toX + toWidth) - envelopeX
+        layoutParams.height = maxOf(fromY + fromHeight, toY + toHeight) - envelopeY
+        contentView.translationX = (fromX - envelopeX).toFloat()
+        contentView.translationY = (fromY - envelopeY).toFloat()
+        contentView.clipBounds = Rect(0, 0, fromWidth, fromHeight)
         runCatching { windowManager.updateViewLayout(this, layoutParams) }
-        postMessage(
-            buildJsonObject {
-                put("type", "resize")
-                put("width", widthDp)
-                put("height", heightDp)
+        resizeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = RESIZE_DURATION_MS
+            interpolator = PathInterpolator(.2f, 0f, 0f, 1f)
+            addUpdateListener {
+                val fraction = it.animatedValue as Float
+                contentView.translationX = fromX - envelopeX + (toX - fromX) * fraction
+                contentView.translationY = fromY - envelopeY + (toY - fromY) * fraction
+                contentView.clipBounds = Rect(
+                    0,
+                    0,
+                    (fromWidth + (toWidth - fromWidth) * fraction).roundToInt(),
+                    (fromHeight + (toHeight - fromHeight) * fraction).roundToInt()
+                )
             }
-        )
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    if (resizeAnimator === animation) resizeAnimator = null
+                    if (!cancelled) finishResize()
+                }
+            })
+        }
+        resizeAnimator?.start()
     }
 
     private fun applyDragRegion() {
@@ -171,11 +254,12 @@ internal class PluginOverlayWindow(
         dragHandle.requestLayout()
     }
 
-    private fun widthDp(): Int = (layoutParams.width / density).toInt()
+    private fun widthDp(): Int = logicalWidthDp
 
-    private fun heightDp(): Int = (layoutParams.height / density).toInt()
+    private fun heightDp(): Int = logicalHeightDp
 
     fun moveBy(dx: Float, dy: Float) {
+        resizeAnimator?.end()
         layoutParams.x += (dx * density).toInt()
         layoutParams.y += (dy * density).toInt()
         clampPosition()
@@ -194,6 +278,7 @@ internal class PluginOverlayWindow(
             "background" -> !appForeground
             else -> true
         }
+        if (!visible) resizeAnimator?.end()
         visibility = if (visible) View.VISIBLE else View.GONE
         if (visible) webView.onResume() else webView.onPause()
     }
@@ -209,6 +294,9 @@ internal class PluginOverlayWindow(
     }
 
     fun dispose() {
+        resizeAnimator?.cancel()
+        resizeAnimator = null
+        mainHandler.removeCallbacks(longPressRunnable)
         bridge?.close()
         bridge = null
         dragHandle.setOnTouchListener(null)
@@ -216,8 +304,12 @@ internal class PluginOverlayWindow(
     }
 
     private fun onDragTouch(event: MotionEvent): Boolean {
+        if (resizeAnimator?.isRunning == true ||
+            (event.actionMasked != MotionEvent.ACTION_DOWN && !touchActive)
+        ) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touchActive = true
                 downRawX = event.rawX
                 downRawY = event.rawY
                 startX = layoutParams.x
@@ -249,6 +341,7 @@ internal class PluginOverlayWindow(
             }
 
             MotionEvent.ACTION_UP -> {
+                touchActive = false
                 mainHandler.removeCallbacks(longPressRunnable)
                 dragHandle.isPressed = false
                 if (dragging) {
@@ -268,6 +361,7 @@ internal class PluginOverlayWindow(
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                touchActive = false
                 mainHandler.removeCallbacks(longPressRunnable)
                 dragHandle.isPressed = false
                 dragging = false
@@ -291,6 +385,7 @@ internal class PluginOverlayWindow(
 
     private companion object {
         const val LONG_PRESS_MS = 520L
+        const val RESIZE_DURATION_MS = 280L
     }
 }
 

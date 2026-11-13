@@ -216,6 +216,7 @@ class PluginRuntimeManager @Inject constructor(
             "host.fs.list" -> paths.list(PluginHostPaths.requireString(params, "path"))
             "host.fs.delete" -> paths.delete(PluginHostPaths.requireString(params, "path"))
             "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
+            "host.app.isForeground" -> JsonPrimitive(overlayManager.isAppForeground())
             "host.bash" -> bash(params)
             "host.notify" -> notifier.notify(pluginId, params)
             "host.shizuku.exec" -> shizukuExec(pluginId, params)

@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Background Approval</title>
+  <script src="/__aicode/aicode.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    * { box-sizing: border-box; }
+    .shell {
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 316px;
+      height: 276px;
+      overflow: hidden;
+      border-radius: 18px;
+      clip-path: inset(0 272px 232px 0 round 22px);
+      background: #3d6deb;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+      transition: clip-path .28s cubic-bezier(.2, 0, 0, 1), background .28s ease;
+    }
+    .shell.expanded {
+      clip-path: inset(0 round 18px);
+      background: rgba(28, 30, 38, .98);
+    }
+    .mark {
+      position: absolute;
+      z-index: 1;
+      left: 0;
+      top: 0;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .mark svg { width: 22px; height: 22px; }
+    .badge {
+      position: absolute;
+      z-index: 2;
+      top: 0;
+      left: 26px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 20px;
+      background: #f05d69;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 16px;
+      text-align: center;
+      opacity: 0;
+      transform: scale(.6);
+      transition: opacity .12s ease, transform .18s ease;
+    }
+    .badge.show { opacity: 1; transform: scale(1); }
+    .shell.expanded .badge { opacity: 0; transform: scale(.6); }
+    .panel {
+      width: 316px;
+      height: 276px;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(6px);
+      transition: opacity .09s ease, transform .18s ease;
+    }
+    .shell.expanded.ready .panel {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+      transition: opacity .16s ease, transform .2s ease;
+    }
+    .header {
+      flex: none;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      padding: 0 4px 0 46px;
+      gap: 8px;
+    }
+    .heading { flex: 1; min-width: 0; }
+    .title { font-size: 13px; font-weight: 600; }
+    .subtitle {
+      margin-top: 2px;
+      color: rgba(255, 255, 255, .5);
+      font-size: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    button {
+      border: 0;
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background .15s ease, transform .12s ease, opacity .15s ease;
+    }
+    button:active { transform: scale(.96); }
+    button:focus-visible { outline: 2px solid #adc4ff; outline-offset: -3px; }
+    button:disabled { opacity: .5; cursor: default; }
+    .collapse {
+      flex: none;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: transparent;
+    }
+    .collapse:active { background: rgba(255, 255, 255, .1); }
+    .collapse svg { width: 18px; height: 18px; }
+    .body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px 12px 0;
+    }
+    .tool {
+      flex: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: rgba(255, 255, 255, .65);
+      font: 600 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    pre {
+      flex: 1;
+      min-height: 0;
+      margin: 0;
+      overflow: auto;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .065);
+      color: rgba(255, 255, 255, .85);
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overscroll-behavior: contain;
+    }
+    .actions { flex: none; display: flex; gap: 8px; padding: 12px; }
+    .actions button { flex: 1; height: 42px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+    .deny { background: rgba(255, 255, 255, .1); }
+    .allow { background: #3d7eff; }
+    .empty {
+      margin: auto;
+      color: rgba(255, 255, 255, .5);
+      font-size: 12px;
+      line-height: 1.8;
+      text-align: center;
+    }
+    .empty strong { display: block; color: rgba(255, 255, 255, .8); font-size: 13px; }
+    [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell" id="shell">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/>
+        <path d="M8.5 12.2l2.3 2.3 4.7-4.7"/>
+      </svg>
+    </div>
+    <span class="badge" id="badge">0</span>
+    <div class="panel" id="panel" aria-hidden="true">
+      <div class="header">
+        <div class="heading">
+          <div class="title" id="title">后台审批</div>
+          <div class="subtitle" id="subtitle">暂无待审批</div>
+        </div>
+        <button class="collapse" id="collapse" aria-label="收起审批面板" title="收起">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg>
+        </button>
+      </div>
+      <div class="body">
+        <div class="empty" id="empty"><strong>暂无待审批请求</strong>有新的授权请求时会自动展开。<br>拖动标题栏可以移动面板。</div>
+        <div class="tool" id="toolName" hidden></div>
+        <pre id="preview" hidden></pre>
+      </div>
+      <div class="actions" id="actions" hidden>
+        <button class="deny" id="deny" disabled>拒绝</button>
+        <button class="allow" id="allow" disabled>同意</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var BALL_SIZE = 48;
+      var PANEL_WIDTH = 320;
+      var PANEL_HEIGHT = 280;
+      var shell = document.getElementById('shell');
+      var panel = document.getElementById('panel');
+      var badge = document.getElementById('badge');
+      var title = document.getElementById('title');
+      var subtitle = document.getElementById('subtitle');
+      var toolName = document.getElementById('toolName');
+      var preview = document.getElementById('preview');
+      var empty = document.getElementById('empty');
+      var actions = document.getElementById('actions');
+      var deny = document.getElementById('deny');
+      var allow = document.getElementById('allow');
+      var request = null;
+      var count = 0;
+      var initialized = false;
+      var expanded = false;
+      var transitioning = false;
+      var submitting = false;
+      var foreground = false;
+      var minimizedRequestId = null;
+      var ballAnchor = null;
+      var panelOrigin = null;
+      var density = 1;
+      var transitionSeq = 0;
+      var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function post(payload) {
+        return aicode.overlay.postMessage(payload);
+      }
+
+      function updateButtons() {
+        deny.disabled = allow.disabled = !request || submitting || transitioning || !expanded || foreground;
+      }
+
+      function updateDragRegion() {
+        return aicode.overlay.setDragRegion({
+          left: 0,
+          top: 0,
+          width: expanded ? PANEL_WIDTH - 48 : BALL_SIZE,
+          height: BALL_SIZE
+        });
+      }
+
+      async function setExpanded(value) {
+        if (!initialized || expanded === value) return;
+        expanded = value;
+        transitioning = true;
+        var seq = ++transitionSeq;
+        shell.classList.remove('ready');
+        panel.setAttribute('aria-hidden', 'true');
+        updateButtons();
+        try {
+          shell.classList.toggle('expanded', value);
+          await updateDragRegion();
+          if (seq !== transitionSeq) return;
+          await aicode.overlay.resize(value ? PANEL_WIDTH : BALL_SIZE, value ? PANEL_HEIGHT : BALL_SIZE, {
+            animate: !reducedMotion,
+            x: !value && ballAnchor ? ballAnchor.x : null,
+            y: !value && ballAnchor ? ballAnchor.y : null
+          });
+        } catch (error) {
+          if (seq !== transitionSeq) return;
+          transitioning = false;
+          expanded = false;
+          shell.classList.remove('expanded', 'ready');
+          updateButtons();
+          if (request) post({ type: 'displayError', requestId: request.requestId }).catch(function () {});
+        }
+      }
+
+      function render(changed) {
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.classList.toggle('show', count > 0);
+        title.textContent = request ? '审批请求' : '后台审批';
+        subtitle.textContent = request
+          ? (count > 1 ? count + ' 项待审批' : '等待你的确认') + (request.agentName ? ' · ' + request.agentName : '')
+          : '暂无待审批';
+        toolName.hidden = preview.hidden = actions.hidden = !request;
+        empty.hidden = !!request;
+        if (changed) {
+          toolName.textContent = request ? request.toolName : '';
+          preview.textContent = request ? request.preview : '';
+          preview.scrollTop = 0;
+          submitting = false;
+          deny.textContent = '拒绝';
+          allow.textContent = '同意';
+        }
+        updateButtons();
+      }
+
+      function applyState(message) {
+        var previousId = request && request.requestId;
+        request = message.request || null;
+        count = Math.max(0, Number(message.count) || 0);
+        var changed = previousId !== (request && request.requestId);
+        render(changed);
+        if (request && request.requestId !== minimizedRequestId && !foreground) {
+          void setExpanded(true);
+        } else if (!request && previousId) {
+          minimizedRequestId = null;
+          void setExpanded(false);
+        }
+      }
+
+      function decide(decision) {
+        if (!request || submitting || transitioning || !expanded || foreground) return;
+        var requestId = request.requestId;
+        submitting = true;
+        updateButtons();
+        if (decision === 'allow') allow.textContent = '已同意';
+        else deny.textContent = '已拒绝';
+        post({ type: 'decision', requestId: requestId, decision: decision }).catch(function () {
+          if (!request || request.requestId !== requestId) return;
+          submitting = false;
+          deny.textContent = '拒绝';
+          allow.textContent = '同意';
+          updateButtons();
+        });
+      }
+
+      document.getElementById('collapse').addEventListener('click', function () {
+        minimizedRequestId = request && request.requestId;
+        void setExpanded(false);
+      });
+      deny.addEventListener('click', function () { decide('deny'); });
+      allow.addEventListener('click', function () { decide('allow'); });
+
+      aicode.overlay.onMessage(function (message) {
+        if (!message) return;
+        if (message.type === 'approvalState') {
+          applyState(message);
+        } else if (message.type === 'click' && !expanded && !transitioning) {
+          minimizedRequestId = null;
+          void setExpanded(true);
+          if (count > 0) post({ type: 'ballClick' }).catch(function () {});
+        } else if (message.type === 'resize') {
+          var targetWidth = expanded ? PANEL_WIDTH : BALL_SIZE;
+          var targetHeight = expanded ? PANEL_HEIGHT : BALL_SIZE;
+          if (message.width !== targetWidth || message.height !== targetHeight) return;
+          transitioning = false;
+          shell.classList.toggle('ready', expanded);
+          panel.setAttribute('aria-hidden', String(!expanded));
+          if (expanded) {
+            panelOrigin = { x: message.x, y: message.y };
+          } else {
+            ballAnchor = { x: message.x, y: message.y };
+          }
+          updateButtons();
+          updateDragRegion().catch(function () {});
+        } else if (message.type === 'dragEnd') {
+          var position = { x: message.x / density, y: message.y / density };
+          if (expanded && panelOrigin && ballAnchor) {
+            ballAnchor.x += position.x - panelOrigin.x;
+            ballAnchor.y += position.y - panelOrigin.y;
+            panelOrigin = position;
+          } else if (!expanded) {
+            ballAnchor = position;
+          }
+        } else if (message.type === 'appState') {
+          foreground = message.foreground === true;
+          if (foreground) {
+            void setExpanded(false);
+            post({ type: 'foreground' }).catch(function () {});
+          } else if (request && request.requestId !== minimizedRequestId) {
+            void setExpanded(true);
+          }
+          updateButtons();
+        }
+      });
+
+      (async function () {
+        try {
+          var self = await aicode.overlay.self();
+          density = self.density;
+          foreground = self.foreground === true;
+          ballAnchor = { x: self.x, y: self.y };
+          await aicode.overlay.resize(BALL_SIZE, BALL_SIZE);
+          await updateDragRegion();
+          initialized = true;
+          if (request && !foreground) void setExpanded(true);
+          await post({ type: 'ballReady' });
+        } catch (error) {
+          if (request) post({ type: 'displayError', requestId: request.requestId }).catch(function () {});
+        }
+      })();
+    })();
+  </script>
+</body>
+</html>

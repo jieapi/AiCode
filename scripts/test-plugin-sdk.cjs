@@ -304,6 +304,24 @@ test('write forwards contextKey in its third argument and preserves path/content
   assert.equal(await legacy, null);
 });
 
+test('overlay.resize preserves immediate calls and forwards optional animated movement', async () => {
+  const harness = loadSdk();
+  const immediate = harness.sdk.overlay.resize('48', '48');
+  const first = harness.requests[0];
+  assert.equal(first.method, 'overlay.resize');
+  assert.deepEqual(first.params, { width: 48, height: 48 });
+  harness.resolve(first, { width: 48, height: 48 });
+  await immediate;
+
+  const options = { animate: true, x: 24.5, y: 12 };
+  const animated = harness.sdk.overlay.resize(320, 280, options);
+  const second = harness.requests[1];
+  assert.deepEqual(second.params, { width: 320, height: 280, animate: true, x: 24.5, y: 12 });
+  assert.deepEqual(options, { animate: true, x: 24.5, y: 12 });
+  harness.resolve(second, { width: 320, height: 280 });
+  await animated;
+});
+
 test('ui.lifecycle continues reaching events.on before, during and after a file subscription', async () => {
   const harness = loadSdk();
   const lifecycle = [];

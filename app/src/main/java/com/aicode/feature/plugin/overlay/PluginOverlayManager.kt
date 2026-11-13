@@ -3,6 +3,7 @@ package com.aicode.feature.plugin.overlay
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
@@ -174,6 +175,43 @@ class PluginOverlayManager @Inject constructor(
         }
     }
 
+    fun reloadPlugin(pluginId: String) {
+        scope.launch {
+            val granted = permissionRepository.isGranted(pluginId) && Settings.canDrawOverlays(context)
+            val plugin = pluginManager.plugins.value.firstOrNull { it.id == pluginId && it.isActive }
+            if (!granted || plugin == null) {
+                closePlugin(pluginId)
+                return@launch
+            }
+            windows.values.filter { it.pluginId == pluginId }.forEach { window ->
+                val surface = plugin.content.overlay?.surfaces?.firstOrNull { it.key == window.overlayId }
+                val previous = window.describe()
+                val policy = window.visibilityPolicy()
+                if (!windows.remove(window.overlayId, window)) return@forEach
+                detachWindow(window, stopServiceIfEmpty = false)
+                if (surface != null) {
+                    runCatching {
+                        createWindow(
+                            surface = surface,
+                            params = buildJsonObject {
+                                put("x", previous.getValue("x"))
+                                put("y", previous.getValue("y"))
+                            },
+                            widthDp = surface.width,
+                            heightDp = surface.height,
+                            visibilityPolicy = policy,
+                            savedPosition = null
+                        )
+                    }.onFailure { FileLogger.w(TAG, "reload overlay failed: ${window.overlayId}", it) }
+                }
+            }
+            if (windows.isEmpty() && serviceStarted) {
+                serviceStarted = false
+                runCatching { context.stopService(Intent(context, PluginOverlayService::class.java)) }
+            }
+        }
+    }
+
     fun closeAll() {
         mainHandler.post { closeAllInternal() }
     }
@@ -273,6 +311,10 @@ class PluginOverlayManager @Inject constructor(
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // 内容已完成位移，系统窗口收尾时不再叠加移动动画。
+                setCanPlayMoveAnimation(false)
+            }
             x = (params["x"] as? JsonPrimitive)?.intOrNull ?: savedPosition?.x ?: defaultX(widthPx)
             y = (params["y"] as? JsonPrimitive)?.intOrNull ?: savedPosition?.y ?: defaultY(heightPx)
             x = x.coerceIn(0, (context.resources.displayMetrics.widthPixels - widthPx).coerceAtLeast(0))
@@ -322,11 +364,11 @@ class PluginOverlayManager @Inject constructor(
         detachWindow(window)
     }
 
-    private fun detachWindow(window: PluginOverlayWindow) {
+    private fun detachWindow(window: PluginOverlayWindow, stopServiceIfEmpty: Boolean = true) {
         runCatching { windowManager.removeViewImmediate(window) }
             .onFailure { FileLogger.w(TAG, "remove overlay failed: ${window.overlayId}", it) }
         window.dispose()
-        if (windows.isEmpty()) {
+        if (stopServiceIfEmpty && windows.isEmpty()) {
             serviceStarted = false
             runCatching { context.stopService(Intent(context, PluginOverlayService::class.java)) }
         }

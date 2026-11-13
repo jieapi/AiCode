@@ -239,6 +239,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 宿主 → 插件 | `hook.invoke` | `params: {handler, args}`，返回 `result` |
 | 宿主 → 插件 | `ui.invoke` | 插件页面调用常驻进程：`params: {handler, args}`，返回 `result` |
 | 插件 → 宿主 | `host.fs.read/write/list/stat/delete` | 四个根：`data://`、`plugin://`、`workspace://`、`aicode://` |
+| 插件 → 宿主 | `host.app.isForeground` | 返回 App 当前是否处于前台（有 Activity 处于 STARTED）；不传参数 |
 | 插件 → 宿主 | `host.bash` | `params: {command, timeout}`，在当前工作区执行 |
 | 插件 → 宿主 | `host.terminal.run` / `poll` / `stop` / `close` | 创建、轮询、停止、关闭共享终端标签，参数与页面桥 `terminal.*` 一致 |
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
@@ -381,7 +382,7 @@ const handlers = {
 | `agent.tool.before` | `callId`、`toolName`、`arguments` |
 | `agent.tool.after` | `callId`、`toolName`、`status=success`、`data` |
 | `agent.http.before` | `url`、`method`、`headers`、`body`（不带头部的公共字段） |
-| `agent.permission.review` | `callId`、`toolName`、`arguments` |
+| `agent.permission.review` | `callId`、`toolName`、`arguments`、`appForeground` |
 
 只读事件的 payload 里**没有**消息正文、工具参数、工具结果和模型输出；可写事件会提供它要处理的参数或结果快照。
 
@@ -438,7 +439,9 @@ const handlers = {
 - 插件不能改工具参数，也不能覆盖宿主已经做出的 DENY、ALLOW/自动放行或 PLAN 模式限制；
 - 已开放全部 ASK：Shizuku、`elevate` 提权、配置修改、删除子代理、危险 rm 都可代审；`planMode` 模式切换仍由本人处理；插件不能代审自己提供的工具。
 
-多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个看到前一个改写后的值。单次调用上限 10 秒，一次拦截合计上限 20 秒；超时、异常或返回值格式不合法时跳过该 hook 并保持当前值，**不会因此自动放行或自动拒绝**。代审核同样是顺序执行、首个 allow/deny 生效；超时或异常按 `pass` 继续，最终无人处理时回到用户确认。
+多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个看到前一个改写后的值。单次调用上限 10 秒，一次拦截合计上限 20 秒；超时、异常或返回值格式不合法时跳过该 hook 并保持当前值，**不会因此自动放行或自动拒绝**。代审核同样是顺序执行、首个 allow/deny 生效；单次最多等待 5 分钟、总预算 5 分钟，超时或异常按 `pass` 继续，最终无人处理时回到用户确认。
+
+需要用户在后台确认时，插件可以创建 `visibilityPolicy: "background"` 的浮层并轮询 `host.app.isForeground`；App 回到前台后应返回 `pass`，把请求交回应用内确认框，避免审批一直挂到超时。
 
 ### 调试输出
 
@@ -593,7 +596,7 @@ stopLifecycle();
 | `aicode.overlay.close(overlayId)` | 关闭指定浮层；浮层页面内可省略 id 关闭自身 |
 | `aicode.overlay.self()` | 浮层页面读取自身 id、尺寸、位置与密度 |
 | `aicode.overlay.setDragRegion({left,top,width,height})` | 浮层页面声明宿主接管拖拽的区域，单位为 CSS 像素 |
-| `aicode.overlay.resize(width, height)` | 浮层页面调整自身窗口尺寸，单位为 CSS 像素（dp） |
+| `aicode.overlay.resize(width, height, options?)` | 浮层页面调整自身窗口尺寸，单位为 CSS 像素（dp）；`options` 可指定 `{animate: true, x, y}`，在同一次变形中平滑调整尺寸与位置 |
 | `aicode.overlay.setVisibilityPolicy(policy)` | 浮层页面设置显示时机：`always` / `foreground` / `background` |
 | `aicode.app.isForeground()` | 返回 App 当前是否处于前台（有 Activity 处于 STARTED） |
 | `aicode.overlay.moveBy(dx, dy)` | 浮层页面请求移动窗口 |
@@ -631,7 +634,7 @@ stopLifecycle();
 }
 ```
 
-`width/height` 只是默认值，插件可以在 `overlay.create()` 或 `overlay.update()` 里按需指定；宿主接受 48–720dp 宽、48–1200dp 高，超出会报 `PARAM_INVALID`。浮层页面用 `aicode.overlay.resize(width, height)` 调整自身尺寸，并会收到 `{type:"resize", width, height}` 消息。
+`width/height` 只是默认值，插件可以在 `overlay.create()` 或 `overlay.update()` 里按需指定；宿主接受 48–720dp 宽、48–1200dp 高，超出会报 `PARAM_INVALID`。浮层页面用 `aicode.overlay.resize(width, height, options?)` 调整自身尺寸；传入 `{animate: true}` 时，宿主在原窗口内用 280ms 同步过渡尺寸与位置，页面不会重新加载。系统窗口只在变形开始和结束时调整布局，中间通过内容裁剪与平移过渡；Android 14 及以上会关闭系统额外的位置过渡，使收尾直接停在目标位置；页面宜使用固定内容尺寸配合裁剪和渐显，避免在动画中反复排版。`options.x/y` 是目标位置，单位与 `self()` 中的位置相同，均为 dp；宿主会自动把目标窗口限制在屏幕范围内。变形完成后页面收到 `{type:"resize", width, height, x, y}`，其中位置为最终 dp 坐标；调用返回不代表动画已经结束。未传动画选项时立即调整，窗口不可见时也直接完成。新的尺寸请求会从当前状态继续，关闭窗口时停止动画。
 
 `visibilityPolicy` 由插件决定，宿主不预设业务：`always` 始终显示，`foreground` 仅在 App 前台显示，`background` 仅在 App 后台显示。App 前后台以 `ProcessLifecycleOwner` 为准；插件也可以用 `aicode.app.isForeground()` 自行判断。
 

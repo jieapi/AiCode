@@ -5,6 +5,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,12 +28,19 @@ class PluginToolManager @Inject constructor(
     private val pluginManager: PluginManager,
     private val toolRegistry: ToolRegistry,
     private val runtime: PluginRuntimeManager,
-    private val terminalRunner: PluginTerminalRunner
+    private val terminalRunner: PluginTerminalRunner,
+    private val overlayManager: PluginOverlayManager
 ) {
     private val started = AtomicBoolean(false)
     private val registeredLock = Any()
     private val registeredNames = mutableSetOf<String>()
-    private var activePluginIds = emptySet<String>()
+    private var activePluginRevisions = emptyMap<String, InstallRevision>()
+
+    private data class InstallRevision(
+        val version: String,
+        val installedAt: Long,
+        val archiveSha256: String
+    )
 
     fun start(scope: CoroutineScope) {
         if (!started.compareAndSet(false, true)) return
@@ -46,11 +54,8 @@ class PluginToolManager @Inject constructor(
     }
 
     private fun sync(plugins: List<InstalledPlugin>) {
-        plugins.filter { it.isActive }.forEach { plugin ->
-            plugin.content.runtime?.let { runtime.closeOtherVersions(plugin.id, plugin.record.version) }
-        }
-        val desired = plugins
-            .filter { it.isActive }
+        val activePlugins = plugins.filter { it.isActive }
+        val desired = activePlugins
             .flatMap { plugin ->
                 val manifest = plugin.manifest ?: return@flatMap emptyList()
                 plugin.content.runtime ?: return@flatMap emptyList()
@@ -70,15 +75,26 @@ class PluginToolManager @Inject constructor(
             }
             .distinctBy { it.name }
 
-        val currentActiveIds = plugins
-            .filter { it.isActive && it.content.runtime != null }
-            .map { it.id }
-            .toSet()
-        (activePluginIds - currentActiveIds).forEach {
-            runtime.closePlugin(it)
-            terminalRunner.closePlugin(it)
+        val currentRevisions = activePlugins.associate { plugin ->
+            plugin.id to InstallRevision(
+                version = plugin.record.version,
+                installedAt = plugin.record.installedAt,
+                archiveSha256 = plugin.record.archiveSha256
+            )
         }
-        activePluginIds = currentActiveIds
+        (activePluginRevisions.keys - currentRevisions.keys).forEach { pluginId ->
+            runtime.closePlugin(pluginId)
+            terminalRunner.closePlugin(pluginId)
+            overlayManager.closePlugin(pluginId)
+        }
+        currentRevisions.forEach { (pluginId, revision) ->
+            val previous = activePluginRevisions[pluginId]
+            if (previous != null && previous != revision) {
+                runtime.closePlugin(pluginId)
+                overlayManager.reloadPlugin(pluginId)
+            }
+        }
+        activePluginRevisions = currentRevisions
 
         val desiredNames = desired.map { it.name }.toSet()
         synchronized(registeredLock) {

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Approval Panel</title>
+  <script src="/__aicode/aicode.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card {
+      position: absolute;
+      inset: 0;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-radius: 18px;
+      background: rgba(28, 30, 36, .96);
+      color: #fff;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .34), inset 0 0 0 1px rgba(255, 255, 255, .07);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .header {
+      flex: none;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, .09);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffb84d;
+      box-shadow: 0 0 0 3px rgba(255, 184, 77, .16);
+    }
+    .title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .subtitle {
+      margin-left: auto;
+      font-size: 11px;
+      color: rgba(255, 255, 255, .5);
+    }
+    .body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 14px 0;
+    }
+    .tool {
+      flex: none;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .58);
+    }
+    .tool b {
+      color: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+    }
+    pre {
+      flex: 1;
+      min-height: 0;
+      margin: 0;
+      overflow: auto;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .07);
+      color: rgba(255, 255, 255, .86);
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .actions {
+      flex: none;
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px 14px;
+    }
+    button {
+      flex: 1;
+      height: 42px;
+      border: 0;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    button:active {
+      filter: brightness(1.15);
+    }
+    button:disabled {
+      opacity: .55;
+    }
+    .deny {
+      background: rgba(255, 255, 255, .12);
+      color: #fff;
+    }
+    .allow {
+      background: #3d7eff;
+      color: #fff;
+    }
+    .empty {
+      margin: auto;
+      text-align: center;
+      color: rgba(255, 255, 255, .5);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .empty strong {
+      display: block;
+      margin-bottom: 4px;
+      color: rgba(255, 255, 255, .8);
+      font-size: 13px;
+    }
+    #content {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #content[hidden], .empty[hidden] {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header" id="header">
+      <span class="dot"></span>
+      <span class="title">审批请求</span>
+      <span class="subtitle">后台</span>
+    </div>
+    <div class="body">
+      <div class="empty" id="empty">
+        <strong>暂无待审批请求</strong>
+        App 回到前台后会显示应用内确认框。
+      </div>
+      <div id="content" hidden>
+        <div class="tool">工具 <b id="toolName">-</b></div>
+        <pre id="preview"></pre>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="deny" id="deny" disabled>拒绝</button>
+      <button class="allow" id="allow" disabled>同意</button>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var currentRequestId = null;
+      var submitting = false;
+      var toolName = document.getElementById('toolName');
+      var preview = document.getElementById('preview');
+      var empty = document.getElementById('empty');
+      var content = document.getElementById('content');
+      var deny = document.getElementById('deny');
+      var allow = document.getElementById('allow');
+
+      function setButtons(enabled) {
+        deny.disabled = !enabled;
+        allow.disabled = !enabled;
+      }
+
+      function showRequest(request) {
+        currentRequestId = request.requestId;
+        submitting = false;
+        toolName.textContent = request.toolName || '-';
+        preview.textContent = request.preview || '{}';
+        empty.hidden = true;
+        content.hidden = false;
+        setButtons(true);
+      }
+
+      function decide(decision) {
+        if (!currentRequestId || submitting) return;
+        submitting = true;
+        setButtons(false);
+        aicode.overlay.postMessage({
+          type: 'decision',
+          requestId: currentRequestId,
+          decision: decision
+        }).catch(function () {
+          submitting = false;
+          setButtons(true);
+        });
+      }
+
+      function updateDragRegion(width) {
+        var dragWidth = Number(width) > 0 ? Number(width) : document.documentElement.clientWidth;
+        if (dragWidth <= 0) return;
+        aicode.overlay.setDragRegion({
+          left: 0,
+          top: 0,
+          width: dragWidth,
+          height: 46
+        }).catch(function () {});
+      }
+
+      // 先收缩到标题栏，避免宿主默认整窗拖拽区域挡住按钮。
+      updateDragRegion(document.documentElement.clientWidth);
+
+      (async function () {
+        try {
+          var self = await aicode.overlay.self();
+          updateDragRegion(self.width);
+        } catch (error) {
+          // 保留按页面宽度计算的拖拽区域。
+        }
+        try {
+          if (await aicode.app.isForeground()) {
+            aicode.overlay.postMessage({ type: 'foreground' }).catch(function () {});
+          }
+        } catch (error) {
+          // 宿主不支持查询时依赖轮询与 appState 消息。
+        }
+        aicode.overlay.postMessage({ type: 'panelReady' }).catch(function () {});
+      })();
+
+      deny.addEventListener('click', function () { decide('deny'); });
+      allow.addEventListener('click', function () { decide('allow'); });
+
+      aicode.overlay.onMessage(function (message) {
+        if (!message) return;
+        if (message.type === 'request' && message.request) {
+          showRequest(message.request);
+        } else if (message.type === 'appState' && message.foreground === true) {
+          aicode.overlay.postMessage({ type: 'foreground' }).catch(function () {});
+        } else if (message.type === 'resize' && message.width) {
+          updateDragRegion(message.width);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
