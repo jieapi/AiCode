@@ -1,0 +1,303 @@
+# 插件页面与宿主接口
+
+插件使用 HTML/WebView 构建界面，共有三种入口：工作区工具、设置页入口、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
+
+## 三种页面
+
+| 类型 | 声明位置 | 入口 | 典型用途 |
+| --- | --- | --- | --- |
+| 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉，用户添加后打开 | 构建、清理、部署、项目状态 |
+| 设置页入口 | `contributes.settingsPages` | 设置页对应分组末尾 | 记忆管理、全局配置、工具面板 |
+| 插件配置页 | `configPage` | 「设置 → 插件」的插件详情中 | 插件自身的参数、密钥、开关 |
+
+三种页面使用同一套桥和主题，区别在于入口位置与生命周期。
+
+### 工作区工具
+
+```json
+{
+  "contributes": {
+    "workspaceTools": [
+      {
+        "id": "build-apk",
+        "title": {"default": "Build APK", "zh-CN": "构建 APK"},
+        "description": {"default": "Build the current project.", "zh-CN": "构建当前项目。"},
+        "icon": "hammer",
+        "category": "构建",
+        "pageFile": "pages/build-apk.html"
+      }
+    ]
+  }
+}
+```
+
+用户可在右侧项目工具抽屉中添加并打开页面。页面通过桥读写数据、执行命令或发送事件；命令与文件操作仅在用户打开页面并点击对应操作后发生。
+
+短命令使用 `aicode.bash` 同步执行；需要后台运行、实时输出或停止时，使用 `aicode.terminal.run` 创建共享标签，再通过 `terminal.poll(tabId, offset)` 按偏移读取增量输出、`terminal.stop` 发送 Ctrl-C、`terminal.close` 关闭。标签默认不在终端页显示；用户在「设置 → 终端设置 → 显示插件运行」开启后才可见。标签归属于创建它的插件，其他插件与 AI 的终端工具不得操作。
+
+### 设置页入口
+
+```json
+{
+  "contributes": {
+    "settingsPages": [
+      {
+        "id": "memory",
+        "title": {"zh-CN": "记忆管理", "en": "Memory"},
+        "anchor": "settings.ai",
+        "page": "pages/memory.html",
+        "icon": "book"
+      }
+    ]
+  }
+}
+```
+
+`anchor` 仅可取下列值，宿主据此将入口放入对应分组：
+
+| 值 | 分组 |
+| --- | --- |
+| `settings.general` | 通用 |
+| `settings.ai` | AI 配置 |
+| `settings.environment` | 运行环境 |
+| `settings.permissions` | 权限与后台 |
+| `settings.data` | 数据与诊断 |
+| `settings.help` | 帮助与关于 |
+
+安装后，设置页对应分组末尾将显示入口，副标题标明插件来源；停用或卸载插件后入口消失。入口按声明顺序展示，超出限制的部分将被忽略。
+
+### 插件配置页
+
+```json
+{
+  "contributes": {
+    "configPage": "pages/config.html"
+  }
+}
+```
+
+配置页仅出现在「设置 → 插件」的插件详情中，与启停、卸载等原生项通过分段控件切换，不会混入设置主菜单。配置页随插件启用而加载，适用于填写 API Key、开关和选项。
+
+## 加载资源
+
+页面中引用宿主提供的脚本和样式：
+
+```html
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <script src="/__aicode/aicode.js"></script>
+</head>
+<body>
+  <main id="app"></main>
+</body>
+</html>
+```
+
+`/__aicode/theme.css` 提供跟随 App 主题的 CSS 变量，`/__aicode/aicode.js` 注入 `window.aicode`。页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截。
+
+页面文件最大 512 KiB。`settingsPages` 和 `workspaceTools` 的 `pageFile`/`page` 必须是包内 `.html`/`.htm`。
+
+## 宿主接口
+
+所有方法均返回 Promise。失败时 reject 一个包含 `code` 与 `message` 的 Error。
+
+### 基础
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.context()` | 返回 `pluginId`、`pageId`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible` |
+| `aicode.toast(message)` | 轻量提示 |
+| `aicode.tip({title?, text, action?{label, handler}})` | 在对话中显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
+| `aicode.app.isForeground()` | App 当前是否处于前台（有 Activity 处于 STARTED） |
+| `aicode.ui.close()` | 退出插件页并返回设置页 |
+| `aicode.ui.setOverlay(visible, rect)` | 打开或关闭页面内全屏弹层并上报矩形；宿主在全局背景图上按矩形挖孔 |
+| `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理，返回注销函数 |
+| `aicode.applyTheme(variables)` | 设置 CSS 变量并派发 `aicode:theme` 事件 |
+
+### 文件
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.fs.read(path, options?)` | 读取文件，返回 `{content, size}` |
+| `aicode.fs.write(path, content, options?)` | 原子写入文件 |
+| `aicode.fs.list(path, options?)` | 列出目录，返回 `{entries: [{name, isDir, size}]}` |
+| `aicode.fs.delete(path, options?)` | 删除文件或目录 |
+| `aicode.fs.stat(path, options?)` | 返回 `{exists, isDir, size}` |
+| `aicode.fs.watch(path, options?, handler)` | 订阅文件来源变化，Promise 解析为取消订阅函数 |
+
+路径必须以虚拟根开头：
+
+| 根 | 位置 | 读写 |
+| --- | --- | --- |
+| `data://` | 插件自身的数据目录，卸载时清理 | 读写 |
+| `plugin://` | 插件安装目录 | 只读 |
+| `workspace://` | 当前工作区 | 读写 |
+| `aicode://` | 全局 `.aicode` 目录 | 读写 |
+
+单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。`aicode://` 下的 `plugins/`、`permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 禁止访问。
+
+文件方法可在最后一个 `options` 参数中传入 `{contextKey}`。上下文已经变化时请求返回 `STALE_CONTEXT`，用于拦截仍在排队的旧项目操作：
+
+```js
+const ctx = await aicode.context();
+const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.contextKey});
+```
+
+### 命令与终端
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.bash(command, options?)` | 在当前工作区执行一次性命令，返回 `{output, exitCode, truncated}`；`options.timeout` 以秒计，默认 30、上限 300 |
+| `aicode.terminal.run(command, options?)` | 创建共享终端标签，返回 `{tabId, state}`；`options.title` 可选 |
+| `aicode.terminal.poll(tabId, offset)` | 返回 `{output, offset, state, exitCode?, truncated}`；`state` 为 `running` / `finished` / `cancelled` |
+| `aicode.terminal.stop(tabId)` | 发送 Ctrl-C；2 秒仍未退出则关闭标签 |
+| `aicode.terminal.close(tabId)` | 关闭标签 |
+
+`aicode.bash` 适用于版本检测、状态查询等短命令，不应启动常驻进程或交互式程序。命令执行环境的初始化由终端页负责；未初始化时退出码为 `null`，输出中会包含引导提示。
+
+终端输出按偏移轮询；宿主仅保留最近 128 KiB，超出后 `truncated` 为 true。关闭页面不会停止命令；插件停用或卸载时，宿主将关闭其创建的全部标签。
+
+### 进程调用
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.invoke(handler, args)` | 调用同一插件常驻进程的 handler，返回其 `result` |
+
+仅允许调用当前页面对应插件的进程，不可跨插件。宿主会按需启动插件 runtime，单次等待上限为 60 秒。插件进程需处理 `ui.invoke`。
+
+### Shizuku
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；`options.timeout` 以秒计 |
+
+需要插件声明 `contributes.shizuku`，且使用者已在插件详情中单独授权。系统中的 Shizuku 服务须正在运行。
+
+### 浮层
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.overlay.create({surface?, width?, height?, visibilityPolicy?})` | 创建清单声明的系统浮层，返回 `{overlayId, width, height, ...}` |
+| `aicode.overlay.update(overlayId, {width?, height?, visible?, visibilityPolicy?, dx?, dy?})` | 更新浮层尺寸、位置、可见性或显示时机 |
+| `aicode.overlay.close(overlayId)` | 关闭指定浮层；浮层页面内可省略 id 关闭自身 |
+| `aicode.overlay.self()` | 浮层页面读取自身 id、尺寸、位置与密度 |
+| `aicode.overlay.setDragRegion({left, top, width, height})` | 浮层页面声明宿主接管拖拽的区域，单位为 CSS 像素 |
+| `aicode.overlay.resize(width, height, options?)` | 浮层页面调整自身尺寸，单位为 dp；`options` 可指定 `{animate: true, x, y}` |
+| `aicode.overlay.setVisibilityPolicy(policy)` | 设置显示时机：`always` / `foreground` / `background` |
+| `aicode.overlay.moveBy(dx, dy)` | 请求移动窗口 |
+| `aicode.overlay.onMessage(handler)` | 接收宿主消息：`state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress` |
+| `aicode.overlay.postMessage(payload)` | 将交互回传至插件进程的 `overlay.message` handler |
+
+浮层页面不得调用 Shizuku、Shell 或终端。详见[系统浮层](/advanced/plugin/overlay)。
+
+### 事件
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.events.on(handler)` | 监听插件进程推送的事件和宿主生命周期事件，返回取消订阅函数 |
+
+事件包括插件进程发送的 `plugin.event`、文件订阅的 `fs.changed`，以及页面的 `ui.lifecycle`。详细用法参见[页面样式、组件与事件](/advanced/plugin/ui-components)。
+
+## 返回键
+
+返回键按以下顺序处理：
+
+1. WebView 自身历史（如 hash 路由）；
+2. `aicode.ui.onBack` 注册的处理器，后注册的优先；
+3. 退出插件页。
+
+页面存在多层视图时，使用 `onBack` 接管返回；回到最外层时返回 `false`，交由宿主退出。顶栏自绘的返回按钮应在首页调用 `aicode.ui.close()`，在子页调用自身的路由返回。
+
+```js
+const off = aicode.ui.onBack(() => {
+  if (drawerOpen) {
+    drawerOpen = false;
+    return true;
+  }
+  return false;
+});
+```
+
+## 页面与进程
+
+页面与 AI 工具运行在同一插件的容器进程体系中：
+
+- 页面具有 DOM 与桥，可使用 `aicode.invoke` 调用同插件进程的 `ui.invoke`；
+- AI 工具 handler 不具备 DOM；
+- 页面不可直接访问容器文件系统，必须通过 `aicode.fs` 或由进程代为处理；
+- 关闭页面不会停止进程；进程空闲 10 分钟后才会回收（`resident` 除外）。
+
+适合在页面中实现的逻辑：表单、列表、预览、配置、需要用户点击确认的操作。适合在进程中实现的逻辑：文件处理、长命令、网络请求、需要跨页面共享的状态。
+
+## 完整示例：配置页
+
+```html
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <script src="/__aicode/aicode.js"></script>
+</head>
+<body>
+  <main class="page">
+    <h2>插件设置</h2>
+    <label>
+      服务地址
+      <input id="endpoint" placeholder="https://example.com">
+    </label>
+    <button id="save">保存</button>
+    <p id="status"></p>
+  </main>
+
+  <script>
+    const endpoint = document.getElementById('endpoint');
+    const status = document.getElementById('status');
+
+    async function load() {
+      const result = await aicode.fs.read('data://config.json').catch(() => null);
+      if (result) {
+        try {
+          endpoint.value = JSON.parse(result.content).endpoint || '';
+        } catch (e) {
+          status.textContent = '配置格式损坏';
+        }
+      }
+    }
+
+    document.getElementById('save').addEventListener('click', async () => {
+      await aicode.fs.write('data://config.json', JSON.stringify({endpoint: endpoint.value.trim()}, null, 2));
+      status.textContent = '已保存';
+      aicode.toast('配置已保存');
+    });
+
+    load();
+  </script>
+
+  <style>
+    .page {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+  </style>
+</body>
+</html>
+```
+
+`data://` 是插件自身的数据目录，卸载时清理；需要在卸载后保留的配置应放在 `aicode://` 下插件自身的命名空间内，并避开受保护路径。
+
+## 限制
+
+- 页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截；
+- 设置页入口在插件停用后消失，页面请求将被拒绝；
+- `settingsPages`、`workspaceTools`、`configPage` 的页面都必须是包内 HTML，单文件最大 512 KiB；
+- 页面不可绕过宿主桥直接读取容器文件；
+- 外部样式和脚本不会加载，资源须打包进插件。

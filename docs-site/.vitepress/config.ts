@@ -199,7 +199,24 @@ export default defineConfig({
           text: '扩展开发',
           items: [
             { text: '自定义面板', link: '/advanced/dashboard-cards' },
-            { text: '开发插件', link: '/advanced/plugin-development' }
+            {
+              text: '插件开发',
+              collapsed: false,
+              items: [
+                { text: '总览与能力清单', link: '/advanced/plugin/' },
+                { text: '快速开始', link: '/advanced/plugin/quick-start' },
+                { text: 'plugin.json 清单参考', link: '/advanced/plugin/manifest' },
+                { text: '技能、子代理与 MCP', link: '/advanced/plugin/skills-agents-mcp' },
+                { text: 'AI 工具与插件运行时', link: '/advanced/plugin/tools-runtime' },
+                { text: '生命周期 Hooks', link: '/advanced/plugin/hooks' },
+                { text: '插件页面与宿主接口', link: '/advanced/plugin/ui-pages' },
+                { text: '页面样式、组件与事件', link: '/advanced/plugin/ui-components' },
+                { text: '系统浮层', link: '/advanced/plugin/overlay' },
+                { text: 'Shizuku 与插件提供商', link: '/advanced/plugin/shizuku-providers' },
+                { text: '打包、导入与排错', link: '/advanced/plugin/packaging' },
+                { text: '示例库', link: '/advanced/plugin/examples' }
+              ]
+            }
           ]
         }
       ]
