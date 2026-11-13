@@ -17,13 +17,18 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
@@ -41,11 +46,29 @@ class PluginOverlayException(val code: String, message: String) : Exception(mess
 class PluginOverlayManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
-    private val permissionRepository: PluginOverlayPermissionRepository
+    private val permissionRepository: PluginOverlayPermissionRepository,
+    private val appForegroundMonitor: AppForegroundMonitor
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
     private val windows = ConcurrentHashMap<String, PluginOverlayWindow>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    init {
+        scope.launch {
+            appForegroundMonitor.isForeground.collect { foreground ->
+                windows.values.forEach { window ->
+                    window.onAppForegroundChanged(foreground)
+                    window.postMessage(
+                        buildJsonObject {
+                            put("type", "appState")
+                            put("foreground", foreground)
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     @Volatile
     private var serviceStarted = false
@@ -69,6 +92,8 @@ class PluginOverlayManager @Inject constructor(
 
     fun hasOverlays(): Boolean = windows.isNotEmpty()
 
+    fun isAppForeground(): Boolean = appForegroundMonitor.current()
+
     suspend fun create(
         pluginId: String,
         surfaceId: String?,
@@ -89,9 +114,15 @@ class PluginOverlayManager @Inject constructor(
         if (!Settings.canDrawOverlays(context)) {
             throw PluginOverlayException("OVERLAY_SYSTEM_PERMISSION_MISSING", "system overlay permission is not granted")
         }
-        windows[surface.key]?.let { return it.describe() }
         val widthDp = readSize(params, "width", surface.width, PluginOverlayLimits.MAX_WIDTH_DP)
         val heightDp = readSize(params, "height", surface.height, PluginOverlayLimits.MAX_HEIGHT_DP)
+        val visibilityPolicy = readVisibilityPolicy(params, "visibilityPolicy", "always")
+        windows[surface.key]?.let { existing ->
+            if (existing.visibilityPolicy() != visibilityPolicy) {
+                mainHandler.post { existing.setVisibilityPolicy(visibilityPolicy) }
+            }
+            return existing.describe()
+        }
         val perPlugin = windows.values.count { it.pluginId == pluginId }
         if (perPlugin >= MAX_SURFACES_PER_PLUGIN) {
             throw PluginOverlayException("OVERLAY_LIMIT", "too many overlays for this plugin")
@@ -102,7 +133,7 @@ class PluginOverlayManager @Inject constructor(
 
         ensureService()
         return withContext(Dispatchers.Main.immediate) {
-            createWindow(surface, params, widthDp, heightDp)
+            createWindow(surface, params, widthDp, heightDp, visibilityPolicy)
         }
     }
 
@@ -168,6 +199,11 @@ class PluginOverlayManager @Inject constructor(
         if (visible != null) {
             mainHandler.post { window.setVisible(visible) }
         }
+        val visibilityPolicy = (params["visibilityPolicy"] as? JsonPrimitive)?.contentOrNull
+        if (visibilityPolicy != null) {
+            val policy = validateVisibilityPolicy(visibilityPolicy)
+            mainHandler.post { window.setVisibilityPolicy(policy) }
+        }
         return buildJsonObject { put("ok", true) }
     }
 
@@ -175,7 +211,8 @@ class PluginOverlayManager @Inject constructor(
         surface: PluginOverlaySurface,
         params: JsonObject,
         widthDp: Int,
-        heightDp: Int
+        heightDp: Int,
+        visibilityPolicy: String
     ): JsonObject {
         val density = context.resources.displayMetrics.density
         val widthPx = (widthDp * density).toInt().coerceAtLeast(1)
@@ -218,7 +255,9 @@ class PluginOverlayManager @Inject constructor(
             windowManager = windowManager,
             layoutParams = layoutParams,
             webView = webView,
-            draggable = surface.draggable
+            draggable = surface.draggable,
+            initialVisibilityPolicy = visibilityPolicy,
+            initialForeground = appForegroundMonitor.current()
         )
         val bridge = PluginOverlayBridge(
             pluginId = surface.pluginId,
@@ -284,9 +323,24 @@ class PluginOverlayManager @Inject constructor(
         return value
     }
 
+    private fun readVisibilityPolicy(params: JsonObject, key: String, default: String): String {
+        val raw = params[key] ?: return default
+        val value = (raw as? JsonPrimitive)?.contentOrNull
+            ?: throw PluginOverlayException("PARAM_INVALID", "$key must be a string")
+        return validateVisibilityPolicy(value)
+    }
+
+    private fun validateVisibilityPolicy(value: String): String {
+        if (value !in VISIBILITY_POLICIES) {
+            throw PluginOverlayException("PARAM_INVALID", "unsupported visibilityPolicy: $value")
+        }
+        return value
+    }
+
     private companion object {
         const val TAG = "PluginOverlay"
         const val MAX_SURFACES_PER_PLUGIN = 3
         const val MAX_SURFACES_TOTAL = 8
+        val VISIBILITY_POLICIES = setOf("always", "foreground", "background")
     }
 }

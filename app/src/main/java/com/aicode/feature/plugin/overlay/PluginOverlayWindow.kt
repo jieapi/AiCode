@@ -32,7 +32,9 @@ internal class PluginOverlayWindow(
     private val windowManager: WindowManager,
     private val layoutParams: WindowManager.LayoutParams,
     private val webView: WebView,
-    private val draggable: Boolean
+    private val draggable: Boolean,
+    initialVisibilityPolicy: String,
+    initialForeground: Boolean
 ) : FrameLayout(context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -41,6 +43,9 @@ internal class PluginOverlayWindow(
     private val density = resources.displayMetrics.density
     private var bridge: PluginOverlayBridge? = null
     private var dragRegionCss = RectF(0f, 0f, layoutParams.width / density, layoutParams.height / density)
+    private var visibilityPolicy = initialVisibilityPolicy
+    private var appForeground = initialForeground
+    private var requestedVisible = true
 
     private var downRawX = 0f
     private var downRawY = 0f
@@ -68,6 +73,7 @@ internal class PluginOverlayWindow(
         )
         dragHandle.visibility = if (draggable) View.VISIBLE else View.GONE
         dragHandle.setOnTouchListener { _, event -> onDragTouch(event) }
+        applyVisibility()
     }
 
     fun bindBridge(value: PluginOverlayBridge) {
@@ -82,6 +88,7 @@ internal class PluginOverlayWindow(
         put("x", layoutParams.x)
         put("y", layoutParams.y)
         put("draggable", draggable)
+        put("visibilityPolicy", visibilityPolicy)
     }
 
     fun selfInfo(): JsonObject = buildJsonObject {
@@ -93,6 +100,22 @@ internal class PluginOverlayWindow(
         put("y", (layoutParams.y / density).toInt())
         put("density", density)
         put("draggable", draggable)
+        put("visibilityPolicy", visibilityPolicy)
+        put("foreground", appForeground)
+    }
+
+    fun visibilityPolicy(): String = visibilityPolicy
+
+    fun isAppForeground(): Boolean = appForeground
+
+    fun setVisibilityPolicy(policy: String) {
+        visibilityPolicy = policy
+        applyVisibility()
+    }
+
+    fun onAppForegroundChanged(foreground: Boolean) {
+        appForeground = foreground
+        applyVisibility()
     }
 
     fun sizeDp(): Pair<Int, Int> = widthDp() to heightDp()
@@ -159,6 +182,16 @@ internal class PluginOverlayWindow(
     }
 
     fun setVisible(visible: Boolean) {
+        requestedVisible = visible
+        applyVisibility()
+    }
+
+    private fun applyVisibility() {
+        val visible = requestedVisible && when (visibilityPolicy) {
+            "foreground" -> appForeground
+            "background" -> !appForeground
+            else -> true
+        }
         visibility = if (visible) View.VISIBLE else View.GONE
         if (visible) webView.onResume() else webView.onPause()
     }

@@ -111,6 +111,12 @@
     toast: function (message) {
       return call('toast', { message: String(message) });
     },
+    // App 进程前后台状态；用于插件决定是否显示或隐藏浮层。
+    app: {
+      isForeground: function () {
+        return call('app.isForeground');
+      }
+    },
     // 在对话内显示可关闭提示条；options.action = { label, handler } 时点击会回调插件进程。
     tip: function (options) {
       return call('tip', options || {});
@@ -200,6 +206,10 @@
       // 浮层页面调整自身尺寸，单位为 CSS 像素（dp）。
       resize: function (width, height) {
         return call('overlay.resize', { width: Number(width) || 0, height: Number(height) || 0 });
+      },
+      // 浮层页面设置可见性策略：always / foreground / background。
+      setVisibilityPolicy: function (policy) {
+        return call('overlay.setVisibilityPolicy', { policy: String(policy) });
       },
       // 浮层页面接收宿主消息（状态、click、dragStart、dragEnd、longPress）。
       onMessage: function (handler) {

@@ -81,6 +81,17 @@ internal class PluginOverlayBridge(
 
         "overlay.self" -> window.selfInfo()
 
+        "app.isForeground" -> JsonPrimitive(window.isAppForeground())
+
+        "overlay.setVisibilityPolicy" -> {
+            val policy = requireString(params, "policy")
+            if (policy !in VISIBILITY_POLICIES) {
+                throw PluginHostException("PARAM_INVALID", "unsupported visibility policy: $policy")
+            }
+            mainHandler.post { window.setVisibilityPolicy(policy) }
+            JsonNull
+        }
+
         "overlay.close" -> {
             mainHandler.post { onClose() }
             JsonNull
@@ -137,6 +148,14 @@ internal class PluginOverlayBridge(
     private fun requireInt(params: JsonObject, key: String): Int =
         (params[key] as? JsonPrimitive)?.intOrNull
             ?: throw PluginHostException("PARAM_INVALID", "$key required")
+
+    private fun requireString(params: JsonObject, key: String): String =
+        (params[key] as? JsonPrimitive)?.contentOrNull
+            ?: throw PluginHostException("PARAM_INVALID", "$key required")
+
+    private companion object {
+        val VISIBILITY_POLICIES = setOf("always", "foreground", "background")
+    }
 
     private fun errorReply(code: String, message: String): JsonObject = buildJsonObject {
         put("ok", false)

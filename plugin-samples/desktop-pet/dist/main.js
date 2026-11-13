@@ -3,7 +3,7 @@
 const readline = require('readline');
 
 const SETTINGS_PATH = 'data://pet-settings.json';
-const DEFAULTS = { autoStart: false, width: 110, height: 130 };
+const DEFAULTS = { autoStart: false, width: 110, height: 130, visibilityPolicy: 'always' };
 
 let hostSeq = 0;
 const hostPending = new Map();
@@ -41,6 +41,7 @@ async function boot() {
   }
   const width = Number(settings.width) || DEFAULTS.width;
   const height = Number(settings.height) || DEFAULTS.height;
+  const visibilityPolicy = String(settings.visibilityPolicy || DEFAULTS.visibilityPolicy);
   let lastError = null;
   // App 进程启动时可能还没进入前台；前台服务被系统挡掉时短暂重试。
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -48,7 +49,8 @@ async function boot() {
       const info = await hostCall('host.overlay.create', {
         surface: 'pet',
         width,
-        height
+        height,
+        visibilityPolicy
       });
       return { ok: true, overlayId: info.overlayId, width, height };
     } catch (error) {

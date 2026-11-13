@@ -244,8 +244,8 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 插件 → 宿主 | `host.notify` | `params: {title, body, key?}`，发系统通知；同一 `key` 覆盖上一条 |
 | 插件 → 宿主 | `host.tip` | `params: {title?, text, action?{label, handler}}`，在对话内显示可关闭提示条；按钮点击以 `ui.invoke` 回调 `handler` |
 | 插件 → 宿主 | `host.shizuku.exec` | `params: {command, timeout?}`，经 Shizuku 在 Android 系统执行；插件声明用途且使用者已授权后直接执行 |
-| 插件 → 宿主 | `host.overlay.create` | `params: {surface?, width?, height?}`，创建清单声明的系统浮层；尺寸可由插件指定并受宿主范围限制 |
-| 插件 → 宿主 | `host.overlay.close` / `postMessage` / `update` | 按 `overlayId` 关闭、向浮层页面发消息、更新尺寸/位置/可见性 |
+| 插件 → 宿主 | `host.overlay.create` | `params: {surface?, width?, height?, visibilityPolicy?}`，创建清单声明的系统浮层；尺寸和显示时机可由插件指定 |
+| 插件 → 宿主 | `host.overlay.close` / `postMessage` / `update` | 按 `overlayId` 关闭、向浮层页面发消息、更新尺寸/位置/可见性/显示时机 |
 | 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
 
 入口至少要实现一个消息循环：
@@ -588,14 +588,16 @@ stopLifecycle();
 | `aicode.toast(message)` | 轻提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话内显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；插件声明用途且已单独授权后直接执行，`options.timeout` 以秒计 |
-| `aicode.overlay.create({surface?, width?, height?})` | 创建清单声明的系统浮层，返回 `{ overlayId, width, height, ... }`；尺寸可由插件指定 |
-| `aicode.overlay.update(overlayId, {width?, height?, visible?, dx?, dy?})` | 更新普通页面创建的浮层尺寸、位置或可见性 |
+| `aicode.overlay.create({surface?, width?, height?, visibilityPolicy?})` | 创建清单声明的系统浮层，返回 `{ overlayId, width, height, ... }`；尺寸和显示时机可由插件指定 |
+| `aicode.overlay.update(overlayId, {width?, height?, visible?, visibilityPolicy?, dx?, dy?})` | 更新普通页面创建的浮层尺寸、位置、可见性或显示时机 |
 | `aicode.overlay.close(overlayId)` | 关闭指定浮层；浮层页面内可省略 id 关闭自身 |
 | `aicode.overlay.self()` | 浮层页面读取自身 id、尺寸、位置与密度 |
 | `aicode.overlay.setDragRegion({left,top,width,height})` | 浮层页面声明宿主接管拖拽的区域，单位为 CSS 像素 |
 | `aicode.overlay.resize(width, height)` | 浮层页面调整自身窗口尺寸，单位为 CSS 像素（dp） |
+| `aicode.overlay.setVisibilityPolicy(policy)` | 浮层页面设置显示时机：`always` / `foreground` / `background` |
+| `aicode.app.isForeground()` | 返回 App 当前是否处于前台（有 Activity 处于 STARTED） |
 | `aicode.overlay.moveBy(dx, dy)` | 浮层页面请求移动窗口 |
-| `aicode.overlay.onMessage(handler)` | 接收宿主消息：`state`、`resize`、`click`、`dragStart`、`dragEnd`、`longPress` |
+| `aicode.overlay.onMessage(handler)` | 接收宿主消息：`state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress` |
 | `aicode.overlay.postMessage(payload)` | 浮层页面把交互回传给插件进程的 `overlay.message` handler |
 | `aicode.invoke(handler, args)` | 调用同一插件常驻进程的 handler，返回其 `result`；不支持跨插件 |
 | `aicode.bash(command, options)` | 在当前工作区执行一次性 Shell 命令，返回 `{ output, exitCode, truncated }` |
@@ -630,6 +632,8 @@ stopLifecycle();
 ```
 
 `width/height` 只是默认值，插件可以在 `overlay.create()` 或 `overlay.update()` 里按需指定；宿主接受 48–720dp 宽、48–1200dp 高，超出会报 `PARAM_INVALID`。浮层页面用 `aicode.overlay.resize(width, height)` 调整自身尺寸，并会收到 `{type:"resize", width, height}` 消息。
+
+`visibilityPolicy` 由插件决定，宿主不预设业务：`always` 始终显示，`foreground` 仅在 App 前台显示，`background` 仅在 App 后台显示。App 前后台以 `ProcessLifecycleOwner` 为准；插件也可以用 `aicode.app.isForeground()` 自行判断。
 
 浮层页面加载 `aicode.js` 后，用 `aicode.overlay.self()` 读取自身尺寸，用 `setDragRegion()` 声明拖拽区域，用 `onMessage()` 接收 `click` / `dragStart` / `dragEnd` / `longPress` / `state`。宿主负责窗口、拖拽、前台服务和清理；浮层页面不能调用 Shizuku、Shell 或终端。
 

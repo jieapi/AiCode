@@ -44,6 +44,15 @@
       cursor: pointer;
     }
     .toggle input { width: 18px; height: 18px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; font-size: 14px; }
+    .field select {
+      padding: 9px 10px;
+      border-radius: 9px;
+      border: 1px solid rgba(127, 127, 127, .3);
+      background: var(--aicode-surface, #fff);
+      color: inherit;
+      font-size: 15px;
+    }
     .hint { margin: 6px 0 0; font-size: 12px; color: var(--aicode-on-surface-variant, #59636e); }
     pre {
       margin-top: 16px;
@@ -70,6 +79,14 @@
       <button class="size" data-width="110" data-height="130">中</button>
       <button class="size" data-width="150" data-height="180">大</button>
     </div>
+    <label class="field">
+      <span>显示时机</span>
+      <select id="visibility">
+        <option value="always">始终显示</option>
+        <option value="foreground">仅 App 在前台时显示</option>
+        <option value="background">仅 App 在后台时显示</option>
+      </select>
+    </label>
     <label class="toggle">
       <input type="checkbox" id="autostart">
       <span>随 App 启动显示桌宠</span>
@@ -82,8 +99,9 @@
     (function () {
       var log = document.getElementById('log');
       var autostart = document.getElementById('autostart');
+      var visibility = document.getElementById('visibility');
       var overlayId = null;
-      var settings = { autoStart: false, width: 110, height: 130 };
+      var settings = { autoStart: false, width: 110, height: 130, visibilityPolicy: 'always' };
       var SETTINGS_PATH = 'data://pet-settings.json';
 
       function write(text) {
@@ -98,6 +116,7 @@
           // 首次运行还没有设置文件。
         }
         autostart.checked = settings.autoStart === true;
+        visibility.value = settings.visibilityPolicy || 'always';
       }
 
       async function saveSettings() {
@@ -110,12 +129,22 @@
 
       async function show(width, height) {
         try {
-          var info = await aicode.overlay.create({ surface: 'pet', width: width, height: height });
+          var info = await aicode.overlay.create({
+            surface: 'pet',
+            width: width,
+            height: height,
+            visibilityPolicy: settings.visibilityPolicy
+          });
           overlayId = info.overlayId;
-          if (info.width !== width || info.height !== height) {
-            await aicode.overlay.update(overlayId, { width: width, height: height });
+          if (info.width !== width || info.height !== height ||
+              info.visibilityPolicy !== settings.visibilityPolicy) {
+            await aicode.overlay.update(overlayId, {
+              width: width,
+              height: height,
+              visibilityPolicy: settings.visibilityPolicy
+            });
           }
-          write('已创建：' + width + '×' + height + 'dp\n在桌面上拖动宠物试试。');
+          write('已创建：' + width + '×' + height + 'dp\n显示时机：' + visibility.options[visibility.selectedIndex].text);
         } catch (error) {
           write('创建失败：' + (error.code || 'ERROR') + ' ' + error.message);
         }
@@ -138,6 +167,15 @@
         settings.autoStart = autostart.checked;
         saveSettings();
         write(settings.autoStart ? '已开启随 App 启动。' : '已关闭随 App 启动。');
+      });
+
+      visibility.addEventListener('change', function () {
+        settings.visibilityPolicy = visibility.value;
+        saveSettings();
+        if (overlayId) {
+          aicode.overlay.update(overlayId, { visibilityPolicy: settings.visibilityPolicy });
+        }
+        write('显示时机已改为：' + visibility.options[visibility.selectedIndex].text);
       });
 
       document.getElementById('hide').addEventListener('click', async function () {

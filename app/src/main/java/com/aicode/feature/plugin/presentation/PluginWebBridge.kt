@@ -218,6 +218,8 @@ class PluginWebBridge(
             put("visible", visible)
         }
 
+        "app.isForeground" -> JsonPrimitive(overlayManager.isAppForeground())
+
         "toast" -> {
             val message = PluginHostPaths.requireString(params, "message")
             mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_SHORT).show() }
