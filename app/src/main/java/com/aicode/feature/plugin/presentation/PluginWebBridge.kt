@@ -23,10 +23,12 @@ import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -55,7 +57,6 @@ class PluginWebBridge(
     private val dataDir: File,
     private val pluginVersion: String,
     private val languageTag: String,
-    private val workspaceName: String,
     private val fileAccess: FileAccessProvider,
     private val homeResolver: PathHomeResolver,
     private val commandEngine: CommandEngine,
@@ -66,6 +67,7 @@ class PluginWebBridge(
     private val terminalRunner: PluginTerminalRunner,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
+    private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit
@@ -74,9 +76,29 @@ class PluginWebBridge(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hostPaths = PluginHostPaths(dataDir, page.installDir, fileAccess, homeResolver)
     @Volatile private var overlayActive = false
+    @Volatile private var visible = false
+    @Volatile private var closed = false
+    @Volatile private var contextKey = environment.contextKey()
+    private val fileSubscriptions = PluginFileSubscriptions(
+        scope = scope,
+        watch = { path, recursive -> environment.watch(hostPaths, path, recursive) },
+        emit = { payload -> postEvent("fs.changed", payload) }
+    )
     private val eventSubscription = eventBus.subscribe(page.pluginId) { event ->
-        val script = "window.__aicodeEvent(${jsString(event.toString())})"
-        mainHandler.post { runCatching { post(script) } }
+        postEvent(event)
+    }
+
+    init {
+        scope.launch {
+            environment.changes.collect {
+                val key = environment.contextKey()
+                if (contextKey != key) {
+                    contextKey = key
+                    fileSubscriptions.setActive(visible, restart = true)
+                    postLifecycle("contextChanged")
+                }
+            }
+        }
     }
 
     @JavascriptInterface
@@ -85,13 +107,29 @@ class PluginWebBridge(
         val id = (root["id"] as? JsonPrimitive)?.contentOrNull ?: return
         val method = (root["method"] as? JsonPrimitive)?.contentOrNull ?: return
         val params = root["params"] as? JsonObject ?: JsonObject(emptyMap())
+        val requestContext = environment.contextKey()
         scope.launch {
             val reply = try {
+                if (method.startsWith("fs.") && method != "fs.unwatch") {
+                    val expected = (params["contextKey"] as? JsonPrimitive)?.contentOrNull
+                    if (requestContext != environment.contextKey() ||
+                        (expected != null && expected != requestContext)
+                    ) {
+                        throw PluginHostException("STALE_CONTEXT", "page context has changed")
+                    }
+                }
                 val data = dispatch(method, params)
+                if (method in setOf("fs.read", "fs.list", "fs.stat") &&
+                    requestContext != environment.contextKey()
+                ) {
+                    throw PluginHostException("STALE_CONTEXT", "page context has changed")
+                }
                 buildJsonObject {
                     put("ok", true)
                     put("data", data)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: PluginHostException) {
                 errorReply(e.code, e.message)
             } catch (e: Exception) {
@@ -103,9 +141,55 @@ class PluginWebBridge(
     }
 
     fun close() {
+        closed = true
+        visible = false
+        fileSubscriptions.close()
         updateOverlay(false, null)
         eventSubscription()
         scope.cancel()
+    }
+
+    fun setVisible(value: Boolean, reason: String) {
+        if (closed || (!value && !visible)) return
+        visible = value
+        val key = environment.contextKey()
+        val changed = contextKey != key
+        contextKey = key
+        fileSubscriptions.setActive(value, restart = changed)
+        if (changed) postLifecycle("contextChanged")
+        postLifecycle(reason)
+    }
+
+    private fun postLifecycle(reason: String) {
+        postEvent("ui.lifecycle", buildJsonObject {
+            put("visible", visible)
+            put("reason", reason)
+            put("contextKey", contextKey)
+        })
+    }
+
+    private fun postEvent(name: String, payload: JsonObject) {
+        postEvent(buildJsonObject {
+            put("name", name)
+            put("payload", if (name == "fs.changed" && "contextKey" !in payload) {
+                buildJsonObject {
+                    payload.forEach { (key, value) -> put(key, value) }
+                    put("contextKey", environment.contextKey())
+                }
+            } else payload)
+        })
+    }
+
+    private fun postEvent(event: JsonObject) {
+        val payload = event["payload"] as? JsonObject
+        val key = (payload?.get("contextKey") as? JsonPrimitive)?.contentOrNull
+        val contextual = (event["name"] as? JsonPrimitive)?.contentOrNull in setOf("fs.changed", "ui.lifecycle")
+        val script = "window.__aicodeEvent(${jsString(event.toString())})"
+        mainHandler.post {
+            if (!closed && (!contextual || key == null || key == environment.contextKey())) {
+                runCatching { post(script) }
+            }
+        }
     }
 
     /**
@@ -125,7 +209,9 @@ class PluginWebBridge(
             put("version", pluginVersion)
             put("languageTag", languageTag)
             put("theme", theme())
-            put("workspaceName", workspaceName)
+            put("workspaceName", environment.workspaceName())
+            put("contextKey", environment.contextKey())
+            put("visible", visible)
         }
 
         "toast" -> {
@@ -155,6 +241,20 @@ class PluginWebBridge(
         "fs.list" -> hostPaths.list(PluginHostPaths.requireString(params, "path"))
         "fs.delete" -> hostPaths.delete(PluginHostPaths.requireString(params, "path"))
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
+        "fs.watch" -> {
+            val id = PluginHostPaths.requireString(params, "subscriptionId")
+            val path = PluginHostPaths.requireString(params, "path")
+            val recursive = params["recursive"]?.let {
+                (it as? JsonPrimitive)?.booleanOrNull
+                    ?: throw PluginHostException("PARAM_INVALID", "recursive must be a boolean")
+            } ?: false
+            fileSubscriptions.add(id, path, recursive)
+            buildJsonObject { put("subscriptionId", id) }
+        }
+        "fs.unwatch" -> {
+            fileSubscriptions.remove(PluginHostPaths.requireString(params, "subscriptionId"))
+            buildJsonObject { put("ok", true) }
+        }
         "bash" -> bash(params)
         "shizuku.exec" -> shizukuExec(params)
         "tip" -> tip(params)
@@ -326,7 +426,7 @@ class PluginWebBridge(
     private fun deliver(id: String, payload: JsonObject) {
         val script = "window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})"
         // 预热时 WebView 还没 attach，View.post 会一直排队；直接走主线程 Handler，不依赖窗口。
-        mainHandler.post { post(script) }
+        mainHandler.post { if (!closed) post(script) }
     }
 
     private fun jsString(value: String): String = buildString {

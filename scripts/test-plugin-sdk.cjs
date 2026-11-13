@@ -1,0 +1,331 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const sdkPath = path.join(__dirname, '..', 'app', 'src', 'main', 'assets', 'plugin-ui', 'aicode.js');
+const sdkSource = fs.readFileSync(sdkPath, 'utf8');
+
+function loadSdk(onPost) {
+  const requests = [];
+  const errors = [];
+  const window = {
+    __aicodeBridge: {
+      postMessage(message) {
+        const request = JSON.parse(message);
+        requests.push(request);
+        if (onPost) onPost(request, harness);
+      }
+    }
+  };
+  const harness = {
+    window,
+    requests,
+    errors,
+    resolve(request, data) {
+      window.__aicodeResolve(request.id, JSON.stringify({ ok: true, data }));
+    },
+    reject(request, code, message) {
+      window.__aicodeResolve(request.id, JSON.stringify({ ok: false, error: { code, message } }));
+    },
+    event(name, payload) {
+      window.__aicodeEvent(JSON.stringify({ name, payload }));
+    }
+  };
+  vm.runInNewContext(sdkSource, {
+    window,
+    console: { error: (...args) => errors.push(args) }
+  }, { filename: sdkPath });
+  harness.sdk = window.aicode;
+  return harness;
+}
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function changed(request, extra = {}) {
+  return {
+    subscriptionId: request.params.subscriptionId,
+    path: request.params.path,
+    changes: [{ path: request.params.path + '/updated.json', kind: 'modify' }],
+    truncated: false,
+    ...extra
+  };
+}
+
+function trackListeners(sdk) {
+  const listeners = new Set();
+  const originalOn = sdk.events.on;
+  sdk.events.on = function (handler) {
+    const off = originalOn(handler);
+    listeners.add(handler);
+    return function () {
+      listeners.delete(handler);
+      off();
+    };
+  };
+  return listeners;
+}
+
+async function cancelSubscription(harness, cancel, subscriptionId) {
+  const previousCount = harness.requests.length;
+  const pending = cancel();
+  assert.equal(typeof pending.then, 'function');
+  assert.equal(harness.requests.length, previousCount + 1);
+  const request = harness.requests[previousCount];
+  assert.equal(request.method, 'fs.unwatch');
+  assert.deepEqual(request.params, { subscriptionId });
+  harness.resolve(request, null);
+  await pending;
+}
+
+for (const watchedPath of [
+  'data://settings/layout.json',
+  'data://cache/exports',
+  'workspace://src/components',
+  'workspace://notes/project.md'
+]) {
+  test('fs.watch supports the generic path ' + watchedPath + ' with the handler overload', async () => {
+    const harness = loadSdk();
+    const received = [];
+    const registration = harness.sdk.fs.watch(watchedPath, payload => received.push(plain(payload)));
+    assert.equal(typeof registration.then, 'function');
+    assert.equal(harness.requests.length, 1);
+    const request = harness.requests[0];
+    assert.equal(request.method, 'fs.watch');
+    assert.match(request.params.subscriptionId, /^[A-Za-z0-9_-]{1,64}$/);
+    assert.deepEqual(request.params, {
+      path: watchedPath,
+      recursive: false,
+      subscriptionId: request.params.subscriptionId
+    });
+
+    harness.resolve(request, { subscriptionId: request.params.subscriptionId });
+    const cancel = await registration;
+    assert.equal(typeof cancel, 'function');
+    const payload = changed(request);
+    harness.event('fs.changed', payload);
+    assert.deepEqual(received, [payload]);
+    await cancelSubscription(harness, cancel, request.params.subscriptionId);
+    assert.deepEqual(harness.errors, []);
+  });
+}
+
+test('fs.watch forwards recursive and contextKey options without changing the path', async () => {
+  const harness = loadSdk();
+  const received = [];
+  const registration = harness.sdk.fs.watch('workspace://assets', {
+    recursive: true,
+    contextKey: 'remote-project-a'
+  }, payload => received.push(plain(payload)));
+  const request = harness.requests[0];
+  assert.deepEqual(request.params, {
+    path: 'workspace://assets',
+    recursive: true,
+    contextKey: 'remote-project-a',
+    subscriptionId: request.params.subscriptionId
+  });
+  harness.resolve(request, { subscriptionId: request.params.subscriptionId });
+  const cancel = await registration;
+  const payload = changed(request, { contextKey: 'remote-project-a', truncated: true });
+  harness.event('fs.changed', payload);
+  assert.deepEqual(received, [payload]);
+  await cancelSubscription(harness, cancel, request.params.subscriptionId);
+});
+
+test('two fs.watch subscriptions only receive their own fs.changed payloads', async () => {
+  const harness = loadSdk();
+  const firstEvents = [];
+  const secondEvents = [];
+  const allEvents = [];
+  const off = harness.sdk.events.on(event => allEvents.push(plain(event)));
+  const firstPending = harness.sdk.fs.watch('data://profile.json', payload => firstEvents.push(plain(payload)));
+  const secondPending = harness.sdk.fs.watch('workspace://src', {}, payload => secondEvents.push(plain(payload)));
+  const [first, second] = harness.requests;
+  assert.notEqual(first.params.subscriptionId, second.params.subscriptionId);
+  assert.equal(second.params.recursive, false);
+  harness.resolve(first, { subscriptionId: first.params.subscriptionId });
+  harness.resolve(second, { subscriptionId: second.params.subscriptionId });
+  const [cancelFirst, cancelSecond] = await Promise.all([firstPending, secondPending]);
+  const firstPayload = changed(first);
+  const secondPayload = changed(second);
+  const unrelated = changed(first, { subscriptionId: 'unrelated-subscription' });
+  harness.event('fs.changed', firstPayload);
+  harness.event('fs.changed', secondPayload);
+  harness.event('fs.changed', unrelated);
+  harness.event('plugin.changed', firstPayload);
+
+  assert.deepEqual(firstEvents, [firstPayload]);
+  assert.deepEqual(secondEvents, [secondPayload]);
+  assert.deepEqual(allEvents, [
+    { name: 'fs.changed', payload: firstPayload },
+    { name: 'fs.changed', payload: secondPayload },
+    { name: 'fs.changed', payload: unrelated },
+    { name: 'plugin.changed', payload: firstPayload }
+  ]);
+
+  await cancelSubscription(harness, cancelFirst, first.params.subscriptionId);
+  harness.event('fs.changed', firstPayload);
+  harness.event('fs.changed', secondPayload);
+  assert.deepEqual(firstEvents, [firstPayload]);
+  assert.deepEqual(secondEvents, [secondPayload, secondPayload]);
+  assert.equal(allEvents.length, 6);
+  await cancelSubscription(harness, cancelSecond, second.params.subscriptionId);
+  off();
+});
+
+test('fs.watch installs its event listener before posting the host registration request', async () => {
+  const received = [];
+  const harness = loadSdk((request, host) => {
+    if (request.method === 'fs.watch') host.event('fs.changed', changed(request, { contextKey: 'early-context' }));
+  });
+  const registration = harness.sdk.fs.watch('data://state.json', payload => received.push(plain(payload)));
+  const request = harness.requests[0];
+  const earlyPayload = changed(request, { contextKey: 'early-context' });
+  assert.deepEqual(received, [earlyPayload]);
+  harness.resolve(request, { subscriptionId: request.params.subscriptionId });
+  const cancel = await registration;
+  assert.deepEqual(received, [earlyPayload]);
+  await cancelSubscription(harness, cancel, request.params.subscriptionId);
+});
+
+test('unwatch removes the listener immediately and repeated concurrent cancellation is idempotent', async () => {
+  const harness = loadSdk();
+  const listeners = trackListeners(harness.sdk);
+  const received = [];
+  const registration = harness.sdk.fs.watch('workspace://docs', payload => received.push(plain(payload)));
+  const watchRequest = harness.requests[0];
+  assert.equal(listeners.size, 1);
+  harness.resolve(watchRequest, { subscriptionId: watchRequest.params.subscriptionId });
+  const cancel = await registration;
+  harness.event('fs.changed', changed(watchRequest));
+  assert.equal(received.length, 1);
+
+  const firstCancel = cancel();
+  const secondCancel = cancel();
+  assert.equal(typeof firstCancel.then, 'function');
+  assert.equal(typeof secondCancel.then, 'function');
+  assert.equal(listeners.size, 0);
+  assert.equal(harness.requests.length, 2);
+  const unwatchRequest = harness.requests[1];
+  assert.equal(unwatchRequest.method, 'fs.unwatch');
+  assert.deepEqual(unwatchRequest.params, { subscriptionId: watchRequest.params.subscriptionId });
+  harness.event('fs.changed', changed(watchRequest));
+  assert.equal(received.length, 1);
+  harness.resolve(unwatchRequest, null);
+  await Promise.all([firstCancel, secondCancel]);
+  const thirdCancel = cancel();
+  assert.equal(typeof thirdCancel.then, 'function');
+  await thirdCancel;
+  assert.equal(harness.requests.length, 2);
+});
+
+test('failed host registration removes only its listener and preserves other event listeners', async () => {
+  const harness = loadSdk();
+  const listeners = trackListeners(harness.sdk);
+  const received = [];
+  const lifecycle = [];
+  const off = harness.sdk.events.on(event => lifecycle.push(plain(event)));
+  const registration = harness.sdk.fs.watch('data://restricted.json', payload => received.push(plain(payload)));
+  const request = harness.requests[0];
+  assert.equal(listeners.size, 2);
+  const rejected = assert.rejects(registration, { code: 'PATH_DENIED', message: 'path denied' });
+  harness.reject(request, 'PATH_DENIED', 'path denied');
+  await rejected;
+  assert.equal(listeners.size, 1);
+
+  const payload = changed(request);
+  harness.event('fs.changed', payload);
+  const shown = { state: 'shown', contextKey: 'current-context' };
+  harness.event('ui.lifecycle', shown);
+  assert.deepEqual(received, []);
+  assert.deepEqual(lifecycle, [
+    { name: 'fs.changed', payload },
+    { name: 'ui.lifecycle', payload: shown }
+  ]);
+  assert.equal(harness.requests.length, 1);
+  off();
+  assert.equal(listeners.size, 0);
+});
+
+test('bridge exceptions during registration also release the watch listener', async () => {
+  const harness = loadSdk(() => { throw new Error('bridge disconnected'); });
+  const listeners = trackListeners(harness.sdk);
+  const received = [];
+  const registration = harness.sdk.fs.watch('workspace://generated', payload => received.push(plain(payload)));
+  await assert.rejects(registration, { message: 'bridge disconnected' });
+  assert.equal(listeners.size, 0);
+  assert.equal(harness.requests.length, 1);
+  harness.event('fs.changed', changed(harness.requests[0]));
+  assert.deepEqual(received, []);
+});
+
+test('read, list, delete and stat forward contextKey while keeping the original single-path signature', async () => {
+  const harness = loadSdk();
+  for (const method of ['read', 'list', 'delete', 'stat']) {
+    for (const options of [undefined, {}, { contextKey: 'remote-project-b' }]) {
+      const pending = options === undefined
+        ? harness.sdk.fs[method]('workspace://files/item.json')
+        : harness.sdk.fs[method]('workspace://files/item.json', options);
+      const request = harness.requests[harness.requests.length - 1];
+      const expected = { path: 'workspace://files/item.json' };
+      if (options && options.contextKey) expected.contextKey = options.contextKey;
+      assert.equal(request.method, 'fs.' + method);
+      assert.deepEqual(request.params, expected);
+      const response = { method, content: 'unchanged result' };
+      harness.resolve(request, response);
+      assert.deepEqual(plain(await pending), response);
+    }
+  }
+});
+
+test('write forwards contextKey in its third argument and preserves path/content string conversion', async () => {
+  const harness = loadSdk();
+  const withContext = harness.sdk.fs.write('data://settings.json', '{"enabled":true}', { contextKey: 'local-project' });
+  const first = harness.requests[0];
+  assert.equal(first.method, 'fs.write');
+  assert.deepEqual(first.params, {
+    path: 'data://settings.json',
+    content: '{"enabled":true}',
+    contextKey: 'local-project'
+  });
+  harness.resolve(first, { written: true });
+  assert.deepEqual(plain(await withContext), { written: true });
+
+  const legacy = harness.sdk.fs.write(42, 17);
+  const second = harness.requests[1];
+  assert.equal(second.method, 'fs.write');
+  assert.deepEqual(second.params, { path: '42', content: '17' });
+  harness.resolve(second, null);
+  assert.equal(await legacy, null);
+});
+
+test('ui.lifecycle continues reaching events.on before, during and after a file subscription', async () => {
+  const harness = loadSdk();
+  const lifecycle = [];
+  const fileEvents = [];
+  const off = harness.sdk.events.on(event => lifecycle.push(plain(event)));
+  const hidden = { state: 'hidden', reason: 'background', contextKey: 'project-a' };
+  harness.event('ui.lifecycle', hidden);
+  const registration = harness.sdk.fs.watch('data://view-state.json', payload => fileEvents.push(plain(payload)));
+  const request = harness.requests[0];
+  const shown = { state: 'shown', reason: 'foreground', contextKey: 'project-a' };
+  harness.event('ui.lifecycle', shown);
+  harness.resolve(request, { subscriptionId: request.params.subscriptionId });
+  const cancel = await registration;
+  const changedContext = { state: 'contextChanged', reason: 'workspace', contextKey: 'project-b' };
+  harness.event('ui.lifecycle', changedContext);
+  await cancelSubscription(harness, cancel, request.params.subscriptionId);
+  const closed = { state: 'closed', reason: 'pageClosed', contextKey: 'project-b' };
+  harness.event('ui.lifecycle', closed);
+
+  assert.deepEqual(lifecycle, [hidden, shown, changedContext, closed].map(payload => ({ name: 'ui.lifecycle', payload })));
+  assert.deepEqual(fileEvents, []);
+  off();
+  harness.event('ui.lifecycle', shown);
+  assert.equal(lifecycle.length, 4);
+});

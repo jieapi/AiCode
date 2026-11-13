@@ -102,7 +102,8 @@ class PluginsViewModel @Inject constructor(
     private val shizukuManager: ShizukuManager,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
-    private val devSettingsRepository: PluginDevSettingsRepository
+    private val devSettingsRepository: PluginDevSettingsRepository,
+    private val pageEnvironment: PluginPageEnvironment
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -411,17 +412,12 @@ class PluginsViewModel @Inject constructor(
         onClosePage: () -> Unit,
         post: (String) -> Unit
     ): PluginWebBridge {
-        val workspaceName = workspaceRepository.currentPath()
-            .trimEnd('/')
-            .substringAfterLast('/')
-            .ifBlank { "workspace" }
         return PluginWebBridge(
             context = context,
             page = page,
             dataDir = manager.dataDirFor(page.pluginId),
             pluginVersion = pluginVersion,
             languageTag = languageTag,
-            workspaceName = workspaceName,
             fileAccess = fileAccess,
             homeResolver = pathHomeResolver,
             commandEngine = commandEngine,
@@ -432,6 +428,7 @@ class PluginsViewModel @Inject constructor(
             terminalRunner = pluginTerminalRunner,
             shizukuRunner = shizukuRunner,
             tipManager = tipManager,
+            environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,
             post = post

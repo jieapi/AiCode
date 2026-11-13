@@ -18,6 +18,11 @@ import kotlinx.serialization.json.put
 /** 插件访问宿主文件时的稳定错误码；页面桥与插件进程都按这里的 code 判断。 */
 class PluginHostException(val code: String, override val message: String) : Exception(message)
 
+sealed interface PluginWatchTarget {
+    data class Local(val file: File) : PluginWatchTarget
+    data class Remote(val path: String) : PluginWatchTarget
+}
+
 /**
  * 插件可访问的四个文件根，页面桥与插件进程共用同一套解析与限制：
  * `data://`（插件数据目录）、`plugin://`（安装目录，只读）、`workspace://`（当前工作区）、
@@ -148,6 +153,70 @@ class PluginHostPaths(
                 put("isDir", fileAccess.isDirectory(target.path))
                 put("size", if (fileAccess.isFile(target.path)) fileAccess.fileSize(target.path) else 0L)
             }
+        }
+    }
+
+    fun watchTarget(
+        path: String,
+        localFile: (String) -> File?,
+        recursive: Boolean = false
+    ): PluginWatchTarget {
+        val target = resolve(path)
+        requireRead(target)
+        if (target.scheme == "aicode" && target.relative.isEmpty()) {
+            throw PluginHostException("PATH_DENIED", "cannot watch the host configuration root")
+        }
+        val file = when (target) {
+            is Target.Local -> target.file
+            is Target.Remote -> localFile(target.path)
+        }
+        if (file != null) {
+            val canonical = file.canonicalFile
+            if (target is Target.Remote) {
+                val root = if (target.scheme == "workspace") WORKSPACE_ROOT else homeResolver.aicodeRoot()
+                localFile(root)?.let { mappedRoot ->
+                    val expected = inside(mappedRoot, target.relative)
+                    if (canonical != expected) {
+                        throw PluginHostException("PATH_DENIED", "watch path escapes root")
+                    }
+                }
+            }
+            assertLocalWatchRange(canonical, target.scheme, recursive, localFile)
+            return PluginWatchTarget.Local(canonical)
+        }
+        target as Target.Remote
+        if (target.scheme == "workspace") {
+            val hostRoot = fileAccess.toDisplayPath(homeResolver.aicodeRoot()).trimEnd('/')
+            assertWatchAncestor(target.path, hostRoot, recursive)
+            if (target.path.startsWith("$hostRoot/")) {
+                assertHostProtected(target.path.removePrefix("$hostRoot/"))
+            }
+        }
+        return PluginWatchTarget.Remote(target.path)
+    }
+
+    private fun assertLocalWatchRange(
+        file: File,
+        scheme: String,
+        recursive: Boolean,
+        localFile: (String) -> File?
+    ) {
+        val hostRoot = localFile(homeResolver.aicodeRoot())?.canonicalFile ?: return
+        val watched = file.toPath()
+        assertWatchAncestor(file.path, hostRoot.path, recursive)
+        for (name in HOST_PROTECTED) {
+            val protected = File(hostRoot, name).canonicalFile.toPath()
+            if (((scheme == "aicode" || scheme == "workspace") && watched.startsWith(protected)) ||
+                (recursive && protected.startsWith(watched))
+            ) {
+                throw PluginHostException("READ_ONLY", "watch range includes a protected host path")
+            }
+        }
+    }
+
+    private fun assertWatchAncestor(path: String, hostRoot: String, recursive: Boolean) {
+        if (path == hostRoot || (recursive && hostRoot.startsWith(path.trimEnd('/') + "/"))) {
+            throw PluginHostException("PATH_DENIED", "watch range includes the host configuration root")
         }
     }
 

@@ -80,6 +80,12 @@
     });
   }
 
+  function fileParams(path, options) {
+    var params = { path: String(path) };
+    if (options && options.contextKey != null) params.contextKey = String(options.contextKey);
+    return params;
+  }
+
   window.aicode = {
     context: function () {
       return call('context');
@@ -130,7 +136,7 @@
         });
       }
     },
-    // 监听插件进程主动发出的事件；返回取消订阅函数。
+    // 监听插件进程与宿主事件；返回取消订阅函数。
     events: {
       on: function (handler) {
         if (typeof handler !== 'function') return function () {};
@@ -171,20 +177,54 @@
       }
     },
     fs: {
-      read: function (path) {
-        return call('fs.read', { path: String(path) });
+      read: function (path, options) {
+        return call('fs.read', fileParams(path, options));
       },
-      write: function (path, content) {
-        return call('fs.write', { path: String(path), content: String(content) });
+      write: function (path, content, options) {
+        var params = fileParams(path, options);
+        params.content = String(content);
+        return call('fs.write', params);
       },
-      list: function (path) {
-        return call('fs.list', { path: String(path) });
+      list: function (path, options) {
+        return call('fs.list', fileParams(path, options));
       },
-      delete: function (path) {
-        return call('fs.delete', { path: String(path) });
+      delete: function (path, options) {
+        return call('fs.delete', fileParams(path, options));
       },
-      stat: function (path) {
-        return call('fs.stat', { path: String(path) });
+      stat: function (path, options) {
+        return call('fs.stat', fileParams(path, options));
+      },
+      watch: function (path, options, handler) {
+        if (typeof options === 'function') {
+          handler = options;
+          options = {};
+        }
+        if (typeof handler !== 'function') {
+          return Promise.reject(new TypeError('watch handler must be a function'));
+        }
+        var params = fileParams(path, options);
+        params.subscriptionId = 'watch_' + String(nextId++);
+        params.recursive = !!(options && options.recursive);
+        var active = true;
+        // 先注册接收端，避免宿主首次通知早于订阅确认而丢失。
+        var off = window.aicode.events.on(function (event) {
+          if (active && event && event.name === 'fs.changed' && event.payload &&
+              event.payload.subscriptionId === params.subscriptionId) {
+            handler(event.payload);
+          }
+        });
+        return call('fs.watch', params).then(function () {
+          return function () {
+            if (!active) return Promise.resolve();
+            active = false;
+            off();
+            return call('fs.unwatch', { subscriptionId: params.subscriptionId });
+          };
+        }, function (error) {
+          active = false;
+          off();
+          throw error;
+        });
       }
     },
     applyTheme: function (variables) {

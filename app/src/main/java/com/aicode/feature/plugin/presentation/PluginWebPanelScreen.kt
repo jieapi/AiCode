@@ -41,6 +41,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
 import com.aicode.core.theme.Spacing
@@ -63,6 +66,7 @@ fun PluginWebPanelScreen(
     applySystemBarInsets: Boolean = true
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val colorScheme = MaterialTheme.colorScheme
     val semantic = MaterialTheme.semanticColors
     val configuration = LocalConfiguration.current
@@ -128,6 +132,27 @@ fun PluginWebPanelScreen(
                 runCatching { webView.evaluateJavascript(script, null) }
             }
         )
+    }
+
+    DisposableEffect(bridge, lifecycleOwner, viewportReady) {
+        val lifecycle = lifecycleOwner.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (viewportReady) {
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> bridge.setVisible(true, "resumed")
+                    Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> bridge.setVisible(false, "hidden")
+                    else -> Unit
+                }
+            }
+        }
+        if (viewportReady) {
+            bridge.setVisible(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED), "shown")
+            lifecycle.addObserver(observer)
+        }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            bridge.setVisible(false, "hidden")
+        }
     }
 
     LaunchedEffect(webView, pageUrl, viewportReady) {

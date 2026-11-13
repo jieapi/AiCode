@@ -476,6 +476,40 @@ const off = aicode.events.on((event) => {
 - 事件只发给同一插件、当前已加载的页面；没有页面时丢弃，不排队。
 - 不跨插件转发，也不会注入会话或触发新的 AI 推理。
 
+### 文件订阅与页面生命周期
+
+所有插件 HTML 页面都可以订阅自己读取的文件来源，不需要增加插件运行时或声明 Hook。订阅只通知“数据可能发生变化”，由页面决定重读哪些内容；宿主不会重载 WebView。
+
+```js
+const stopWatching = await aicode.fs.watch('data://records', { recursive: false }, (change) => {
+  if (change.error) {
+    console.error(change.error.code, change.error.message);
+    return;
+  }
+  refreshRecords();
+});
+const stopLifecycle = aicode.events.on((event) => {
+  if (event.name === 'ui.lifecycle' && event.payload.visible) {
+    refreshRecords();
+  }
+});
+await refreshRecords();
+
+// 页面应用卸载时清理；暂时退出页面由宿主自动暂停监听。
+await stopWatching();
+stopLifecycle();
+```
+
+- `watch(path, options, handler)` 返回 Promise，解析为取消订阅函数；取消函数也返回 Promise，可以重复调用。也支持 `watch(path, handler)`。
+- 路径沿用 `data://`、`plugin://`、`workspace://`、`aicode://` 四个根，可订阅目录或已存在的文件。`recursive` 默认为 `false`；未创建的路径按目录等待，若要监听尚未创建的文件，应订阅其父目录。
+- 回调收到 `{ subscriptionId, path, contextKey, changes: [{ path, kind }], truncated }`，`kind` 为 `created`、`modified` 或 `deleted`。路径始终是插件使用的逻辑 URI，不包含手机私有目录。首次远端扫描成功时也会收到一次 `changes: []` 的校准通知，不应仅在明细非空时刷新。`truncated` 为 `true` 时应重新读取整个订阅范围；`error` 存在时表示订阅出现错误，不应据此清空已有数据。
+- 本地复用文件系统通知，默认约 300ms 合并一批，另有约 2 秒的文件快照检查兜底；SSH 的工作区和配置目录使用约 2 秒的按需远端快照检查。远端以修改时间和大小判断变化，同一时间精度内、大小也相同的连续改写可能无法区分，重新显示页面时应再次校准数据。
+- 页面可见时监听，离开页面或 App 退到后台时暂停，回到页面时恢复；工作区、执行模式或 SSH 服务器变化时重建。每个页面最多 16 个订阅，应选择必要的小范围，不要递归监听整个工作区。
+- 文件访问保护同样适用于订阅；不能监听受保护配置路径，也不能通过订阅整个 `aicode://` 根获取这些路径的变更。
+- `ui.lifecycle` 的 payload 为 `{ visible, reason, contextKey }`，`reason` 为 `shown`、`resumed`、`hidden` 或 `contextChanged`。首次加载仍需主动取数；重新显示、回到前台和上下文切换用于校准缓存，不能只依赖一次 Vue `mounted`。
+- `aicode.context()` 返回当前 `contextKey` 和 `visible`。文件方法可在最后一个 `options` 参数中传入 `{ contextKey }`；上下文已经变化时请求会返回 `STALE_CONTEXT`，用于拦截仍在排队的旧项目操作。异步刷新结果仍应在页面侧核对上下文，正在编辑的输入不能被刷新直接覆盖。
+- 文件订阅只覆盖指定文件来源，不会自动推断数据库、HTTP API 或其他插件数据的变化；这类数据仍由插件进程通过 `plugin.event` 主动推送，或在页面显示时自行校准。
+
 ## 工作区工具页面
 
 工作区工具通过 `contributes.workspaceTools` 声明，`pageFile` 指向包内 HTML 页面。用户可以在右侧项目工具抽屉里添加并打开；页面通过 `window.aicode` 桥读写数据、执行命令或发事件。命令与文件操作需要你打开页面并点击对应操作才会发生。
@@ -542,12 +576,13 @@ const off = aicode.events.on((event) => {
 
 | 方法 | 作用 |
 | --- | --- |
-| `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名 |
-| `aicode.fs.read(path)` | 读取文件，返回 `{ content, size }` |
-| `aicode.fs.write(path, content)` | 写入文件（原子写） |
-| `aicode.fs.list(path)` | 列出目录，返回 `{ entries: [{ name, isDir, size }] }` |
-| `aicode.fs.delete(path)` | 删除文件或目录 |
-| `aicode.fs.stat(path)` | 返回 `{ exists, isDir, size }` |
+| `aicode.context()` | 插件 id、页面 id、版本、语言、主题、工作区名、`contextKey` 与页面是否可见 |
+| `aicode.fs.read(path, options?)` | 读取文件，返回 `{ content, size }` |
+| `aicode.fs.write(path, content, options?)` | 写入文件（原子写） |
+| `aicode.fs.list(path, options?)` | 列出目录，返回 `{ entries: [{ name, isDir, size }] }` |
+| `aicode.fs.delete(path, options?)` | 删除文件或目录 |
+| `aicode.fs.stat(path, options?)` | 返回 `{ exists, isDir, size }` |
+| `aicode.fs.watch(path, options?, handler)` | 订阅文件来源变化，Promise 解析为取消订阅函数 |
 | `aicode.toast(message)` | 轻提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话内显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.shizuku.exec(command, options)` | 经 Shizuku 在 Android 系统执行；插件声明用途且已单独授权后直接执行，`options.timeout` 以秒计 |
