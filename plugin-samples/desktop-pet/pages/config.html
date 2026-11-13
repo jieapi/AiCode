@@ -144,6 +144,7 @@
               visibilityPolicy: settings.visibilityPolicy
             });
           }
+          aicode.invoke('overlay.created', { overlayId: overlayId });
           write('已创建：' + width + '×' + height + 'dp\n显示时机：' + visibility.options[visibility.selectedIndex].text);
         } catch (error) {
           write('创建失败：' + (error.code || 'ERROR') + ' ' + error.message);
@@ -181,6 +182,7 @@
       document.getElementById('hide').addEventListener('click', async function () {
         try {
           await aicode.overlay.close(overlayId);
+          aicode.invoke('overlay.closed');
           overlayId = null;
           write('已关闭。');
         } catch (error) {

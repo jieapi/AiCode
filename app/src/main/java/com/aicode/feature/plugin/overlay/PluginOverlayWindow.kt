@@ -34,7 +34,8 @@ internal class PluginOverlayWindow(
     private val webView: WebView,
     private val draggable: Boolean,
     initialVisibilityPolicy: String,
-    initialForeground: Boolean
+    initialForeground: Boolean,
+    private val onPositionChanged: (Int, Int) -> Unit
 ) : FrameLayout(context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -179,6 +180,7 @@ internal class PluginOverlayWindow(
         layoutParams.y += (dy * density).toInt()
         clampPosition()
         runCatching { windowManager.updateViewLayout(this, layoutParams) }
+        onPositionChanged(layoutParams.x, layoutParams.y)
     }
 
     fun setVisible(visible: Boolean) {
@@ -257,6 +259,7 @@ internal class PluginOverlayWindow(
                             put("y", layoutParams.y)
                         }
                     )
+                    onPositionChanged(layoutParams.x, layoutParams.y)
                 } else if (!longPressFired) {
                     sendEvent(buildJsonObject { put("type", "click") })
                 }

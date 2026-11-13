@@ -31,15 +31,18 @@ class DesktopPetSampleTest {
         val manifest = (parsed as ManifestParseResult.Success).manifest
         assertEquals("demo.desktop-pet", manifest.id)
         assertNotNull(manifest.overlay)
-        assertEquals(1, manifest.overlay?.surfaces?.size)
+        assertEquals(2, manifest.overlay?.surfaces?.size)
 
         val loaded = PluginContentLoader.load(dir, manifest)
         assertTrue("内容应加载成功：$loaded", loaded is ContentLoadResult.Ok)
         val content = (loaded as ContentLoadResult.Ok).content
         assertNotNull(content.overlay)
         assertEquals("pet", content.overlay?.surfaces?.first()?.localId)
+        assertTrue(content.overlay?.surfaces?.any { it.localId == "menu" } == true)
         assertNotNull("应带运行时而自启动 hook", content.runtime)
         assertTrue(content.hooks.any { it.event == PluginHookEvents.APP_STARTED })
+        assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_STARTED })
+        assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_FINISHED })
         assertNotNull("应带配置页", content.configPage)
     }
 }

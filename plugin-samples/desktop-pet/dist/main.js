@@ -7,6 +7,9 @@ const DEFAULTS = { autoStart: false, width: 110, height: 130, visibilityPolicy: 
 
 let hostSeq = 0;
 const hostPending = new Map();
+let overlayId = null;
+let menuOverlayId = null;
+let idleTimer = null;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\n');
@@ -52,6 +55,7 @@ async function boot() {
         height,
         visibilityPolicy
       });
+      overlayId = info.overlayId;
       return { ok: true, overlayId: info.overlayId, width, height };
     } catch (error) {
       lastError = error;
@@ -69,10 +73,125 @@ async function boot() {
   };
 }
 
+async function postState(state) {
+  try {
+    await hostCall('host.overlay.postMessage', {
+      surface: 'pet',
+      payload: { type: 'state', state }
+    });
+    return { ok: true, state, logs: ['pet state -> ' + state] };
+  } catch (error) {
+    if (error.code === 'OVERLAY_NOT_FOUND') overlayId = null;
+    return {
+      ok: false,
+      code: error.code || 'POST_FAILED',
+      state,
+      logs: ['pet state failed -> ' + (error.code || error.message)]
+    };
+  }
+}
+
+function scheduleIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    postState('idle');
+  }, 3000);
+}
+
+async function postHint(text) {
+  try {
+    await hostCall('host.overlay.postMessage', {
+      surface: 'pet',
+      payload: { type: 'hint', text }
+    });
+  } catch (e) {
+    // 浮层已关闭时忽略。
+  }
+}
+
+async function closeMenu() {
+  const id = menuOverlayId;
+  menuOverlayId = null;
+  if (!id) return;
+  try {
+    await hostCall('host.overlay.close', { overlayId: id });
+  } catch (e) {
+    // 菜单可能已被页面自己关闭。
+  }
+}
+
+async function openMenu(payload) {
+  await closeMenu();
+  const density = Number(payload.density) || 1;
+  const width = 150;
+  const height = 130;
+  const petX = Number(payload.x) || 0;
+  const petY = Number(payload.y) || 0;
+  const petHeight = Number(payload.height) || 130;
+  const x = Math.max(0, petX * density);
+  let y = petY * density - (height + 8) * density;
+  if (y < 0) y = (petY + petHeight + 8) * density;
+  const info = await hostCall('host.overlay.create', {
+    surface: 'menu',
+    width,
+    height,
+    x: Math.round(x),
+    y: Math.round(y),
+    visibilityPolicy: 'always'
+  });
+  menuOverlayId = info.overlayId;
+  return { ok: true, overlayId: menuOverlayId };
+}
+
+async function handleMenuAction(action) {
+  await closeMenu();
+  if (action === 'feed') {
+    await postState('success');
+    await postHint('好吃！');
+    scheduleIdle();
+  } else if (action === 'sleep') {
+    await postState('sleep');
+    await postHint('晚安…');
+  } else if (action === 'hide') {
+    try {
+      await hostCall('host.overlay.close', { surface: 'pet' });
+    } catch (e) {
+      // 已关闭。
+    }
+    overlayId = null;
+  }
+  return { ok: true };
+}
+
 const handlers = {
   'hooks.boot': () => boot(),
+  'hooks.agentRunStarted': () => postState('thinking'),
+  'hooks.agentToolStarted': () => postState('working'),
+  'hooks.agentToolFinished': () => postState('working'),
+  'hooks.agentRunFinished': (args) => {
+    const state = args.status === 'success'
+      ? 'success'
+      : (args.status === 'cancelled' ? 'idle' : 'error');
+    const result = postState(state);
+    scheduleIdle();
+    return result;
+  },
+  // 配置页手动创建/关闭浮层时同步给常驻进程。
+  'overlay.created': (args) => {
+    if (args.overlayId) overlayId = String(args.overlayId);
+    return { ok: true };
+  },
+  'overlay.closed': () => {
+    overlayId = null;
+    return { ok: true };
+  },
   // 浮层页面如果回传交互，这里先确认收到；需要状态动画时可在这里扩展。
-  'overlay.message': () => ({ ok: true })
+  'overlay.message': (args) => {
+    const payload = args.payload || {};
+    if (payload.type === 'longPress') return openMenu(payload);
+    if (payload.type === 'menuAction') return handleMenuAction(payload.action);
+    return { ok: true };
+  }
 };
 
 function handleHostRequest(id, method, params) {

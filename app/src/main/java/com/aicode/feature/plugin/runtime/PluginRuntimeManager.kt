@@ -260,15 +260,26 @@ class PluginRuntimeManager @Inject constructor(
     }
 
     private fun overlayClose(pluginId: String, params: JsonObject): JsonElement = try {
-        overlayManager.close(pluginId, PluginHostPaths.requireString(params, "overlayId"))
+        val overlayId = (params["overlayId"] as? JsonPrimitive)?.contentOrNull
+        val surfaceId = (params["surface"] as? JsonPrimitive)?.contentOrNull
+        when {
+            !overlayId.isNullOrBlank() -> overlayManager.close(pluginId, overlayId)
+            !surfaceId.isNullOrBlank() -> overlayManager.closeBySurface(pluginId, surfaceId)
+            else -> throw PluginProcessException("PARAM_INVALID", "overlayId or surface required")
+        }
     } catch (e: PluginOverlayException) {
         throw PluginProcessException(e.code, e.message.orEmpty())
     }
 
     private fun overlayPostMessage(pluginId: String, params: JsonObject): JsonElement = try {
-        val overlayId = PluginHostPaths.requireString(params, "overlayId")
+        val overlayId = (params["overlayId"] as? JsonPrimitive)?.contentOrNull
+        val surfaceId = (params["surface"] as? JsonPrimitive)?.contentOrNull
         val payload = params["payload"] ?: kotlinx.serialization.json.JsonNull
-        overlayManager.postMessage(pluginId, overlayId, payload)
+        when {
+            !overlayId.isNullOrBlank() -> overlayManager.postMessage(pluginId, overlayId, payload)
+            !surfaceId.isNullOrBlank() -> overlayManager.postMessageBySurface(pluginId, surfaceId, payload)
+            else -> throw PluginProcessException("PARAM_INVALID", "overlayId or surface required")
+        }
     } catch (e: PluginOverlayException) {
         throw PluginProcessException(e.code, e.message.orEmpty())
     }

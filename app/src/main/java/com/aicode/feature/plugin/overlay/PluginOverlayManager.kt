@@ -9,6 +9,8 @@ import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.data.PluginOverlayPermissionRepository
+import com.aicode.feature.plugin.data.PluginOverlayPosition
+import com.aicode.feature.plugin.data.PluginOverlayPositionRepository
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginOverlaySurface
 import com.aicode.feature.plugin.domain.PluginSettingsPage
@@ -47,6 +49,7 @@ class PluginOverlayManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
     private val permissionRepository: PluginOverlayPermissionRepository,
+    private val positionRepository: PluginOverlayPositionRepository,
     private val appForegroundMonitor: AppForegroundMonitor
 ) {
     private val windowManager = context.getSystemService(WindowManager::class.java)
@@ -117,6 +120,7 @@ class PluginOverlayManager @Inject constructor(
         val widthDp = readSize(params, "width", surface.width, PluginOverlayLimits.MAX_WIDTH_DP)
         val heightDp = readSize(params, "height", surface.height, PluginOverlayLimits.MAX_HEIGHT_DP)
         val visibilityPolicy = readVisibilityPolicy(params, "visibilityPolicy", "always")
+        val savedPosition = positionRepository.get(pluginId, surface.localId)
         windows[surface.key]?.let { existing ->
             if (existing.visibilityPolicy() != visibilityPolicy) {
                 mainHandler.post { existing.setVisibilityPolicy(visibilityPolicy) }
@@ -133,7 +137,7 @@ class PluginOverlayManager @Inject constructor(
 
         ensureService()
         return withContext(Dispatchers.Main.immediate) {
-            createWindow(surface, params, widthDp, heightDp, visibilityPolicy)
+            createWindow(surface, params, widthDp, heightDp, visibilityPolicy, savedPosition)
         }
     }
 
@@ -144,6 +148,19 @@ class PluginOverlayManager @Inject constructor(
             throw PluginOverlayException("OVERLAY_DENIED", "overlay does not belong to this plugin")
         }
         if (windows.remove(overlayId, window)) {
+            mainHandler.post { detachWindow(window) }
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    fun closeBySurface(pluginId: String, surfaceId: String): JsonObject {
+        val key = "$pluginId:$surfaceId"
+        val window = windows[key]
+            ?: throw PluginOverlayException("OVERLAY_NOT_FOUND", "overlay not found: $surfaceId")
+        if (window.pluginId != pluginId) {
+            throw PluginOverlayException("OVERLAY_DENIED", "overlay does not belong to this plugin")
+        }
+        if (windows.remove(key, window)) {
             mainHandler.post { detachWindow(window) }
         }
         return buildJsonObject { put("ok", true) }
@@ -161,9 +178,27 @@ class PluginOverlayManager @Inject constructor(
         mainHandler.post { closeAllInternal() }
     }
 
-    fun postMessage(pluginId: String, overlayId: String, payload: JsonElement): JsonObject {
-        val window = windows[overlayId]
-            ?: throw PluginOverlayException("OVERLAY_NOT_FOUND", "overlay not found: $overlayId")
+    fun postMessage(pluginId: String, overlayId: String, payload: JsonElement): JsonObject =
+        postMessageTo(pluginId, overlayId, null, payload)
+
+    /** 不依赖 overlayId，按 surface 查找当前窗口；适合常驻进程主动推状态。 */
+    fun postMessageBySurface(pluginId: String, surfaceId: String, payload: JsonElement): JsonObject =
+        postMessageTo(pluginId, null, surfaceId, payload)
+
+    private fun postMessageTo(
+        pluginId: String,
+        overlayId: String?,
+        surfaceId: String?,
+        payload: JsonElement
+    ): JsonObject {
+        val window = when {
+            !overlayId.isNullOrBlank() -> windows[overlayId]
+            !surfaceId.isNullOrBlank() -> windows["$pluginId:$surfaceId"]
+            else -> null
+        } ?: throw PluginOverlayException(
+            "OVERLAY_NOT_FOUND",
+            "overlay not found: ${overlayId ?: surfaceId.orEmpty()}"
+        )
         if (window.pluginId != pluginId) {
             throw PluginOverlayException("OVERLAY_DENIED", "overlay does not belong to this plugin")
         }
@@ -212,7 +247,8 @@ class PluginOverlayManager @Inject constructor(
         params: JsonObject,
         widthDp: Int,
         heightDp: Int,
-        visibilityPolicy: String
+        visibilityPolicy: String,
+        savedPosition: PluginOverlayPosition?
     ): JsonObject {
         val density = context.resources.displayMetrics.density
         val widthPx = (widthDp * density).toInt().coerceAtLeast(1)
@@ -237,8 +273,8 @@ class PluginOverlayManager @Inject constructor(
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (params["x"] as? JsonPrimitive)?.intOrNull ?: defaultX(widthPx)
-            y = (params["y"] as? JsonPrimitive)?.intOrNull ?: defaultY(heightPx)
+            x = (params["x"] as? JsonPrimitive)?.intOrNull ?: savedPosition?.x ?: defaultX(widthPx)
+            y = (params["y"] as? JsonPrimitive)?.intOrNull ?: savedPosition?.y ?: defaultY(heightPx)
             x = x.coerceIn(0, (context.resources.displayMetrics.widthPixels - widthPx).coerceAtLeast(0))
             y = y.coerceIn(0, (context.resources.displayMetrics.heightPixels - heightPx).coerceAtLeast(0))
         }
@@ -257,7 +293,12 @@ class PluginOverlayManager @Inject constructor(
             webView = webView,
             draggable = surface.draggable,
             initialVisibilityPolicy = visibilityPolicy,
-            initialForeground = appForegroundMonitor.current()
+            initialForeground = appForegroundMonitor.current(),
+            onPositionChanged = { x, y ->
+                scope.launch(Dispatchers.IO) {
+                    positionRepository.save(surface.pluginId, surface.localId, x, y)
+                }
+            }
         )
         val bridge = PluginOverlayBridge(
             pluginId = surface.pluginId,

@@ -48,8 +48,86 @@
     }
     .pet.dragging { animation-play-state: paused; transform: scale(1.04); }
     .pet.happy { animation: hop .55s ease; }
+    .pet.working { animation: work .65s ease-in-out infinite; }
+    .pet.success { animation: hop .55s ease; }
+    .pet.error { animation: shake .42s ease; }
+    .pet.sleep { opacity: .6; filter: saturate(.65); }
+    .pet.sleep .eye { height: 3px; top: 18px; border-radius: 4px; }
     .pet.thinking .eye { animation: blink 1.8s ease-in-out infinite; }
     .pet.thinking .tail { animation: wag .5s ease-in-out infinite; }
+    .pet.thinking { animation: think 2.4s ease-in-out infinite; }
+    .pet .thought, .pet .tool, .pet .zzz { opacity: 0; transition: opacity .2s ease; }
+    .pet .thought {
+      position: absolute;
+      left: -12px;
+      top: 26px;
+      display: flex;
+      gap: 4px;
+    }
+    .pet .thought i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .8);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+      animation: dot 1.2s ease-in-out infinite;
+    }
+    .pet .thought i:nth-child(2) { animation-delay: .15s; }
+    .pet .thought i:nth-child(3) { animation-delay: .3s; }
+    .pet.thinking .thought { opacity: 1; }
+    .pet .tool {
+      position: absolute;
+      right: 10px;
+      bottom: 48px;
+      width: 32px;
+      height: 21px;
+      border-radius: 5px;
+      background: #5b3420;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, .2);
+    }
+    .pet .tool::before {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 3px;
+      background: #f3d2b4;
+    }
+    .pet.working .tool { opacity: 1; animation: tool 1s ease-in-out infinite; }
+    .pet.success::after {
+      content: "✦";
+      position: absolute;
+      right: 6px;
+      top: 4px;
+      color: #ffd76a;
+      font-size: 30px;
+      text-shadow: 0 0 10px rgba(255, 215, 106, .8);
+      animation: sparkle .7s ease;
+    }
+    .pet.error .ear.left { transform: rotate(-48deg) translateY(8px); }
+    .pet.error .ear.right { transform: rotate(48deg) scaleX(-1) translateY(8px); }
+    .pet.error .body { filter: grayscale(.28); }
+    .pet.error .face::after {
+      content: "";
+      position: absolute;
+      right: -2px;
+      top: 18px;
+      width: 8px;
+      height: 12px;
+      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+      background: #8fd3ff;
+      transform: rotate(18deg);
+    }
+    .pet.sleep .tail { transform: rotate(38deg); }
+    .pet.sleep .zzz { opacity: 1; }
+    .pet .zzz {
+      position: absolute;
+      right: 4px;
+      top: 10px;
+      color: #fff;
+      font: 600 12px/1 system-ui, sans-serif;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+      animation: float 2s ease-in-out infinite;
+    }
     .pet .body {
       position: absolute;
       left: 20px;
@@ -131,7 +209,7 @@
     .hint {
       position: absolute;
       left: 50%;
-      top: 4px;
+      top: 30px;
       transform: translateX(-50%);
       padding: 5px 9px;
       border-radius: 999px;
@@ -143,6 +221,22 @@
       white-space: nowrap;
     }
     .hint.show { opacity: 1; }
+    .state-label {
+      position: absolute;
+      left: 50%;
+      top: 6px;
+      transform: translateX(-50%);
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(30, 30, 30, .68);
+      color: #fff;
+      font: 11px/1.3 system-ui, sans-serif;
+      opacity: 0;
+      transition: opacity .2s ease;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .state-label.show { opacity: 1; }
     @keyframes breathe {
       0%, 100% { transform: scale(1, 1) translateY(0); }
       50% { transform: scale(1.025, .975) translateY(3px); }
@@ -164,6 +258,38 @@
       35% { transform: translateY(-18px) scale(1.06, .94); }
       65% { transform: translateY(0) scale(.98, 1.02); }
     }
+    @keyframes work {
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50% { transform: translateY(-4px) rotate(2deg); }
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-5px); }
+      40% { transform: translateX(5px); }
+      60% { transform: translateX(-3px); }
+      80% { transform: translateX(3px); }
+    }
+    @keyframes think {
+      0%, 100% { transform: rotate(0deg) translateY(0); }
+      50% { transform: rotate(-3deg) translateY(-2px); }
+    }
+    @keyframes dot {
+      0%, 100% { transform: translateY(0); opacity: .55; }
+      50% { transform: translateY(-4px); opacity: 1; }
+    }
+    @keyframes tool {
+      0%, 100% { transform: rotate(-6deg); }
+      50% { transform: rotate(6deg); }
+    }
+    @keyframes sparkle {
+      0% { transform: scale(.4) rotate(-20deg); opacity: 0; }
+      40% { transform: scale(1.15) rotate(8deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0); opacity: .9; }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); opacity: .6; }
+      50% { transform: translateY(-5px); opacity: 1; }
+    }
   </style>
 </head>
 <body class="idle">
@@ -171,10 +297,12 @@
     <div class="pet-wrap">
       <div class="pet-scale">
         <div class="pet" id="pet">
+          <div class="thought"><i></i><i></i><i></i></div>
           <div class="tail"></div>
           <div class="ear left"></div>
           <div class="ear right"></div>
           <div class="body"></div>
+          <div class="tool"></div>
           <div class="face">
             <div class="eye left"></div>
             <div class="eye right"></div>
@@ -183,17 +311,21 @@
             <div class="cheek left"></div>
             <div class="cheek right"></div>
           </div>
+          <div class="zzz">Z z</div>
         </div>
       </div>
     </div>
   </div>
   <div class="hint" id="hint">拖动我</div>
+  <div class="state-label" id="stateLabel"></div>
 
   <script>
     (function () {
       var pet = document.getElementById('pet');
       var hint = document.getElementById('hint');
+      var stateLabel = document.getElementById('stateLabel');
       var hintTimer = 0;
+      var selfInfo = { x: 0, y: 0, width: 110, height: 130, density: 1 };
 
       // 让 170×190 的基准形象适配宿主当前窗口尺寸。
       function fit(width, height) {
@@ -217,9 +349,27 @@
         hintTimer = setTimeout(function () { hint.classList.remove('show'); }, 1200);
       }
 
+      function setState(state) {
+        console.log('[pet] state', state);
+        pet.classList.remove('happy', 'thinking', 'working', 'success', 'error', 'sleep');
+        if (state && state !== 'idle') {
+          pet.classList.add(state);
+        }
+        var labels = {
+          thinking: '思考中…',
+          working: '工作中…',
+          success: '完成',
+          error: '出错',
+          sleep: '休息中'
+        };
+        stateLabel.textContent = labels[state] || '';
+        stateLabel.classList.toggle('show', !!labels[state]);
+      }
+
       (async function () {
         try {
           var self = await aicode.overlay.self();
+          selfInfo = self;
           fit(self.width, self.height);
           setFullDragRegion(self.width, self.height);
         } catch (error) {
@@ -236,7 +386,16 @@
           pet.classList.add('happy');
           showHint(['喵', '在呢', '摸摸', '今天也要写代码'][Math.floor(Math.random() * 4)]);
         } else if (message.type === 'longPress') {
-          showHint('长按菜单留给下一版');
+          aicode.overlay.postMessage({
+            type: 'longPress',
+            x: selfInfo.x,
+            y: selfInfo.y,
+            width: selfInfo.width,
+            height: selfInfo.height,
+            density: selfInfo.density
+          }).catch(function () {});
+        } else if (message.type === 'hint') {
+          showHint(message.text || '');
         } else if (message.type === 'dragStart') {
           pet.classList.add('dragging');
           hint.classList.remove('show');
@@ -246,8 +405,7 @@
           fit(message.width, message.height);
           setFullDragRegion(message.width, message.height);
         } else if (message.type === 'state') {
-          pet.classList.remove('thinking');
-          if (message.state === 'thinking') pet.classList.add('thinking');
+          setState(message.state);
         }
       });
     })();

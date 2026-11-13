@@ -245,7 +245,7 @@ AI 工具需要 `runtime`，包内放一个入口脚本。AiCode 在本地容器
 | 插件 → 宿主 | `host.tip` | `params: {title?, text, action?{label, handler}}`，在对话内显示可关闭提示条；按钮点击以 `ui.invoke` 回调 `handler` |
 | 插件 → 宿主 | `host.shizuku.exec` | `params: {command, timeout?}`，经 Shizuku 在 Android 系统执行；插件声明用途且使用者已授权后直接执行 |
 | 插件 → 宿主 | `host.overlay.create` | `params: {surface?, width?, height?, visibilityPolicy?}`，创建清单声明的系统浮层；尺寸和显示时机可由插件指定 |
-| 插件 → 宿主 | `host.overlay.close` / `postMessage` / `update` | 按 `overlayId` 关闭、向浮层页面发消息、更新尺寸/位置/可见性/显示时机 |
+| 插件 → 宿主 | `host.overlay.close` / `postMessage` / `update` | `close`/`postMessage` 可用 `{overlayId}` 或 `{surface}`；其余按 `overlayId` 更新尺寸、位置、可见性、显示时机 |
 | 插件 → 宿主 | `plugin.event`（通知） | `params: {name, payload}`，推送事件到已打开的插件页面 |
 
 入口至少要实现一个消息循环：
@@ -634,6 +634,8 @@ stopLifecycle();
 `width/height` 只是默认值，插件可以在 `overlay.create()` 或 `overlay.update()` 里按需指定；宿主接受 48–720dp 宽、48–1200dp 高，超出会报 `PARAM_INVALID`。浮层页面用 `aicode.overlay.resize(width, height)` 调整自身尺寸，并会收到 `{type:"resize", width, height}` 消息。
 
 `visibilityPolicy` 由插件决定，宿主不预设业务：`always` 始终显示，`foreground` 仅在 App 前台显示，`background` 仅在 App 后台显示。App 前后台以 `ProcessLifecycleOwner` 为准；插件也可以用 `aicode.app.isForeground()` 自行判断。
+
+窗口位置按 `pluginId:surfaceId` 自动保存，重启或自动拉起时恢复；插件拖动窗口或调用 `overlay.moveBy` 后都会更新保存位置。
 
 浮层页面加载 `aicode.js` 后，用 `aicode.overlay.self()` 读取自身尺寸，用 `setDragRegion()` 声明拖拽区域，用 `onMessage()` 接收 `click` / `dragStart` / `dragEnd` / `longPress` / `state`。宿主负责窗口、拖拽、前台服务和清理；浮层页面不能调用 Shizuku、Shell 或终端。
 

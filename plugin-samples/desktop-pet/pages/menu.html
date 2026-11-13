@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Pet Menu</title>
+  <script src="/__aicode/aicode.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .menu {
+      position: relative;
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-radius: 14px;
+      background: rgba(30, 30, 30, .92);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    button {
+      flex: 1;
+      border: 0;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, .12);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    button:active { background: rgba(255, 255, 255, .28); }
+    .close {
+      position: absolute;
+      right: 9px;
+      top: 5px;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      flex: none;
+      border-radius: 50%;
+      background: transparent;
+      color: rgba(255, 255, 255, .6);
+      font-size: 16px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="menu">
+    <button class="close" id="close" aria-label="关闭">×</button>
+    <button data-action="feed">喂食</button>
+    <button data-action="sleep">休息</button>
+    <button data-action="hide">隐藏</button>
+  </div>
+  <script>
+    (function () {
+      function act(action) {
+        aicode.overlay.postMessage({ type: 'menuAction', action: action }).catch(function () {});
+      }
+      document.querySelectorAll('[data-action]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          act(button.dataset.action);
+        });
+      });
+      document.getElementById('close').addEventListener('click', function () {
+        aicode.overlay.close();
+      });
+    })();
+  </script>
+</body>
+</html>

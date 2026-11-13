@@ -5,7 +5,7 @@
     "default": "Desktop Pet Demo",
     "zh-CN": "桌面宠物示例"
   },
-  "version": "1.4.0",
+  "version": "1.6.0",
   "publisher": "demo",
   "repository": "https://github.com/example/desktop-pet-demo",
   "description": {
@@ -29,6 +29,13 @@
           "id": "pet",
           "page": "pages/pet.html",
           "draggable": true
+        },
+        {
+          "id": "menu",
+          "page": "pages/menu.html",
+          "width": 150,
+          "height": 130,
+          "draggable": false
         }
       ]
     },
@@ -37,6 +44,26 @@
         "id": "boot",
         "event": "app.started",
         "handler": "hooks.boot"
+      },
+      {
+        "id": "run-started",
+        "event": "agent.run.started",
+        "handler": "hooks.agentRunStarted"
+      },
+      {
+        "id": "tool-started",
+        "event": "agent.tool.started",
+        "handler": "hooks.agentToolStarted"
+      },
+      {
+        "id": "tool-finished",
+        "event": "agent.tool.finished",
+        "handler": "hooks.agentToolFinished"
+      },
+      {
+        "id": "run-finished",
+        "event": "agent.run.finished",
+        "handler": "hooks.agentRunFinished"
       }
     ],
     "configPage": "pages/config.html"
