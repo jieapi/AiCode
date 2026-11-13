@@ -33,7 +33,7 @@ class PluginOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForegroundSafely()
+        if (!startForegroundSafely()) return
         overlayManager.onServiceStarted()
     }
 
@@ -43,7 +43,7 @@ class PluginOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        startForegroundSafely()
+        if (!startForegroundSafely()) return START_NOT_STICKY
         // 服务被系统重建时可能已经没有窗口，延迟停止，避免空转通知。
         handler.removeCallbacksAndMessages(null)
         handler.postDelayed({
@@ -66,7 +66,14 @@ class PluginOverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun startForegroundSafely() {
+    /**
+     * 进入前台；失败时立即退出服务。
+     *
+     * 系统对 `startForegroundService()` 的计时器不会因为这里捕获了异常而取消，
+     * 服务继续活着就会以 ForegroundServiceDidNotStartInTimeException 杀掉整个进程；
+     * 主动 stopSelf() 让服务记录消失，系统到点检查时跳过。
+     */
+    private fun startForegroundSafely(): Boolean {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -91,8 +98,12 @@ class PluginOverlayService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .build()
-        runCatching { startForeground(NOTIFICATION_ID, notification) }
-            .onFailure { FileLogger.w(TAG, "startForeground failed", it) }
+        return runCatching { startForeground(NOTIFICATION_ID, notification) }
+            .onFailure {
+                FileLogger.e(TAG, "startForeground failed", it)
+                stopSelf()
+            }
+            .isSuccess
     }
 
     private fun createChannel() {

@@ -384,7 +384,6 @@ class PluginOverlayManager @Inject constructor(
         if (serviceStarted) return
         runCatching {
             ContextCompat.startForegroundService(context, Intent(context, PluginOverlayService::class.java))
-            serviceStarted = true
         }.onFailure {
             throw PluginOverlayException("OVERLAY_SERVICE_FAILED", it.message ?: it.javaClass.simpleName)
         }
