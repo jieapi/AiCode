@@ -90,7 +90,12 @@ class PluginToolManager @Inject constructor(
         currentRevisions.forEach { (pluginId, revision) ->
             val previous = activePluginRevisions[pluginId]
             if (previous != null && previous != revision) {
-                runtime.closePlugin(pluginId)
+                // 版本号变化时只关旧进程；同版本重装的进程 key 相同，只能整体关闭。
+                if (previous.version != revision.version) {
+                    runtime.closeOtherVersions(pluginId, revision.version)
+                } else {
+                    runtime.closePlugin(pluginId)
+                }
                 overlayManager.reloadPlugin(pluginId)
             }
         }

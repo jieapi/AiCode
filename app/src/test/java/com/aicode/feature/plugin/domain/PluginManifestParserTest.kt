@@ -384,6 +384,38 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun pluginLifecycleHooks_areParsed() {
+        val manifest = success(
+            hooksManifest(
+                hooksBlock = """{"id": "on-installed", "event": "plugin.installed", "handler": "hooks.onInstalled"},
+                    {"id": "on-uninstalled", "event": "plugin.uninstalled", "handler": "hooks.onUninstalled"},
+                    {"id": "on-enabled", "event": "plugin.enabled", "handler": "hooks.onEnabled"},
+                    {"id": "on-disabled", "event": "plugin.disabled", "handler": "hooks.onDisabled"}"""
+            )
+        )
+        assertEquals(
+            listOf(
+                PluginHookRef("on-installed", "plugin.installed", "hooks.onInstalled", PluginHookModes.OBSERVE),
+                PluginHookRef("on-uninstalled", "plugin.uninstalled", "hooks.onUninstalled", PluginHookModes.OBSERVE),
+                PluginHookRef("on-enabled", "plugin.enabled", "hooks.onEnabled", PluginHookModes.OBSERVE),
+                PluginHookRef("on-disabled", "plugin.disabled", "hooks.onDisabled", PluginHookModes.OBSERVE)
+            ),
+            manifest.hooks
+        )
+    }
+
+    @Test
+    fun pluginLifecycleHooksRequireObserveMode() {
+        assertRejected(
+            hooksManifest(
+                hooksBlock = """{"id": "on-installed", "event": "plugin.installed", "handler": "hooks.onInstalled", "mode": "transform"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
     fun appStartedRequiresObserveMode() {
         assertRejected(
             hooksManifest(

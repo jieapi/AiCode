@@ -1,6 +1,7 @@
 package com.aicode.feature.plugin.runtime
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHook
 import com.aicode.feature.plugin.domain.PluginHookEvents
 import com.aicode.feature.plugin.domain.PluginHookModes
@@ -12,8 +13,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -26,9 +31,10 @@ import kotlinx.serialization.json.put
 import java.util.UUID
 
 /**
- * 把 AI 运行生命周期事件分发给生效插件声明的 hook。
+ * 把 AI 运行与插件生命周期事件分发给生效插件声明的 hook。
  *
  * 只读事件异步派发，只报告运行元数据，不携带消息正文、工具参数或工具结果；
+ * 插件停用/卸载事件在状态变更前等待该插件自己的 hook，超时后继续。
  * 可写事件（`agent.tool.before` / `agent.tool.after`）同步等待插件结果，
  * 携带对应工具的参数或成功结果，由宿主校验后应用。两类 hook 的执行失败都只写日志，
  * 不向主流程抛出；可写 hook 失败时保持原值继续。
@@ -51,6 +57,61 @@ class PluginHookDispatcher @Inject constructor(
                 put("appVersion", appVersion)
                 put("process", "main")
             }
+        )
+    }
+
+    /** 插件安装或版本替换完成；只通知该插件自身，[previousVersion] 非空表示更新。 */
+    fun dispatchPluginInstalled(pluginId: String, previousVersion: String?) {
+        scope.launch {
+            val plugin = findPlugin(pluginId) ?: return@launch
+            dispatchToPlugin(
+                event = PluginHookEvents.PLUGIN_INSTALLED,
+                plugin = plugin,
+                payload = buildJsonObject {
+                    put("pluginId", pluginId)
+                    put("version", plugin.record.version)
+                    put("installedAt", plugin.record.installedAt)
+                    put(
+                        "previousVersion",
+                        if (previousVersion == null) JsonNull else JsonPrimitive(previousVersion)
+                    )
+                }
+            )
+        }
+    }
+
+    /** 插件启用生效后；只通知该插件自身。 */
+    fun dispatchPluginEnabled(pluginId: String) {
+        scope.launch {
+            val plugin = findPlugin(pluginId) ?: return@launch
+            dispatchToPlugin(
+                event = PluginHookEvents.PLUGIN_ENABLED,
+                plugin = plugin,
+                payload = pluginLifecyclePayload(plugin)
+            )
+        }
+    }
+
+    /**
+     * 插件停用生效前；此时插件仍可运行。等待该插件自己的 hook 返回，
+     * 超时或失败只记日志，调用方随后继续停用。
+     */
+    suspend fun dispatchPluginDisabled(pluginId: String) {
+        val plugin = findPlugin(pluginId) ?: return
+        dispatchToPluginAndAwait(
+            event = PluginHookEvents.PLUGIN_DISABLED,
+            plugin = plugin,
+            payload = pluginLifecyclePayload(plugin)
+        )
+    }
+
+    /** 插件卸载生效前；安装目录与数据目录尚未删除，等待最多 10 秒后继续卸载。 */
+    suspend fun dispatchPluginUninstalled(pluginId: String) {
+        val plugin = findPlugin(pluginId) ?: return
+        dispatchToPluginAndAwait(
+            event = PluginHookEvents.PLUGIN_UNINSTALLED,
+            plugin = plugin,
+            payload = pluginLifecyclePayload(plugin)
         )
     }
 
@@ -491,7 +552,12 @@ class PluginHookDispatcher @Inject constructor(
         }
     }
 
-    private suspend fun invoke(version: String, hook: PluginHook, payload: JsonObject) {
+    private suspend fun invoke(
+        version: String,
+        hook: PluginHook,
+        payload: JsonObject,
+        timeoutMs: Long = HOOK_TIMEOUT_MS
+    ) {
         // 派发是异步的：执行前再确认 hook 仍生效且未撤权，避免停用后旧任务继续跑。
         if (pluginManager.activeHooks().none { it.key == hook.key }) return
         try {
@@ -502,13 +568,61 @@ class PluginHookDispatcher @Inject constructor(
                 handler = hook.handler,
                 args = payload,
                 method = "hook.invoke",
-                timeoutMs = HOOK_TIMEOUT_MS
+                timeoutMs = timeoutMs
             )
             writeHookLogs(hook, result)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             FileLogger.w(TAG, "插件生命周期 hook 调用失败: ${hook.pluginId}/${hook.event} (${e.javaClass.simpleName})")
+        }
+    }
+
+    private fun dispatchToPlugin(event: String, plugin: InstalledPlugin, payload: JsonObject) {
+        lifecycleHooks(plugin, event).forEach { hook ->
+            scope.launch { invoke(plugin.record.version, hook, payload) }
+        }
+    }
+
+    private suspend fun dispatchToPluginAndAwait(
+        event: String,
+        plugin: InstalledPlugin,
+        payload: JsonObject
+    ) {
+        val hooks = lifecycleHooks(plugin, event)
+        if (hooks.isEmpty()) return
+        val completed = withTimeoutOrNull(LIFECYCLE_TOTAL_TIMEOUT_MS) {
+            coroutineScope {
+                hooks.map { hook ->
+                    async {
+                        invoke(plugin.record.version, hook, payload, LIFECYCLE_HOOK_TIMEOUT_MS)
+                    }
+                }.awaitAll()
+            }
+            true
+        }
+        if (completed == null) {
+            FileLogger.w(TAG, "插件生命周期 hook 等待超时: ${plugin.id}/$event")
+        }
+    }
+
+    private fun lifecycleHooks(plugin: InstalledPlugin, event: String): List<PluginHook> =
+        plugin.content.hooks.filter { it.event == event && it.mode == PluginHookModes.OBSERVE }
+
+    private fun pluginLifecyclePayload(plugin: InstalledPlugin): JsonObject = buildJsonObject {
+        put("pluginId", plugin.id)
+        put("version", plugin.record.version)
+    }
+
+    private suspend fun findPlugin(pluginId: String): InstalledPlugin? = withContext(Dispatchers.IO) {
+        try {
+            pluginManager.ensureLoaded()
+            pluginManager.plugins.value.firstOrNull { it.id == pluginId }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "读取插件失败: $pluginId (${e.javaClass.simpleName})")
+            null
         }
     }
 
@@ -549,6 +663,10 @@ class PluginHookDispatcher @Inject constructor(
         /** 代审核等的是人：给用户离开手机后回来的时间，但仍保留有界等待。 */
         const val REVIEW_HOOK_TIMEOUT_MS = 5 * 60_000L
         const val REVIEW_TOTAL_TIMEOUT_MS = 5 * 60_000L
+
+        /** 停用/卸载前的清理最多等 10 秒，插件不能借此阻止操作。 */
+        const val LIFECYCLE_HOOK_TIMEOUT_MS = 10_000L
+        const val LIFECYCLE_TOTAL_TIMEOUT_MS = 10_000L
         const val MAX_LOG_LINES = 50
         const val MAX_LOG_CHARS = 500
         const val DEFAULT_DENY_REASON = "插件阻止了该工具调用"

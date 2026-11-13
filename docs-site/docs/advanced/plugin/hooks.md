@@ -17,6 +17,10 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 | 事件 | 时机 |
 | --- | --- |
 | `app.started` | App 主进程启动完成时；用于常驻插件初始化 |
+| `plugin.installed` | 插件安装或版本替换完成后；只通知该插件自身 |
+| `plugin.uninstalled` | 插件卸载生效前；安装目录与数据目录仍可访问 |
+| `plugin.enabled` | 插件启用生效后；只通知该插件自身 |
+| `plugin.disabled` | 插件停用生效前；此时插件仍可运行 |
 | `agent.run.started` | 一轮对话开始处理时 |
 | `agent.run.finished` | 一轮对话结束时；成功、失败或被取消都会发出 |
 | `agent.request.started` | 一次模型请求即将发出时 |
@@ -26,6 +30,8 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 | `agent.compaction` | 上下文被压缩时 |
 
 只读事件的 payload 不包含消息正文、工具参数、工具结果和模型输出。
+
+`plugin.installed` 与 `plugin.enabled` 异步派发，不阻塞安装或启用。`plugin.uninstalled` 与 `plugin.disabled` 在状态变更前同步等待，给插件清理自己数据的机会；单次最多等待 10 秒，超时或失败后继续卸载/停用，插件不能阻止操作。这四个事件只派发给事件对应的插件，不广播给其他插件。
 
 ## 可写事件
 
@@ -59,7 +65,7 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 
 ## 事件内容
 
-所有事件均包含以下公共字段：
+所有 `agent.*` 事件均包含以下公共字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -81,6 +87,10 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 | `agent.tool.finished` | `callId`、`toolName`、`status`（`success`/`error`）、`durationMs` |
 | `agent.compaction` | `compacted=true`、`estimatedInputTokens` |
 | `app.started` | `launchId`、`startedAt`、`appVersion`、`process`（不含 run/session 公共字段） |
+| `plugin.installed` | `pluginId`、`version`、`installedAt`、`previousVersion`（首次安装为 null） |
+| `plugin.uninstalled` | `pluginId`、`version` |
+| `plugin.enabled` | `pluginId`、`version` |
+| `plugin.disabled` | `pluginId`、`version` |
 | `agent.tool.before` | `callId`、`toolName`、`arguments` |
 | `agent.tool.after` | `callId`、`toolName`、`status=success`、`data` |
 | `agent.http.before` | `url`、`method`、`headers`、`body` |

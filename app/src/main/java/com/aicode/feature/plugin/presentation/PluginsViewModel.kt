@@ -25,6 +25,7 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginShizukuRunner
@@ -98,6 +99,7 @@ class PluginsViewModel @Inject constructor(
     private val commandEngine: CommandEngine,
     private val eventBus: PluginEventBus,
     private val pluginRuntimeManager: PluginRuntimeManager,
+    private val pluginHookDispatcher: PluginHookDispatcher,
     private val pluginTerminalRunner: PluginTerminalRunner,
     private val pluginProviderRegistrar: PluginProviderRegistrar,
     private val shizukuPermissionRepository: PluginShizukuPermissionRepository,
@@ -201,6 +203,10 @@ class PluginsViewModel @Inject constructor(
             when (val result = manager.install(state.preview.token)) {
                 is PluginInstallResult.Installed -> {
                     syncProviders(result.pluginId)
+                    pluginHookDispatcher.dispatchPluginInstalled(
+                        result.pluginId,
+                        state.preview.installedVersion
+                    )
                     state.sourceDirName?.let { dirName ->
                         devLastLoaded[dirName] = devDirModified(dirName)
                         refreshDevProjects()
@@ -270,8 +276,14 @@ class PluginsViewModel @Inject constructor(
 
     fun setEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
+            if (!enabled) pluginHookDispatcher.dispatchPluginDisabled(id)
             if (manager.setEnabled(id, enabled)) {
-                if (enabled) syncProviders(id) else removeProviders(id)
+                if (enabled) {
+                    syncProviders(id)
+                    pluginHookDispatcher.dispatchPluginEnabled(id)
+                } else {
+                    removeProviders(id)
+                }
             }
             if (!enabled) {
                 pluginTerminalRunner.closePlugin(id)
@@ -283,6 +295,7 @@ class PluginsViewModel @Inject constructor(
 
     fun uninstall(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            pluginHookDispatcher.dispatchPluginUninstalled(id)
             if (manager.uninstall(id)) {
                 removeProviders(id)
                 shizukuPermissionRepository.revoke(id)
@@ -410,6 +423,10 @@ class PluginsViewModel @Inject constructor(
             when (val result = manager.install(preview.preview.token)) {
                 is PluginInstallResult.Installed -> {
                     syncProviders(result.pluginId)
+                    pluginHookDispatcher.dispatchPluginInstalled(
+                        result.pluginId,
+                        preview.preview.installedVersion
+                    )
                     true
                 }
                 is PluginInstallResult.Failed -> false

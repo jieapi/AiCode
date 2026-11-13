@@ -104,6 +104,18 @@ object PluginHookEvents {
     /** 宿主判定需要使用者确认后、弹窗前的代审核。 */
     const val AGENT_PERMISSION_REVIEW = "agent.permission.review"
 
+    /** 插件安装或版本替换完成；只派发给该插件自身。 */
+    const val PLUGIN_INSTALLED = "plugin.installed"
+
+    /** 插件卸载生效前；此时安装目录与数据目录仍可访问。 */
+    const val PLUGIN_UNINSTALLED = "plugin.uninstalled"
+
+    /** 插件启用生效后。 */
+    const val PLUGIN_ENABLED = "plugin.enabled"
+
+    /** 插件停用生效前；此时插件仍可运行。 */
+    const val PLUGIN_DISABLED = "plugin.disabled"
+
     /** 只允许 `mode: "transform"` 的事件。 */
     val TRANSFORM = setOf(AGENT_TOOL_BEFORE, AGENT_TOOL_AFTER, AGENT_HTTP_BEFORE)
 
@@ -122,7 +134,11 @@ object PluginHookEvents {
         AGENT_TOOL_BEFORE,
         AGENT_TOOL_AFTER,
         AGENT_HTTP_BEFORE,
-        AGENT_PERMISSION_REVIEW
+        AGENT_PERMISSION_REVIEW,
+        PLUGIN_INSTALLED,
+        PLUGIN_UNINSTALLED,
+        PLUGIN_ENABLED,
+        PLUGIN_DISABLED
     )
 }
 

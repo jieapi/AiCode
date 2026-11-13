@@ -67,7 +67,7 @@ class PluginToolManagerTest {
         sync(plugin(updated))
 
         verifySequence {
-            runtime.closePlugin(record.id)
+            runtime.closeOtherVersions(record.id, "1.1.0")
             overlayManager.reloadPlugin(record.id)
         }
         verify { terminalRunner wasNot Called }
@@ -144,7 +144,7 @@ class PluginToolManagerTest {
         sync(plugin(), plugin(other.copy(version = "1.1.0")))
 
         verifySequence {
-            runtime.closePlugin(other.id)
+            runtime.closeOtherVersions(other.id, "1.1.0")
             overlayManager.reloadPlugin(other.id)
         }
         verify { terminalRunner wasNot Called }
