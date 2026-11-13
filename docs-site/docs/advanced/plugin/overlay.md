@@ -10,7 +10,7 @@
     "overlay": {
       "purpose": "悬浮小组件与状态 HUD",
       "surfaces": [
-        {"id": "pet", "page": "pages/pet.html", "width": 240, "height": 320, "draggable": true},
+        {"id": "pet", "page": "pages/pet.html", "width": 240, "height": 320, "draggable": true, "snap": "x"},
         {"id": "menu", "page": "pages/menu.html", "width": 150, "height": 130, "draggable": false}
       ]
     },
@@ -28,6 +28,7 @@
 | `surface.width` | 默认宽度，单位 dp，默认 240，范围 48–720 |
 | `surface.height` | 默认高度，单位 dp，默认 320，范围 48–1200 |
 | `surface.draggable` | 是否允许拖动，默认 `true` |
+| `surface.snap` | 松手吸附轴：`none`、`x`、`y`、`both`，默认 `none` |
 
 全局最多同时存在 8 个插件浮层窗口，单个插件最多 3 个。窗口不可全屏，也不保证覆盖安全界面。
 
@@ -80,7 +81,7 @@ await aicode.overlay.close();
 
 ```js
 const self = await aicode.overlay.self();
-// { overlayId, pluginId, width, height, x, y, density, draggable, visibilityPolicy, foreground }
+// { overlayId, pluginId, width, height, x, y, density, draggable, snap, visibilityPolicy, foreground }
 ```
 
 窗口位置按 `pluginId:surfaceId` 自动保存，重启或自动拉起时恢复。插件拖动窗口或调用 `moveBy` 后均会更新保存位置。
@@ -145,10 +146,49 @@ const self = await aicode.overlay.self();
 - `overlay.resize(width, height, options?)` 调整自身窗口尺寸，单位为 dp；
 - `overlay.setVisibilityPolicy(policy)` 设置显示时机；
 - `overlay.moveBy(dx, dy)` 请求移动；
-- `overlay.onMessage(handler)` 接收 `state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress`；
+- `overlay.onMessage(handler)` 接收 `state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress`、`snap`；
 - `overlay.postMessage(payload)` 将交互回传至插件进程的 `overlay.message` handler。
 
 浮层页面不得调用 Shizuku、Shell 或终端。需要这些能力时，应由浮层通过 `postMessage` 将请求发送给插件进程执行。
+
+## 靠边吸附
+
+`surface.snap` 声明拖动松手后的吸附轴：
+
+| 值 | 行为 |
+| --- | --- |
+| `none` | 不吸附，松手位置即最终位置，默认 |
+| `x` | 吸附到左或右边缘 |
+| `y` | 吸附到上或下边缘 |
+| `both` | 吸附到 40dp 内最近的一条边 |
+
+只有窗口边缘距离屏幕边缘 40dp 以内时才触发吸附；拖到中间松手会停在原位，不会自动贴边。吸附由宿主完成：松手后取 40dp 内最近的边，以 280ms 过渡移动窗口，并把最终位置写入保存位置。插件不参与窗口几何计算，也不需要知道屏幕尺寸。
+
+吸附开始时页面收到事件：
+
+```js
+{type: 'snap', edge: 'left' | 'right' | 'top' | 'bottom', x, y}
+```
+
+`x`/`y` 是目标位置的 dp 坐标，与 `self()` 一致。页面按 `edge` 切换贴边后的表现，例如翻身朝向、趴下动画、只在靠边半区绘制内容。宿主只保证窗口贴着屏幕边缘，不会让窗口越出屏幕。
+
+`dragEnd` 的 `x`/`y` 同样是 dp，与 `snap`、`self()` 保持一致；拖动开始后窗口尚未吸附，需要恢复非贴边形态时监听 `dragStart`。
+
+```js
+let edge = null;
+
+aicode.overlay.onMessage((message) => {
+  if (message.type === 'snap') {
+    edge = message.edge;
+    document.body.dataset.edge = edge;
+  } else if (message.type === 'dragStart') {
+    edge = null;
+    delete document.body.dataset.edge;
+  }
+});
+```
+
+吸附后调用 `overlay.resize`，宿主会让窗口继续贴着同一条边；显式传入 `options.x` 或 `options.y` 时以传入位置为准。
 
 ## 尺寸动画
 

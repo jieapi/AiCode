@@ -17,6 +17,7 @@ import android.view.WindowManager
 import android.view.animation.PathInterpolator
 import android.webkit.WebView
 import android.widget.FrameLayout
+import com.aicode.feature.plugin.domain.PluginOverlaySnap
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -39,6 +40,7 @@ internal class PluginOverlayWindow(
     private val layoutParams: WindowManager.LayoutParams,
     private val webView: WebView,
     private val draggable: Boolean,
+    private val snap: String,
     initialVisibilityPolicy: String,
     initialForeground: Boolean,
     private val onPositionChanged: (Int, Int) -> Unit
@@ -55,6 +57,8 @@ internal class PluginOverlayWindow(
     private var appForeground = initialForeground
     private var requestedVisible = true
     private var resizeAnimator: ValueAnimator? = null
+    private var snapAnimator: ValueAnimator? = null
+    private var snappedEdge: String? = null
     private var logicalWidthDp = (layoutParams.width / density).toInt()
     private var logicalHeightDp = (layoutParams.height / density).toInt()
 
@@ -86,6 +90,7 @@ internal class PluginOverlayWindow(
         )
         dragHandle.visibility = if (draggable) View.VISIBLE else View.GONE
         dragHandle.setOnTouchListener { _, event -> onDragTouch(event) }
+        refreshSnappedEdge()
         applyVisibility()
     }
 
@@ -101,6 +106,7 @@ internal class PluginOverlayWindow(
         put("x", layoutParams.x)
         put("y", layoutParams.y)
         put("draggable", draggable)
+        put("snap", snap)
         put("visibilityPolicy", visibilityPolicy)
     }
 
@@ -113,6 +119,7 @@ internal class PluginOverlayWindow(
         put("y", (layoutParams.y + contentView.translationY) / density)
         put("density", density)
         put("draggable", draggable)
+        put("snap", snap)
         put("visibilityPolicy", visibilityPolicy)
         put("foreground", appForeground)
     }
@@ -149,6 +156,7 @@ internal class PluginOverlayWindow(
         y: Float? = null
     ) {
         resizeAnimator?.cancel()
+        snapAnimator?.end()
         mainHandler.removeCallbacks(longPressRunnable)
         touchActive = false
         dragging = false
@@ -160,10 +168,20 @@ internal class PluginOverlayWindow(
         val toWidth = (widthDp * density).toInt().coerceAtLeast(1)
         val toHeight = (heightDp * density).toInt().coerceAtLeast(1)
         val metrics = resources.displayMetrics
-        val toX = (x?.times(density) ?: fromX.toFloat()).roundToInt()
-            .coerceIn(0, (metrics.widthPixels - toWidth).coerceAtLeast(0))
-        val toY = (y?.times(density) ?: fromY.toFloat()).roundToInt()
-            .coerceIn(0, (metrics.heightPixels - toHeight).coerceAtLeast(0))
+        val maxX = (metrics.widthPixels - toWidth).coerceAtLeast(0)
+        val maxY = (metrics.heightPixels - toHeight).coerceAtLeast(0)
+        val toX = when {
+            x != null -> (x * density).roundToInt()
+            snappedEdge == "left" -> 0
+            snappedEdge == "right" -> maxX
+            else -> fromX
+        }.coerceIn(0, maxX)
+        val toY = when {
+            y != null -> (y * density).roundToInt()
+            snappedEdge == "top" -> 0
+            snappedEdge == "bottom" -> maxY
+            else -> fromY
+        }.coerceIn(0, maxY)
         val wasFull = dragRegionCss.left <= 0f &&
             dragRegionCss.top <= 0f &&
             dragRegionCss.right >= widthDp() &&
@@ -182,7 +200,8 @@ internal class PluginOverlayWindow(
             if (wasFull) dragRegionCss = RectF(0f, 0f, widthDp.toFloat(), heightDp.toFloat())
             applyDragRegion()
             runCatching { windowManager.updateViewLayout(this, layoutParams) }
-            if (x != null || y != null) onPositionChanged(layoutParams.x, layoutParams.y)
+            refreshSnappedEdge()
+            onPositionChanged(layoutParams.x, layoutParams.y)
             postMessage(
                 buildJsonObject {
                     put("type", "resize")
@@ -259,7 +278,9 @@ internal class PluginOverlayWindow(
     private fun heightDp(): Int = logicalHeightDp
 
     fun moveBy(dx: Float, dy: Float) {
+        snapAnimator?.end()
         resizeAnimator?.end()
+        snappedEdge = null
         layoutParams.x += (dx * density).toInt()
         layoutParams.y += (dy * density).toInt()
         clampPosition()
@@ -296,6 +317,8 @@ internal class PluginOverlayWindow(
     fun dispose() {
         resizeAnimator?.cancel()
         resizeAnimator = null
+        snapAnimator?.cancel()
+        snapAnimator = null
         mainHandler.removeCallbacks(longPressRunnable)
         bridge?.close()
         bridge = null
@@ -309,6 +332,7 @@ internal class PluginOverlayWindow(
         ) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                snapAnimator?.end()
                 touchActive = true
                 downRawX = event.rawX
                 downRawY = event.rawY
@@ -327,6 +351,7 @@ internal class PluginOverlayWindow(
                 val dy = event.rawY - downRawY
                 if (!dragging && hypot(dx, dy) > touchSlop) {
                     dragging = true
+                    snappedEdge = null
                     longPressFired = false
                     mainHandler.removeCallbacks(longPressRunnable)
                     sendEvent(buildJsonObject { put("type", "dragStart") })
@@ -348,11 +373,13 @@ internal class PluginOverlayWindow(
                     sendEvent(
                         buildJsonObject {
                             put("type", "dragEnd")
-                            put("x", layoutParams.x)
-                            put("y", layoutParams.y)
+                            put("x", layoutParams.x / density)
+                            put("y", layoutParams.y / density)
                         }
                     )
-                    onPositionChanged(layoutParams.x, layoutParams.y)
+                    if (!startSnap()) {
+                        onPositionChanged(layoutParams.x, layoutParams.y)
+                    }
                 } else if (!longPressFired) {
                     sendEvent(buildJsonObject { put("type", "click") })
                 }
@@ -371,6 +398,105 @@ internal class PluginOverlayWindow(
         return false
     }
 
+    private fun allowsSnapX(): Boolean = snap == PluginOverlaySnap.X || snap == PluginOverlaySnap.BOTH
+
+    private fun allowsSnapY(): Boolean = snap == PluginOverlaySnap.Y || snap == PluginOverlaySnap.BOTH
+
+    private fun refreshSnappedEdge() {
+        if (snap == PluginOverlaySnap.NONE) {
+            snappedEdge = null
+            return
+        }
+        val metrics = resources.displayMetrics
+        val maxX = (metrics.widthPixels - layoutParams.width).coerceAtLeast(0)
+        val maxY = (metrics.heightPixels - layoutParams.height).coerceAtLeast(0)
+        snappedEdge = when {
+            allowsSnapX() && layoutParams.x <= EDGE_TOLERANCE_PX -> "left"
+            allowsSnapX() && layoutParams.x >= maxX - EDGE_TOLERANCE_PX -> "right"
+            allowsSnapY() && layoutParams.y <= EDGE_TOLERANCE_PX -> "top"
+            allowsSnapY() && layoutParams.y >= maxY - EDGE_TOLERANCE_PX -> "bottom"
+            else -> null
+        }
+    }
+
+    /** 仅当窗口边缘距屏幕边缘足够近时吸附；返回 null 表示停在松手位置。 */
+    private fun snapTarget(): Triple<String, Int, Int>? {
+        val allowX = allowsSnapX()
+        val allowY = allowsSnapY()
+        if (!allowX && !allowY) return null
+        val metrics = resources.displayMetrics
+        val maxX = (metrics.widthPixels - layoutParams.width).coerceAtLeast(0)
+        val maxY = (metrics.heightPixels - layoutParams.height).coerceAtLeast(0)
+        val trigger = SNAP_TRIGGER_DP * density
+        val candidates = mutableListOf<Pair<Float, Triple<String, Int, Int>>>()
+        if (allowX) {
+            val left = layoutParams.x.toFloat()
+            val right = (maxX - layoutParams.x).toFloat()
+            if (left <= trigger) candidates += left to Triple("left", 0, layoutParams.y)
+            if (right <= trigger) candidates += right to Triple("right", maxX, layoutParams.y)
+        }
+        if (allowY) {
+            val top = layoutParams.y.toFloat()
+            val bottom = (maxY - layoutParams.y).toFloat()
+            if (top <= trigger) candidates += top to Triple("top", layoutParams.x, 0)
+            if (bottom <= trigger) candidates += bottom to Triple("bottom", layoutParams.x, maxY)
+        }
+        return candidates.minByOrNull { it.first }?.second
+    }
+
+    private fun startSnap(): Boolean {
+        val (edge, targetX, targetY) = snapTarget() ?: return false
+        snapAnimator?.cancel()
+        snappedEdge = edge
+        notifySnap(edge, targetX, targetY)
+        val fromX = layoutParams.x
+        val fromY = layoutParams.y
+        if (fromX == targetX && fromY == targetY) {
+            onPositionChanged(targetX, targetY)
+            return true
+        }
+        snapAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = SNAP_DURATION_MS
+            interpolator = PathInterpolator(.2f, 0f, 0f, 1f)
+            addUpdateListener {
+                val fraction = it.animatedValue as Float
+                layoutParams.x = (fromX + (targetX - fromX) * fraction).roundToInt()
+                layoutParams.y = (fromY + (targetY - fromY) * fraction).roundToInt()
+                runCatching { windowManager.updateViewLayout(this@PluginOverlayWindow, layoutParams) }
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    if (snapAnimator === animation) snapAnimator = null
+                    if (!cancelled) {
+                        layoutParams.x = targetX
+                        layoutParams.y = targetY
+                        runCatching { windowManager.updateViewLayout(this@PluginOverlayWindow, layoutParams) }
+                        onPositionChanged(targetX, targetY)
+                    }
+                }
+            })
+        }
+        snapAnimator?.start()
+        return true
+    }
+
+    private fun notifySnap(edge: String, x: Int, y: Int) {
+        postMessage(
+            buildJsonObject {
+                put("type", "snap")
+                put("edge", edge)
+                put("x", x / density)
+                put("y", y / density)
+            }
+        )
+    }
+
     private fun sendEvent(event: JsonObject) {
         postMessage(event)
     }
@@ -386,6 +512,9 @@ internal class PluginOverlayWindow(
     private companion object {
         const val LONG_PRESS_MS = 520L
         const val RESIZE_DURATION_MS = 280L
+        const val SNAP_DURATION_MS = 280L
+        const val SNAP_TRIGGER_DP = 40f
+        const val EDGE_TOLERANCE_PX = 2f
     }
 }
 

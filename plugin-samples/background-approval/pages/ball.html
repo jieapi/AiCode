@@ -358,7 +358,7 @@
           updateButtons();
           updateDragRegion().catch(function () {});
         } else if (message.type === 'dragEnd') {
-          var position = { x: message.x / density, y: message.y / density };
+          var position = { x: message.x, y: message.y };
           if (expanded && panelOrigin && ballAnchor) {
             ballAnchor.x += position.x - panelOrigin.x;
             ballAnchor.y += position.y - panelOrigin.y;

@@ -35,8 +35,18 @@
     .pet-scale {
       width: 170px;
       height: 190px;
+      flex: none;
       transform: scale(var(--pet-scale));
       transform-origin: 50% 100%;
+      transition: transform .28s ease;
+    }
+    .pet-wrap.edge-left .pet-scale {
+      transform-origin: 50% 50%;
+      transform: translate(-30px, 36px) rotate(90deg) scale(var(--pet-scale));
+    }
+    .pet-wrap.edge-right .pet-scale {
+      transform-origin: 50% 50%;
+      transform: translate(30px, 36px) rotate(-90deg) scale(var(--pet-scale));
     }
     .pet {
       position: relative;
@@ -322,6 +332,7 @@
   <script>
     (function () {
       var pet = document.getElementById('pet');
+      var wrap = document.querySelector('.pet-wrap');
       var hint = document.getElementById('hint');
       var stateLabel = document.getElementById('stateLabel');
       var hintTimer = 0;
@@ -397,10 +408,16 @@
         } else if (message.type === 'hint') {
           showHint(message.text || '');
         } else if (message.type === 'dragStart') {
+          wrap.classList.remove('edge-left', 'edge-right');
           pet.classList.add('dragging');
           hint.classList.remove('show');
         } else if (message.type === 'dragEnd') {
           pet.classList.remove('dragging');
+        } else if (message.type === 'snap') {
+          wrap.classList.remove('edge-left', 'edge-right');
+          if (message.edge === 'left' || message.edge === 'right') {
+            wrap.classList.add('edge-' + message.edge);
+          }
         } else if (message.type === 'resize') {
           fit(message.width, message.height);
           setFullDragRegion(message.width, message.height);

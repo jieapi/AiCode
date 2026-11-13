@@ -7,6 +7,7 @@ import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
+import com.aicode.feature.plugin.domain.PluginOverlaySnap
 import io.mockk.clearMocks
 import io.mockk.mockk
 import io.mockk.verify
@@ -41,6 +42,13 @@ class PluginOverlayWindowTest {
     fun setUp() {
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        windowManager = mockk(relaxed = true)
+        window = createWindow(PluginOverlaySnap.NONE)
+        anchorX = position("x")
+        anchorY = position("y")
+    }
+
+    private fun createWindow(snap: String): PluginOverlayWindow {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val metrics = context.resources.displayMetrics
         val size = (48 * metrics.density).toInt()
@@ -50,22 +58,21 @@ class PluginOverlayWindowTest {
             x = metrics.widthPixels - size
             y = metrics.heightPixels - size
         }
-        webView = WebView(context)
-        windowManager = mockk(relaxed = true)
-        window = PluginOverlayWindow(
+        val localWebView = WebView(context)
+        webView = localWebView
+        return PluginOverlayWindow(
             context = context,
             pluginId = "test.approval",
             overlayId = "test.approval:ball",
             windowManager = windowManager,
             layoutParams = params,
-            webView = webView,
+            webView = localWebView,
             draggable = true,
+            snap = snap,
             initialVisibilityPolicy = "background",
             initialForeground = false,
             onPositionChanged = { _, _ -> }
         )
-        anchorX = position("x")
-        anchorY = position("y")
     }
 
     @After
@@ -157,6 +164,98 @@ class PluginOverlayWindowTest {
         assertEquals(320 to 280, window.sizeDp())
         assertEquals(320, window.selfInfo()["width"]?.jsonPrimitive?.intOrNull)
     }
+
+    @Test
+    fun dragReleaseSnapsToTheNearestHorizontalEdge() {
+        window = createWindow(PluginOverlaySnap.X)
+        ShadowChoreographer.setPaused(false)
+        try {
+            val handle = (window.getChildAt(0) as FrameLayout).getChildAt(1)
+            val startX = position("x")
+            sendTouch(handle, MotionEvent.ACTION_DOWN, 20f, 20f)
+            sendTouch(handle, MotionEvent.ACTION_MOVE, 20f - 250f * density(), 20f)
+            assertEquals(startX - 250f, position("x"), .5f)
+            sendTouch(handle, MotionEvent.ACTION_UP, 20f - 250f * density(), 20f)
+            settle()
+            assertEquals(0f, position("x"), .5f)
+        } finally {
+            ShadowChoreographer.setPaused(true)
+        }
+    }
+
+    @Test
+    fun dragReleaseFarFromEdgesKeepsTheDroppedPosition() {
+        window = createWindow(PluginOverlaySnap.X)
+        ShadowChoreographer.setPaused(false)
+        try {
+            val handle = (window.getChildAt(0) as FrameLayout).getChildAt(1)
+            val startX = position("x")
+            sendTouch(handle, MotionEvent.ACTION_DOWN, 20f, 20f)
+            sendTouch(handle, MotionEvent.ACTION_MOVE, 20f - 200f * density(), 20f)
+            sendTouch(handle, MotionEvent.ACTION_UP, 20f - 200f * density(), 20f)
+            settle()
+            assertEquals(startX - 200f, position("x"), .5f)
+        } finally {
+            ShadowChoreographer.setPaused(true)
+        }
+    }
+
+    @Test
+    fun snapNoneKeepsTheDroppedPosition() {
+        val handle = (window.getChildAt(0) as FrameLayout).getChildAt(1)
+        val startX = position("x")
+        sendTouch(handle, MotionEvent.ACTION_DOWN, 20f, 20f)
+        sendTouch(handle, MotionEvent.ACTION_MOVE, 20f - 200f * density(), 20f)
+        sendTouch(handle, MotionEvent.ACTION_UP, 20f - 200f * density(), 20f)
+        settle()
+        assertEquals(startX - 200f, position("x"), .5f)
+    }
+
+    @Test
+    fun resizeKeepsTheSnappedEdge() {
+        window = createWindow(PluginOverlaySnap.X)
+        ShadowChoreographer.setPaused(false)
+        try {
+            val handle = (window.getChildAt(0) as FrameLayout).getChildAt(1)
+            sendTouch(handle, MotionEvent.ACTION_DOWN, 20f, 20f)
+            sendTouch(handle, MotionEvent.ACTION_MOVE, 20f - 400f * density(), 20f)
+            sendTouch(handle, MotionEvent.ACTION_UP, 20f - 400f * density(), 20f)
+            settle()
+            assertEquals(0f, position("x"), .5f)
+            window.resize(120, 48)
+            settle()
+            assertEquals(0f, position("x"), .5f)
+        } finally {
+            ShadowChoreographer.setPaused(true)
+        }
+    }
+
+    @Test
+    fun snapEventCarriesEdgeAndDpPosition() {
+        window = createWindow(PluginOverlaySnap.X)
+        ShadowChoreographer.setPaused(false)
+        try {
+            val handle = (window.getChildAt(0) as FrameLayout).getChildAt(1)
+            sendTouch(handle, MotionEvent.ACTION_DOWN, 20f, 20f)
+            sendTouch(handle, MotionEvent.ACTION_MOVE, 20f - 400f * density(), 20f)
+            sendTouch(handle, MotionEvent.ACTION_UP, 20f - 400f * density(), 20f)
+            settle()
+            val script = shadowOf(webView).lastEvaluatedJavascript.orEmpty()
+            assertTrue(script.contains("snap"))
+            assertTrue(script.contains("left"))
+        } finally {
+            ShadowChoreographer.setPaused(true)
+        }
+    }
+
+    private fun sendTouch(handle: android.view.View, action: Int, x: Float, y: Float) {
+        val event = MotionEvent.obtain(0L, 0L, action, x, y, 0)
+        handle.dispatchTouchEvent(event)
+        event.recycle()
+    }
+
+    private fun density(): Float =
+        ApplicationProvider.getApplicationContext<Context>().resources.displayMetrics.density
 
     private fun position(key: String): Float = window.selfInfo().getValue(key).jsonPrimitive.floatOrNull!!
 

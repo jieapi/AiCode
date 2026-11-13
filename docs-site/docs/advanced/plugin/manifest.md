@@ -288,7 +288,7 @@
     "overlay": {
       "purpose": "悬浮小组件与状态 HUD",
       "surfaces": [
-        {"id": "pet", "page": "pages/pet.html", "width": 240, "height": 320, "draggable": true}
+        {"id": "pet", "page": "pages/pet.html", "width": 240, "height": 320, "draggable": true, "snap": "x"}
       ]
     }
   }
@@ -309,6 +309,7 @@
 | `width` | 否 | 默认宽度，单位 dp，默认 240，范围 48–720 |
 | `height` | 否 | 默认高度，单位 dp，默认 320，范围 48–1200 |
 | `draggable` | 否 | 是否允许拖动，默认 `true` |
+| `snap` | 否 | 松手吸附轴：`none`、`x`、`y`、`both`，默认 `none` |
 
 浮层需要使用者单独授权，且 App 需获得「显示在其他应用上层」的系统权限。
 

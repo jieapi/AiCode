@@ -55,7 +55,7 @@ object PluginManifestParser {
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
-    private val OVERLAY_SURFACE_KEYS = setOf("id", "page", "width", "height", "draggable")
+    private val OVERLAY_SURFACE_KEYS = setOf("id", "page", "width", "height", "draggable", "snap")
 
     private val PLUGIN_ID = Regex("^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$")
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
@@ -693,8 +693,16 @@ object PluginManifestParser {
                             (draggableRaw as? JsonPrimitive)?.booleanOrNull
                                 ?: run { invalid("$itemPath.draggable"); ok = false; false }
                         }
+                        val snapRaw = item["snap"]
+                        val snap = if (snapRaw == null) {
+                            PluginOverlaySnap.NONE
+                        } else {
+                            (snapRaw as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+                                ?.takeIf { it in PluginOverlaySnap.ALL }
+                                ?: run { invalid("$itemPath.snap"); ok = false; PluginOverlaySnap.NONE }
+                        }
                         if (id != null && page != null) {
-                            surfaces += PluginOverlaySurfaceRef(id, page, width, height, draggable)
+                            surfaces += PluginOverlaySurfaceRef(id, page, width, height, draggable, snap)
                         }
                     }
                 }

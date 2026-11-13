@@ -132,7 +132,8 @@ data class PluginOverlaySurface(
     val pluginVersion: String,
     val width: Int,
     val height: Int,
-    val draggable: Boolean
+    val draggable: Boolean,
+    val snap: String = PluginOverlaySnap.NONE
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
@@ -429,7 +430,8 @@ object PluginContentLoader {
             pluginVersion = pluginVersion,
             width = ref.width,
             height = ref.height,
-            draggable = ref.draggable
+            draggable = ref.draggable,
+            snap = ref.snap
         )
     }
 

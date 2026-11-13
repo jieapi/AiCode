@@ -217,7 +217,7 @@
       setVisibilityPolicy: function (policy) {
         return call('overlay.setVisibilityPolicy', { policy: String(policy) });
       },
-      // 浮层页面接收宿主消息（状态、click、dragStart、dragEnd、longPress）。
+      // 浮层页面接收宿主消息（状态、click、dragStart、dragEnd、longPress、snap）。
       onMessage: function (handler) {
         if (typeof handler !== 'function') return function () {};
         overlayHandlers.push(handler);

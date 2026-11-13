@@ -171,8 +171,21 @@ data class PluginOverlaySurfaceRef(
     val page: String,
     val width: Int = 240,
     val height: Int = 320,
-    val draggable: Boolean = true
+    val draggable: Boolean = true,
+    val snap: String = PluginOverlaySnap.NONE
 )
+
+/**
+ * 浮层松手后的吸附轴。窗口几何由宿主完成，插件只消费 `snap` 事件调整贴边后的表现。
+ */
+object PluginOverlaySnap {
+    const val NONE = "none"
+    const val X = "x"
+    const val Y = "y"
+    const val BOTH = "both"
+
+    val ALL = setOf(NONE, X, Y, BOTH)
+}
 
 /** `contributes.overlay` 声明插件使用系统悬浮窗；使用者需在插件详情中单独授权。 */
 data class PluginOverlayRef(

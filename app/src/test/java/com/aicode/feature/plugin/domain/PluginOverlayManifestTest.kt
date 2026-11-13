@@ -68,6 +68,35 @@ class PluginOverlayManifestTest {
     }
 
     @Test
+    fun overlaySnapDefaultsToNone() {
+        val result = PluginManifestParser.parse(
+            manifest("""{"purpose": "x", "surfaces": [{"id": "pet", "page": "pet.html"}]}""")
+        )
+        val surface = (result as ManifestParseResult.Success).manifest.overlay?.surfaces?.first()
+        assertEquals(PluginOverlaySnap.NONE, surface?.snap)
+    }
+
+    @Test
+    fun overlaySnapAcceptsDeclaredAxes() {
+        val result = PluginManifestParser.parse(
+            manifest("""{"purpose": "x", "surfaces": [{"id": "pet", "page": "pet.html", "snap": "both"}]}""")
+        )
+        val surface = (result as ManifestParseResult.Success).manifest.overlay?.surfaces?.first()
+        assertEquals(PluginOverlaySnap.BOTH, surface?.snap)
+    }
+
+    @Test
+    fun overlayRejectsUnknownSnapValue() {
+        val result = PluginManifestParser.parse(
+            manifest("""{"purpose": "x", "surfaces": [{"id": "pet", "page": "pet.html", "snap": "diagonal"}]}""")
+        )
+        assertTrue(result is ManifestParseResult.Failure)
+        assertTrue(
+            (result as ManifestParseResult.Failure).errors.any { it.code == PluginErrorCode.FIELD_INVALID }
+        )
+    }
+
+    @Test
     fun overlayRequiresPurpose() {
         val result = PluginManifestParser.parse(manifest("""{"surfaces": []}"""))
         assertTrue(result is ManifestParseResult.Failure)

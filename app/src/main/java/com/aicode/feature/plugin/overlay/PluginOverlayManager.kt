@@ -334,6 +334,7 @@ class PluginOverlayManager @Inject constructor(
             layoutParams = layoutParams,
             webView = webView,
             draggable = surface.draggable,
+            snap = surface.snap,
             initialVisibilityPolicy = visibilityPolicy,
             initialForeground = appForegroundMonitor.current(),
             onPositionChanged = { x, y ->

@@ -189,7 +189,7 @@ const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.cont
 | `aicode.overlay.resize(width, height, options?)` | 浮层页面调整自身尺寸，单位为 dp；`options` 可指定 `{animate: true, x, y}` |
 | `aicode.overlay.setVisibilityPolicy(policy)` | 设置显示时机：`always` / `foreground` / `background` |
 | `aicode.overlay.moveBy(dx, dy)` | 请求移动窗口 |
-| `aicode.overlay.onMessage(handler)` | 接收宿主消息：`state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress` |
+| `aicode.overlay.onMessage(handler)` | 接收宿主消息：`state`、`resize`、`appState`、`click`、`dragStart`、`dragEnd`、`longPress`、`snap` |
 | `aicode.overlay.postMessage(payload)` | 将交互回传至插件进程的 `overlay.message` handler |
 
 浮层页面不得调用 Shizuku、Shell 或终端。详见[系统浮层](/advanced/plugin/overlay)。
