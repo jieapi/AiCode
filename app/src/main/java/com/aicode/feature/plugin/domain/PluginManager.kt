@@ -157,6 +157,16 @@ class PluginManager internal constructor(
         }
     }
 
+    /** 重新读取安装记录与清单；只更新界面快照，不重启已启用的插件运行时。 */
+    suspend fun refresh() = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            ensureLoaded()
+            val records = loadRecords()
+            publish(records.map { loadInstalled(it) })
+            sweepOrphans(records.map { it.id }.toSet())
+        }
+    }
+
     /** 当前生效的插件技能：插件启用即可用。 */
     fun activeSkills(): List<Skill> {
         ensureLoaded()

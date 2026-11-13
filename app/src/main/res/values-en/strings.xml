@@ -2022,6 +2022,12 @@
     <string name="plugins_search_empty">No matching plugins found</string>
     <string name="plugins_tab_manage">Management</string>
     <string name="plugins_tab_config">Configuration</string>
+    <string name="plugins_tab_installed">Installed</string>
+    <string name="plugins_tab_store">Plugin Store</string>
+    <string name="plugins_store_empty_title">Plugin store coming soon</string>
+    <string name="plugins_store_empty_hint">Browsing, installing, and updating plugins online is still in development.</string>
+    <string name="plugins_settings_title">Plugin settings</string>
+    <string name="plugins_refresh">Refresh plugins</string>
     <string name="plugins_config_card_title">Plugin Configuration</string>
     <string name="plugins_config_card_hint">This plugin provides its own settings page. Tap to configure.</string>
     <string name="plugins_status_active">Active</string>
@@ -2126,7 +2132,7 @@
     <string name="plugins_info_version">Version</string>
     <string name="plugins_info_publisher">Publisher</string>
     <string name="plugins_info_license">License</string>
-    <string name="plugins_info_repository">Source repository (declared by the plugin, not verified)</string>
+    <string name="plugins_info_repository">Source repository</string>
     <string name="plugins_info_origin">Source</string>
     <string name="plugins_origin_local">Imported from a local file</string>
     <string name="plugins_no_contents">Nothing to show</string>

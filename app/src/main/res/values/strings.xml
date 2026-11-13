@@ -2021,6 +2021,12 @@
     <string name="plugins_search_empty">未找到匹配的插件</string>
     <string name="plugins_tab_manage">插件管理</string>
     <string name="plugins_tab_config">插件配置</string>
+    <string name="plugins_tab_installed">已安装</string>
+    <string name="plugins_tab_store">插件商店</string>
+    <string name="plugins_store_empty_title">插件商店即将上线</string>
+    <string name="plugins_store_empty_hint">在线浏览、安装和更新插件的功能还在开发中。</string>
+    <string name="plugins_settings_title">插件设置</string>
+    <string name="plugins_refresh">刷新插件</string>
     <string name="plugins_config_card_title">插件专属配置</string>
     <string name="plugins_config_card_hint">此插件提供了专属配置界面，点击直接前往配置。</string>
     <string name="plugins_status_active">已启用</string>
@@ -2125,7 +2131,7 @@
     <string name="plugins_info_version">版本</string>
     <string name="plugins_info_publisher">发布者</string>
     <string name="plugins_info_license">许可证</string>
-    <string name="plugins_info_repository">源码仓库（插件自述，未核验）</string>
+    <string name="plugins_info_repository">源码仓库</string>
     <string name="plugins_info_origin">来源</string>
     <string name="plugins_origin_local">本地导入</string>
     <string name="plugins_no_contents">没有可显示的内容</string>

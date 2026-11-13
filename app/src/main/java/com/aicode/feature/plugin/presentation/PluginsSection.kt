@@ -2,8 +2,6 @@ package com.aicode.feature.plugin.presentation
 
 import android.view.View
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,18 +14,27 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,23 +45,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.util.FileLogger
+import com.aicode.core.ui.AdaptiveModalBottomSheet
 import com.aicode.core.ui.AppSwitch
+import com.aicode.core.ui.FloatingTabBar
+import com.aicode.core.ui.FloatingTabItem
 import com.aicode.core.ui.SegmentedTabs
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.plugin.domain.InstalledPlugin
-import com.aicode.feature.plugin.domain.PluginHookModes
 import com.aicode.feature.plugin.domain.PluginMcpServer
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.domain.PluginStatus
@@ -65,11 +74,27 @@ import com.aicode.feature.settings.presentation.component.SettingsDivider
 import com.aicode.feature.settings.presentation.component.SettingsEmptyState
 import com.aicode.feature.settings.presentation.component.SettingsGroup
 import com.aicode.feature.settings.presentation.component.SettingsGroupHeader
+import com.aicode.feature.settings.presentation.component.SettingsRow
+import com.aicode.feature.settings.presentation.component.openUrl
+import com.aicode.feature.settings.presentation.component.settingsPageBackground
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.Activity
+import compose.icons.feathericons.Book
+import compose.icons.feathericons.BookOpen
 import compose.icons.feathericons.ChevronRight
-import compose.icons.feathericons.ExternalLink
+import compose.icons.feathericons.Cloud
+import compose.icons.feathericons.Github
 import compose.icons.feathericons.Package
 import compose.icons.feathericons.Search
+import compose.icons.feathericons.Server
+import compose.icons.feathericons.Settings
+import compose.icons.feathericons.ShoppingBag
+import compose.icons.feathericons.Tag
+import compose.icons.feathericons.Terminal
+import compose.icons.feathericons.Tool
+import compose.icons.feathericons.User
+import compose.icons.feathericons.Users
+import compose.icons.feathericons.Zap
 import kotlinx.coroutines.delay
 
 /** 当前界面语言标签，用于挑选插件自带的多语言文本。 */
@@ -94,8 +119,8 @@ internal fun mcpDescription(server: PluginMcpServer): String {
 }
 
 /**
- * 设置 → 插件：类似 MCP 风格的插件卡片列表。
- * 包含左侧方块图标、主标题、描述摘要、元信息/能力 Pills、状态指示 Pill 与左滑卸载。
+ * 设置 → 插件：底部 tab 切换「已安装」与「插件商店」。
+ * 已安装列表保留搜索和左滑卸载；条目显示名称、图标、版本/作者标签与启停开关。
  */
 @Composable
 internal fun PluginsSection(
@@ -103,118 +128,50 @@ internal fun PluginsSection(
     loaded: Boolean,
     onOpenDetail: (InstalledPlugin) -> Unit,
     onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
-    onUninstall: (InstalledPlugin) -> Unit = {},
-    devMode: Boolean = false,
-    devRootPath: String = "",
-    devProjects: List<PluginDevProject> = emptyList(),
-    onSetDevMode: (Boolean) -> Unit = {},
-    onRefreshDevProjects: () -> Unit = {},
-    onInstallDevProject: (PluginDevProject) -> Unit = {}
+    onUninstall: (InstalledPlugin) -> Unit = {}
 ) {
     if (!loaded) return
 
     val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var pluginToUninstall by remember { mutableStateOf<InstalledPlugin?>(null) }
-
-    val filteredPlugins = remember(plugins, searchQuery, languageTag) {
-        val query = searchQuery.trim().lowercase()
-        if (query.isEmpty()) {
-            plugins
-        } else {
-            plugins.filter { plugin ->
-                plugin.displayName(languageTag).lowercase().contains(query) ||
-                    plugin.id.lowercase().contains(query) ||
-                    plugin.manifest?.publisher?.lowercase()?.contains(query) == true ||
-                    plugin.manifest?.description?.resolve(languageTag)?.lowercase()?.contains(query) == true
-            }
-        }
+    val pagerState = rememberPagerState { 2 }
+    val installedListState = rememberLazyListState()
+    val installedScrolling by remember {
+        derivedStateOf { pagerState.currentPage == 0 && installedListState.isScrollInProgress }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            item(key = "developer", contentType = "developer") {
-                PluginDeveloperSection(
-                    devMode = devMode,
-                    devRootPath = devRootPath,
-                    projects = devProjects,
-                    onSetDevMode = onSetDevMode,
-                    onRefresh = onRefreshDevProjects,
-                    onInstall = onInstallDevProject
+    Box(modifier = Modifier.fillMaxSize()) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            if (page == 0) {
+                InstalledPluginsPage(
+                    plugins = plugins,
+                    languageTag = languageTag,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    listState = installedListState,
+                    onOpenDetail = onOpenDetail,
+                    onToggleEnabled = onToggleEnabled,
+                    onDelete = { pluginToUninstall = it }
                 )
-            }
-            if (plugins.isEmpty() && !devMode) {
-                item(key = "empty", contentType = "empty") {
-                    SettingsEmptyState(
-                        icon = FeatherIcons.Package,
-                        title = stringResource(R.string.plugins_empty_title),
-                        hint = stringResource(R.string.plugins_empty_hint),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.xl, vertical = 48.dp)
-                    )
-                }
-            }
-            if (plugins.size >= 3) {
-                item(key = "search", contentType = "search") {
-                    ModelSearchField(
-                        query = searchQuery,
-                        onQueryChange = { searchQuery = it },
-                        placeholder = stringResource(R.string.plugins_search_placeholder),
-                        modifier = Modifier.padding(bottom = Spacing.xs)
-                    )
-                }
-            }
-
-            if (filteredPlugins.isEmpty() && plugins.isNotEmpty()) {
-                item(key = "search-empty", contentType = "empty") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-                        ) {
-                            Icon(
-                                FeatherIcons.Search,
-                                contentDescription = null,
-                                modifier = Modifier.size(28.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                text = stringResource(R.string.plugins_search_empty),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
             } else {
-                itemsIndexed(
-                    items = filteredPlugins,
-                    key = { _, plugin -> plugin.id },
-                    contentType = { _, _ -> "plugin-row" }
-                ) { index, plugin ->
-                    LazyGroupItem(index = index, lastIndex = filteredPlugins.lastIndex) {
-                        PluginRow(
-                            plugin = plugin,
-                            languageTag = languageTag,
-                            onClick = { onOpenDetail(plugin) },
-                            onDelete = { pluginToUninstall = plugin }
-                        )
-                    }
-                }
+                PluginStorePage()
             }
         }
+
+        FloatingTabBar(
+            pagerState = pagerState,
+            items = listOf(
+                FloatingTabItem(FeatherIcons.Package, stringResource(R.string.plugins_tab_installed)),
+                FloatingTabItem(FeatherIcons.ShoppingBag, stringResource(R.string.plugins_tab_store))
+            ),
+            maskColor = settingsPageBackground(),
+            isScrolling = installedScrolling,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     pluginToUninstall?.let { target ->
@@ -237,33 +194,139 @@ internal fun PluginsSection(
     }
 }
 
+@Composable
+private fun InstalledPluginsPage(
+    plugins: List<InstalledPlugin>,
+    languageTag: String,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    listState: LazyListState,
+    onOpenDetail: (InstalledPlugin) -> Unit,
+    onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
+    onDelete: (InstalledPlugin) -> Unit
+) {
+    val filteredPlugins = remember(plugins, searchQuery, languageTag) {
+        val query = searchQuery.trim().lowercase()
+        if (query.isEmpty()) {
+            plugins
+        } else {
+            plugins.filter { plugin ->
+                plugin.displayName(languageTag).lowercase().contains(query) ||
+                    plugin.id.lowercase().contains(query) ||
+                    plugin.manifest?.publisher?.lowercase()?.contains(query) == true ||
+                    plugin.manifest?.description?.resolve(languageTag)?.lowercase()?.contains(query) == true
+            }
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        if (plugins.isEmpty()) {
+            item(key = "empty", contentType = "empty") {
+                SettingsEmptyState(
+                    icon = FeatherIcons.Package,
+                    title = stringResource(R.string.plugins_empty_title),
+                    hint = stringResource(R.string.plugins_empty_hint),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.xl, vertical = 48.dp)
+                )
+            }
+        }
+        if (plugins.size >= 3) {
+            item(key = "search", contentType = "search") {
+                ModelSearchField(
+                    query = searchQuery,
+                    onQueryChange = onSearchQueryChange,
+                    placeholder = stringResource(R.string.plugins_search_placeholder),
+                    modifier = Modifier.padding(bottom = Spacing.xs)
+                )
+            }
+        }
+
+        if (filteredPlugins.isEmpty() && plugins.isNotEmpty()) {
+            item(key = "search-empty", contentType = "empty") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        Icon(
+                            FeatherIcons.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            text = stringResource(R.string.plugins_search_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            itemsIndexed(
+                items = filteredPlugins,
+                key = { _, plugin -> plugin.id },
+                contentType = { _, _ -> "plugin-row" }
+            ) { index, plugin ->
+                LazyGroupItem(index = index, lastIndex = filteredPlugins.lastIndex) {
+                    PluginRow(
+                        plugin = plugin,
+                        languageTag = languageTag,
+                        onToggleEnabled = { onToggleEnabled(plugin, it) },
+                        onClick = { onOpenDetail(plugin) },
+                        onDelete = { onDelete(plugin) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PluginStorePage() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 96.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        SettingsEmptyState(
+            icon = FeatherIcons.ShoppingBag,
+            title = stringResource(R.string.plugins_store_empty_title),
+            hint = stringResource(R.string.plugins_store_empty_hint),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.xl)
+        )
+    }
+}
+
 /**
- * 单个插件列表行：MCP 风格卡片行。
- * 左侧 40dp 方形图标容器，中间名称/简介/元信息 Pill 标签，右侧状态指示 Pill + Chevron 箭头，支持左滑删除。
+ * 单个插件列表行：名称独占一行；下一行是图标、版本/作者标签、启停开关与详情箭头，支持左滑卸载。
  */
 @Composable
 private fun PluginRow(
     plugin: InstalledPlugin,
     languageTag: String,
+    onToggleEnabled: (Boolean) -> Unit,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val statusText = when {
-        plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_status_incompatible)
-        plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_status_damaged)
-        !plugin.record.enabled -> stringResource(R.string.plugins_status_disabled)
-        else -> stringResource(R.string.plugins_status_active)
-    }
-
-    val statusColor = when {
-        plugin.status == PluginStatus.INVALID || plugin.status != PluginStatus.OK ->
-            MaterialTheme.colorScheme.error
-        !plugin.record.enabled ->
-            MaterialTheme.colorScheme.outline
-        else ->
-            MaterialTheme.colorScheme.tertiary
-    }
-    val statusBgColor = statusColor.copy(alpha = 0.12f)
+    val version = plugin.manifest?.version?.toString() ?: plugin.record.version
+    val publisher = plugin.manifest?.publisher
+    val switchEnabled = plugin.status == PluginStatus.OK
 
     SwipeToDeleteRow(
         onDelete = onDelete,
@@ -275,28 +338,25 @@ private fun PluginRow(
                 .padding(horizontal = Spacing.lg, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 左侧容器图标
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .background(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         shape = RoundedCornerShape(8.dp)
-                    )
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = FeatherIcons.Package,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .align(Alignment.Center)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(Spacing.md))
 
-            // 中间：名称 / 简介 / 胶囊信息
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = plugin.displayName(languageTag),
@@ -307,107 +367,20 @@ private fun PluginRow(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                val desc = plugin.manifest?.description?.resolve(languageTag).orEmpty()
-                if (desc.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = desc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 版本
-                    val version = plugin.manifest?.version?.toString() ?: plugin.record.version
                     McpPill(
                         text = "v$version",
                         textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     )
-
-                    // 发布者
-                    val publisher = plugin.manifest?.publisher
                     if (!publisher.isNullOrBlank()) {
                         McpPill(
                             text = publisher,
-                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                        )
-                    }
-
-                    // 专属配置页
-                    if (plugin.content.configPage != null) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_config),
-                            textColor = MaterialTheme.colorScheme.tertiary,
-                            backgroundColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
-                        )
-                    }
-
-                    // 技能数
-                    val skillCount = plugin.content.skills.size
-                    if (skillCount > 0) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_skills, skillCount),
-                            textColor = MaterialTheme.colorScheme.primary,
-                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        )
-                    }
-
-                    // 工具数
-                    val toolCount = plugin.content.tools.size + plugin.content.workspaceTools.size
-                    if (toolCount > 0) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_tools, toolCount),
-                            textColor = MaterialTheme.colorScheme.primary,
-                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        )
-                    }
-
-                    // 智能体数
-                    val agentCount = plugin.content.agents.size
-                    if (agentCount > 0) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_agents, agentCount),
-                            textColor = MaterialTheme.colorScheme.primary,
-                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        )
-                    }
-
-                    // 自定义页面
-                    if (plugin.content.settingsPages.isNotEmpty()) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_page),
-                            textColor = MaterialTheme.colorScheme.secondary,
-                            backgroundColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-                        )
-                    }
-
-                    // Hook 数量
-                    val hookCount = plugin.content.hooks.size
-                    if (hookCount > 0) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_hooks, hookCount),
-                            textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                        )
-                    }
-
-                    // MCP 数量
-                    val mcpCount = plugin.content.mcp.size
-                    if (mcpCount > 0) {
-                        McpPill(
-                            text = stringResource(R.string.plugins_tag_mcp, mcpCount),
                             textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                         )
@@ -417,13 +390,14 @@ private fun PluginRow(
 
             Spacer(modifier = Modifier.width(Spacing.sm))
 
-            // 状态 pill 与右箭头
-            McpPill(
-                text = statusText,
-                textColor = statusColor,
-                backgroundColor = statusBgColor
+            AppSwitch(
+                checked = plugin.record.enabled && switchEnabled,
+                onCheckedChange = onToggleEnabled,
+                enabled = switchEnabled
             )
+
             Spacer(modifier = Modifier.width(Spacing.xs))
+
             Icon(
                 imageVector = FeatherIcons.ChevronRight,
                 contentDescription = null,
@@ -443,7 +417,6 @@ private fun PluginRow(
 internal fun PluginDetailSection(
     plugin: InstalledPlugin,
     onToggleEnabled: (Boolean) -> Unit,
-    onUninstall: () -> Unit,
     bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
     onClosePage: () -> Unit = {},
     dependencyState: PluginDependencyUiState? = null,
@@ -530,10 +503,7 @@ internal fun PluginDetailSection(
             PluginNativeConfigContent(
                 plugin = plugin,
                 languageTag = languageTag,
-                hasConfigPage = hasConfigPage,
-                onNavigateToConfigTab = { selectedTab = 1 },
                 onToggleEnabled = onToggleEnabled,
-                onUninstall = onUninstall,
                 dependencyState = dependencyState,
                 onPrepareDependencies = onPrepareDependencies,
                 shizukuGranted = shizukuGranted,
@@ -560,10 +530,7 @@ internal fun PluginDetailSection(
 private fun PluginNativeConfigContent(
     plugin: InstalledPlugin,
     languageTag: String,
-    hasConfigPage: Boolean,
-    onNavigateToConfigTab: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onUninstall: () -> Unit,
     dependencyState: PluginDependencyUiState? = null,
     onPrepareDependencies: () -> Unit = {},
     shizukuGranted: Boolean = false,
@@ -571,7 +538,7 @@ private fun PluginNativeConfigContent(
     onSetShizukuGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
-    var confirmUninstall by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -583,6 +550,13 @@ private fun PluginNativeConfigContent(
     ) {
         Spacer(Modifier.height(Spacing.xs))
 
+        if (manifest != null) {
+            PluginHeaderCard(
+                name = plugin.displayName(languageTag),
+                description = manifest.description.resolve(languageTag)
+            )
+        }
+
         // 启停开关
         SettingsGroup {
             Row(
@@ -591,18 +565,12 @@ private fun PluginNativeConfigContent(
                     .padding(horizontal = Spacing.lg, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.plugins_enable),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = enableHint(plugin),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = stringResource(R.string.plugins_enable),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
                 AppSwitch(
                     checked = plugin.record.enabled && plugin.status == PluginStatus.OK,
                     onCheckedChange = onToggleEnabled,
@@ -660,79 +628,84 @@ private fun PluginNativeConfigContent(
             }
         }
 
-        // 插件专属配置页面直达入口卡片
-        if (hasConfigPage) {
-            SettingsGroup {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onNavigateToConfigTab() }
-                        .padding(horizontal = Spacing.lg, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.plugins_config_card_title),
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = stringResource(R.string.plugins_config_card_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(
-                        imageVector = FeatherIcons.ExternalLink,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
         if (manifest != null) {
-            SettingsGroupHeader(text = stringResource(R.string.plugins_section_summary))
-            SettingsGroup {
-                Text(
-                    text = manifest.description.resolve(languageTag),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = 12.dp)
-                )
-            }
-
             SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
             SettingsGroup {
-                InfoRow(stringResource(R.string.plugins_info_version), manifest.version.toString())
+                SettingsRow(
+                    icon = FeatherIcons.Tag,
+                    title = stringResource(R.string.plugins_info_version),
+                    trailing = { PluginInfoValue("v${manifest.version}") }
+                )
                 SettingsDivider()
-                InfoRow(stringResource(R.string.plugins_info_publisher), manifest.publisher)
+                SettingsRow(
+                    icon = FeatherIcons.User,
+                    title = stringResource(R.string.plugins_info_publisher),
+                    trailing = { PluginInfoValue(manifest.publisher) }
+                )
                 SettingsDivider()
-                InfoRow(stringResource(R.string.plugins_info_license), manifest.license)
+                SettingsRow(
+                    icon = FeatherIcons.Book,
+                    title = stringResource(R.string.plugins_info_license),
+                    trailing = { PluginInfoValue(manifest.license) }
+                )
                 SettingsDivider()
-                InfoRow(stringResource(R.string.plugins_info_repository), manifest.repository)
+                SettingsRow(
+                    icon = FeatherIcons.Github,
+                    title = stringResource(R.string.plugins_info_repository),
+                    onClick = { openUrl(context, manifest.repository) }
+                )
                 SettingsDivider()
-                InfoRow(stringResource(R.string.plugins_info_origin), stringResource(R.string.plugins_origin_local))
+                SettingsRow(
+                    icon = FeatherIcons.Package,
+                    title = stringResource(R.string.plugins_info_origin),
+                    trailing = { PluginInfoValue(stringResource(R.string.plugins_origin_local)) }
+                )
             }
 
             SettingsGroupHeader(text = stringResource(R.string.plugins_section_contents))
             SettingsGroup {
-                val skills = plugin.content.skills
-                val agents = plugin.content.agents
-                val workspaceTools = plugin.content.workspaceTools
-                val settingsPages = plugin.content.settingsPages
-                val aiTools = plugin.content.tools
-                val hooks = plugin.content.hooks
-                val mcpServers = plugin.content.mcp
-                val providers = plugin.content.providers
-                val shizuku = plugin.content.shizuku
-                if (skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
-                    aiTools.isEmpty() && hooks.isEmpty() && mcpServers.isEmpty() && providers.isEmpty() && shizuku == null
-                ) {
+                val items = mutableListOf<PluginContentItem>()
+                plugin.content.skills.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.BookOpen, entry.localId, entry.skill.description)
+                }
+                plugin.content.agents.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.Users, entry.localId, entry.definition.description)
+                }
+                plugin.content.workspaceTools.forEach { entry ->
+                    items += PluginContentItem(
+                        FeatherIcons.Tool,
+                        entry.title.resolve(languageTag),
+                        entry.description.resolve(languageTag)
+                    )
+                }
+                plugin.content.settingsPages.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.Settings, entry.title.resolve(languageTag), entry.anchor)
+                }
+                plugin.content.tools.forEach { entry ->
+                    items += PluginContentItem(
+                        FeatherIcons.Zap,
+                        entry.title.resolve(languageTag),
+                        entry.description.resolve(languageTag)
+                    )
+                }
+                plugin.content.hooks.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.Activity, entry.event, entry.handler)
+                }
+                plugin.content.mcp.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.Server, entry.originalName, mcpDescription(entry))
+                }
+                plugin.content.providers.forEach { entry ->
+                    items += PluginContentItem(FeatherIcons.Cloud, entry.name.resolve(languageTag), entry.baseUrl)
+                }
+                plugin.content.shizuku?.let { declaration ->
+                    items += PluginContentItem(
+                        FeatherIcons.Terminal,
+                        stringResource(R.string.plugins_shizuku_section),
+                        declaration.purpose
+                    )
+                }
+
+                if (items.isEmpty()) {
                     Text(
                         text = stringResource(R.string.plugins_no_contents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -741,38 +714,16 @@ private fun PluginNativeConfigContent(
                             .fillMaxWidth()
                             .padding(horizontal = Spacing.lg, vertical = 12.dp)
                     )
-                }
-                val rows = skills.map {
-                    stringResource(R.string.plugins_content_skill, it.skill.name) to it.skill.description
-                } + agents.map {
-                    stringResource(R.string.plugins_content_agent, it.definition.name) to it.definition.description
-                } + workspaceTools.map {
-                    stringResource(R.string.plugins_content_tool, it.title.resolve(languageTag)) to
-                        it.description.resolve(languageTag)
-                } + settingsPages.map {
-                    stringResource(R.string.plugins_content_settings_page, it.title.resolve(languageTag)) to it.anchor
-                } + aiTools.map {
-                    stringResource(R.string.plugins_content_ai_tool, it.title.resolve(languageTag)) to
-                        it.description.resolve(languageTag)
-                } + hooks.map {
-                    val title = when (it.mode) {
-                        PluginHookModes.TRANSFORM -> stringResource(R.string.plugins_content_transform_hook, it.event)
-                        PluginHookModes.REVIEW -> stringResource(R.string.plugins_content_review_hook, it.event)
-                        else -> stringResource(R.string.plugins_content_hook, it.event)
+                } else {
+                    items.forEachIndexed { index, item ->
+                        if (index > 0) SettingsDivider()
+                        ContentRow(
+                            icon = item.icon,
+                            title = item.title,
+                            description = item.description,
+                            active = plugin.isActive
+                        )
                     }
-                    title to it.handler
-                } + mcpServers.map {
-                    stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
-                } + providers.map {
-                    stringResource(R.string.plugins_content_provider, it.name.resolve(languageTag)) to it.baseUrl
-                } + listOfNotNull(
-                    shizuku?.let {
-                        stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
-                    }
-                )
-                rows.forEachIndexed { index, (title, description) ->
-                    if (index > 0) SettingsDivider()
-                    ContentRow(title = title, description = description, active = plugin.isActive)
                 }
             }
         }
@@ -824,89 +775,166 @@ private fun PluginNativeConfigContent(
                 }
             }
         }
+    }
+}
 
-        SettingsGroup {
-            Text(
-                text = stringResource(R.string.plugins_uninstall),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.error,
+@Composable
+private fun PluginHeaderCard(name: String, description: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.semanticColors.cardSurface,
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { confirmUninstall = true }
-                    .padding(horizontal = Spacing.lg, vertical = 14.dp)
-            )
+                    .size(48.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = FeatherIcons.Package,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(Spacing.lg))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (description.isNotBlank()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
-
-    if (confirmUninstall) {
-        AlertDialog(
-            onDismissRequest = { confirmUninstall = false },
-            title = { Text(stringResource(R.string.plugins_uninstall_confirm_title)) },
-            text = {
-                Text(stringResource(R.string.plugins_uninstall_confirm_message, plugin.displayName(languageTag)))
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmUninstall = false
-                    onUninstall()
-                }) { Text(stringResource(R.string.common_delete)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmUninstall = false }) { Text(stringResource(R.string.common_cancel)) }
-            }
-        )
-    }
 }
 
 @Composable
-private fun enableHint(plugin: InstalledPlugin): String = when {
-    plugin.status == PluginStatus.INVALID -> stringResource(R.string.plugins_hint_incompatible)
-    plugin.status != PluginStatus.OK -> stringResource(R.string.plugins_hint_damaged)
-    else -> stringResource(R.string.plugins_enable_hint)
+private fun PluginInfoValue(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.semanticColors.subtleText,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.widthIn(max = 190.dp)
+    )
 }
 
+private data class PluginContentItem(
+    val icon: ImageVector,
+    val title: String,
+    val description: String
+)
+
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun ContentRow(icon: ImageVector, title: String, description: String, active: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = 12.dp)
+            .alpha(if (active) 1f else 0.5f)
+            .padding(horizontal = Spacing.lg, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(0.45f)
-        )
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(17.dp)
+            )
+        }
         Spacer(modifier = Modifier.width(Spacing.md))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(0.55f)
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (description.isNotBlank()) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ContentRow(title: String, description: String, active: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (active) 1f else 0.5f)
-            .padding(horizontal = Spacing.lg, vertical = 12.dp)
+internal fun PluginDeveloperSettingsSheet(
+    devMode: Boolean,
+    devRootPath: String,
+    projects: List<PluginDevProject>,
+    onSetDevMode: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    onInstall: (PluginDevProject) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        if (description.isNotBlank()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.xl)
+        ) {
             Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = stringResource(R.string.plugins_settings_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(vertical = Spacing.md)
+            )
+            PluginDeveloperSection(
+                devMode = devMode,
+                devRootPath = devRootPath,
+                projects = projects,
+                onSetDevMode = onSetDevMode,
+                onRefresh = onRefresh,
+                onInstall = onInstall
             )
         }
     }

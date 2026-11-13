@@ -100,6 +100,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginSettingsAnchors
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.presentation.PluginDetailSection
+import com.aicode.feature.plugin.presentation.PluginDeveloperSettingsSheet
 import com.aicode.feature.plugin.presentation.PluginImportHost
 import com.aicode.feature.plugin.presentation.PluginThemeTokens
 import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
@@ -135,6 +136,7 @@ import compose.icons.feathericons.RefreshCw
 import compose.icons.feathericons.RotateCcw
 import compose.icons.feathericons.Save
 import compose.icons.feathericons.Server
+import compose.icons.feathericons.Settings
 import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Terminal
@@ -410,12 +412,14 @@ fun SettingsScreen(
     val pluginsViewModel: PluginsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val plugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
     val pluginsLoaded by pluginsViewModel.loaded.collectAsStateWithLifecycle()
+    val pluginsRefreshing by pluginsViewModel.refreshing.collectAsStateWithLifecycle()
     val pluginDependencyStates by pluginsViewModel.dependencyStates.collectAsStateWithLifecycle()
     val shizukuGrantedPluginIds by pluginsViewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
     val shizukuState by pluginsViewModel.shizukuState.collectAsStateWithLifecycle()
     val pluginDevMode by pluginsViewModel.devMode.collectAsStateWithLifecycle()
     val pluginDevProjects by pluginsViewModel.devProjects.collectAsStateWithLifecycle()
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
+    var showPluginSettingsSheet by remember { mutableStateOf(false) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val pluginLanguageTag = currentLanguageTag()
     var activePluginPage by remember { mutableStateOf<PluginSettingsPage?>(null) }
@@ -555,6 +559,11 @@ fun SettingsScreen(
     // 在详情页卸载插件（或记录消失）后回到列表，别停在一个空页面。
     LaunchedEffect(selectedPlugin, section) {
         if (section == SettingsSection.PluginDetail && selectedPlugin == null) section = SettingsSection.Plugins
+    }
+
+    // 离开插件列表时收起设置弹层，避免返回列表时意外重新弹出。
+    LaunchedEffect(section) {
+        if (section != SettingsSection.Plugins) showPluginSettingsSheet = false
     }
 
     // 插件停用 / 卸载后入口消失，当前停留的插件页要退回菜单。
@@ -987,6 +996,32 @@ fun SettingsScreen(
                             }
                         }
                         SettingsSection.Plugins -> {
+                            IconButton(
+                                onClick = { pluginsViewModel.refresh() },
+                                enabled = !pluginsRefreshing
+                            ) {
+                                if (pluginsRefreshing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        FeatherIcons.RefreshCw,
+                                        contentDescription = stringResource(R.string.plugins_refresh),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { showPluginSettingsSheet = true }) {
+                                Icon(
+                                    FeatherIcons.Settings,
+                                    contentDescription = stringResource(R.string.plugins_settings_title),
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                             IconButton(onClick = { pluginZipLauncher.launch(PluginPackageMimeTypes) }) {
                                 Icon(
                                     FeatherIcons.Plus,
@@ -1392,23 +1427,13 @@ fun SettingsScreen(
                         section = SettingsSection.PluginDetail
                     },
                     onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) },
-                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) },
-                    devMode = pluginDevMode,
-                    devRootPath = pluginsViewModel.devRootPath,
-                    devProjects = pluginDevProjects,
-                    onSetDevMode = pluginsViewModel::setDevMode,
-                    onRefreshDevProjects = pluginsViewModel::refreshDevProjects,
-                    onInstallDevProject = pluginsViewModel::installDevProject
+                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) }
                 )
                 SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     PluginDetailSection(
                         plugin = plugin,
                         onToggleEnabled = { pluginsViewModel.setEnabled(plugin.id, it) },
-                        onUninstall = {
-                            pluginsViewModel.uninstall(plugin.id)
-                            section = SettingsSection.Plugins
-                        },
                         bridgeFactory = { page, post, onClosePage ->
                             pluginsViewModel.createWebBridge(
                                 page = page,
@@ -1665,6 +1690,18 @@ fun SettingsScreen(
     SkillImportResultDialog(state = skillImportState, onDismiss = { viewModel.clearSkillImportState() })
 
     PluginImportHost(viewModel = pluginsViewModel)
+
+    if (showPluginSettingsSheet && section == SettingsSection.Plugins) {
+        PluginDeveloperSettingsSheet(
+            devMode = pluginDevMode,
+            devRootPath = pluginsViewModel.devRootPath,
+            projects = pluginDevProjects,
+            onSetDevMode = pluginsViewModel::setDevMode,
+            onRefresh = pluginsViewModel::refreshDevProjects,
+            onInstall = pluginsViewModel::installDevProject,
+            onDismiss = { showPluginSettingsSheet = false }
+        )
+    }
 
     subAgentToDelete?.let { target ->
         val deleting = target.name in subAgentDeleting

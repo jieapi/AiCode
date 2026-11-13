@@ -135,6 +135,9 @@ class PluginsViewModel @Inject constructor(
     private val _devProjects = MutableStateFlow<List<PluginDevProject>>(emptyList())
     val devProjects: StateFlow<List<PluginDevProject>> = _devProjects.asStateFlow()
 
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
     private var devWatcherJob: Job? = null
     private val devLastLoaded = mutableMapOf<String, Long>()
 
@@ -211,6 +214,17 @@ class PluginsViewModel @Inject constructor(
 
     fun setDevMode(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { devSettingsRepository.setEnabled(enabled) }
+    }
+
+    /** 重新扫描已安装插件；不重启运行中的插件进程。 */
+    fun refresh() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { manager.refresh() }
+                .onFailure { FileLogger.w(TAG, "刷新插件失败", it) }
+            _refreshing.value = false
+        }
     }
 
     fun refreshDevProjects() {

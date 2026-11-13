@@ -225,9 +225,9 @@ private fun Notice(text: String) {
 @Composable
 private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
     preview.content.skills.map {
-        stringResource(R.string.plugins_content_skill, it.skill.name) to it.skill.description
+        stringResource(R.string.plugins_content_skill, it.localId) to it.skill.description
     } + preview.content.agents.map {
-        stringResource(R.string.plugins_content_agent, it.definition.name) to it.definition.description
+        stringResource(R.string.plugins_content_agent, it.localId) to it.definition.description
     } + preview.content.workspaceTools.map {
         stringResource(
             R.string.plugins_content_tool,
