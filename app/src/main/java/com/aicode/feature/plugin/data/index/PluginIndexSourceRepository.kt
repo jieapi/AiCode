@@ -27,14 +27,13 @@ data class PluginIndexSource(
     val name: String,
     val indexUrl: String,
     val official: Boolean,
-    val enabled: Boolean = true,
     val lastFetchedAt: Long = 0
 ) {
     val rootUrl: String get() = indexUrl.substringBeforeLast('/') + "/"
 }
 
 object PluginIndexDefaults {
-    const val OFFICIAL_URL = "https://raw.githubusercontent.com/jieapi/aicode-plugins/main/index.json"
+    const val OFFICIAL_URL = "https://raw.githubusercontent.com/jieapi/AiCode-Plugins-Store/main/index.json"
     const val OFFICIAL_NAME = "AiCode Plugins"
     const val OFFICIAL_ID = "aicode.official"
 
@@ -51,14 +50,16 @@ private data class StoredSource(
     val id: String,
     val name: String,
     val indexUrl: String,
-    val enabled: Boolean = true,
     val lastFetchedAt: Long = 0
 )
 
 @Serializable
 private data class StoredSources(val sources: List<StoredSource> = emptyList())
 
-/** 自定义索引来源的持久化；官方来源永远由宿主常量提供，不能被自定义来源顶替。 */
+/**
+ * 索引来源的持久化。官方来源永远由宿主常量提供且固定排在最前；
+ * 自定义来源只有一个按行编辑的地址列表，列表顺序就是商店里各来源条目的叠加顺序。
+ */
 @Singleton
 class PluginIndexSourceRepository @Inject constructor(
     @param:ApplicationContext private val context: Context
@@ -80,69 +81,49 @@ class PluginIndexSourceRepository @Inject constructor(
         }
     }
 
-    suspend fun add(name: String, indexUrl: String): Result<PluginIndexSource> = runCatching {
-        val normalizedName = name.trim().ifEmpty { throw IllegalArgumentException("name") }
-        val normalizedUrl = normalizeIndexUrl(indexUrl)
-        val id = sourceId(normalizedUrl)
-        val current = sources.first()
-        if (current.any { it.indexUrl == normalizedUrl }) throw IllegalArgumentException("duplicate")
-        val source = PluginIndexSource(id = id, name = normalizedName, indexUrl = normalizedUrl, official = false)
-        updateStored { stored ->
-            stored.copy(sources = stored.sources.filterNot { it.id == id } + source.toStored())
-        }
-        source
+    /** 自定义来源地址，顺序即展示顺序；官方来源不在其中。 */
+    val customIndexUrls: Flow<List<String>> = sources.map { list ->
+        list.filterNot { it.official }.map { it.indexUrl }
     }
 
-    suspend fun update(id: String, name: String, indexUrl: String, enabled: Boolean): Result<Unit> = runCatching {
-        if (id == PluginIndexDefaults.OFFICIAL_ID) throw IllegalArgumentException("official")
-        val normalizedName = name.trim().ifEmpty { throw IllegalArgumentException("name") }
-        val normalizedUrl = normalizeIndexUrl(indexUrl)
-        val newId = sourceId(normalizedUrl)
-        if (newId != id) throw IllegalArgumentException("url-changed")
-        updateStored { stored ->
-            stored.copy(
-                sources = stored.sources.map { source ->
-                    if (source.id == id) {
-                        source.copy(name = normalizedName, indexUrl = normalizedUrl, enabled = enabled)
-                    } else {
-                        source
-                    }
-                }
+    /** 用输入行整体替换自定义来源；空行、无效地址与重复地址会被忽略，其余保持输入顺序。 */
+    suspend fun setCustomSources(lines: List<String>): Result<Unit> = runCatching {
+        val existing = sources.first().filterNot { it.official }.associateBy { it.indexUrl }
+        val next = linkedMapOf<String, PluginIndexSource>()
+        lines.forEach { raw ->
+            val url = runCatching { normalizeIndexUrl(raw) }.getOrNull() ?: return@forEach
+            if (url in next) return@forEach
+            next[url] = existing[url] ?: PluginIndexSource(
+                id = sourceId(url),
+                name = defaultName(url),
+                indexUrl = url,
+                official = false
             )
         }
-    }
-
-    suspend fun setEnabled(id: String, enabled: Boolean) {
-        if (id == PluginIndexDefaults.OFFICIAL_ID) return
         updateStored { stored ->
-            stored.copy(sources = stored.sources.map { if (it.id == id) it.copy(enabled = enabled) else it })
+            val officialEntries = stored.sources.filter { it.id == PluginIndexDefaults.OFFICIAL_ID }
+            stored.copy(sources = officialEntries + next.values.map { it.toStored() })
         }
-    }
-
-    suspend fun remove(id: String) {
-        if (id == PluginIndexDefaults.OFFICIAL_ID) return
-        updateStored { stored -> stored.copy(sources = stored.sources.filterNot { it.id == id }) }
     }
 
     /** 记录最近一次成功拉取时间，仅用于离线展示。 */
     suspend fun markFetched(id: String, fetchedAt: Long) {
         updateStored { stored ->
-            val exists = stored.sources.any { it.id == id }
-            if (!exists) {
-                stored.copy(
+            when {
+                stored.sources.any { it.id == id } -> stored.copy(
+                    sources = stored.sources.map {
+                        if (it.id == id) it.copy(lastFetchedAt = fetchedAt) else it
+                    }
+                )
+                id == PluginIndexDefaults.OFFICIAL_ID -> stored.copy(
                     sources = stored.sources + StoredSource(
-                        id = id,
+                        id = PluginIndexDefaults.OFFICIAL_ID,
                         name = PluginIndexDefaults.OFFICIAL_NAME,
                         indexUrl = PluginIndexDefaults.OFFICIAL_URL,
                         lastFetchedAt = fetchedAt
                     )
                 )
-            } else {
-                stored.copy(
-                    sources = stored.sources.map {
-                        if (it.id == id) it.copy(lastFetchedAt = fetchedAt) else it
-                    }
-                )
+                else -> stored
             }
         }
     }
@@ -161,7 +142,6 @@ class PluginIndexSourceRepository @Inject constructor(
         name = name,
         indexUrl = indexUrl,
         official = false,
-        enabled = enabled,
         lastFetchedAt = lastFetchedAt
     )
 
@@ -169,7 +149,6 @@ class PluginIndexSourceRepository @Inject constructor(
         id = id,
         name = name,
         indexUrl = indexUrl,
-        enabled = enabled,
         lastFetchedAt = lastFetchedAt
     )
 
@@ -179,12 +158,16 @@ class PluginIndexSourceRepository @Inject constructor(
         fun normalizeIndexUrl(raw: String): String {
             val text = raw.trim()
             val uri = URI(text)
-            require(uri.scheme == "https") { "scheme" }
+            require(uri.scheme == "https" || uri.scheme == "http") { "scheme" }
             require(uri.host != null) { "host" }
             require(uri.userInfo == null) { "userInfo" }
             require(!text.contains('#')) { "fragment" }
             return text
         }
+
+        /** 自定义来源没有单独的名称输入，用主机名作展示名。 */
+        fun defaultName(indexUrl: String): String =
+            runCatching { URI(indexUrl).host }.getOrNull() ?: indexUrl
 
         fun sourceId(indexUrl: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(indexUrl.toByteArray(Charsets.UTF_8))

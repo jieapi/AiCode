@@ -1,6 +1,7 @@
 package com.aicode.feature.plugin.data.index
 
 import android.content.Context
+import com.aicode.feature.plugin.data.PluginStoreSettingsRepository
 import com.aicode.feature.plugin.domain.SemVer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -10,6 +11,7 @@ import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
@@ -43,7 +45,8 @@ class NoMatchingReleaseException(message: String) : IOException(message)
 @Singleton
 class PluginIndexClient @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    client: OkHttpClient
+    client: OkHttpClient,
+    private val storeSettings: PluginStoreSettingsRepository
 ) {
     private val http = client.newBuilder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -61,8 +64,9 @@ class PluginIndexClient @Inject constructor(
     suspend fun fetchIndex(source: PluginIndexSource, forceRefresh: Boolean = false): PluginIndexSnapshot =
         withContext(Dispatchers.IO) {
             val cached = cacheFile(source)
+            val url = accelerated(source.indexUrl)
             val bytes = try {
-                getBytes(source.indexUrl, MAX_INDEX_BYTES, noCache = forceRefresh)
+                getBytes(url, MAX_INDEX_BYTES, noCache = forceRefresh)
             } catch (e: IOException) {
                 if (forceRefresh) throw e
                 val fallback = readCache(cached) ?: throw e
@@ -76,7 +80,14 @@ class PluginIndexClient @Inject constructor(
     fun isCompatible(plugin: PluginIndexPlugin): Boolean {
         val minimum = plugin.minAppVersion?.let { SemVer.parse(it) ?: return false } ?: return true
         val current = hostAppVersion ?: return true
-        return current >= minimum
+        // 开发 / RC 构建按同一 major.minor.patch 的正式版看待；
+        // 最低版本本身是预发布时，仍按完整版本比较。
+        val comparable = if (minimum.preRelease.isEmpty()) {
+            SemVer(current.major, current.minor, current.patch)
+        } else {
+            current
+        }
+        return comparable >= minimum
     }
 
     /**
@@ -119,10 +130,19 @@ class PluginIndexClient @Inject constructor(
         if (asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
             throw PluginIndexException("资产大小非法: ${asset.size}")
         }
-        val bytes = getBytes(asset.url, asset.size, noCache = true, expectedSize = asset.size)
+        val bytes = getBytes(accelerated(asset.url), asset.size, noCache = true, expectedSize = asset.size)
         val file = File(context.cacheDir, "plugin-${sha256(bytes).take(16)}.zip")
         file.writeBytes(bytes)
         DownloadedPluginPackage(file, asset)
+    }
+
+    /** 配置了镜像加速时给 GitHub 地址加上前缀；其他主机的索引仓库保持原地址。 */
+    private suspend fun accelerated(url: String): String {
+        val mirror = storeSettings.downloadMirror.first().trim()
+        if (mirror.isEmpty()) return url
+        val host = runCatching { URI(url).host?.lowercase() }.getOrNull() ?: return url
+        if (host !in MIRRORED_HOSTS) return url
+        return mirror.trimEnd('/') + "/" + url
     }
 
     private fun assetName(id: String, version: String): String = "${id}_$version.zip"
@@ -230,6 +250,12 @@ class PluginIndexClient @Inject constructor(
 
     private companion object {
         const val GITHUB_API = "https://api.github.com"
+        val MIRRORED_HOSTS = setOf(
+            "raw.githubusercontent.com",
+            "github.com",
+            "objects.githubusercontent.com",
+            "codeload.github.com"
+        )
         const val MAX_INDEX_BYTES = 2L * 1024 * 1024
         const val MAX_ARCHIVE_BYTES = 16L * 1024 * 1024
     }

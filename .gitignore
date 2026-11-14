@@ -34,7 +34,7 @@ log-*.txt
 __pycache__/
 *.pyc
 
-# 独立插件索引仓库（jieapi/aicode-plugins），不随主仓库提交
+# 独立插件索引仓库（jieapi/AiCode-Plugins-Store），不随主仓库提交
 /plugin-index/
 
 # 容器镜像目录：由 scripts/sync-container-images.py 生成，CI 发布到 data 分支；

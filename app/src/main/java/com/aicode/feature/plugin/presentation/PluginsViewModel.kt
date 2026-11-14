@@ -13,9 +13,12 @@ import com.aicode.feature.plugin.data.PluginDevPackageBuilder
 import com.aicode.feature.plugin.data.PluginDevSettingsRepository
 import com.aicode.feature.plugin.data.PluginOverlayPermissionRepository
 import com.aicode.feature.plugin.data.PluginShizukuPermissionRepository
+import com.aicode.feature.plugin.data.PluginStoreSettingsRepository
+import com.aicode.feature.plugin.data.index.PluginIndexSourceRepository
 import com.aicode.feature.plugin.domain.PluginManifestParser
 import com.aicode.feature.plugin.domain.ManifestParseResult
 import com.aicode.feature.plugin.domain.InstalledPlugin
+import com.aicode.feature.plugin.domain.LocalizedText
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
 import com.aicode.feature.plugin.domain.PluginInstallOrigin
@@ -55,6 +58,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -101,7 +105,10 @@ data class PluginDevProject(
     val version: String,
     val installedVersion: String?,
     val lastModified: Long,
-    val error: String? = null
+    val error: String? = null,
+    val name: LocalizedText? = null,
+    val description: LocalizedText? = null,
+    val publisher: String? = null
 )
 
 @HiltViewModel
@@ -124,6 +131,8 @@ class PluginsViewModel @Inject constructor(
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
     private val devSettingsRepository: PluginDevSettingsRepository,
+    private val indexSourceRepository: PluginIndexSourceRepository,
+    private val storeSettingsRepository: PluginStoreSettingsRepository,
     private val pageEnvironment: PluginPageEnvironment,
     private val chatService: PluginChatService,
     private val agentRunStateStore: AgentRunStateStore,
@@ -164,11 +173,25 @@ class PluginsViewModel @Inject constructor(
     private val _devMode = MutableStateFlow(false)
     val devMode: StateFlow<Boolean> = _devMode.asStateFlow()
 
+    /** 插件设置里的索引仓库输入框内容，一行一个地址。 */
+    private val _indexSourceText = MutableStateFlow("")
+    val indexSourceText: StateFlow<String> = _indexSourceText.asStateFlow()
+
+    /** 插件设置里的镜像加速地址；只作用于 GitHub 托管的索引与插件包。 */
+    private val _downloadMirror = MutableStateFlow("")
+    val downloadMirror: StateFlow<String> = _downloadMirror.asStateFlow()
+
+    private var indexSourceSaveJob: Job? = null
+    private var downloadMirrorSaveJob: Job? = null
+
     /** 开发者目录固定挂在容器 `~/.aicode/plugin-dev`，每个子目录是一个插件项目。 */
     val devRootPath: String = "~/.aicode/plugin-dev"
 
     private val _devProjects = MutableStateFlow<List<PluginDevProject>>(emptyList())
     val devProjects: StateFlow<List<PluginDevProject>> = _devProjects.asStateFlow()
+
+    private val _devRefreshing = MutableStateFlow(false)
+    val devRefreshing: StateFlow<Boolean> = _devRefreshing.asStateFlow()
 
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
@@ -189,6 +212,15 @@ class PluginsViewModel @Inject constructor(
                     devWatcherJob = null
                     _devProjects.value = emptyList()
                 }
+            }
+        }
+        viewModelScope.launch {
+            val urls = indexSourceRepository.customIndexUrls.first()
+            if (_indexSourceText.value.isEmpty()) _indexSourceText.value = urls.joinToString("\n")
+        }
+        viewModelScope.launch {
+            if (_downloadMirror.value.isEmpty()) {
+                _downloadMirror.value = storeSettingsRepository.downloadMirror.first()
             }
         }
     }
@@ -283,6 +315,35 @@ class PluginsViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { devSettingsRepository.setEnabled(enabled) }
     }
 
+    /** 索引仓库按输入行保存；停顿后再落盘，避免每个按键都写一次 DataStore。 */
+    fun setIndexSourceText(text: String) {
+        _indexSourceText.value = text
+        indexSourceSaveJob?.cancel()
+        indexSourceSaveJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(SETTINGS_SAVE_DEBOUNCE_MS)
+            indexSourceRepository.setCustomSources(text.lines())
+        }
+    }
+
+    fun setDownloadMirror(text: String) {
+        _downloadMirror.value = text
+        downloadMirrorSaveJob?.cancel()
+        downloadMirrorSaveJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(SETTINGS_SAVE_DEBOUNCE_MS)
+            storeSettingsRepository.setDownloadMirror(text)
+        }
+    }
+
+    /** 关闭插件设置弹层时立即落盘，避免刚改完就切走而丢掉暂停写入。 */
+    fun savePluginSettings() {
+        indexSourceSaveJob?.cancel()
+        downloadMirrorSaveJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            indexSourceRepository.setCustomSources(_indexSourceText.value.lines())
+            storeSettingsRepository.setDownloadMirror(_downloadMirror.value)
+        }
+    }
+
     /** 重新扫描已安装插件；不重启运行中的插件进程。 */
     fun refresh() {
         if (_refreshing.value) return
@@ -295,7 +356,14 @@ class PluginsViewModel @Inject constructor(
     }
 
     fun refreshDevProjects() {
-        viewModelScope.launch(Dispatchers.IO) { _devProjects.value = scanDevProjects() }
+        viewModelScope.launch(Dispatchers.IO) {
+            _devRefreshing.value = true
+            try {
+                _devProjects.value = scanDevProjects()
+            } finally {
+                _devRefreshing.value = false
+            }
+        }
     }
 
     /** 从开发目录打 zip 后走现有预览流程，安装仍需使用者在预览里确认。 */
@@ -417,7 +485,10 @@ class PluginsViewModel @Inject constructor(
                         pluginId = parsed.manifest.id,
                         version = parsed.manifest.version.toString(),
                         installedVersion = installed[parsed.manifest.id],
-                        lastModified = lastModified
+                        lastModified = lastModified,
+                        name = parsed.manifest.name,
+                        description = parsed.manifest.description,
+                        publisher = parsed.manifest.publisher
                     )
                     else -> PluginDevProject(
                         dirName = dir.name,
@@ -553,5 +624,6 @@ class PluginsViewModel @Inject constructor(
     private companion object {
         const val TAG = "PluginsViewModel"
         const val DEV_POLL_MS = 2_000L
+        const val SETTINGS_SAVE_DEBOUNCE_MS = 500L
     }
 }
