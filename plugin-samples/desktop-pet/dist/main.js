@@ -41,7 +41,7 @@ async function readSettings() {
   }
 }
 
-async function boot() {
+async function autoShowPet() {
   const settings = await readSettings();
   if (settings.autoStart !== true) {
     return { ok: true, skipped: true };
@@ -50,7 +50,7 @@ async function boot() {
   const height = Number(settings.height) || DEFAULTS.height;
   const visibilityPolicy = String(settings.visibilityPolicy || DEFAULTS.visibilityPolicy);
   let lastError = null;
-  // App 进程启动时可能还没进入前台；前台服务被系统挡掉时短暂重试。
+  // 启动或启用插件时 App 可能还没进入前台；前台服务被系统挡掉时短暂重试。
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const info = await hostCall('host.overlay.create', {
@@ -159,7 +159,8 @@ async function handleMenuAction(action) {
 }
 
 const handlers = {
-  'hooks.boot': () => boot(),
+  'hooks.boot': () => autoShowPet(),
+  'hooks.pluginEnabled': () => autoShowPet(),
   'hooks.agentRunStarted': () => postState('thinking'),
   'hooks.agentToolStarted': () => postState('working'),
   'hooks.agentToolFinished': () => postState('working'),
@@ -171,6 +172,8 @@ const handlers = {
     if (state !== 'idle') scheduleIdle();
     return result;
   },
+  // 配置页读取当前浮层，用于展示状态与关闭按钮。
+  'overlay.status': () => ({ ok: true, overlayId, state: currentState }),
   // 配置页手动创建/关闭浮层时同步给常驻进程。
   'overlay.created': (args) => {
     if (args.overlayId) overlayId = String(args.overlayId);

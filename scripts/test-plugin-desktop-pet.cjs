@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const sample = path.join(__dirname, '..', 'plugin-samples', 'desktop-pet');
 const html = fs.readFileSync(path.join(sample, 'pages/pet.html'), 'utf8');
+const configHtml = fs.readFileSync(path.join(sample, 'pages/config.html'), 'utf8');
 const pageSource = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
   .map(match => match[1]).find(source => source.trim());
 const runtimeSource = fs.readFileSync(path.join(sample, 'dist/main.js'), 'utf8');
@@ -94,6 +95,15 @@ function loadPage({ width = 110, height = 130, reducedMotion = false } = {}) {
   };
   return env;
 }
+
+test('配置页接入宿主主题与组件库，不再使用临时页面结构', () => {
+  assert.match(configHtml, /\/__aicode\/theme\.css/);
+  assert.match(configHtml, /\/__aicode\/ui\.css/);
+  assert.match(configHtml, /\/__aicode\/aicode-ui-vue\.js/);
+  assert.match(configHtml, /<aicode-group\b/);
+  assert.match(configHtml, /<aicode-switch\b/);
+  assert.doesNotMatch(configHtml, /<pre id="log"/);
+});
 
 test('菜单与宠物共用固定宽度舞台，贴边旋转使用独立且固定的原点', () => {
   assert.match(html, /#stage\s*\{[^}]*width: var\(--pet-width\)/);
@@ -411,12 +421,26 @@ test('减少动态效果时菜单立即完成，交互不依赖 CSS 动画结束
   assert.deepEqual(env.menuActions(), [{ type: 'menuAction', action: 'feed' }]);
 });
 
-function loadRuntime() {
+function loadRuntime(options = {}) {
   let onLine;
   let seq = 0;
   const pending = new Map();
-  const env = { calls: [], timers: new Map(), now: 0, random: 0.9 };
+  const env = { calls: [], timers: new Map(), now: 0, random: 0.9, settings: options.settings };
   const receive = message => onLine(JSON.stringify(message));
+  const resultFor = message => {
+    if (message.method === 'host.fs.read') {
+      return env.settings == null ? { ok: true } : { content: JSON.stringify(env.settings) };
+    }
+    if (message.method === 'host.overlay.create') {
+      return {
+        overlayId: 'demo.desktop-pet:pet',
+        width: message.params.width,
+        height: message.params.height,
+        visibilityPolicy: message.params.visibilityPolicy
+      };
+    }
+    return { ok: true };
+  };
   vm.runInNewContext(runtimeSource, {
     require(name) {
       assert.equal(name, 'readline');
@@ -436,7 +460,7 @@ function loadRuntime() {
             env.calls.push(message);
             const respond = error => receive(error
               ? { id: message.id, error }
-              : { id: message.id, result: { ok: true } });
+              : { id: message.id, result: resultFor(message) });
             if (env.holdResponse && env.holdResponse(message)) env.releaseResponse = respond;
             else queueMicrotask(respond);
           }
@@ -695,4 +719,32 @@ test('新一轮思考和工具工作不会被上一轮的定时器覆盖', async
   await env.invoke('hooks.agentToolStarted');
   assert.equal(env.timers.size, 0);
   assert.equal(env.states().at(-1), 'working');
+});
+
+test('启用插件后按随 App 启动设置自动显示桌宠', async () => {
+  const env = loadRuntime({ settings: { autoStart: true, width: 150, height: 180, visibilityPolicy: 'foreground' } });
+  const result = await env.invoke('hooks.pluginEnabled');
+  assert.equal(result.ok, true);
+  const create = env.calls.find(call => call.method === 'host.overlay.create');
+  assert.ok(create, '应创建桌宠浮层');
+  assert.deepEqual(plain(create.params), { surface: 'pet', width: 150, height: 180, visibilityPolicy: 'foreground' });
+  assert.equal(env.timers.size, 1);
+  const status = await env.invoke('overlay.status');
+  assert.equal(status.overlayId, 'demo.desktop-pet:pet');
+  assert.equal(status.state, 'idle');
+});
+
+test('未开启随 App 启动时启用插件不显示桌宠', async () => {
+  const env = loadRuntime({ settings: { autoStart: false } });
+  const result = await env.invoke('hooks.pluginEnabled');
+  assert.equal(result.skipped, true);
+  assert.equal(env.calls.some(call => call.method === 'host.overlay.create'), false);
+  const status = await env.invoke('overlay.status');
+  assert.equal(status.overlayId, null);
+});
+
+test('App 启动与插件启用共用同一套自动显示逻辑', async () => {
+  const env = loadRuntime({ settings: { autoStart: true } });
+  await env.invoke('hooks.boot');
+  assert.equal(env.calls.filter(call => call.method === 'host.overlay.create').length, 1);
 });

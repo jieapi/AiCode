@@ -79,7 +79,7 @@ demo-kit/
 | `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
 | `ui-gallery` | 设置页入口、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |
-| `desktop-pet` | 宿主托管浮层、长按展开菜单、拖拽、点击互动、`app.started` 自启动 |
+| `desktop-pet` | 宿主托管浮层、长按展开菜单、拖拽、点击互动、`app.started` 与 `plugin.enabled` 自启动 |
 | `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |
 | `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started` |
 | `env-guard`、`ssh-manager`、`runtime-env` | 环境检查、SSH 管理、运行时能力演示 |

@@ -43,6 +43,7 @@ class DesktopPetSampleTest {
         assertEquals(320, surface?.height)
         assertNotNull("应带运行时而自启动 hook", content.runtime)
         assertTrue(content.hooks.any { it.event == PluginHookEvents.APP_STARTED })
+        assertTrue(content.hooks.any { it.event == PluginHookEvents.PLUGIN_ENABLED })
         assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_STARTED })
         assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_FINISHED })
         assertNotNull("应带配置页", content.configPage)

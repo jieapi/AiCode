@@ -5,7 +5,7 @@
     "default": "Desktop Pet Demo",
     "zh-CN": "桌面宠物示例"
   },
-  "version": "1.15.0",
+  "version": "1.16.0",
   "publisher": "demo",
   "repository": "https://github.com/example/desktop-pet-demo",
   "description": {
@@ -40,6 +40,11 @@
         "id": "boot",
         "event": "app.started",
         "handler": "hooks.boot"
+      },
+      {
+        "id": "enabled",
+        "event": "plugin.enabled",
+        "handler": "hooks.pluginEnabled"
       },
       {
         "id": "run-started",
