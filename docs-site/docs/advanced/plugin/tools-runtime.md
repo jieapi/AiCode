@@ -127,6 +127,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.chat.createSession` | `{title?, mode?}` | `{session}`；`mode` 仅 `build` / `plan` |
 | `host.chat.listMessages` | `{sessionId, limit?, before?, after?}` | `{sessionId, messages, hasMore}`；`before` / `after` 互斥 |
 | `host.chat.sendMessage` | `{sessionId, text}` | `{sessionId, accepted}`；启动普通 AI 轮次，需要聊天页存活 |
+| `host.chat.setDraft` | `{text, sessionId?, append?}` | `{sessionId?, accepted}`；写入输入框，`append` 为 true 时追加，需要聊天页存活 |
 | `host.chat.stop` | `{sessionId}` | `{sessionId, accepted}`；停止该会话的 AI 轮次 |
 | `host.chat.openSession` | `{sessionId}` | `{sessionId, accepted}`；切换聊天页当前会话 |
 | `host.chat.getSession` | `{sessionId}` | `{session}` |

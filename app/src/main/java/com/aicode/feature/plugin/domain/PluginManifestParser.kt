@@ -51,7 +51,7 @@ object PluginManifestParser {
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
-    private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "prompt", "handler", "confirm", "icon")
+    private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "handler", "confirm", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
@@ -65,7 +65,6 @@ object PluginManifestParser {
     private val LANGUAGE_TAG = Regex("^[a-z]{2,3}(-[a-z0-9]{2,8})*$")
 
     private const val MAX_NAME = 80
-    private const val MAX_PROMPT = 4_000
     private const val MAX_DESCRIPTION = 600
     private const val MAX_COMMAND_PARTS = 16
     private const val MAX_COMMAND_PART_CHARS = 200
@@ -790,7 +789,7 @@ object PluginManifestParser {
             return if (ok) result else null
         }
 
-        /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位，以及 page / prompt / handler 三者之一。 */
+        /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位，以及 page / handler 二者之一。 */
         private fun readUiEntries(raw: JsonElement?, path: String): List<PluginUiEntryRef>? {
             if (raw == null) return emptyList()
             val array = raw as? JsonArray ?: return null.also { invalid(path) }
@@ -814,10 +813,6 @@ object PluginManifestParser {
                 val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
                 val slot = item["slot"]?.stringOrNull()?.takeIf { it in PluginUiSlots.ALL }
                 val page = item["page"]?.stringOrNull()
-                val promptRaw = item["prompt"]
-                val prompt = if (promptRaw != null) {
-                    parseLocalized(promptRaw, "$itemPath.prompt", MAX_PROMPT, allowNewlines = true)
-                } else null
                 val handlerRaw = item["handler"]?.stringOrNull()
                 val handler = handlerRaw?.trim()?.takeIf { HANDLER_NAME.matches(it) }
                 val confirmRaw = item["confirm"]
@@ -834,10 +829,14 @@ object PluginManifestParser {
                 }
                 if (handlerRaw != null && handler == null) { invalid("$itemPath.handler"); ok = false }
                 if (confirmRaw != null && confirm == null) { invalid("$itemPath.confirm"); ok = false }
-                val kinds = listOfNotNull(page, prompt?.let { "prompt" }, handler)
+                val kinds = listOfNotNull(page, handler)
                 if (kinds.size != 1) { invalid(itemPath); ok = false }
                 if (confirm == true && handler == null) { invalid("$itemPath.confirm"); ok = false }
-                if (slot != null && PluginUiSlots.isSettingsSlot(slot) && (prompt != null || handler != null)) {
+                if (slot != null && slot in PluginUiSlots.ACTION_ONLY && page != null) {
+                    invalid("$itemPath.page")
+                    ok = false
+                }
+                if (slot != null && PluginUiSlots.isSettingsSlot(slot) && handler != null) {
                     invalid("$itemPath.slot")
                     ok = false
                 }
@@ -859,7 +858,6 @@ object PluginManifestParser {
                             slot = slot,
                             title = title,
                             page = page,
-                            prompt = prompt,
                             handler = handler,
                             confirm = confirm == true,
                             icon = icon

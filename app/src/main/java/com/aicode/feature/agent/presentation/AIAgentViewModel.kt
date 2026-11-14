@@ -317,18 +317,6 @@ class AIAgentViewModel @Inject constructor(
         draftPrefs.edit().remove(id).apply()
     }
 
-    /** 插件提示词入口：切到目标会话（缺省当前，必要时新建）并把文本填进草稿。 */
-    fun applyPluginPrompt(text: String, sessionId: String? = null) {
-        if (text.isBlank()) return
-        viewModelScope.launch {
-            val target = sessionId ?: ensureSession()
-            if (target.isBlank()) return@launch
-            if (sessionId != null && sessionUseCase.getSessionById(sessionId) == null) return@launch
-            _currentSessionId.value = target
-            updateInputDraft(text)
-        }
-    }
-
     /**
      * 工具调用（分组头与单条工具卡片）的手动展开态：key = 分组 key（`toolgroup:<组内首条消息 id>`）
      * 或单条消息 id。
@@ -1428,6 +1416,18 @@ class AIAgentViewModel @Inject constructor(
             }
             is AgentChatRequest.Stop -> stopAgentSession(request.sessionId)
             is AgentChatRequest.Select -> selectSession(request.sessionId)
+            is AgentChatRequest.SetDraft -> {
+                val target = request.sessionId ?: _currentSessionId.value ?: ensureSession()
+                if (target.isBlank() || sessionUseCase.getSessionById(target) == null) return
+                _currentSessionId.value = target
+                val next = if (request.append) {
+                    val existing = _inputDrafts.value[target].orEmpty()
+                    if (existing.isBlank()) request.text else existing.trimEnd() + "\n\n" + request.text
+                } else {
+                    request.text
+                }
+                updateInputDraft(next)
+            }
             is AgentChatRequest.Delete -> deleteSession(request.sessionId)
         }
     }

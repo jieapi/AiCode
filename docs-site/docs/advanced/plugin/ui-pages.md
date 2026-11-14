@@ -1,13 +1,13 @@
 # 插件页面与宿主接口
 
-插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（设置页 / 侧栏 / 顶栏 / 空态 / 会话菜单）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
+插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（设置页 / 侧栏 / 顶栏 / 空态 / 会话菜单 / 文件树 / 编辑器选区）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
 
 ## 三种页面
 
 | 类型 | 声明位置 | 入口 | 典型用途 |
 | --- | --- | --- | --- |
 | 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉，用户添加后打开 | 构建、清理、部署、项目状态 |
-| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按 | 记忆管理、提示词库、快捷动作、工具面板 |
+| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按、文件树长按、编辑器选区菜单 | 记忆管理、快捷动作、工具面板 |
 | 插件配置页 | `configPage` | 「设置 → 插件」的插件详情中 | 插件自身的参数、密钥、开关 |
 
 三种页面使用同一套桥和主题，区别在于入口位置与生命周期。
@@ -37,7 +37,7 @@
 
 ### 槽位入口
 
-一个入口可以是页面、提示词或动作：
+一个入口可以是页面或动作：
 
 ```json
 {
@@ -51,13 +51,6 @@
         "icon": "book"
       },
       {
-        "id": "summarize",
-        "title": {"zh-CN": "总结会话", "en": "Summarize"},
-        "slot": "chat.welcome",
-        "icon": "zap",
-        "prompt": {"zh-CN": "请总结当前会话的结论和待办。"}
-      },
-      {
         "id": "sync",
         "title": {"zh-CN": "同步笔记", "en": "Sync notes"},
         "slot": "drawer.footer",
@@ -69,15 +62,14 @@
 }
 ```
 
-`page` / `prompt` / `handler` 必须且只能出现一个：
+`page` / `handler` 必须且只能出现一个：
 
 | 字段 | 行为 |
 | --- | --- |
 | `page` | 打开包内 HTML 页面，最大 512 KiB |
-| `prompt` | 把本地化提示词填进当前会话的输入框，不自动发送 |
 | `handler` | 调用插件 runtime 的 `ui.invoke`，需要声明 `runtime` |
 
-动作入口可用 `confirm: true` 让宿主在执行前弹确认框。handler 返回 `{message: "..."}` 时，宿主会用 toast 显示这条消息；失败请用 JSON-RPC error 返回，不要在成功结果里包一层 `ok: false`。动作的 `args` 包含 `entryId`、`slot`、`sessionId`（能确定时）；handler 内可正常调用 `host.*`，包括 `host.tip`、`host.notify` 和 `host.chat.*`。
+动作入口可用 `confirm: true` 让宿主在执行前弹确认框。handler 返回 `{message: "..."}` 时，宿主会用 toast 显示这条消息；失败请用 JSON-RPC error 返回，不要在成功结果里包一层 `ok: false`。动作的 `args` 包含 `entryId`、`slot`，以及当前槽位可提供的上下文：`sessionId`、`path`、`isDirectory`、`selection`、`language`、`lineStart`、`lineEnd`。handler 内可正常调用 `host.*`，包括 `host.tip`、`host.notify` 和 `host.chat.*`。
 
 `slot` 仅可取下列值，宿主据此将入口放入固定位置：
 
@@ -93,10 +85,14 @@
 | `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
 | `chat.welcome` | 聊天空态建议区，最多展示 3 条 |
 | `chat.session.menu` | 会话长按菜单，删除项之前 |
+| `files.tree.menu` | 文件树文件/目录长按菜单，插件项在删除之前 |
+| `editor.selection.menu` | 代码编辑器选中文本后的浮动菜单，窄屏与右栏编辑器共用 |
 
-`settings.*` 只接受 `page` 入口；聊天区槽位接受三种入口。同一插件在每个槽位最多 2 个入口；同一槽位内入口顺序由宿主按插件显示名与声明顺序决定，插件不能指定排序或插入位置。侧栏底部最多内联展示 3 条，其余收进「更多插件」；顶栏菜单没有插件项时整段隐藏。
+`settings.*` 只接受 `page` 入口；`files.tree.menu` 与 `editor.selection.menu` 只接受 `handler` 动作；其余聊天区槽位接受页面与动作。同一插件在每个槽位最多 2 个入口；同一槽位内入口顺序由宿主按插件显示名与声明顺序决定，插件不能指定排序或插入位置。侧栏底部最多内联展示 3 条，其余收进「更多插件」；顶栏菜单没有插件项时整段隐藏。
 
-安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏、顶栏或会话菜单打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面。
+安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏、顶栏、会话菜单或文件树打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面；编辑器选区入口在编辑器浮动菜单内打开。
+
+文件树/编辑器动作的 `path` 在工作区内是 `workspace://…`，可直接传给 `host.fs.*`；工作区外为容器路径，宿主文件 API 不接受这种入参。
 
 ### 插件配置页
 
@@ -131,7 +127,7 @@
 
 `/__aicode/theme.css` 提供跟随 App 主题的 CSS 变量，`/__aicode/aicode.js` 注入 `window.aicode`。页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截。
 
-页面文件最大 512 KiB。`uiEntries` 的 `page` 入口和 `workspaceTools` 的 `pageFile` 必须是包内 `.html`/`.htm`；`prompt`/`handler` 入口不涉及页面文件。
+页面文件最大 512 KiB。`uiEntries` 的 `page` 入口和 `workspaceTools` 的 `pageFile` 必须是包内 `.html`/`.htm`；`handler` 入口不涉及页面文件。
 
 ## 宿主接口
 
@@ -141,7 +137,7 @@
 
 | 方法 | 作用 |
 | --- | --- |
-| `aicode.context()` | 返回 `pluginId`、`pageId`、`slot`、`sessionId`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible`；`slot` 是入口所在槽位，`sessionId` 仅在聊天区打开时存在 |
+| `aicode.context()` | 返回 `pluginId`、`pageId`、`slot`、`sessionId`、`path`、`isDirectory`、`selection`、`language`、`lineStart`、`lineEnd`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible`；未使用的字段不出现 |
 | `aicode.toast(message)` | 轻量提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话中显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.app.isForeground()` | App 当前是否处于前台（有 Activity 处于 STARTED） |
@@ -211,6 +207,7 @@ const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.cont
 | `aicode.chat.createSession(options?)` | 返回 `{session}`；`options.title` 最多 100 字，`options.mode` 仅支持 `build` / `plan`（`auto` 只能由使用者手动选择） |
 | `aicode.chat.listMessages(sessionId, options?)` | 返回 `{sessionId, messages, hasMore}`；`options.limit` 默认 50、上限 200，`options.before` / `options.after` 为毫秒时间戳，二者互斥 |
 | `aicode.chat.sendMessage(sessionId, text)` | 向会话追加用户消息并启动 AI 轮次；`text` 最多 32000 字符 |
+| `aicode.chat.setDraft(text, options?)` | 把文本写入输入框；`options.sessionId` 缺省当前会话，`options.append` 为 true 时追加。需要聊天页存活 |
 | `aicode.chat.stop(sessionId)` | 停止该会话正在运行的 AI 轮次 |
 | `aicode.chat.openSession(sessionId)` | 把聊天页切换到该会话 |
 | `aicode.chat.getSession(sessionId)` | 返回单个会话 |

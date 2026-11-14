@@ -19,7 +19,7 @@
 | `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
 | `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 | 会话与消息 API |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
-| `ui-gallery` | `demo.gallery` | 设置页、侧栏与顶栏槽位入口、空态提示词、配置页、宿主 Vue 组件库 | 页面组件 |
+| `ui-gallery` | `demo.gallery` | 设置页、侧栏与顶栏槽位入口、配置页、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
 | `desktop-pet` | `jieapi.desktop-pet` | 单浮层 surface、长按展开菜单、拖拽、点击、运行状态 hook | 系统浮层 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
@@ -56,11 +56,14 @@
 
 ## capability-demo
 
-演示插件级 Shizuku 授权、对话提示条和会话/消息 API。
+演示插件级 Shizuku 授权、对话提示条、输入框写入 API 与文件/选区动作入口。
 
 - `show-tip` 工具调用 `host.tip`，在对话中显示一条可关闭提示；
 - `shizuku-command` 工具通过 `host.shizuku.exec` 执行只读 `settings` 命令；
 - 清单声明 `contributes.shizuku.purpose`，使用者需在插件详情中单独开启权限；
+- `chat.welcome` 动作「填入演示提示词」调用 `host.chat.setDraft`，把文本写入当前输入框；
+- `files.tree.menu` 动作「查看文件信息」根据长按路径调用 `host.fs.stat`；
+- `editor.selection.menu` 动作「解释选中代码」把选中文本交给 `host.chat.setDraft`；
 - 配置页可直接触发提示、Shizuku 与「创建会话并发送」，后者依次调用 `aicode.chat.createSession`、`openSession` 和 `sendMessage`，便于验证会话 API。
 
 ## chat-bridge
@@ -87,7 +90,7 @@
 
 演示槽位入口和插件配置页：
 
-- `uiEntries` 将「组件演示」挂载到 `settings.help`、侧栏底部与聊天顶栏菜单；`chat.welcome` 提供一条提示词入口；
+- `uiEntries` 将「组件演示」挂载到 `settings.help`、侧栏底部与聊天顶栏菜单；
 - `configPage` 演示配置读取、保存、重置；
 - 页面展示宿主 Vue 组件库的输入框、文本域、对话框和底部弹层。
 

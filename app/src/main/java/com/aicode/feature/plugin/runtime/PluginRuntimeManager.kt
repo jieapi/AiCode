@@ -270,6 +270,7 @@ class PluginRuntimeManager @Inject constructor(
             "host.chat.createSession" -> hostCall { chatService.createSession(pluginId, params) }
             "host.chat.listMessages" -> hostCall { chatService.listMessages(pluginId, params) }
             "host.chat.sendMessage" -> hostCall { chatService.sendMessage(pluginId, params) }
+            "host.chat.setDraft" -> hostCall { chatService.setDraft(pluginId, params) }
             "host.chat.stop" -> hostCall { chatService.stop(pluginId, params) }
             "host.chat.openSession" -> hostCall { chatService.openSession(pluginId, params) }
             "host.chat.getSession" -> hostCall { chatService.getSession(pluginId, params) }

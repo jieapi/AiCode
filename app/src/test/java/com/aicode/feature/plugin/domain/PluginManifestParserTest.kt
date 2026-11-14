@@ -675,6 +675,24 @@ class PluginManifestParserTest {
         assertEquals("chat.header.menu", success(settingsManifest(slot = "chat.header.menu")).uiEntries.single().slot)
         assertEquals("chat.welcome", success(settingsManifest(slot = "chat.welcome")).uiEntries.single().slot)
         assertEquals("chat.session.menu", success(settingsManifest(slot = "chat.session.menu")).uiEntries.single().slot)
+        assertEquals(
+            "files.tree.menu",
+            success(
+                entriesManifest(
+                    """{"id":"f","title":"文件动作","slot":"files.tree.menu","handler":"actions.file"}""",
+                    runtime = true
+                )
+            ).uiEntries.single().slot
+        )
+        assertEquals(
+            "editor.selection.menu",
+            success(
+                entriesManifest(
+                    """{"id":"e","title":"选区动作","slot":"editor.selection.menu","handler":"actions.selection"}""",
+                    runtime = true
+                )
+            ).uiEntries.single().slot
+        )
     }
 
     private fun entriesManifest(entries: String, runtime: Boolean = false): String {
@@ -698,16 +716,6 @@ class PluginManifestParserTest {
               "contributes": {"uiEntries": [$entries]}
             }
         """.trimIndent()
-    }
-
-    @Test
-    fun uiEntries_parsesPromptEntry() {
-        val m = success(
-            entriesManifest("""{"id":"p","title":"总结","slot":"chat.welcome","prompt":"请总结当前会话"}""")
-        )
-        val entry = m.uiEntries.single()
-        assertEquals(PluginUiEntryKind.PROMPT, entry.kind)
-        assertEquals("请总结当前会话", entry.prompt?.resolve("zh-CN"))
     }
 
     @Test
@@ -743,9 +751,21 @@ class PluginManifestParserTest {
     }
 
     @Test
-    fun uiEntries_rejectsPromptInSettingsSlot() {
+    fun uiEntries_rejectsPageInActionOnlySlot() {
         assertRejected(
-            entriesManifest("""{"id":"p","title":"提示","slot":"settings.ai","prompt":"总结"}"""),
+            entriesManifest("""{"id":"p","title":"页","slot":"files.tree.menu","page":"p.html"}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0].page"
+        )
+    }
+
+    @Test
+    fun uiEntries_rejectsHandlerInSettingsSlot() {
+        assertRejected(
+            entriesManifest(
+                """{"id":"a","title":"动作","slot":"settings.ai","handler":"actions.sync"}""",
+                runtime = true
+            ),
             PluginErrorCode.FIELD_INVALID,
             "contributes.uiEntries[0].slot"
         )

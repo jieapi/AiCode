@@ -167,6 +167,21 @@ class PluginChatService @Inject constructor(
         }
     }
 
+    suspend fun setDraft(pluginId: String, params: JsonObject): JsonElement {
+        ensureActive(pluginId)
+        val workspace = requireWorkspace()
+        val sessionId = optionalString(params, "sessionId")?.trim()?.takeIf { it.isNotEmpty() }
+        if (sessionId != null) requireSession(sessionId, workspace)
+        val text = optionalString(params, "text") ?: throw paramInvalid("text required")
+        if (text.length > MAX_MESSAGE_CHARS) throw paramInvalid("text too long")
+        val append = optionalBoolean(params, "append") ?: false
+        submit(AgentChatRequest.SetDraft(sessionId, text, append))
+        return buildJsonObject {
+            sessionId?.let { put("sessionId", it) }
+            put("accepted", true)
+        }
+    }
+
     suspend fun stop(pluginId: String, params: JsonObject): JsonElement {
         ensureActive(pluginId)
         val workspace = requireWorkspace()

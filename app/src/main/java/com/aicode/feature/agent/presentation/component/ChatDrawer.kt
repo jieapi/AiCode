@@ -184,6 +184,8 @@ fun ChatDrawerContent(
     onPluginEntry: (PluginUiEntry) -> Unit = {},
     sessionPluginEntries: List<PluginUiEntry> = emptyList(),
     onSessionPluginEntry: (ChatSession, PluginUiEntry) -> Unit = { _, _ -> },
+    filePluginEntries: List<PluginUiEntry> = emptyList(),
+    onFilePluginEntry: (FileTreeNode, PluginUiEntry) -> Unit = { _, _ -> },
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -372,7 +374,10 @@ fun ChatDrawerContent(
                     onCopyEntry = onCopyEntry,
                     onCutEntry = onCutEntry,
                     onPasteEntry = onPasteEntry,
-                    onClearClipboard = onClearClipboard
+                    onClearClipboard = onClearClipboard,
+                    filePluginEntries = filePluginEntries,
+                    pluginLanguageTag = pluginLanguageTag,
+                    onFilePluginEntry = onFilePluginEntry
                 )
             }
         }
@@ -942,7 +947,10 @@ private fun FileBrowserTab(
     onCopyEntry: (String, String) -> Unit,
     onCutEntry: (String, String) -> Unit,
     onPasteEntry: (String, (Boolean) -> Unit) -> Unit,
-    onClearClipboard: () -> Unit
+    onClearClipboard: () -> Unit,
+    filePluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onFilePluginEntry: (FileTreeNode, PluginUiEntry) -> Unit = { _, _ -> }
 ) {
     var creating by remember { mutableStateOf<CreateTarget?>(null) }
     var menuNode by remember { mutableStateOf<FileTreeNode?>(null) }
@@ -1109,6 +1117,9 @@ private fun FileBrowserTab(
                 menuNode = null
                 onPasteEntry(target) { /* 结果由调用方决定是否提示，这里保持静默 */ }
             },
+            pluginEntries = filePluginEntries,
+            pluginLanguageTag = pluginLanguageTag,
+            onPluginEntry = { entry -> onFilePluginEntry(node, entry) },
             onDismiss = { menuNode = null }
         )
     }
@@ -1233,6 +1244,9 @@ private fun FileTreeActionSheet(
     onCopy: () -> Unit,
     onCut: () -> Unit,
     onPasteHere: () -> Unit,
+    pluginEntries: List<PluginUiEntry>,
+    pluginLanguageTag: String,
+    onPluginEntry: (PluginUiEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
     AdaptiveModalBottomSheet(
@@ -1297,6 +1311,27 @@ private fun FileTreeActionSheet(
                     tint = MaterialTheme.colorScheme.onSurface,
                     onClick = onRename
                 )
+            }
+            if (pluginEntries.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_plugins),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+                pluginEntries.forEach { entry ->
+                    SheetActionRow(
+                        icon = pluginPageIcon(entry.icon),
+                        label = entry.title.resolve(pluginLanguageTag),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            onDismiss()
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
+            if (node.root == null) {
                 SheetActionRow(
                     icon = FeatherIcons.Trash2,
                     label = stringResource(R.string.common_delete),

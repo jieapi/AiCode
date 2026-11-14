@@ -2017,7 +2017,6 @@
     <!-- Plugins -->
     <string name="settings_plugins">Plugins</string>
     <string name="plugins_more_in_drawer">More plugins</string>
-    <string name="plugins_entry_prompt">Prompt</string>
     <string name="plugins_entry_action">Action</string>
     <string name="plugins_action_confirm_title">Run plugin action</string>
     <string name="plugins_action_confirm_message">Run “%1$s”?</string>

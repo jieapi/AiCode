@@ -19,6 +19,13 @@ sealed interface AgentChatRequest {
     /** 把 [sessionId] 切换为聊天页当前会话。 */
     data class Select(val sessionId: String) : AgentChatRequest
 
+    /** 把文本写入 [sessionId] 的输入框草稿；[sessionId] 为空表示当前会话，[append] 为 true 时追加。 */
+    data class SetDraft(
+        val sessionId: String?,
+        val text: String,
+        val append: Boolean = false
+    ) : AgentChatRequest
+
     /** 删除会话及其消息；由聊天页负责取消在途任务与清理运行时状态。 */
     data class Delete(val sessionId: String) : AgentChatRequest
 }

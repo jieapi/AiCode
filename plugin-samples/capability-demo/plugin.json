@@ -10,7 +10,7 @@
   "repository": "https://github.com/example/capability-demo",
   "description": {
     "default": "Demo plugin for conversation tips and plugin-level Shizuku permission.",
-    "zh-CN": "演示对话内提示条、插件级 Shizuku 授权与会话/消息 API：可在插件配置页直接触发，也可以让 AI 调用两个演示工具。"
+    "zh-CN": "演示对话内提示条、插件级 Shizuku 授权、会话输入框写入 API 与文件/选区动作入口：可在插件配置页直接触发，也可以让 AI 调用两个演示工具。"
   },
   "license": "MIT",
   "engines": {
@@ -21,6 +21,38 @@
     "entry": "dist/main.js"
   },
   "contributes": {
+    "uiEntries": [
+      {
+        "id": "fill-draft",
+        "title": {
+          "default": "Fill Demo Prompt",
+          "zh-CN": "填入演示提示词"
+        },
+        "slot": "chat.welcome",
+        "icon": "zap",
+        "handler": "actions.fillDraft"
+      },
+      {
+        "id": "file-info",
+        "title": {
+          "default": "File Info",
+          "zh-CN": "查看文件信息"
+        },
+        "slot": "files.tree.menu",
+        "icon": "file",
+        "handler": "actions.fileInfo"
+      },
+      {
+        "id": "explain-selection",
+        "title": {
+          "default": "Explain Selection",
+          "zh-CN": "解释选中代码"
+        },
+        "slot": "editor.selection.menu",
+        "icon": "code",
+        "handler": "actions.explainSelection"
+      }
+    ],
     "tools": [
       {
         "id": "show-tip",

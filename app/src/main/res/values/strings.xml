@@ -2016,7 +2016,6 @@
     <!-- 插件 -->
     <string name="settings_plugins">插件</string>
     <string name="plugins_more_in_drawer">更多插件</string>
-    <string name="plugins_entry_prompt">提示词</string>
     <string name="plugins_entry_action">动作</string>
     <string name="plugins_action_confirm_title">执行插件动作</string>
     <string name="plugins_action_confirm_message">要执行「%1$s」吗？</string>

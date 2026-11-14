@@ -595,7 +595,11 @@ class PluginsViewModel @Inject constructor(
      * 槽位动作入口：复核插件仍启用后调用 runtime 的 `ui.invoke`。
      * handler 返回 `{message}` 时交给 UI 显示；失败返回错误文案。
      */
-    fun runUiAction(entry: PluginUiEntry, sessionId: String?, onMessage: (String?) -> Unit) {
+    fun runUiAction(
+        entry: PluginUiEntry,
+        entryContext: PluginEntryContext,
+        onMessage: (String?) -> Unit
+    ) {
         val handler = entry.handler ?: return
         viewModelScope.launch {
             val message = try {
@@ -612,7 +616,13 @@ class PluginsViewModel @Inject constructor(
                         args = buildJsonObject {
                             put("entryId", entry.localId)
                             put("slot", entry.slot)
-                            sessionId?.let { put("sessionId", it) }
+                            entryContext.sessionId?.let { put("sessionId", it) }
+                            entryContext.path?.let { put("path", it) }
+                            entryContext.isDirectory?.let { put("isDirectory", it) }
+                            entryContext.selection?.let { put("selection", it) }
+                            entryContext.language?.let { put("language", it) }
+                            entryContext.lineStart?.let { put("lineStart", it) }
+                            entryContext.lineEnd?.let { put("lineEnd", it) }
                         },
                         method = "ui.invoke",
                         timeoutMs = ACTION_TIMEOUT_MS
@@ -637,7 +647,7 @@ class PluginsViewModel @Inject constructor(
         theme: () -> String,
         onClosePage: () -> Unit,
         post: (String) -> Unit,
-        currentSessionId: () -> String? = { null }
+        pageContext: () -> PluginEntryContext = { PluginEntryContext() }
     ): PluginWebBridge {
         return PluginWebBridge(
             context = context,
@@ -666,7 +676,7 @@ class PluginsViewModel @Inject constructor(
             theme = theme,
             onClosePage = onClosePage,
             post = post,
-            currentSessionId = currentSessionId
+            pageContext = pageContext
         )
     }
 

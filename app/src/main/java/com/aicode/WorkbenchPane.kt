@@ -17,6 +17,8 @@ import com.aicode.feature.browser.presentation.BrowserViewModel
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.git.presentation.component.GitScreen
 import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
+import com.aicode.feature.plugin.presentation.PluginEntryContext
 import com.aicode.feature.plugin.presentation.PluginPageHost
 import com.aicode.feature.plugin.presentation.PluginsViewModel
 import com.aicode.feature.terminal.presentation.TerminalViewModel
@@ -42,9 +44,11 @@ internal fun WorkbenchPaneContent(
     editorPath: String,
     editorLine: Int,
     pluginPage: PluginPage?,
+    pluginPageContext: () -> PluginEntryContext,
+    editorPluginEntries: List<PluginUiEntry>,
     pluginLanguageTag: String,
     pluginsViewModel: PluginsViewModel,
-    currentSessionId: () -> String?,
+    onEditorPluginEntry: (PluginUiEntry, PluginEntryContext) -> Unit,
     onClose: () -> Unit,
     onOpenFile: ((String) -> Unit)? = null,
     editorLeaveGuard: EditorLeaveGuard? = null,
@@ -59,7 +63,10 @@ internal fun WorkbenchPaneContent(
                 initialLine = editorLine,
                 onBack = onClose,
                 embedded = true,
-                leaveGuard = editorLeaveGuard
+                leaveGuard = editorLeaveGuard,
+                pluginEntries = editorPluginEntries,
+                pluginLanguageTag = pluginLanguageTag,
+                onPluginEntry = onEditorPluginEntry
             )
 
             WorkbenchPaneKind.TERMINAL -> {
@@ -109,7 +116,7 @@ internal fun WorkbenchPaneContent(
                         pluginsViewModel = pluginsViewModel,
                         onClose = onClose,
                         applySystemBarInsets = false,
-                        currentSessionId = currentSessionId
+                        context = pluginPageContext
                     )
                 }
             }

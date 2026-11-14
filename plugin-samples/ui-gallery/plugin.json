@@ -9,8 +9,8 @@
   "publisher": "demo",
   "repository": "https://github.com/jieapi/AiCode",
   "description": {
-    "zh-CN": "演示插件专属配置页面（configPage）、设置页/侧栏/顶栏/空态槽位入口及宿主 Vue 组件库，支持配置的读取与持久化保存。",
-    "en": "Demonstrates plugin configuration page (configPage), settings/drawer/header/welcome slots and host Vue UI components with persistence."
+    "zh-CN": "演示插件专属配置页面（configPage）、设置页/侧栏/顶栏槽位入口及宿主 Vue 组件库，支持配置的读取与持久化保存。",
+    "en": "Demonstrates plugin configuration page (configPage), settings/drawer/header slots and host Vue UI components with persistence."
   },
   "license": "MIT",
   "engines": {
@@ -47,19 +47,6 @@
         "slot": "chat.header.menu",
         "page": "pages/gallery.html",
         "icon": "settings"
-      },
-      {
-        "id": "gallery-prompt",
-        "title": {
-          "zh-CN": "解释这个插件",
-          "en": "Explain this plugin"
-        },
-        "slot": "chat.welcome",
-        "icon": "zap",
-        "prompt": {
-          "zh-CN": "请解释这个 UI 演示插件能做什么。",
-          "en": "Explain what this UI demo plugin can do."
-        }
       }
     ],
     "configPage": "pages/config.html"

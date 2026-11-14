@@ -88,8 +88,9 @@ class PluginWebBridge(
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit,
-    /** 聊天页当前会话；缓存复用时由页面宿主刷新。 */
-    @Volatile private var currentSessionId: () -> String? = { null }
+    /** 页面绑定的入口上下文；缓存复用时由页面宿主刷新。 */
+    @Volatile private var pageContext: () -> PluginEntryContext = { PluginEntryContext() },
+    @Volatile private var lastPageContext: PluginEntryContext? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -235,12 +236,15 @@ class PluginWebBridge(
         theme: () -> String,
         onClosePage: () -> Unit,
         post: (String) -> Unit,
-        currentSessionId: () -> String? = { null }
+        pageContext: () -> PluginEntryContext = { PluginEntryContext() }
     ) {
         this.theme = theme
         this.onClosePage = onClosePage
         this.post = post
-        this.currentSessionId = currentSessionId
+        this.pageContext = pageContext
+        val next = pageContext()
+        if (lastPageContext != null && lastPageContext != next) postLifecycle("contextChanged")
+        lastPageContext = next
     }
 
     private suspend fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
@@ -248,7 +252,14 @@ class PluginWebBridge(
             put("pluginId", page.pluginId)
             put("pageId", page.localId)
             page.slot?.let { put("slot", it) }
-            currentSessionId()?.let { put("sessionId", it) }
+            val ctx = pageContext()
+            ctx.sessionId?.let { put("sessionId", it) }
+            ctx.path?.let { put("path", it) }
+            ctx.isDirectory?.let { put("isDirectory", it) }
+            ctx.selection?.let { put("selection", it) }
+            ctx.language?.let { put("language", it) }
+            ctx.lineStart?.let { put("lineStart", it) }
+            ctx.lineEnd?.let { put("lineEnd", it) }
             put("version", pluginVersion)
             put("languageTag", languageTag)
             put("theme", theme())
@@ -337,6 +348,7 @@ class PluginWebBridge(
         "chat.createSession" -> chatService.createSession(page.pluginId, params)
         "chat.listMessages" -> chatService.listMessages(page.pluginId, params)
         "chat.sendMessage" -> chatService.sendMessage(page.pluginId, params)
+        "chat.setDraft" -> chatService.setDraft(page.pluginId, params)
         "chat.stop" -> chatService.stop(page.pluginId, params)
         "chat.openSession" -> chatService.openSession(page.pluginId, params)
         "chat.getSession" -> chatService.getSession(page.pluginId, params)

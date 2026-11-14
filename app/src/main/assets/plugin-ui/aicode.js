@@ -301,6 +301,12 @@
       sendMessage: function (sessionId, text) {
         return call('chat.sendMessage', { sessionId: String(sessionId), text: String(text) });
       },
+      setDraft: function (text, options) {
+        var params = { text: String(text) };
+        if (options && options.sessionId != null) params.sessionId = String(options.sessionId);
+        if (options && options.append != null) params.append = !!options.append;
+        return call('chat.setDraft', params);
+      },
       stop: function (sessionId) {
         return call('chat.stop', { sessionId: String(sessionId) });
       },

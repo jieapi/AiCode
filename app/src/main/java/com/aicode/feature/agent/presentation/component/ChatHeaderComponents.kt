@@ -414,15 +414,9 @@ internal fun WelcomeState(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (entry.kind != PluginUiEntryKind.PAGE) {
+                                if (entry.kind == PluginUiEntryKind.ACTION) {
                                     Text(
-                                        text = stringResource(
-                                            if (entry.kind == PluginUiEntryKind.PROMPT) {
-                                                R.string.plugins_entry_prompt
-                                            } else {
-                                                R.string.plugins_entry_action
-                                            }
-                                        ),
+                                        text = stringResource(R.string.plugins_entry_action),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

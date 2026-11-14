@@ -54,7 +54,7 @@ data class PluginPage(
     val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
 }
 
-/** 已解析的槽位入口：页面、提示词或运行时动作。 */
+/** 已解析的槽位入口：页面或运行时动作。 */
 data class PluginUiEntry(
     val pluginId: String,
     val localId: String,
@@ -62,18 +62,13 @@ data class PluginUiEntry(
     val slot: String,
     val icon: String,
     val page: PluginPage? = null,
-    val prompt: LocalizedText? = null,
     val handler: String? = null,
     val confirm: Boolean = false
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 
     val kind: PluginUiEntryKind
-        get() = when {
-            page != null -> PluginUiEntryKind.PAGE
-            prompt != null -> PluginUiEntryKind.PROMPT
-            else -> PluginUiEntryKind.ACTION
-        }
+        get() = if (page != null) PluginUiEntryKind.PAGE else PluginUiEntryKind.ACTION
 
     /** 仅页面入口有 WebView 缓存键。 */
     val cacheKey: String? get() = page?.cacheKey
@@ -502,7 +497,6 @@ object PluginContentLoader {
             slot = ref.slot,
             icon = ref.icon,
             page = page,
-            prompt = ref.prompt,
             handler = ref.handler,
             confirm = ref.confirm
         )

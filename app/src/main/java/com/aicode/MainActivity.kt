@@ -111,6 +111,8 @@ import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.domain.PluginUiEntryKind
 import com.aicode.feature.plugin.domain.PluginUiSlots
+import com.aicode.feature.plugin.presentation.PluginEntryContext
+import com.aicode.feature.plugin.presentation.pluginHostPath
 import com.aicode.feature.plugin.presentation.PluginPageHost
 import com.aicode.feature.plugin.presentation.currentLanguageTag
 import com.aicode.feature.plugin.presentation.displayName
@@ -410,6 +412,12 @@ fun AppNavigation(
     val sessionPluginEntries = remember(pluginSlotEntries) {
         pluginSlotEntries.filter { it.slot == PluginUiSlots.CHAT_SESSION_MENU }
     }
+    val fileTreePluginEntries = remember(pluginSlotEntries) {
+        pluginSlotEntries.filter { it.slot == PluginUiSlots.FILES_TREE_MENU }
+    }
+    val editorPluginEntries = remember(pluginSlotEntries) {
+        pluginSlotEntries.filter { it.slot == PluginUiSlots.EDITOR_SELECTION_MENU }
+    }
     val rightDrawerState = rememberEndDrawerState()
 
     // ── 首次启动引导 ──
@@ -516,16 +524,16 @@ fun AppNavigation(
     var paneEditorPath by rememberSaveable { mutableStateOf("") }
     var paneEditorLine by rememberSaveable { mutableIntStateOf(0) }
     var panePluginKey by rememberSaveable { mutableStateOf("") }
-    var panePluginSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var panePluginContext by remember { mutableStateOf(PluginEntryContext()) }
     // 右栏插件页只存 key，页面对象从插件快照重新解析；插件更新或卸载后不会继续用旧页面。
     val panePluginEntry = remember(pluginSlotEntries, panePluginKey) {
         pluginSlotEntries.firstOrNull { it.key == panePluginKey }
     }
     val panePluginPage = panePluginEntry?.page
     var activeSlotPage by remember { mutableStateOf<PluginPage?>(null) }
-    var activeSlotSessionId by remember { mutableStateOf<String?>(null) }
+    var activeSlotContext by remember { mutableStateOf(PluginEntryContext()) }
     // 需要确认的动作入口：确认后再交给插件 runtime。
-    var pendingPluginAction by remember { mutableStateOf<Pair<PluginUiEntry, String?>?>(null) }
+    var pendingPluginAction by remember { mutableStateOf<Pair<PluginUiEntry, PluginEntryContext>?>(null) }
     var paneSplit by rememberSaveable { mutableFloatStateOf(DEFAULT_PANE_SPLIT) }
     // 右栏编辑器有未保存修改时，换文件前先弹保存提示（窄窗全屏编辑器由返回键拦截，不经过这里）。
     val editorLeaveGuard = remember { EditorLeaveGuard() }
@@ -617,40 +625,52 @@ fun AppNavigation(
     }
 
     // 插件槽位入口：页面进右栏或全屏；提示词填草稿；动作交给插件 runtime。
-    val openPluginEntryPage: (PluginUiEntry, String?) -> Unit = { entry, sessionId ->
+    val openPluginEntryPage: (PluginUiEntry, PluginEntryContext) -> Unit = { entry, context ->
         val page = entry.page
         if (page != null) {
             if (rightDrawerState.isOpen) scope.launch { rightDrawerState.close() }
             if (drawerState.isOpen) scope.launch { drawerState.close() }
             if (expanded && currentRoute == "chat") {
-                activeSlotPage = null
-                activeSlotSessionId = null
-                panePluginKey = entry.key
-                panePluginSessionId = sessionId
-                paneKind = WorkbenchPaneKind.PLUGIN
+                val openInPane = {
+                    activeSlotPage = null
+                    activeSlotContext = PluginEntryContext()
+                    panePluginKey = entry.key
+                    panePluginContext = context
+                    paneKind = WorkbenchPaneKind.PLUGIN
+                }
+                // 右栏编辑器可能还有未保存修改，和切换终端/Git 一样先走离开确认。
+                if (paneKind == WorkbenchPaneKind.EDITOR) {
+                    editorLeaveGuard.requestLeave(openInPane)
+                } else {
+                    openInPane()
+                }
             } else {
                 activeSlotPage = page
-                activeSlotSessionId = sessionId
+                activeSlotContext = context
             }
         }
     }
     val showPluginActionResult: (String?) -> Unit = { message ->
         if (!message.isNullOrBlank()) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
-    val runPluginEntry: (PluginUiEntry, String?) -> Unit = { entry, sessionId ->
+    // 文件树/编辑器给的是容器路径；工作区内转成插件宿主可读的 workspace:// 路径。
+    val runPluginEntry: (PluginUiEntry, PluginEntryContext) -> Unit = { entry, context ->
         if (drawerState.isOpen) scope.launch { drawerState.close() }
+        val entryContext = context.copy(
+            path = pluginHostPath(context.path, currentWorkspace?.path)
+        )
         when (entry.kind) {
-            PluginUiEntryKind.PAGE -> openPluginEntryPage(entry, sessionId)
-            PluginUiEntryKind.PROMPT -> {
-                val text = entry.prompt?.resolve(pluginLanguageTag).orEmpty()
-                agentViewModel.applyPluginPrompt(text, sessionId)
-            }
+            PluginUiEntryKind.PAGE -> openPluginEntryPage(entry, entryContext)
             PluginUiEntryKind.ACTION -> {
-                val actionSessionId = sessionId ?: agentViewModel.currentSessionId.value
-                if (entry.confirm) {
-                    pendingPluginAction = entry to actionSessionId
+                val actionContext = if (entryContext.sessionId == null) {
+                    entryContext.copy(sessionId = agentViewModel.currentSessionId.value)
                 } else {
-                    pluginsViewModel.runUiAction(entry, actionSessionId, showPluginActionResult)
+                    entryContext
+                }
+                if (entry.confirm) {
+                    pendingPluginAction = entry to actionContext
+                } else {
+                    pluginsViewModel.runUiAction(entry, actionContext, showPluginActionResult)
                 }
             }
         }
@@ -661,14 +681,14 @@ fun AppNavigation(
         val entry = pluginSlotEntries.firstOrNull { it.key == panePluginKey }
         if (paneKind == WorkbenchPaneKind.PLUGIN && entry?.page == null) {
             paneKind = WorkbenchPaneKind.NONE
-            panePluginSessionId = null
+            panePluginContext = PluginEntryContext()
         }
     }
     LaunchedEffect(pluginSlotEntries, activeSlotPage) {
         val active = activeSlotPage ?: return@LaunchedEffect
         if (pluginSlotEntries.none { it.page?.key == active.key && it.cacheKey == active.cacheKey }) {
             activeSlotPage = null
-            activeSlotSessionId = null
+            activeSlotContext = PluginEntryContext()
         }
     }
 
@@ -744,9 +764,21 @@ fun AppNavigation(
             },
             pluginEntries = drawerPluginEntries,
             pluginLanguageTag = pluginLanguageTag,
-            onPluginEntry = { entry -> runPluginEntry(entry, null) },
+            onPluginEntry = { entry -> runPluginEntry(entry, PluginEntryContext()) },
             sessionPluginEntries = sessionPluginEntries,
-            onSessionPluginEntry = { session, entry -> runPluginEntry(entry, session.id) },
+            onSessionPluginEntry = { session, entry ->
+                runPluginEntry(entry, PluginEntryContext(sessionId = session.id))
+            },
+            filePluginEntries = fileTreePluginEntries,
+            onFilePluginEntry = { node, entry ->
+                runPluginEntry(
+                    entry,
+                    PluginEntryContext(
+                        path = node.path,
+                        isDirectory = node.entry.isDirectory
+                    )
+                )
+            },
             searchQuery = chatSearchQuery,
             searchState = chatSearchState,
             onSearchQueryChange = { agentViewModel.updateChatSearchQuery(it) },
@@ -819,7 +851,7 @@ fun AppNavigation(
                                     onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
                                     pluginEntries = headerPluginEntries,
                                     pluginLanguageTag = pluginLanguageTag,
-                                    onPluginEntry = { entry -> runPluginEntry(entry, null) },
+                                    onPluginEntry = { entry -> runPluginEntry(entry, PluginEntryContext()) },
                                     welcomePluginEntries = welcomePluginEntries,
                                     terminalActive = paneOpen && paneKind == WorkbenchPaneKind.TERMINAL,
                                     gitActive = paneOpen && paneKind == WorkbenchPaneKind.GIT,
@@ -846,10 +878,20 @@ fun AppNavigation(
                                 pluginPage = panePluginPage,
                                 pluginLanguageTag = pluginLanguageTag,
                                 pluginsViewModel = pluginsViewModel,
-                                currentSessionId = { panePluginSessionId ?: agentViewModel.currentSessionId.value },
+                                pluginPageContext = {
+                                    if (panePluginContext.sessionId == null) {
+                                        panePluginContext.copy(sessionId = agentViewModel.currentSessionId.value)
+                                    } else {
+                                        panePluginContext
+                                    }
+                                },
+                                editorPluginEntries = editorPluginEntries,
+                                onEditorPluginEntry = { entry, entryContext ->
+                                    runPluginEntry(entry, entryContext)
+                                },
                                 onClose = {
                                     paneKind = WorkbenchPaneKind.NONE
-                                    panePluginSessionId = null
+                                    panePluginContext = PluginEntryContext()
                                 },
                                 onOpenFile = { path -> openFile(path, 0, false) },
                                 // rc5 的平板右栏脏状态确认：主分支把调用重构进了 if (paneOpen)，
@@ -966,6 +1008,11 @@ fun AppNavigation(
                 CodeEditorScreen(
                     path = entry.arguments?.getString("path").orEmpty(),
                     initialLine = entry.arguments?.getInt("line") ?: 0,
+                    pluginEntries = editorPluginEntries,
+                    pluginLanguageTag = pluginLanguageTag,
+                    onPluginEntry = { pluginEntry, entryContext ->
+                        runPluginEntry(pluginEntry, entryContext)
+                    },
                     onBack = {
                         navController.popBackStack()
                         if (openDrawerOnBack && !expanded) scope.launch { drawerState.open() }
@@ -1144,14 +1191,20 @@ fun AppNavigation(
             pluginsViewModel = pluginsViewModel,
             onClose = {
                 activeSlotPage = null
-                activeSlotSessionId = null
+                activeSlotContext = PluginEntryContext()
             },
             modifier = Modifier.fillMaxSize(),
-            currentSessionId = { activeSlotSessionId ?: agentViewModel.currentSessionId.value }
+            context = {
+                if (activeSlotContext.sessionId == null) {
+                    activeSlotContext.copy(sessionId = agentViewModel.currentSessionId.value)
+                } else {
+                    activeSlotContext
+                }
+            }
         )
     }
 
-    pendingPluginAction?.let { (entry, sessionId) ->
+    pendingPluginAction?.let { (entry, actionContext) ->
         AlertDialog(
             onDismissRequest = { pendingPluginAction = null },
             title = { Text(stringResource(R.string.plugins_action_confirm_title)) },
@@ -1166,7 +1219,7 @@ fun AppNavigation(
             confirmButton = {
                 TextButton(onClick = {
                     pendingPluginAction = null
-                    pluginsViewModel.runUiAction(entry, sessionId, showPluginActionResult)
+                    pluginsViewModel.runUiAction(entry, actionContext, showPluginActionResult)
                 }) { Text(stringResource(R.string.common_confirm)) }
             },
             dismissButton = {

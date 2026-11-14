@@ -27,10 +27,19 @@ object PluginUiSlots {
     /** 会话长按菜单。 */
     const val CHAT_SESSION_MENU = "chat.session.menu"
 
+    /** 文件树文件/目录长按菜单。 */
+    const val FILES_TREE_MENU = "files.tree.menu"
+
+    /** 代码编辑器选中文本后的浮动菜单。 */
+    const val EDITOR_SELECTION_MENU = "editor.selection.menu"
+
     val ALL = setOf(
         SETTINGS_GENERAL, SETTINGS_AI, SETTINGS_ENVIRONMENT, SETTINGS_PERMISSIONS, SETTINGS_DATA, SETTINGS_HELP,
-        DRAWER_FOOTER, CHAT_HEADER_MENU, CHAT_WELCOME, CHAT_SESSION_MENU
+        DRAWER_FOOTER, CHAT_HEADER_MENU, CHAT_WELCOME, CHAT_SESSION_MENU, FILES_TREE_MENU, EDITOR_SELECTION_MENU
     )
+
+    /** 这些槽位只接受动作入口，不提供页面或提示词。 */
+    val ACTION_ONLY = setOf(FILES_TREE_MENU, EDITOR_SELECTION_MENU)
 
     /** 单插件在每个槽位可声明的入口数；超出在安装时拒绝，避免一个插件挤满列表。 */
     const val MAX_ENTRIES_PER_PLUGIN = 2
@@ -39,31 +48,25 @@ object PluginUiSlots {
     fun isSettingsSlot(slot: String): Boolean = slot.startsWith("settings.")
 }
 
-/** 槽位入口的三种形态：HTML 页面、填入输入框的提示词、调用插件 runtime 的动作。 */
-enum class PluginUiEntryKind { PAGE, PROMPT, ACTION }
+/** 槽位入口的两种形态：HTML 页面，或调用插件 runtime 的动作。 */
+enum class PluginUiEntryKind { PAGE, ACTION }
 
 /**
- * `contributes.uiEntries` 声明的一个槽位入口。`page` / `prompt` / `handler`
- * 必须且只能出现一个；`page` 是包内 HTML 相对路径，`prompt` 会填入输入框，
- * `handler` 走插件 runtime 的 `ui.invoke`。
+ * `contributes.uiEntries` 声明的一个槽位入口。`page` 与 `handler` 必须且只能出现一个；
+ * `page` 是包内 HTML 相对路径，`handler` 走插件 runtime 的 `ui.invoke`。
  */
 data class PluginUiEntryRef(
     val id: String,
     val slot: String,
     val title: LocalizedText,
     val page: String? = null,
-    val prompt: LocalizedText? = null,
     val handler: String? = null,
     /** 仅动作入口：执行前让宿主弹确认框。 */
     val confirm: Boolean = false,
     val icon: String = "book"
 ) {
     val kind: PluginUiEntryKind
-        get() = when {
-            page != null -> PluginUiEntryKind.PAGE
-            prompt != null -> PluginUiEntryKind.PROMPT
-            else -> PluginUiEntryKind.ACTION
-        }
+        get() = if (page != null) PluginUiEntryKind.PAGE else PluginUiEntryKind.ACTION
 }
 
 /** `contributes.workspaceTools` 声明的工作区工具项，包含入口元数据与页面定义文件引用。 */

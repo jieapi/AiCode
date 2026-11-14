@@ -17,7 +17,7 @@ fun PluginPageHost(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     applySystemBarInsets: Boolean = true,
-    currentSessionId: () -> String? = { null }
+    context: () -> PluginEntryContext = { PluginEntryContext() }
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
@@ -32,12 +32,12 @@ fun PluginPageHost(
                     theme = { if (isDark) "dark" else "light" },
                     onClosePage = close,
                     post = post,
-                    currentSessionId = currentSessionId
+                    pageContext = context
                 )
             },
             modifier = Modifier.fillMaxSize(),
             applySystemBarInsets = applySystemBarInsets,
-            currentSessionId = currentSessionId
+            entryContext = context
         )
     }
 }
