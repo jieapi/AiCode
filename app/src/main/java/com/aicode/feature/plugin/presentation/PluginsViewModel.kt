@@ -8,6 +8,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.shizuku.ShizukuManager
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
+import com.aicode.feature.agent.domain.session.AgentRunStateStore
 import com.aicode.feature.plugin.data.PluginDevPackageBuilder
 import com.aicode.feature.plugin.data.PluginDevSettingsRepository
 import com.aicode.feature.plugin.data.PluginOverlayPermissionRepository
@@ -25,6 +26,10 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginChatService
+import com.aicode.feature.plugin.runtime.PluginHttpService
+import com.aicode.feature.plugin.runtime.PluginIntrospectionService
+import com.aicode.feature.plugin.runtime.PluginSecretStore
+import com.aicode.feature.plugin.runtime.PluginSystemService
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
@@ -111,7 +116,12 @@ class PluginsViewModel @Inject constructor(
     private val tipManager: PluginTipManager,
     private val devSettingsRepository: PluginDevSettingsRepository,
     private val pageEnvironment: PluginPageEnvironment,
-    private val chatService: PluginChatService
+    private val chatService: PluginChatService,
+    private val agentRunStateStore: AgentRunStateStore,
+    private val secretStore: PluginSecretStore,
+    private val systemService: PluginSystemService,
+    private val introspectionService: PluginIntrospectionService,
+    private val httpService: PluginHttpService
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -491,6 +501,11 @@ class PluginsViewModel @Inject constructor(
             tipManager = tipManager,
             overlayManager = overlayManager,
             chatService = chatService,
+            agentRunStateStore = agentRunStateStore,
+            secretStore = secretStore,
+            systemService = systemService,
+            introspectionService = introspectionService,
+            httpService = httpService,
             environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,

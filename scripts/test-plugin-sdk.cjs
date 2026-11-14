@@ -396,3 +396,73 @@ test('chat methods forward session and message parameters', async () => {
 
   assert.deepEqual(harness.errors, []);
 });
+
+test('extended host methods forward parameters', async () => {
+  const harness = loadSdk();
+  const cases = [
+    [() => harness.sdk.fs.mkdir('data://dir'), 'fs.mkdir', { path: 'data://dir' }],
+    [() => harness.sdk.fs.rename('data://a', 'data://b'), 'fs.rename', { from: 'data://a', to: 'data://b' }],
+    [() => harness.sdk.fs.copy('data://a', 'data://b', { overwrite: true }), 'fs.copy', {
+      from: 'data://a', to: 'data://b', overwrite: true
+    }],
+    [() => harness.sdk.fs.append('data://a', 'x'), 'fs.append', { path: 'data://a', content: 'x' }],
+    [() => harness.sdk.fs.readBinary('data://a'), 'fs.readBinary', { path: 'data://a' }],
+    [() => harness.sdk.fs.writeBinary('data://a', 'AA=='), 'fs.writeBinary', {
+      path: 'data://a', base64: 'AA=='
+    }],
+    [() => harness.sdk.terminal.write('t1', 'ls', { appendNewline: false }), 'terminal.write', {
+      tabId: 't1', text: 'ls', appendNewline: false
+    }],
+    [() => harness.sdk.terminal.list(), 'terminal.list', {}],
+    [() => harness.sdk.chat.getRunState('s1'), 'chat.getRunState', { sessionId: 's1' }],
+    [() => harness.sdk.chat.waitForRun('s1', { timeoutMs: 5000 }), 'chat.waitForRun', {
+      sessionId: 's1', timeoutMs: 5000
+    }],
+    [() => harness.sdk.chat.renameSession('s1', '标题'), 'chat.renameSession', {
+      sessionId: 's1', title: '标题'
+    }],
+    [() => harness.sdk.chat.pinSession('s1', true), 'chat.pinSession', {
+      sessionId: 's1', pinned: true
+    }],
+    [() => harness.sdk.chat.deleteSession('s1'), 'chat.deleteSession', { sessionId: 's1' }],
+    [() => harness.sdk.chat.listApprovals('s1'), 'chat.listApprovals', { sessionId: 's1' }],
+    [() => harness.sdk.chat.resolveToolApproval('s1', 'r1', 'once'), 'chat.resolveToolApproval', {
+      sessionId: 's1', requestId: 'r1', choice: 'once'
+    }],
+    [() => harness.sdk.chat.resolveQuestion('s1', 'r1', [{ question: 'q', selected: ['a'] }]),
+      'chat.resolveQuestion', {
+        sessionId: 's1', requestId: 'r1', answers: [{ question: 'q', selected: ['a'] }]
+      }],
+    [() => harness.sdk.chat.resolvePlanApproval('s1', 'r1', 'approve'), 'chat.resolvePlanApproval', {
+      sessionId: 's1', requestId: 'r1', choice: 'approve'
+    }],
+    [() => harness.sdk.clipboard.read(), 'clipboard.read', {}],
+    [() => harness.sdk.clipboard.write('x'), 'clipboard.write', { text: 'x' }],
+    [() => harness.sdk.share.text('x', { title: 't' }), 'share.text', { text: 'x', title: 't' }],
+    [() => harness.sdk.ui.openUrl('https://example.com'), 'ui.openUrl', { url: 'https://example.com' }],
+    [() => harness.sdk.app.info(), 'app.info', {}],
+    [() => harness.sdk.secrets.get('k'), 'secrets.get', { key: 'k' }],
+    [() => harness.sdk.secrets.set('k', 'v'), 'secrets.set', { key: 'k', value: 'v' }],
+    [() => harness.sdk.secrets.delete('k'), 'secrets.delete', { key: 'k' }],
+    [() => harness.sdk.secrets.list(), 'secrets.list', {}],
+    [() => harness.sdk.tools.list(), 'tools.list', {}],
+    [() => harness.sdk.mcp.status(), 'mcp.status', {}],
+    [() => harness.sdk.http.request({ url: 'https://example.com', method: 'POST' }), 'http.request', {
+      url: 'https://example.com', method: 'POST'
+    }],
+    [() => harness.sdk.log.write('info', 'hi', { tag: 't' }), 'log.write', {
+      level: 'info', message: 'hi', tag: 't'
+    }]
+  ];
+
+  for (const [invoke, method, params] of cases) {
+    const promise = invoke();
+    const request = harness.requests[harness.requests.length - 1];
+    assert.equal(request.method, method);
+    assert.deepEqual(request.params, params);
+    harness.resolve(request, {});
+    await promise;
+  }
+
+  assert.deepEqual(harness.errors, []);
+});

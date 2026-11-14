@@ -85,6 +85,7 @@ import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.agent.domain.tool.question.UserQuestionAnswer
 import com.aicode.feature.agent.domain.session.AgentChatRequest
 import com.aicode.feature.agent.domain.session.AgentChatRequestBus
+import com.aicode.feature.agent.domain.session.AgentRunStateStore
 import com.aicode.feature.agent.domain.session.SessionUseCase
 import com.aicode.feature.agent.domain.session.MessagePersistenceUseCase
 import kotlinx.coroutines.flow.Flow
@@ -158,6 +159,7 @@ class AIAgentViewModel @Inject constructor(
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val agentChatRequestBus: AgentChatRequestBus,
+    private val agentRunStateStore: AgentRunStateStore,
     private val planApprovalManager: PlanApprovalManager,
     private val terminalSessionManager: TerminalSessionManager,
     private val terminalSessionProvider: TerminalSessionProvider,
@@ -1414,6 +1416,7 @@ class AIAgentViewModel @Inject constructor(
             }
             is AgentChatRequest.Stop -> stopAgentSession(request.sessionId)
             is AgentChatRequest.Select -> selectSession(request.sessionId)
+            is AgentChatRequest.Delete -> deleteSession(request.sessionId)
         }
     }
 
@@ -1894,7 +1897,10 @@ class AIAgentViewModel @Inject constructor(
         var goalActiveAtTurn = false
         var turnHadActivity = false
         val isGoalTurn = !persistUserMessage
+        var runStatus = "success"
+        var runError: String? = null
         try {
+            agentRunStateStore.started(sessionId)
             var failed = false
             // 必须在插入本次用户消息之前读取历史：workflow 会自己 add(userRequest)，避免重复。
             val historyStartedNs = System.nanoTime()
@@ -2253,9 +2259,12 @@ class AIAgentViewModel @Inject constructor(
                     runCatching { sessionUseCase.updateGoalStatus(sessionId, GoalStatus.PAUSED) }
                 }
             }
+            runStatus = "cancelled"
             throw e
         } catch (e: Exception) {
              FileLogger.e(TAG, "executeAgentRequestStream 失败: request=$request", e)
+             runStatus = "error"
+             runError = e.toUserMessage(context)
              setAgentState(sessionId, AgentUIState.Error(e.toUserMessage(context)))
              _completedSessions.value = _completedSessions.value - sessionId
              // 子会话在 workflow 之外失败（如历史构建异常）：通知父会话并释放并发名额。
@@ -2296,6 +2305,17 @@ class AIAgentViewModel @Inject constructor(
                 _reasoningTimings.value = _reasoningTimings.value +
                     (sessionId to (timing.first to System.currentTimeMillis()))
             }
+
+            // 先发布本轮终态，再 flush/处理队列；否则接替的新 job 会先 started，
+            // 这里再 finished 会把新轮次误标成已结束。
+            val finishState = _agentStates.value[sessionId]
+            val finishStatus = when {
+                runStatus != "success" -> runStatus
+                finishState is AgentUIState.Error -> "error"
+                else -> "success"
+            }
+            val finishError = runError ?: (finishState as? AgentUIState.Error)?.message
+            agentRunStateStore.finished(sessionId, finishStatus, finishError)
 
             // 本轮未能搭车送达的后台通知：本轮结束且 job 已移除后，合并成一条发送
             // 补送在落库前失败或被取消时保留队列，避免立即反复重启同一失败请求。

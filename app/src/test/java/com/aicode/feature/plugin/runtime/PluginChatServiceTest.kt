@@ -9,7 +9,12 @@ import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.session.AgentChatRequest
 import com.aicode.feature.agent.domain.session.AgentChatRequestBus
+import com.aicode.feature.agent.domain.session.AgentRunStateStore
 import com.aicode.feature.agent.domain.session.SessionUseCase
+import com.aicode.feature.agent.domain.tool.PendingToolPermission
+import com.aicode.feature.agent.domain.tool.ToolPermissionManager
+import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
+import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginManager
@@ -73,6 +78,10 @@ class PluginChatServiceTest {
         sessionDao: ChatSessionDao = mockk(relaxed = true),
         messageDao: AgentMessageDao = mockk(relaxed = true),
         sessionUseCase: SessionUseCase = mockk(relaxed = true),
+        runStateStore: AgentRunStateStore = AgentRunStateStore(),
+        toolPermissionManager: ToolPermissionManager = mockk(relaxed = true),
+        askUserQuestionManager: AskUserQuestionManager = mockk(relaxed = true),
+        planApprovalManager: PlanApprovalManager = mockk(relaxed = true),
         workspace: String? = workspacePath
     ): PluginChatService {
         val pluginManager = mockk<PluginManager>(relaxed = true)
@@ -92,6 +101,7 @@ class PluginChatServiceTest {
 
         val context = mockk<Context>(relaxed = true)
         every { context.getString(R.string.chat_new_session_btn) } returns "New Chat"
+        every { askUserQuestionManager.pendingQuestion } returns MutableStateFlow(null)
 
         return PluginChatService(
             context = context,
@@ -102,7 +112,11 @@ class PluginChatServiceTest {
             agentMessageDao = messageDao,
             defaultModelSettingsRepository = defaultModel,
             modelReasoningEffortRepository = reasoning,
-            requestBus = bus
+            requestBus = bus,
+            runStateStore = runStateStore,
+            toolPermissionManager = toolPermissionManager,
+            askUserQuestionManager = askUserQuestionManager,
+            planApprovalManager = planApprovalManager
         )
     }
 
@@ -259,5 +273,84 @@ class PluginChatServiceTest {
         }.exceptionOrNull()
 
         assertEquals("PARAM_INVALID", (error as PluginHostException).code)
+    }
+
+    @Test
+    fun renameSession_updatesTitle() = runTest {
+        val sessionUseCase = mockk<SessionUseCase>(relaxed = true)
+        coEvery { sessionUseCase.getSessionById("session-1") } returns session()
+        coEvery { sessionUseCase.updateTitle(any(), any()) } just Runs
+        val service = service(sessionUseCase = sessionUseCase)
+
+        val result = service.renameSession(pluginId, buildJsonObject {
+            put("sessionId", "session-1")
+            put("title", "新标题")
+        }) as JsonObject
+
+        assertEquals("新标题", result["session"]!!.jsonObject["title"]!!.jsonPrimitive.content)
+        coVerify { sessionUseCase.updateTitle("session-1", "新标题") }
+    }
+
+    @Test
+    fun deleteSession_submitsDeleteRequest() = runTest {
+        val bus = AgentChatRequestBus().apply { attach("test") }
+        val sessionUseCase = mockk<SessionUseCase>(relaxed = true)
+        coEvery { sessionUseCase.getSessionById("session-1") } returns session()
+        val service = service(bus = bus, sessionUseCase = sessionUseCase)
+
+        service.deleteSession(pluginId, buildJsonObject { put("sessionId", "session-1") })
+
+        val request = bus.receive() as AgentChatRequest.Delete
+        assertEquals("session-1", request.sessionId)
+    }
+
+    @Test
+    fun getRunState_andWaitForRun_useRunStore() = runTest {
+        val runStore = AgentRunStateStore()
+        val sessionUseCase = mockk<SessionUseCase>(relaxed = true)
+        coEvery { sessionUseCase.getSessionById("session-1") } returns session()
+        val service = service(sessionUseCase = sessionUseCase, runStateStore = runStore)
+
+        val idle = service.getRunState(pluginId, buildJsonObject { put("sessionId", "session-1") }) as JsonObject
+        assertEquals("idle", idle["run"]!!.jsonObject["status"]!!.jsonPrimitive.content)
+
+        runStore.started("session-1")
+        val running = service.getRunState(pluginId, buildJsonObject { put("sessionId", "session-1") }) as JsonObject
+        assertEquals(true, running["run"]!!.jsonObject["running"]!!.jsonPrimitive.boolean)
+
+        runStore.finished("session-1", "success", null)
+        val waited = service.waitForRun(pluginId, buildJsonObject {
+            put("sessionId", "session-1")
+            put("timeoutMs", 1000)
+        }) as JsonObject
+        assertEquals(false, waited["timedOut"]!!.jsonPrimitive.boolean)
+        assertEquals("success", waited["run"]!!.jsonObject["status"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun listApprovals_mapsPendingToolPermission() = runTest {
+        val sessionUseCase = mockk<SessionUseCase>(relaxed = true)
+        coEvery { sessionUseCase.getSessionById("session-1") } returns session()
+        val toolPermissionManager = mockk<ToolPermissionManager>(relaxed = true)
+        every { toolPermissionManager.pendingForSession("session-1") } returns PendingToolPermission(
+            id = "approval-1",
+            toolName = "Bash",
+            title = "执行命令",
+            summary = "ls",
+            details = "完整参数",
+            argsPreview = "{\"command\":\"ls\"}",
+            sessionId = "session-1"
+        )
+        val service = service(
+            sessionUseCase = sessionUseCase,
+            toolPermissionManager = toolPermissionManager
+        )
+
+        val result = service.listApprovals(pluginId, buildJsonObject {
+            put("sessionId", "session-1")
+        }) as JsonObject
+
+        assertEquals("approval-1", result["tool"]!!.jsonObject["id"]!!.jsonPrimitive.content)
+        assertEquals("Bash", result["tool"]!!.jsonObject["toolName"]!!.jsonPrimitive.content)
     }
 }

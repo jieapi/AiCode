@@ -221,6 +221,20 @@ stopLifecycle();
 
 首次加载仍需主动获取数据；重新显示、回到前台和上下文切换用于校准缓存。不应仅依赖一次 Vue `mounted`。
 
+## 运行事件
+
+页面启动 AI 轮次后，会额外收到宿主的 `chat.run.started` 与 `chat.run.finished` 事件：
+
+```js
+aicode.events.on((event) => {
+  if (event.name === 'chat.run.finished') {
+    console.log(event.payload.sessionId, event.payload.status, event.payload.error);
+  }
+});
+```
+
+`status` 为 `running` / `success` / `error` / `cancelled`；这些事件只说明轮次状态，正文仍通过 `aicode.chat.listMessages` 读取。
+
 `aicode.context()` 返回当前 `contextKey` 和 `visible`。文件方法可在最后一个 `options` 参数中传入 `{contextKey}`；上下文已经变化时请求返回 `STALE_CONTEXT`，用于拦截仍在排队的旧项目操作。异步刷新结果仍应在页面侧核对上下文，正在编辑的输入不得被刷新直接覆盖。
 
 ```js

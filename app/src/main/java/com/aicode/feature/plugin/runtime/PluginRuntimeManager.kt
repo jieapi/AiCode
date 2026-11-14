@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
@@ -58,7 +59,11 @@ class PluginRuntimeManager @Inject constructor(
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
     private val overlayManager: PluginOverlayManager,
-    private val chatService: PluginChatService
+    private val chatService: PluginChatService,
+    private val secretStore: PluginSecretStore,
+    private val systemService: PluginSystemService,
+    private val introspectionService: PluginIntrospectionService,
+    private val httpService: PluginHttpService
 ) {
 
     private class Entry(
@@ -217,6 +222,35 @@ class PluginRuntimeManager @Inject constructor(
             "host.fs.list" -> paths.list(PluginHostPaths.requireString(params, "path"))
             "host.fs.delete" -> paths.delete(PluginHostPaths.requireString(params, "path"))
             "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
+            "host.fs.mkdir" -> hostCall { paths.mkdir(PluginHostPaths.requireString(params, "path")) }
+            "host.fs.rename" -> hostCall {
+                paths.rename(
+                    PluginHostPaths.requireString(params, "from"),
+                    PluginHostPaths.requireString(params, "to")
+                )
+            }
+            "host.fs.copy" -> hostCall {
+                paths.copy(
+                    PluginHostPaths.requireString(params, "from"),
+                    PluginHostPaths.requireString(params, "to"),
+                    (params["overwrite"] as? JsonPrimitive)?.booleanOrNull ?: false
+                )
+            }
+            "host.fs.append" -> hostCall {
+                paths.append(
+                    PluginHostPaths.requireString(params, "path"),
+                    PluginHostPaths.requireString(params, "content")
+                )
+            }
+            "host.fs.readBinary" -> hostCall {
+                paths.readBinary(PluginHostPaths.requireString(params, "path"))
+            }
+            "host.fs.writeBinary" -> hostCall {
+                paths.writeBinary(
+                    PluginHostPaths.requireString(params, "path"),
+                    PluginHostPaths.requireString(params, "base64")
+                )
+            }
             "host.app.isForeground" -> JsonPrimitive(overlayManager.isAppForeground())
             "host.bash" -> bash(params)
             "host.notify" -> notifier.notify(pluginId, params)
@@ -230,12 +264,64 @@ class PluginRuntimeManager @Inject constructor(
             "host.terminal.poll" -> terminalPoll(pluginId, params)
             "host.terminal.stop" -> terminalStop(pluginId, params, close = false)
             "host.terminal.close" -> terminalStop(pluginId, params, close = true)
-            "host.chat.listSessions" -> chatCall { chatService.listSessions(pluginId, params) }
-            "host.chat.createSession" -> chatCall { chatService.createSession(pluginId, params) }
-            "host.chat.listMessages" -> chatCall { chatService.listMessages(pluginId, params) }
-            "host.chat.sendMessage" -> chatCall { chatService.sendMessage(pluginId, params) }
-            "host.chat.stop" -> chatCall { chatService.stop(pluginId, params) }
-            "host.chat.openSession" -> chatCall { chatService.openSession(pluginId, params) }
+            "host.terminal.write" -> terminalWrite(pluginId, params)
+            "host.terminal.list" -> terminalCall { terminalRunner.list(pluginId) }
+            "host.chat.listSessions" -> hostCall { chatService.listSessions(pluginId, params) }
+            "host.chat.createSession" -> hostCall { chatService.createSession(pluginId, params) }
+            "host.chat.listMessages" -> hostCall { chatService.listMessages(pluginId, params) }
+            "host.chat.sendMessage" -> hostCall { chatService.sendMessage(pluginId, params) }
+            "host.chat.stop" -> hostCall { chatService.stop(pluginId, params) }
+            "host.chat.openSession" -> hostCall { chatService.openSession(pluginId, params) }
+            "host.chat.getSession" -> hostCall { chatService.getSession(pluginId, params) }
+            "host.chat.renameSession" -> hostCall { chatService.renameSession(pluginId, params) }
+            "host.chat.pinSession" -> hostCall { chatService.pinSession(pluginId, params) }
+            "host.chat.deleteSession" -> hostCall { chatService.deleteSession(pluginId, params) }
+            "host.chat.getRunState" -> hostCall { chatService.getRunState(pluginId, params) }
+            "host.chat.waitForRun" -> hostCall { chatService.waitForRun(pluginId, params) }
+            "host.chat.listApprovals" -> hostCall { chatService.listApprovals(pluginId, params) }
+            "host.chat.resolveToolApproval" -> hostCall { chatService.resolveToolApproval(pluginId, params) }
+            "host.chat.resolveQuestion" -> hostCall { chatService.resolveQuestion(pluginId, params) }
+            "host.chat.resolvePlanApproval" -> hostCall { chatService.resolvePlanApproval(pluginId, params) }
+            "host.clipboard.read" -> hostCall { systemService.clipboardRead(pluginId) }
+            "host.clipboard.write" -> hostCall {
+                systemService.clipboardWrite(pluginId, PluginHostPaths.requireString(params, "text"))
+            }
+            "host.share.text" -> hostCall {
+                systemService.shareText(
+                    pluginId,
+                    PluginHostPaths.requireString(params, "text"),
+                    (params["title"] as? JsonPrimitive)?.contentOrNull
+                )
+            }
+            "host.ui.openUrl" -> hostCall {
+                systemService.openUrl(pluginId, PluginHostPaths.requireString(params, "url"))
+            }
+            "host.app.info" -> hostCall { systemService.appInfo(pluginId) }
+            "host.log" -> hostCall {
+                systemService.log(
+                    pluginId,
+                    PluginHostPaths.requireString(params, "level"),
+                    PluginHostPaths.requireString(params, "message"),
+                    (params["tag"] as? JsonPrimitive)?.contentOrNull
+                )
+            }
+            "host.secrets.get" -> hostCall {
+                secretStore.get(pluginId, PluginHostPaths.requireString(params, "key"))
+            }
+            "host.secrets.set" -> hostCall {
+                secretStore.set(
+                    pluginId,
+                    PluginHostPaths.requireString(params, "key"),
+                    PluginHostPaths.requireString(params, "value")
+                )
+            }
+            "host.secrets.delete" -> hostCall {
+                secretStore.delete(pluginId, PluginHostPaths.requireString(params, "key"))
+            }
+            "host.secrets.list" -> hostCall { secretStore.list(pluginId) }
+            "host.tools.list" -> hostCall { introspectionService.listTools(pluginId) }
+            "host.mcp.status" -> hostCall { introspectionService.mcpStatus(pluginId) }
+            "host.http.request" -> hostCall { httpService.request(pluginId, params) }
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")
         }
     }
@@ -358,10 +444,28 @@ class PluginRuntimeManager @Inject constructor(
         return buildJsonObject { put("ok", true) }
     }
 
-    private suspend fun <T> chatCall(block: suspend () -> T): T = try {
+    private suspend fun <T> hostCall(block: suspend () -> T): T = try {
         block()
     } catch (e: PluginHostException) {
         throw PluginProcessException(e.code, e.message)
+    }
+
+    private suspend fun terminalCall(block: suspend () -> JsonElement): JsonElement = try {
+        block()
+    } catch (e: PluginTerminalException) {
+        throw PluginProcessException(e.code, e.message)
+    }
+
+    private suspend fun terminalWrite(pluginId: String, params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        val text = PluginHostPaths.requireString(params, "text")
+        val appendNewline = (params["appendNewline"] as? JsonPrimitive)?.booleanOrNull ?: true
+        val written = try {
+            terminalRunner.write(pluginId, tabId, text, appendNewline)
+        } catch (e: PluginTerminalException) {
+            throw PluginProcessException(e.code, e.message)
+        }
+        return buildJsonObject { put("ok", written) }
     }
 
     private fun handleNotification(pluginId: String, method: String, params: JsonObject) {

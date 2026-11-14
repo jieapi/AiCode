@@ -83,6 +83,13 @@ class PlanApprovalManager @Inject constructor(
         entry.decision.complete(choice)
     }
 
+    /** 取某会话当前最早的待决计划审批；用于插件按会话展示，不影响原有全局最早请求。 */
+    fun pendingForSession(sessionId: String): PlanApprovalRequest? = synchronized(lock) {
+        pending.entries.firstOrNull { it.value.sessionId == sessionId }?.let { (id, entry) ->
+            PlanApprovalRequest(reason = entry.reason, sessionId = entry.sessionId, id = id)
+        }
+    }
+
     /** 在持锁区内调用：把内部表投影到对外展示的单个请求（取最早进入的）。 */
     private fun publish() {
         _pendingApproval.value = pending.entries.firstOrNull()?.let { (id, entry) ->

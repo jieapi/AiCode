@@ -5,7 +5,7 @@
     "default": "Chat Bridge",
     "zh-CN": "对话桥"
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "demo",
   "repository": "https://github.com/example/chat-bridge",
   "description": {
@@ -35,11 +35,6 @@
       }
     ],
     "hooks": [
-      {
-        "id": "run-finished",
-        "event": "agent.run.finished",
-        "handler": "hooks.runFinished"
-      },
       {
         "id": "permission-review",
         "event": "agent.permission.review",

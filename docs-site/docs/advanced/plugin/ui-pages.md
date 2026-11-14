@@ -127,6 +127,12 @@
 | `aicode.fs.list(path, options?)` | 列出目录，返回 `{entries: [{name, isDir, size}]}` |
 | `aicode.fs.delete(path, options?)` | 删除文件或目录 |
 | `aicode.fs.stat(path, options?)` | 返回 `{exists, isDir, size}` |
+| `aicode.fs.mkdir(path, options?)` | 创建目录（含父目录） |
+| `aicode.fs.rename(from, to, options?)` | 移动/重命名；目标已存在时返回 `FILE_EXISTS` |
+| `aicode.fs.copy(from, to, options?)` | 复制文件或目录；`options.overwrite` 默认 false |
+| `aicode.fs.append(path, content, options?)` | 追加文本；文件总大小不得超过 1 MiB |
+| `aicode.fs.readBinary(path, options?)` | 读取二进制，返回 `{base64, size}`；上限 512 KiB |
+| `aicode.fs.writeBinary(path, base64, options?)` | 写入 Base64 二进制；上限 1 MiB |
 | `aicode.fs.watch(path, options?, handler)` | 订阅文件来源变化，Promise 解析为取消订阅函数 |
 
 路径必须以虚拟根开头：
@@ -156,6 +162,8 @@ const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.cont
 | `aicode.terminal.poll(tabId, offset)` | 返回 `{output, offset, state, exitCode?, truncated}`；`state` 为 `running` / `finished` / `cancelled` |
 | `aicode.terminal.stop(tabId)` | 发送 Ctrl-C；2 秒仍未退出则关闭标签 |
 | `aicode.terminal.close(tabId)` | 关闭标签 |
+| `aicode.terminal.write(tabId, text, options?)` | 向标签写入输入并回车；`options.appendNewline` 默认 true，文本上限 4000 字符 |
+| `aicode.terminal.list()` | 列出当前插件创建的标签 `{tabId, title, command, state}` |
 
 `aicode.bash` 适用于版本检测、状态查询等短命令，不应启动常驻进程或交互式程序。命令执行环境的初始化由终端页负责；未初始化时退出码为 `null`，输出中会包含引导提示。
 
@@ -173,10 +181,20 @@ const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.cont
 | `aicode.chat.sendMessage(sessionId, text)` | 向会话追加用户消息并启动 AI 轮次；`text` 最多 32000 字符 |
 | `aicode.chat.stop(sessionId)` | 停止该会话正在运行的 AI 轮次 |
 | `aicode.chat.openSession(sessionId)` | 把聊天页切换到该会话 |
+| `aicode.chat.getSession(sessionId)` | 返回单个会话 |
+| `aicode.chat.renameSession(sessionId, title)` | 重命名；标题最多 100 字 |
+| `aicode.chat.pinSession(sessionId, pinned)` | 置顶/取消置顶 |
+| `aicode.chat.deleteSession(sessionId)` | 删除会话及其消息；由聊天页取消在途任务并清理运行时状态 |
+| `aicode.chat.getRunState(sessionId)` | 返回 `{sessionId, run}`，`run` 含 `running`、`status`、`startedAt`、`finishedAt`、`error?` |
+| `aicode.chat.waitForRun(sessionId, options?)` | 等待本轮结束；`options.timeoutMs` 默认 120000、范围 1000–600000；返回 `{timedOut, run}` |
+| `aicode.chat.listApprovals(sessionId)` | 返回 `{tool, question, plan}`，分别对应待确认工具、提问与计划审批 |
+| `aicode.chat.resolveToolApproval(sessionId, requestId, choice)` | `choice` 为 `once` / `always` / `reject`；`always` 仅在可记忆时可用 |
+| `aicode.chat.resolveQuestion(sessionId, requestId, answers)` | `answers` 为 `[{question, selected: [...], customText?}]` |
+| `aicode.chat.resolvePlanApproval(sessionId, requestId, choice)` | `choice` 为 `approve` / `refine` |
 
 会话与消息读取仅限当前工作区；跨工作区的会话 id 返回 `SESSION_FORBIDDEN`。`sendMessage` / `stop` / `openSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`；请求队列已满时返回 `CHAT_BUSY`。常见错误码还包括 `PLUGIN_INACTIVE`、`WORKSPACE_UNAVAILABLE`、`SESSION_NOT_FOUND`、`MODE_UNSUPPORTED` 与 `PARAM_INVALID`。
 
-`sendMessage` 只表示请求已入队，不等待 AI 完成。插件可以监听已有的 `agent.run.finished` hook（payload 含 `sessionId`），或用 `listMessages` 轮询助手回复。消息对象包含 `id`、`role`、`content`、`timestamp`、`toolName`、`isError`、压缩标记与 token 计数，不返回思考过程、工具原始参数和附件内容。
+`sendMessage` 只表示请求已入队，不等待 AI 完成。插件可以监听页面的 `chat.run.finished` 事件、已有的 `agent.run.finished` hook（payload 含 `sessionId`），或调用 `waitForRun` / `listMessages`。消息对象包含 `id`、`role`、`content`、`timestamp`、`toolName`、`isError`、压缩标记、token 计数，以及可选的 `reasoning`（最多 8000 字符）、`toolCalls`（最多 50 条，单条参数最多 4000 字符）与 `attachments`（最多 20 条，不含宿主本地路径）。
 
 ```js
 const created = await aicode.chat.createSession({title: '插件快捷提问', mode: 'build'});
@@ -184,9 +202,27 @@ await aicode.chat.openSession(created.session.id);
 await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项目');
 ```
 
-完整对话界面与「完成 hook + 轮询兜底」示例见[示例库](/advanced/plugin/examples)的 `chat-bridge`。
+完整对话界面与「完成事件 + 轮询兜底」示例见[示例库](/advanced/plugin/examples)的 `chat-bridge`。
 
-`sendMessage` 启动的 AI 可能调用需要授权的工具。插件页面是全屏 WebView 时，聊天页的授权弹窗不可见；插件应声明 `agent.permission.review` 并在页面内展示允许/拒绝卡片（`chat-bridge` 已示范），或明确提示用户返回聊天页确认。否则轮次会停在等待授权，直到用户处理或超时。
+`sendMessage` 启动的 AI 可能调用需要授权的工具。插件页面是全屏 WebView 时，聊天页的授权弹窗不可见；插件应声明 `agent.permission.review` 并在页面内展示允许/拒绝卡片（`chat-bridge` 已示范），或调用 `listApprovals` + `resolveToolApproval` 在页面内处理。计划审批与 `AskUserQuestion` 也分别通过 `plan` / `question` 与对应 resolve 方法处理。否则轮次会停在等待授权，直到用户处理或超时。
+
+页面还会收到 `chat.run.started` / `chat.run.finished` 事件（payload 带 `sessionId`、`status`、`error?`），不需要插件 runtime 就能判断轮次是否结束。
+
+### 系统、密钥与网络
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.clipboard.read()` / `write(text)` | 读取或写入系统剪贴板，上限 1 MiB |
+| `aicode.share.text(text, {title?})` | 拉起系统分享面板；文本最多 100000 字符 |
+| `aicode.ui.openUrl(url)` | 用系统浏览器打开 http/https 链接；最长 4096 字符 |
+| `aicode.app.info()` | 返回包名、版本、SDK、语言与前后台状态 |
+| `aicode.log.write(level, message, {tag?})` | 写宿主日志；`level` 为 debug/info/warn/error，正文最多 2000 字符 |
+| `aicode.secrets.get(key)` / `set(key, value)` / `delete(key)` / `list()` | 插件私有加密键值存储；值最多 64 KiB，`list` 只返回键名 |
+| `aicode.tools.list()` | 列出宿主注册工具（名称、描述、来源类型、授权策略、能力） |
+| `aicode.mcp.status()` | 列出 MCP server 连接状态 |
+| `aicode.http.request({url, method?, headers?, body?, timeout?})` | 宿主代理 HTTP 请求；仅 http/https，不跟随重定向，不注入宿主凭据；响应体上限 1 MiB |
+
+密钥值由 Android Keystore 加密后存放在插件私有目录，明文只在请求瞬间存在于内存；不要在 `data://` 明文保存 API Key。HTTP 请求的 headers 由插件自行提供，插件应避免把密钥写进日志。
 
 ### 进程调用
 

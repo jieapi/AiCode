@@ -29,20 +29,6 @@ function finishReview(requestId, decision) {
 }
 
 const handlers = {
-  // 宿主在每轮 Agent 结束时调用。把完成事件推给页面，页面再读取最终回复。
-  'hooks.runFinished': (args) => {
-    sendEvent('chat.run.finished', {
-      runId: args.runId || null,
-      sessionId: args.sessionId || null,
-      status: args.status || 'unknown',
-      errorCode: args.errorCode || null,
-      scope: args.scope || 'main',
-      agentName: args.agentName || null,
-      toolCalls: Number(args.toolCalls) || 0
-    });
-    return { ok: true };
-  },
-
   // 宿主判定需要使用者确认工具调用时调用。把请求推给网页，等网页允许/拒绝；
   // 超时返回 pass，交回宿主自己的确认 UI。
   'hooks.reviewPermission': (args) => {

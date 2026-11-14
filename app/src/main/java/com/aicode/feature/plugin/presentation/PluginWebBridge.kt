@@ -7,6 +7,8 @@ import android.webkit.JavascriptInterface
 import android.widget.Toast
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.CommandEngine
+import com.aicode.feature.agent.domain.session.AgentRunEvent
+import com.aicode.feature.agent.domain.session.AgentRunStateStore
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
@@ -15,10 +17,14 @@ import com.aicode.feature.plugin.overlay.PluginOverlayException
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginChatService
+import com.aicode.feature.plugin.runtime.PluginHttpService
+import com.aicode.feature.plugin.runtime.PluginIntrospectionService
 import com.aicode.feature.plugin.runtime.PluginProcessException
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
+import com.aicode.feature.plugin.runtime.PluginSecretStore
 import com.aicode.feature.plugin.runtime.PluginShizukuException
 import com.aicode.feature.plugin.runtime.PluginShizukuRunner
+import com.aicode.feature.plugin.runtime.PluginSystemService
 import com.aicode.feature.plugin.runtime.PluginTipException
 import com.aicode.feature.plugin.runtime.PluginTipManager
 import com.aicode.feature.plugin.runtime.PluginTerminalException
@@ -73,6 +79,11 @@ class PluginWebBridge(
     private val tipManager: PluginTipManager,
     private val overlayManager: PluginOverlayManager,
     private val chatService: PluginChatService,
+    private val agentRunStateStore: AgentRunStateStore,
+    private val secretStore: PluginSecretStore,
+    private val systemService: PluginSystemService,
+    private val introspectionService: PluginIntrospectionService,
+    private val httpService: PluginHttpService,
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
@@ -92,6 +103,22 @@ class PluginWebBridge(
     )
     private val eventSubscription = eventBus.subscribe(page.pluginId) { event ->
         postEvent(event)
+    }
+    private val runSubscription = scope.launch {
+        agentRunStateStore.events.collect { event ->
+            when (event) {
+                is AgentRunEvent.Started -> postEvent("chat.run.started", buildJsonObject {
+                    put("sessionId", event.sessionId)
+                    put("startedAt", event.startedAt)
+                })
+                is AgentRunEvent.Finished -> postEvent("chat.run.finished", buildJsonObject {
+                    put("sessionId", event.sessionId)
+                    put("status", event.status)
+                    event.error?.let { put("error", it) }
+                    put("finishedAt", event.finishedAt)
+                })
+            }
+        }
     }
 
     init {
@@ -249,6 +276,25 @@ class PluginWebBridge(
         "fs.list" -> hostPaths.list(PluginHostPaths.requireString(params, "path"))
         "fs.delete" -> hostPaths.delete(PluginHostPaths.requireString(params, "path"))
         "fs.stat" -> hostPaths.stat(PluginHostPaths.requireString(params, "path"))
+        "fs.mkdir" -> hostPaths.mkdir(PluginHostPaths.requireString(params, "path"))
+        "fs.rename" -> hostPaths.rename(
+            PluginHostPaths.requireString(params, "from"),
+            PluginHostPaths.requireString(params, "to")
+        )
+        "fs.copy" -> hostPaths.copy(
+            PluginHostPaths.requireString(params, "from"),
+            PluginHostPaths.requireString(params, "to"),
+            (params["overwrite"] as? JsonPrimitive)?.booleanOrNull ?: false
+        )
+        "fs.append" -> hostPaths.append(
+            PluginHostPaths.requireString(params, "path"),
+            PluginHostPaths.requireString(params, "content")
+        )
+        "fs.readBinary" -> hostPaths.readBinary(PluginHostPaths.requireString(params, "path"))
+        "fs.writeBinary" -> hostPaths.writeBinary(
+            PluginHostPaths.requireString(params, "path"),
+            PluginHostPaths.requireString(params, "base64")
+        )
         "fs.watch" -> {
             val id = PluginHostPaths.requireString(params, "subscriptionId")
             val path = PluginHostPaths.requireString(params, "path")
@@ -275,12 +321,62 @@ class PluginWebBridge(
         "terminal.poll" -> terminalPoll(params)
         "terminal.stop" -> terminalStop(params)
         "terminal.close" -> terminalClose(params)
+        "terminal.write" -> terminalWrite(params)
+        "terminal.list" -> terminalRunner.list(page.pluginId)
         "chat.listSessions" -> chatService.listSessions(page.pluginId, params)
         "chat.createSession" -> chatService.createSession(page.pluginId, params)
         "chat.listMessages" -> chatService.listMessages(page.pluginId, params)
         "chat.sendMessage" -> chatService.sendMessage(page.pluginId, params)
         "chat.stop" -> chatService.stop(page.pluginId, params)
         "chat.openSession" -> chatService.openSession(page.pluginId, params)
+        "chat.getSession" -> chatService.getSession(page.pluginId, params)
+        "chat.renameSession" -> chatService.renameSession(page.pluginId, params)
+        "chat.pinSession" -> chatService.pinSession(page.pluginId, params)
+        "chat.deleteSession" -> chatService.deleteSession(page.pluginId, params)
+        "chat.getRunState" -> chatService.getRunState(page.pluginId, params)
+        "chat.waitForRun" -> chatService.waitForRun(page.pluginId, params)
+        "chat.listApprovals" -> chatService.listApprovals(page.pluginId, params)
+        "chat.resolveToolApproval" -> chatService.resolveToolApproval(page.pluginId, params)
+        "chat.resolveQuestion" -> chatService.resolveQuestion(page.pluginId, params)
+        "chat.resolvePlanApproval" -> chatService.resolvePlanApproval(page.pluginId, params)
+        "clipboard.read" -> systemService.clipboardRead(page.pluginId)
+        "clipboard.write" -> systemService.clipboardWrite(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "text")
+        )
+        "share.text" -> systemService.shareText(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "text"),
+            (params["title"] as? JsonPrimitive)?.contentOrNull
+        )
+        "ui.openUrl" -> systemService.openUrl(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "url")
+        )
+        "app.info" -> systemService.appInfo(page.pluginId)
+        "log.write" -> systemService.log(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "level"),
+            PluginHostPaths.requireString(params, "message"),
+            (params["tag"] as? JsonPrimitive)?.contentOrNull
+        )
+        "secrets.get" -> secretStore.get(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "key")
+        )
+        "secrets.set" -> secretStore.set(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "key"),
+            PluginHostPaths.requireString(params, "value")
+        )
+        "secrets.delete" -> secretStore.delete(
+            page.pluginId,
+            PluginHostPaths.requireString(params, "key")
+        )
+        "secrets.list" -> secretStore.list(page.pluginId)
+        "tools.list" -> introspectionService.listTools(page.pluginId)
+        "mcp.status" -> introspectionService.mcpStatus(page.pluginId)
+        "http.request" -> httpService.request(page.pluginId, params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")
     }
 
@@ -411,6 +507,16 @@ class PluginWebBridge(
         val tabId = PluginHostPaths.requireString(params, "tabId")
         withTerminalErrors { terminalRunner.close(page.pluginId, tabId) }
         return buildJsonObject { put("ok", true) }
+    }
+
+    private suspend fun terminalWrite(params: JsonObject): JsonElement {
+        val tabId = PluginHostPaths.requireString(params, "tabId")
+        val text = PluginHostPaths.requireString(params, "text")
+        val appendNewline = (params["appendNewline"] as? JsonPrimitive)?.booleanOrNull ?: true
+        val written = withTerminalErrors {
+            terminalRunner.write(page.pluginId, tabId, text, appendNewline)
+        }
+        return buildJsonObject { put("ok", written) }
     }
 
     private suspend fun <T> withTerminalErrors(block: suspend () -> T): T = try {

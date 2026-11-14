@@ -115,6 +115,9 @@
     app: {
       isForeground: function () {
         return call('app.isForeground');
+      },
+      info: function () {
+        return call('app.info');
       }
     },
     // 在对话内显示可关闭提示条；options.action = { label, handler } 时点击会回调插件进程。
@@ -132,6 +135,10 @@
     ui: {
       close: function () {
         return call('ui.close');
+      },
+      // 用系统浏览器打开 http/https 链接。
+      openUrl: function (url) {
+        return call('ui.openUrl', { url: String(url) });
       },
       // 页面内全屏弹层开关：打开时宿主按矩形在全局背景图上挖洞，关闭后恢复。
       setOverlay: function (visible, rect) {
@@ -258,6 +265,16 @@
       },
       close: function (tabId) {
         return call('terminal.close', { tabId: String(tabId) });
+      },
+      // 向共享终端标签写入输入；appendNewline 默认 true。
+      write: function (tabId, text, options) {
+        var params = { tabId: String(tabId), text: String(text) };
+        if (options && options.appendNewline != null) params.appendNewline = !!options.appendNewline;
+        return call('terminal.write', params);
+      },
+      // 列出当前插件创建的标签。
+      list: function () {
+        return call('terminal.list');
       }
     },
     // 会话与消息：读取范围限定当前工作区；send / stop / open 需要聊天页存活。
@@ -289,6 +306,50 @@
       },
       openSession: function (sessionId) {
         return call('chat.openSession', { sessionId: String(sessionId) });
+      },
+      getSession: function (sessionId) {
+        return call('chat.getSession', { sessionId: String(sessionId) });
+      },
+      renameSession: function (sessionId, title) {
+        return call('chat.renameSession', { sessionId: String(sessionId), title: String(title) });
+      },
+      pinSession: function (sessionId, pinned) {
+        return call('chat.pinSession', { sessionId: String(sessionId), pinned: !!pinned });
+      },
+      deleteSession: function (sessionId) {
+        return call('chat.deleteSession', { sessionId: String(sessionId) });
+      },
+      getRunState: function (sessionId) {
+        return call('chat.getRunState', { sessionId: String(sessionId) });
+      },
+      waitForRun: function (sessionId, options) {
+        var params = { sessionId: String(sessionId) };
+        if (options && options.timeoutMs != null) params.timeoutMs = Number(options.timeoutMs);
+        return call('chat.waitForRun', params);
+      },
+      listApprovals: function (sessionId) {
+        return call('chat.listApprovals', { sessionId: String(sessionId) });
+      },
+      resolveToolApproval: function (sessionId, requestId, choice) {
+        return call('chat.resolveToolApproval', {
+          sessionId: String(sessionId),
+          requestId: String(requestId),
+          choice: String(choice)
+        });
+      },
+      resolveQuestion: function (sessionId, requestId, answers) {
+        return call('chat.resolveQuestion', {
+          sessionId: String(sessionId),
+          requestId: String(requestId),
+          answers: answers || []
+        });
+      },
+      resolvePlanApproval: function (sessionId, requestId, choice) {
+        return call('chat.resolvePlanApproval', {
+          sessionId: String(sessionId),
+          requestId: String(requestId),
+          choice: String(choice)
+        });
       }
     },
     fs: {
@@ -308,6 +369,32 @@
       },
       stat: function (path, options) {
         return call('fs.stat', fileParams(path, options));
+      },
+      mkdir: function (path, options) {
+        return call('fs.mkdir', fileParams(path, options));
+      },
+      rename: function (from, to, options) {
+        var params = { from: String(from), to: String(to) };
+        if (options && options.contextKey != null) params.contextKey = String(options.contextKey);
+        return call('fs.rename', params);
+      },
+      copy: function (from, to, options) {
+        var params = { from: String(from), to: String(to), overwrite: !!(options && options.overwrite) };
+        if (options && options.contextKey != null) params.contextKey = String(options.contextKey);
+        return call('fs.copy', params);
+      },
+      append: function (path, content, options) {
+        var params = fileParams(path, options);
+        params.content = String(content);
+        return call('fs.append', params);
+      },
+      readBinary: function (path, options) {
+        return call('fs.readBinary', fileParams(path, options));
+      },
+      writeBinary: function (path, base64, options) {
+        var params = fileParams(path, options);
+        params.base64 = String(base64);
+        return call('fs.writeBinary', params);
       },
       watch: function (path, options, handler) {
         if (typeof options === 'function') {
@@ -340,6 +427,62 @@
           off();
           throw error;
         });
+      }
+    },
+    // 系统剪贴板与分享。
+    clipboard: {
+      read: function () {
+        return call('clipboard.read');
+      },
+      write: function (text) {
+        return call('clipboard.write', { text: String(text) });
+      }
+    },
+    share: {
+      text: function (text, options) {
+        var params = { text: String(text) };
+        if (options && options.title != null) params.title = String(options.title);
+        return call('share.text', params);
+      }
+    },
+    // 插件私有的加密键值存储；list 只返回键名。
+    secrets: {
+      get: function (key) {
+        return call('secrets.get', { key: String(key) });
+      },
+      set: function (key, value) {
+        return call('secrets.set', { key: String(key), value: String(value) });
+      },
+      delete: function (key) {
+        return call('secrets.delete', { key: String(key) });
+      },
+      list: function () {
+        return call('secrets.list');
+      }
+    },
+    // 只读查询宿主已注册工具与 MCP 连接状态。
+    tools: {
+      list: function () {
+        return call('tools.list');
+      }
+    },
+    mcp: {
+      status: function () {
+        return call('mcp.status');
+      }
+    },
+    // 宿主代理的 HTTP 请求；不注入宿主凭据、不跟随重定向。
+    http: {
+      request: function (options) {
+        return call('http.request', options || {});
+      }
+    },
+    // 写宿主日志，便于插件作者在应用日志里排查。
+    log: {
+      write: function (level, message, options) {
+        var params = { level: String(level), message: String(message) };
+        if (options && options.tag != null) params.tag = String(options.tag);
+        return call('log.write', params);
       }
     },
     applyTheme: function (variables) {

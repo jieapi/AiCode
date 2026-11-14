@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/** 对话桥示例：设置页、运行完成 hook、代审核与页面接口必须能被解析、校验和加载。 */
+/** 对话桥示例：设置页、代审核与页面接口必须能被解析、校验和加载。 */
 class ChatBridgeSampleTest {
 
     private fun sampleDir(): File {
@@ -38,7 +38,6 @@ class ChatBridgeSampleTest {
         val content = (loaded as ContentLoadResult.Ok).content
         assertEquals("pages/chat.html", content.settingsPages.single().pageFile)
         assertNotNull("应带运行时", content.runtime)
-        assertTrue(content.hooks.any { it.event == PluginHookEvents.AGENT_RUN_FINISHED })
         assertTrue(content.hooks.any {
             it.event == PluginHookEvents.AGENT_PERMISSION_REVIEW && it.mode == PluginHookModes.REVIEW
         })

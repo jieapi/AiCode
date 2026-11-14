@@ -80,13 +80,19 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | 方法 | 参数 | 说明 |
 | --- | --- | --- |
 | `host.fs.read` / `write` / `list` / `stat` / `delete` | 见下表 | 读写四个虚拟根 |
+| `host.fs.mkdir` / `rename` / `copy` / `append` / `readBinary` / `writeBinary` | 见下表 | 目录、移动、复制、追加与二进制读写 |
 | `host.app.isForeground` | 无 | App 是否有 Activity 处于 STARTED |
 | `host.bash` | `{command, timeout?}` | 在当前工作区执行一次性命令 |
-| `host.terminal.run` / `poll` / `stop` / `close` | 同页面桥 | 管理共享终端标签 |
+| `host.terminal.run` / `poll` / `stop` / `close` / `write` / `list` | 同页面桥 | 管理共享终端标签 |
 | `host.notify` | `{title, body, key?}` | 发送系统通知 |
 | `host.tip` | `{title?, text, action?}` | 在对话中显示提示条 |
 | `host.shizuku.exec` | `{command, timeout?}` | 经 Shizuku 执行 Android 命令 |
-| `host.chat.*` | 同页面桥 | 创建/读取会话与消息、发送消息、停止轮次 |
+| `host.chat.*` | 同页面桥 | 会话、消息、运行状态与审批 |
+| `host.clipboard.read` / `write`、`host.share.text`、`host.ui.openUrl` | 见下表 | 系统剪贴板、分享与打开链接 |
+| `host.app.info`、`host.log` | 见下表 | App 信息与宿主日志 |
+| `host.secrets.get` / `set` / `delete` / `list` | 见下表 | 插件私有加密键值存储 |
+| `host.tools.list`、`host.mcp.status` | 见下表 | 工具与 MCP 状态 introspection |
+| `host.http.request` | 见下表 | 宿主代理 HTTP 请求 |
 | `host.overlay.create` / `close` / `postMessage` / `update` | 同页面桥 | 管理系统浮层 |
 | `plugin.event` | `{name, payload}` | 通知，推送给同插件已打开的页面 |
 
@@ -101,11 +107,19 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.fs.list` | `{path}` | `{entries: [{name, isDir, size}]}`；最多 500 条 |
 | `host.fs.stat` | `{path}` | `{exists, isDir, size}` |
 | `host.fs.delete` | `{path}` | 删除文件或目录 |
+| `host.fs.mkdir` | `{path}` | 创建目录（含父目录） |
+| `host.fs.rename` | `{from, to}` | 移动/重命名；目标存在返回 `FILE_EXISTS` |
+| `host.fs.copy` | `{from, to, overwrite?}` | 复制文件或目录；`overwrite` 默认 false |
+| `host.fs.append` | `{path, content}` | 追加文本；总大小不超过 1 MiB |
+| `host.fs.readBinary` | `{path}` | `{base64, size}`；单次最多 512 KiB |
+| `host.fs.writeBinary` | `{path, base64}` | Base64 写入；解码后最多 1 MiB |
 | `host.bash` | `{command, timeout?}` | `{output, exitCode, truncated}`；默认 30 秒，范围 1–300 秒；命令最长 4000 字符 |
 | `host.terminal.run` | `{command, title?}` | `{tabId, state}`；命令最长 4000 字符 |
 | `host.terminal.poll` | `{tabId, offset}` | `{output, offset, state, exitCode?, truncated}`；仅保留最近 128 KiB |
 | `host.terminal.stop` | `{tabId}` | 发送 Ctrl-C，2 秒未退出则关闭 |
 | `host.terminal.close` | `{tabId}` | 关闭标签 |
+| `host.terminal.write` | `{tabId, text, appendNewline?}` | 向标签写入输入；文本最多 4000 字符 |
+| `host.terminal.list` | 无 | 列出该插件自己的标签 `{tabId, title, command, state}` |
 | `host.notify` | `{title, body, key?}` | 标题最多 100 字，正文最多 1000 字，`key` 最多 64 字；同一 `key` 覆盖上一条 |
 | `host.tip` | `{title?, text, action?{label, handler}}` | 标题最多 80 字，正文最多 500 字，按钮文字最多 24 字；同插件仅保留最新一条，队列最多 3 条 |
 | `host.shizuku.exec` | `{command, timeout?}` | 默认 120 秒；需要插件声明 `shizuku` 且使用者单独授权 |
@@ -115,6 +129,26 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.chat.sendMessage` | `{sessionId, text}` | `{sessionId, accepted}`；启动普通 AI 轮次，需要聊天页存活 |
 | `host.chat.stop` | `{sessionId}` | `{sessionId, accepted}`；停止该会话的 AI 轮次 |
 | `host.chat.openSession` | `{sessionId}` | `{sessionId, accepted}`；切换聊天页当前会话 |
+| `host.chat.getSession` | `{sessionId}` | `{session}` |
+| `host.chat.renameSession` | `{sessionId, title}` | 重命名；标题最多 100 字 |
+| `host.chat.pinSession` | `{sessionId, pinned}` | 置顶/取消置顶 |
+| `host.chat.deleteSession` | `{sessionId}` | 删除会话；需要聊天页存活 |
+| `host.chat.getRunState` | `{sessionId}` | `{sessionId, run}` |
+| `host.chat.waitForRun` | `{sessionId, timeoutMs?}` | `{timedOut, run}`；默认 120 秒，范围 1–600 秒 |
+| `host.chat.listApprovals` | `{sessionId}` | `{tool, question, plan}` |
+| `host.chat.resolveToolApproval` | `{sessionId, requestId, choice}` | `once` / `always` / `reject` |
+| `host.chat.resolveQuestion` | `{sessionId, requestId, answers}` | 回答 `AskUserQuestion` |
+| `host.chat.resolvePlanApproval` | `{sessionId, requestId, choice}` | `approve` / `refine` |
+| `host.clipboard.read` / `write` | `{}` / `{text}` | 剪贴板文本，上限 1 MiB |
+| `host.share.text` | `{text, title?}` | 拉起系统分享；文本最多 100000 字符 |
+| `host.ui.openUrl` | `{url}` | 仅 http/https，最长 4096 字符 |
+| `host.app.info` | 无 | 包名、版本、SDK、语言、前后台 |
+| `host.log` | `{level, message, tag?}` | 写宿主日志；正文最多 2000 字符 |
+| `host.secrets.get` / `set` / `delete` | `{key}` / `{key, value}` / `{key}` | 加密键值；值最多 64 KiB |
+| `host.secrets.list` | 无 | `{keys}`，只返回键名 |
+| `host.tools.list` | 无 | `{tools}`；最多 200 项 |
+| `host.mcp.status` | 无 | `{servers}` 连接状态 |
+| `host.http.request` | `{url, method?, headers?, body?, timeout?}` | `{status, headers, body, truncated}`；不跟随重定向、不注入凭据 |
 | `host.overlay.create` | `{surface?, width?, height?, visibilityPolicy?}` | 创建清单声明的浮层 |
 | `host.overlay.update` | `{overlayId, width?, height?, visible?, visibilityPolicy?, dx?, dy?}` | 更新浮层 |
 | `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭浮层 |
@@ -133,7 +167,11 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 
 工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
 
-`host.chat.sendMessage` 只表示请求已入队，不等待 AI 完成；可用已有的 `agent.run.finished` hook 或 `host.chat.listMessages` 获取结果。`sendMessage` / `stop` / `openSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`。消息与手动输入走同一套授权、模式、hooks 与队列，不会绕过宿主审批。
+`host.chat.sendMessage` 只表示请求已入队，不等待 AI 完成；可用 `host.chat.waitForRun`、页面事件 `chat.run.finished`、已有的 `agent.run.finished` hook 或 `host.chat.listMessages` 获取结果。`sendMessage` / `stop` / `openSession` / `deleteSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`。消息与手动输入走同一套授权、模式、hooks 与队列，不会绕过宿主审批。
+
+`host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
+
+`host.http.request` 只接受 http/https，不跟随重定向、不注入宿主凭据；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
 
 ## handler 约定
 

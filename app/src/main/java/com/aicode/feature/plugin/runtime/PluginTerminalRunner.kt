@@ -14,6 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** 插件终端调用失败；[code] 是稳定的错误码，页面桥与进程 API 原样转交。 */
 class PluginTerminalException(val code: String, override val message: String) : Exception(message)
@@ -30,7 +34,7 @@ data class PluginTerminalPoll(
 /**
  * 管理插件创建的共享终端标签。
  *
- * 标签归属创建它的插件，只能由该插件轮询、停止或关闭；[TerminalSessionProvider.listTabs]
+ * 标签归属创建它的插件，只能由该插件轮询、写入、列出、停止或关闭；[TerminalSessionProvider.listTabs]
  * 不返回插件标签，所以 AI 的 terminal 工具和用户终端页默认都看不到它们。输出由
  * `tabOutput` 的原始字节流累积到有界缓冲，插件通过偏移轮询增量，避免页面桥长连接。
  */
@@ -40,7 +44,12 @@ class PluginTerminalRunner @Inject constructor(
     private val pluginManager: PluginManager
 ) {
 
-    private class Run(val pluginId: String, val tabId: String) {
+    private class Run(
+        val pluginId: String,
+        val tabId: String,
+        val title: String,
+        val command: String
+    ) {
         val buffer = StringBuilder()
         var totalChars: Long = 0
         var cancelled = false
@@ -71,7 +80,7 @@ class PluginTerminalRunner @Inject constructor(
         val tabId = withContext(Dispatchers.Main) {
             provider.startPluginCommand(command, title, pluginId)
         }
-        val run = Run(pluginId, tabId)
+        val run = Run(pluginId, tabId, title ?: tabId, command)
         runs[tabId] = run
         run.collector = scope.launch {
             provider.tabOutput(tabId)?.collect { bytes -> run.append(bytes) }
@@ -127,6 +136,37 @@ class PluginTerminalRunner @Inject constructor(
         return true
     }
 
+    /** 向自己的标签发送输入；[appendNewline] 为 true 时由终端补回车。 */
+    suspend fun write(pluginId: String, tabId: String, text: String, appendNewline: Boolean = true): Boolean {
+        owned(pluginId, tabId)
+        if (text.isEmpty()) throw PluginTerminalException("PARAM_INVALID", "empty input")
+        if (text.length > MAX_INPUT_CHARS) throw PluginTerminalException("PARAM_INVALID", "input too long")
+        return withContext(Dispatchers.Main) { provider.sendInput(tabId, text, appendNewline) }
+    }
+
+    /** 列出当前插件自己创建的标签及其运行状态。 */
+    suspend fun list(pluginId: String): JsonElement {
+        val mine = runs.values.filter { it.pluginId == pluginId }.sortedBy { it.tabId }
+        val statuses = withContext(Dispatchers.Main) {
+            mine.associate { it.tabId to provider.tabStatus(it.tabId) }
+        }
+        val entries = mine.map { run ->
+            val status = statuses[run.tabId]
+            val state = when {
+                run.cancelled -> "cancelled"
+                status?.running == true -> "running"
+                else -> "finished"
+            }
+            buildJsonObject {
+                put("tabId", run.tabId)
+                put("title", run.title)
+                put("command", run.command)
+                put("state", state)
+            }
+        }
+        return JsonArray(entries)
+    }
+
     /** 关闭标签并释放输出收集；标签已结束也可以调用。 */
     suspend fun close(pluginId: String, tabId: String): Boolean {
         val run = owned(pluginId, tabId)
@@ -168,5 +208,8 @@ class PluginTerminalRunner @Inject constructor(
         /** 每个插件标签保留的输出上限；超出部分丢弃最旧内容并标记 truncated。 */
         const val MAX_BUFFER_CHARS = 128 * 1024
         const val STOP_TIMEOUT_MS = 2_000L
+
+        /** 单次写入的字符上限。 */
+        const val MAX_INPUT_CHARS = 4000
     }
 }

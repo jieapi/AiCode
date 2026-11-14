@@ -111,23 +111,6 @@ async function main() {
   );
   assert.equal(resolved.params.payload.requestId, 'call-1');
 
-  send({
-    jsonrpc: '2.0',
-    id: 4,
-    method: 'hook.invoke',
-    params: {
-      handler: 'hooks.runFinished',
-      args: { runId: 'run-1', sessionId: 'session-1', status: 'success', toolCalls: 2 }
-    }
-  });
-  const finishedEvent = await waitFor(
-    (message) => message.method === 'plugin.event' &&
-      message.params && message.params.name === 'chat.run.finished',
-    'run finished event'
-  );
-  assert.equal(finishedEvent.params.payload.sessionId, 'session-1');
-  assert.equal(finishedEvent.params.payload.status, 'success');
-
   console.log('chat-bridge runtime review flow ok');
   child.kill();
 }

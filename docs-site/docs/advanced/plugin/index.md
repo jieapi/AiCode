@@ -23,6 +23,8 @@
 | 插件事件 | 进程发送 `plugin.event` | 推送给同插件已打开的页面 | 是 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 会话与消息 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 运行状态与审批 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 系统、密钥与 HTTP | `aicode.clipboard/share/secrets/http` / `host.*` | 宿主 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 系统浮层 | `contributes.overlay` | 宿主托管的系统窗口 | 可无 | [系统浮层](/advanced/plugin/overlay) |
 | Shizuku 命令 | `contributes.shizuku` | Android 系统 | 否 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
 | OpenAI 兼容提供商 | `contributes.providers` | 插件自行启动的服务 | 通常需要 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
@@ -78,7 +80,7 @@ demo-kit/
 | --- | --- |
 | `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读 hook、插件事件 |
 | `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
-| `chat-bridge` | 设置页对话界面、`aicode.chat`、`agent.run.finished` 完成通知 |
+| `chat-bridge` | 设置页对话界面、`aicode.chat`、`chat.run.finished` 完成通知 |
 | `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
 | `ui-gallery` | 设置页入口、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |

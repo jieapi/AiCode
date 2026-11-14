@@ -18,6 +18,9 @@ sealed interface AgentChatRequest {
 
     /** 把 [sessionId] 切换为聊天页当前会话。 */
     data class Select(val sessionId: String) : AgentChatRequest
+
+    /** 删除会话及其消息；由聊天页负责取消在途任务与清理运行时状态。 */
+    data class Delete(val sessionId: String) : AgentChatRequest
 }
 
 /**

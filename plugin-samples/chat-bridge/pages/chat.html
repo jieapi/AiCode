@@ -763,10 +763,12 @@
         runFinished = true;
         clearPermissions();
         if (payload.status !== 'success') {
-          var reason = payload.errorCode ? ('（' + payload.errorCode + '）') : '';
+          var reason = payload.errorCode
+            ? ('（' + payload.errorCode + '）')
+            : (payload.error ? ('（' + payload.error + '）') : '');
           addSystem('本轮已结束：' + payload.status + reason, 'error');
         }
-        // 完成 hook 之后再做一次拉取，确保最后一条 assistant 消息已经落库。
+        // 完成事件之后再做一次拉取，确保最后一条 assistant 消息已经落库。
         setTimeout(function () {
           if (finishedTurn !== turnId) return;
           pollOnce().then(function () {

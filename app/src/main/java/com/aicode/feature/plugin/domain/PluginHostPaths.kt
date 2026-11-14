@@ -3,9 +3,14 @@ package com.aicode.feature.plugin.domain
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import java.io.File
+import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
+import java.util.Base64
+import kotlin.io.FileAlreadyExistsException as KotlinFileAlreadyExistsException
 import java.util.UUID
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -78,6 +83,167 @@ class PluginHostPaths(
                 if (!target.writable) throw PluginHostException("READ_ONLY", "root is read-only: $path")
                 fileAccess.parentPath(target.path)?.let { fileAccess.mkdirs(it) }
                 fileAccess.writeFile(target.path, content)
+            }
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    /** 创建目录（含父目录）；已存在的目录视为成功。 */
+    fun mkdir(path: String): JsonElement {
+        val target = resolve(path)
+        requireWrite(target)
+        when (target) {
+            is Target.Local -> {
+                if (target.file.exists() && !target.file.isDirectory) {
+                    throw PluginHostException("NOT_FOUND", "not a directory: $path")
+                }
+                if (!target.file.isDirectory && !target.file.mkdirs()) {
+                    throw PluginHostException("IO_ERROR", "cannot create directory: $path")
+                }
+            }
+
+            is Target.Remote -> fileAccess.mkdirs(target.path)
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    /** 在现有文本后追加；现有内容与新内容合计不超过 [MAX_WRITE_BYTES]。 */
+    fun append(path: String, content: String): JsonElement {
+        val tail = content.toByteArray(Charsets.UTF_8)
+        if (tail.size > MAX_WRITE_BYTES) throw PluginHostException("TOO_LARGE", "content too large: $path")
+        val target = resolve(path)
+        requireWrite(target)
+        val head = when (target) {
+            is Target.Local -> {
+                val file = target.file
+                when {
+                    !file.exists() -> ""
+                    !file.isFile -> throw PluginHostException("NOT_FOUND", "not a file: $path")
+                    file.length() + tail.size > MAX_WRITE_BYTES ->
+                        throw PluginHostException("TOO_LARGE", "file too large: $path")
+                    else -> file.readText(Charsets.UTF_8)
+                }
+            }
+
+            is Target.Remote -> when {
+                !fileAccess.exists(target.path) -> ""
+                !fileAccess.isFile(target.path) -> throw PluginHostException("NOT_FOUND", "not a file: $path")
+                fileAccess.fileSize(target.path) + tail.size > MAX_WRITE_BYTES ->
+                    throw PluginHostException("TOO_LARGE", "file too large: $path")
+                else -> fileAccess.readFile(target.path)
+            }
+        }
+        return write(path, head + content)
+    }
+
+    /** 读取原始字节并以 Base64 返回；单文件受 [MAX_READ_BYTES] 限制。 */
+    fun readBinary(path: String): JsonElement {
+        val target = resolve(path)
+        requireRead(target)
+        val bytes = when (target) {
+            is Target.Local -> {
+                if (!target.file.isFile) throw PluginHostException("NOT_FOUND", "not a file: $path")
+                if (target.file.length() > MAX_READ_BYTES) {
+                    throw PluginHostException("TOO_LARGE", "file too large: $path")
+                }
+                target.file.readBytes()
+            }
+
+            is Target.Remote -> {
+                if (!fileAccess.exists(target.path) || fileAccess.isDirectory(target.path)) {
+                    throw PluginHostException("NOT_FOUND", "not a file: $path")
+                }
+                if (fileAccess.fileSize(target.path) > MAX_READ_BYTES) {
+                    throw PluginHostException("TOO_LARGE", "file too large: $path")
+                }
+                fileAccess.readBytes(target.path)
+            }
+        }
+        return buildJsonObject {
+            put("base64", Base64.getEncoder().encodeToString(bytes))
+            put("size", bytes.size)
+        }
+    }
+
+    /** 写入 Base64 解码后的字节；解码后受 [MAX_WRITE_BYTES] 限制。 */
+    fun writeBinary(path: String, base64: String): JsonElement {
+        val bytes = try {
+            Base64.getDecoder().decode(base64)
+        } catch (e: IllegalArgumentException) {
+            throw PluginHostException("PARAM_INVALID", "invalid base64: $path")
+        }
+        if (bytes.size > MAX_WRITE_BYTES) throw PluginHostException("TOO_LARGE", "content too large: $path")
+        val target = resolve(path)
+        requireWrite(target)
+        when (target) {
+            is Target.Local -> atomicWrite(target.file, bytes)
+
+            is Target.Remote -> {
+                fileAccess.parentPath(target.path)?.let { fileAccess.mkdirs(it) }
+                fileAccess.writeBytes(target.path, bytes)
+            }
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    /** 移动/重命名；源与目标必须属于同类后端（都是本地根或都是远程根）。 */
+    fun rename(from: String, to: String): JsonElement {
+        val source = resolve(from)
+        val destination = resolve(to)
+        requireWrite(source)
+        requireWrite(destination)
+        if (source.relative.isEmpty()) throw PluginHostException("PATH_DENIED", "cannot rename a root")
+        if (destination.relative.isEmpty()) throw PluginHostException("PATH_DENIED", "cannot overwrite a root")
+        assertOutsideSource(source, destination, to)
+        when (source) {
+            is Target.Local -> {
+                val target = destination as? Target.Local
+                    ?: throw PluginHostException("UNSUPPORTED", "cannot move across local and remote roots")
+                renameLocal(source.file, target.file, from, to)
+            }
+
+            is Target.Remote -> {
+                val target = destination as? Target.Remote
+                    ?: throw PluginHostException("UNSUPPORTED", "cannot move across local and remote roots")
+                mapIoError(to) { fileAccess.rename(source.path, target.path) }
+            }
+        }
+        return buildJsonObject { put("ok", true) }
+    }
+
+    /** 复制文件或目录；源与目标必须属于同类后端。 */
+    fun copy(from: String, to: String, overwrite: Boolean): JsonElement {
+        val source = resolve(from)
+        val destination = resolve(to)
+        requireRead(source)
+        requireWrite(destination)
+        if (source.relative.isEmpty()) throw PluginHostException("PATH_DENIED", "cannot copy a root")
+        if (destination.relative.isEmpty()) throw PluginHostException("PATH_DENIED", "cannot overwrite a root")
+        assertOutsideSource(source, destination, to)
+        when (source) {
+            is Target.Local -> {
+                val target = destination as? Target.Local
+                    ?: throw PluginHostException("UNSUPPORTED", "cannot copy across local and remote roots")
+                if (!source.file.exists()) throw PluginHostException("NOT_FOUND", "not found: $from")
+                if (!overwrite && target.file.exists()) {
+                    throw PluginHostException("FILE_EXISTS", "target exists: $to")
+                }
+                target.file.parentFile?.mkdirs()
+                mapIoError(to) {
+                    if (source.file.isDirectory) {
+                        source.file.copyRecursively(target.file, overwrite)
+                    } else {
+                        source.file.copyTo(target.file, overwrite)
+                    }
+                }
+            }
+
+            is Target.Remote -> {
+                val target = destination as? Target.Remote
+                    ?: throw PluginHostException("UNSUPPORTED", "cannot copy across local and remote roots")
+                if (!fileAccess.exists(source.path)) throw PluginHostException("NOT_FOUND", "not found: $from")
+                fileAccess.parentPath(target.path)?.let { fileAccess.mkdirs(it) }
+                mapIoError(to) { fileAccess.copy(source.path, target.path, overwrite) }
             }
         }
         return buildJsonObject { put("ok", true) }
@@ -262,6 +428,56 @@ class PluginHostPaths(
         }
     }
 
+    /** 复制/移动不能自我嵌套：目标在源内部会无限递归，源在目标内部时覆盖式复制会先删掉源。 */
+    private fun assertOutsideSource(source: Target, destination: Target, to: String) {
+        if (source.scheme != destination.scheme) return
+        if (source.relative == destination.relative) {
+            throw PluginHostException("PATH_DENIED", "destination is the source: $to")
+        }
+        if (source.relative.startsWith("${destination.relative}/")) {
+            throw PluginHostException("PATH_DENIED", "destination contains the source: $to")
+        }
+        if (source.relative.isEmpty() || !destination.relative.startsWith("${source.relative}/")) return
+        val isDirectory = when (source) {
+            is Target.Local -> source.file.isDirectory
+            is Target.Remote -> fileAccess.isDirectory(source.path)
+        }
+        if (isDirectory) throw PluginHostException("PATH_DENIED", "destination is inside the source: $to")
+    }
+
+    private fun renameLocal(from: File, to: File, fromPath: String, toPath: String) {
+        if (!from.exists()) throw PluginHostException("NOT_FOUND", "not found: $fromPath")
+        if (to.exists()) throw PluginHostException("FILE_EXISTS", "target exists: $toPath")
+        to.parentFile?.mkdirs()
+        mapIoError(toPath) {
+            if (from.renameTo(to)) return@mapIoError
+            // renameTo 跨文件系统会失败，退回复制后删除源。
+            if (from.isDirectory) {
+                from.copyRecursively(to, overwrite = false)
+            } else {
+                from.copyTo(to, overwrite = false)
+            }
+            if (!from.deleteRecursively()) throw IOException("cannot delete source: $fromPath")
+        }
+    }
+
+    private fun mapIoError(path: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: NoSuchFileException) {
+            throw PluginHostException("NOT_FOUND", "not found: $path")
+        } catch (e: FileAlreadyExistsException) {
+            throw PluginHostException("FILE_EXISTS", "target exists: $path")
+        } catch (e: KotlinFileAlreadyExistsException) {
+            throw PluginHostException("FILE_EXISTS", "target exists: $path")
+        } catch (e: IOException) {
+            if (e.javaClass.simpleName == "FileAlreadyExistsException") {
+                throw PluginHostException("FILE_EXISTS", "target exists: $path")
+            }
+            throw PluginHostException("IO_ERROR", e.message ?: "io error: $path")
+        }
+    }
+
     private fun inside(root: File, relative: String): File {
         val canonicalRoot = root.canonicalFile
         val file = File(canonicalRoot, relative).canonicalFile
@@ -288,11 +504,13 @@ class PluginHostPaths(
         }
     }
 
-    private fun atomicWrite(file: File, content: String) {
+    private fun atomicWrite(file: File, content: String) = atomicWrite(file, content.toByteArray(Charsets.UTF_8))
+
+    private fun atomicWrite(file: File, bytes: ByteArray) {
         val parent = file.parentFile ?: throw PluginHostException("PATH_INVALID", "file has no parent")
         parent.mkdirs()
         val tmp = File(parent, ".${file.name}.${UUID.randomUUID()}.tmp")
-        tmp.writeText(content, Charsets.UTF_8)
+        tmp.writeBytes(bytes)
         try {
             Files.move(
                 tmp.toPath(),
