@@ -16,7 +16,8 @@
 | 示例 | 插件 ID | 演示能力 | 建议阅读 |
 | --- | --- | --- | --- |
 | `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读 hook、配置页 | 综合入门 |
-| `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、配置页 | Shizuku 与 `host.tip` |
+| `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
+| `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、`aicode.chat`、`agent.run.finished` → `plugin.event` | 会话与消息 API |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
 | `ui-gallery` | `demo.gallery` | 设置页入口、配置页、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
@@ -55,12 +56,22 @@
 
 ## capability-demo
 
-演示插件级 Shizuku 授权和对话提示条。
+演示插件级 Shizuku 授权、对话提示条和会话/消息 API。
 
 - `show-tip` 工具调用 `host.tip`，在对话中显示一条可关闭提示；
 - `shizuku-command` 工具通过 `host.shizuku.exec` 执行只读 `settings` 命令；
 - 清单声明 `contributes.shizuku.purpose`，使用者需在插件详情中单独开启权限；
-- 配置页可直接触发，便于验证授权。
+- 配置页可直接触发提示、Shizuku 与「创建会话并发送」，后者依次调用 `aicode.chat.createSession`、`openSession` 和 `sendMessage`，便于验证会话 API。
+
+## chat-bridge
+
+演示给 AI 下达指令并读取回复的网页对话界面，可作为 QQ / 微信机器人接入的消息回路示例。
+
+- 在设置 → AI 中打开「对话桥」设置页；首次打开创建会话，之后复用 `data://chat-bridge.json` 里的会话 id；
+- 页面调用 `aicode.chat.createSession`、`sendMessage`、`listMessages`、`stop`，并在当前工作区范围内读写消息；
+- 运行时声明 `agent.run.finished` hook，通过 `plugin.event` 把 `chat.run.finished` 推给页面；页面收到后拉取最终 assistant 文本；没有收到 hook 时按空闲时间兜底；
+- 同时声明 `agent.permission.review` 代审核 hook：AI 遇到需要确认的工具时，页面弹出「允许本次 / 拒绝」卡片，通过 `aicode.invoke('ui.permissionDecision')` 回传决定；4.5 分钟未处理会返回 `pass`，交回宿主自己的确认 UI；
+- 页面提供复制回复按钮，方便把结果回传到外部机器人。真实 QQ / 微信接入需要把同样的「收到消息 → sendMessage → 等完成 → 读取回复」回路放到常驻进程或自己的服务里。
 
 ## dev-tools
 

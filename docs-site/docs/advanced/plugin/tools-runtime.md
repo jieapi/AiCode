@@ -86,6 +86,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.notify` | `{title, body, key?}` | 发送系统通知 |
 | `host.tip` | `{title?, text, action?}` | 在对话中显示提示条 |
 | `host.shizuku.exec` | `{command, timeout?}` | 经 Shizuku 执行 Android 命令 |
+| `host.chat.*` | 同页面桥 | 创建/读取会话与消息、发送消息、停止轮次 |
 | `host.overlay.create` / `close` / `postMessage` / `update` | 同页面桥 | 管理系统浮层 |
 | `plugin.event` | `{name, payload}` | 通知，推送给同插件已打开的页面 |
 
@@ -108,6 +109,12 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.notify` | `{title, body, key?}` | 标题最多 100 字，正文最多 1000 字，`key` 最多 64 字；同一 `key` 覆盖上一条 |
 | `host.tip` | `{title?, text, action?{label, handler}}` | 标题最多 80 字，正文最多 500 字，按钮文字最多 24 字；同插件仅保留最新一条，队列最多 3 条 |
 | `host.shizuku.exec` | `{command, timeout?}` | 默认 120 秒；需要插件声明 `shizuku` 且使用者单独授权 |
+| `host.chat.listSessions` | `{includeSubagents?, limit?}` | `{sessions}`；仅当前工作区，`limit` 默认 50、上限 200 |
+| `host.chat.createSession` | `{title?, mode?}` | `{session}`；`mode` 仅 `build` / `plan` |
+| `host.chat.listMessages` | `{sessionId, limit?, before?, after?}` | `{sessionId, messages, hasMore}`；`before` / `after` 互斥 |
+| `host.chat.sendMessage` | `{sessionId, text}` | `{sessionId, accepted}`；启动普通 AI 轮次，需要聊天页存活 |
+| `host.chat.stop` | `{sessionId}` | `{sessionId, accepted}`；停止该会话的 AI 轮次 |
+| `host.chat.openSession` | `{sessionId}` | `{sessionId, accepted}`；切换聊天页当前会话 |
 | `host.overlay.create` | `{surface?, width?, height?, visibilityPolicy?}` | 创建清单声明的浮层 |
 | `host.overlay.update` | `{overlayId, width?, height?, visible?, visibilityPolicy?, dx?, dy?}` | 更新浮层 |
 | `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭浮层 |
@@ -125,6 +132,8 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 `aicode://` 下的 `plugins/`、`permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 禁止访问。单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。
 
 工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
+
+`host.chat.sendMessage` 只表示请求已入队，不等待 AI 完成；可用已有的 `agent.run.finished` hook 或 `host.chat.listMessages` 获取结果。`sendMessage` / `stop` / `openSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`。消息与手动输入走同一套授权、模式、hooks 与队列，不会绕过宿主审批。
 
 ## handler 约定
 

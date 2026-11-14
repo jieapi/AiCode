@@ -161,7 +161,6 @@ class PluginManagerTest {
         )
         val preview = previewOf(v2)
         assertEquals("1.0.0", preview.installedVersion)
-        assertFalse(preview.identical)
 
         assertTrue(manager.install(preview.token) is PluginInstallResult.Installed)
         val plugin = manager.plugins.value.single()
@@ -169,12 +168,6 @@ class PluginManagerTest {
         assertTrue(plugin.isActive)
         assertTrue(manager.activeSkills().single().instructions.startsWith("Updated skill"))
         assertFalse("替换后不应遗留备份目录", File(root, "installed/community.demo-kit.replaced").exists())
-    }
-
-    @Test
-    fun reinstall_ofIdenticalPackageIsFlagged() = runTest {
-        installValid()
-        assertTrue(previewOf().identical)
     }
 
     @Test

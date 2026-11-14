@@ -42,6 +42,8 @@
   <p>先在「管理」页开启 Shizuku 权限，再点下面的按钮。提示条会出现在对话页底部。</p>
   <button id="tip">显示提示条</button>
   <button id="shizuku">执行 Shizuku 查询</button>
+  <button id="chat">创建会话并发送</button>
+  <input id="prompt" value="用一句话介绍当前项目" style="display:block;margin:6px 0;padding:10px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid var(--aicode-border, #d0d7de);background:var(--aicode-surface, #f6f8fa);color:inherit;font-size:15px;">
   <button id="debug">打开调试控制台</button>
   <pre id="output">尚未操作</pre>
   <script src="/__aicode/aicode.js"></script>
@@ -71,8 +73,8 @@
 
     if (!window.aicode) {
       output.textContent = '页面 SDK 未加载：请安装最新 APK 后重试';
-    } else if (typeof aicode.tip !== 'function' || !aicode.shizuku) {
-      output.textContent = '当前 APK 缺少 tip / Shizuku 页面接口，请安装最新 APK';
+    } else if (typeof aicode.tip !== 'function' || !aicode.shizuku || !aicode.chat) {
+      output.textContent = '当前 APK 缺少 tip / Shizuku / chat 页面接口，请安装最新 APK';
     } else {
       aicode.context().then((context) => {
         if (output.textContent === '尚未操作') {
@@ -104,6 +106,19 @@
         output.textContent = JSON.stringify(result, null, 2);
       } catch (error) {
         output.textContent = 'Shizuku 失败：' + (error.message || error);
+      }
+    });
+
+    document.getElementById('chat').addEventListener('click', async () => {
+      console.log('[capability-demo] chat clicked');
+      try {
+        const text = document.getElementById('prompt').value;
+        const created = await aicode.chat.createSession({ title: '插件快捷提问' });
+        await aicode.chat.openSession(created.session.id);
+        const sent = await aicode.chat.sendMessage(created.session.id, text);
+        output.textContent = JSON.stringify({ created, sent }, null, 2);
+      } catch (error) {
+        output.textContent = '会话操作失败：' + (error.message || error);
       }
     });
 

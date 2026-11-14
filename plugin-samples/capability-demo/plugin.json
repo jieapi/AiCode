@@ -10,7 +10,7 @@
   "repository": "https://github.com/example/capability-demo",
   "description": {
     "default": "Demo plugin for conversation tips and plugin-level Shizuku permission.",
-    "zh-CN": "演示对话内提示条与插件级 Shizuku 授权：可在插件配置页直接触发，也可以让 AI 调用两个演示工具。"
+    "zh-CN": "演示对话内提示条、插件级 Shizuku 授权与会话/消息 API：可在插件配置页直接触发，也可以让 AI 调用两个演示工具。"
   },
   "license": "MIT",
   "engines": {

@@ -22,6 +22,7 @@
 | 插件配置页 | `configPage` | 插件详情中的配置分段 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 插件事件 | 进程发送 `plugin.event` | 推送给同插件已打开的页面 | 是 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
+| 会话与消息 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 系统浮层 | `contributes.overlay` | 宿主托管的系统窗口 | 可无 | [系统浮层](/advanced/plugin/overlay) |
 | Shizuku 命令 | `contributes.shizuku` | Android 系统 | 否 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
 | OpenAI 兼容提供商 | `contributes.providers` | 插件自行启动的服务 | 通常需要 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
@@ -55,6 +56,7 @@ demo-kit/
 插件启用后，清单声明的技能、子代理、工具、页面、hook、MCP 和提供商将一并生效，不再逐项授权。安装确认仅展示其提供的能力。
 
 - 插件页面通过宿主桥读写 `data://`、`workspace://` 和 `aicode://`（受保护路径除外），只读 `plugin://`，可执行 `aicode.bash`、创建共享终端标签，也可调用同插件进程的 handler。
+- 插件可以读取当前工作区的会话与消息、创建会话并向会话发送用户消息；发送与手动输入同路径，会正常消耗 token 并触发工具授权，不能绕过权限与 PLAN 模式。
 - 插件进程与 Bash 同级，拥有容器内的文件、网络和命令能力；宿主桥的路径限制只约束桥接口，不约束进程自身。
 - `aicode://` 下的 `plugins/`、`permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 始终禁止插件读写，避免插件为自身扩权或读取密钥。
 - Shizuku 和系统浮层是插件级独立授权，启用插件不会自动获得，需由使用者打开插件详情后单独开启。
@@ -76,6 +78,7 @@ demo-kit/
 | --- | --- |
 | `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读 hook、插件事件 |
 | `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
+| `chat-bridge` | 设置页对话界面、`aicode.chat`、`agent.run.finished` 完成通知 |
 | `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
 | `ui-gallery` | 设置页入口、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |

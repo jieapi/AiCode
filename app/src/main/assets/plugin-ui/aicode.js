@@ -260,6 +260,37 @@
         return call('terminal.close', { tabId: String(tabId) });
       }
     },
+    // 会话与消息：读取范围限定当前工作区；send / stop / open 需要聊天页存活。
+    chat: {
+      listSessions: function (options) {
+        var params = {};
+        if (options && options.includeSubagents != null) params.includeSubagents = !!options.includeSubagents;
+        if (options && options.limit != null) params.limit = Number(options.limit);
+        return call('chat.listSessions', params);
+      },
+      createSession: function (options) {
+        var params = {};
+        if (options && options.title != null) params.title = String(options.title);
+        if (options && options.mode != null) params.mode = String(options.mode);
+        return call('chat.createSession', params);
+      },
+      listMessages: function (sessionId, options) {
+        var params = { sessionId: String(sessionId) };
+        if (options && options.limit != null) params.limit = Number(options.limit);
+        if (options && options.before != null) params.before = Number(options.before);
+        if (options && options.after != null) params.after = Number(options.after);
+        return call('chat.listMessages', params);
+      },
+      sendMessage: function (sessionId, text) {
+        return call('chat.sendMessage', { sessionId: String(sessionId), text: String(text) });
+      },
+      stop: function (sessionId) {
+        return call('chat.stop', { sessionId: String(sessionId) });
+      },
+      openSession: function (sessionId) {
+        return call('chat.openSession', { sessionId: String(sessionId) });
+      }
+    },
     fs: {
       read: function (path, options) {
         return call('fs.read', fileParams(path, options));

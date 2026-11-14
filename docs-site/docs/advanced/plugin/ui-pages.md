@@ -161,6 +161,33 @@ const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.cont
 
 终端输出按偏移轮询；宿主仅保留最近 128 KiB，超出后 `truncated` 为 true。关闭页面不会停止命令；插件停用或卸载时，宿主将关闭其创建的全部标签。
 
+### 会话与消息
+
+插件可以在当前工作区创建会话、读取会话与消息，并向会话发送一条用户消息来启动 AI 轮次。发送的消息与手动输入完全同路径：会正常落库、进入上下文、消耗 token，并经过工具授权、PLAN/AUTO 模式、hooks 与队列，不会绕过宿主审批。
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.chat.listSessions(options?)` | 返回 `{sessions}`；`options.includeSubagents` 默认 false，`options.limit` 默认 50、上限 200 |
+| `aicode.chat.createSession(options?)` | 返回 `{session}`；`options.title` 最多 100 字，`options.mode` 仅支持 `build` / `plan`（`auto` 只能由使用者手动选择） |
+| `aicode.chat.listMessages(sessionId, options?)` | 返回 `{sessionId, messages, hasMore}`；`options.limit` 默认 50、上限 200，`options.before` / `options.after` 为毫秒时间戳，二者互斥 |
+| `aicode.chat.sendMessage(sessionId, text)` | 向会话追加用户消息并启动 AI 轮次；`text` 最多 32000 字符 |
+| `aicode.chat.stop(sessionId)` | 停止该会话正在运行的 AI 轮次 |
+| `aicode.chat.openSession(sessionId)` | 把聊天页切换到该会话 |
+
+会话与消息读取仅限当前工作区；跨工作区的会话 id 返回 `SESSION_FORBIDDEN`。`sendMessage` / `stop` / `openSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`；请求队列已满时返回 `CHAT_BUSY`。常见错误码还包括 `PLUGIN_INACTIVE`、`WORKSPACE_UNAVAILABLE`、`SESSION_NOT_FOUND`、`MODE_UNSUPPORTED` 与 `PARAM_INVALID`。
+
+`sendMessage` 只表示请求已入队，不等待 AI 完成。插件可以监听已有的 `agent.run.finished` hook（payload 含 `sessionId`），或用 `listMessages` 轮询助手回复。消息对象包含 `id`、`role`、`content`、`timestamp`、`toolName`、`isError`、压缩标记与 token 计数，不返回思考过程、工具原始参数和附件内容。
+
+```js
+const created = await aicode.chat.createSession({title: '插件快捷提问', mode: 'build'});
+await aicode.chat.openSession(created.session.id);
+await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项目');
+```
+
+完整对话界面与「完成 hook + 轮询兜底」示例见[示例库](/advanced/plugin/examples)的 `chat-bridge`。
+
+`sendMessage` 启动的 AI 可能调用需要授权的工具。插件页面是全屏 WebView 时，聊天页的授权弹窗不可见；插件应声明 `agent.permission.review` 并在页面内展示允许/拒绝卡片（`chat-bridge` 已示范），或明确提示用户返回聊天页确认。否则轮次会停在等待授权，直到用户处理或超时。
+
 ### 进程调用
 
 | 方法 | 作用 |

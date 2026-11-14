@@ -57,7 +57,8 @@ class PluginRuntimeManager @Inject constructor(
     private val terminalRunner: PluginTerminalRunner,
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
-    private val overlayManager: PluginOverlayManager
+    private val overlayManager: PluginOverlayManager,
+    private val chatService: PluginChatService
 ) {
 
     private class Entry(
@@ -229,6 +230,12 @@ class PluginRuntimeManager @Inject constructor(
             "host.terminal.poll" -> terminalPoll(pluginId, params)
             "host.terminal.stop" -> terminalStop(pluginId, params, close = false)
             "host.terminal.close" -> terminalStop(pluginId, params, close = true)
+            "host.chat.listSessions" -> chatCall { chatService.listSessions(pluginId, params) }
+            "host.chat.createSession" -> chatCall { chatService.createSession(pluginId, params) }
+            "host.chat.listMessages" -> chatCall { chatService.listMessages(pluginId, params) }
+            "host.chat.sendMessage" -> chatCall { chatService.sendMessage(pluginId, params) }
+            "host.chat.stop" -> chatCall { chatService.stop(pluginId, params) }
+            "host.chat.openSession" -> chatCall { chatService.openSession(pluginId, params) }
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")
         }
     }
@@ -349,6 +356,12 @@ class PluginRuntimeManager @Inject constructor(
             throw PluginProcessException(e.code, e.message)
         }
         return buildJsonObject { put("ok", true) }
+    }
+
+    private suspend fun <T> chatCall(block: suspend () -> T): T = try {
+        block()
+    } catch (e: PluginHostException) {
+        throw PluginProcessException(e.code, e.message)
     }
 
     private fun handleNotification(pluginId: String, method: String, params: JsonObject) {

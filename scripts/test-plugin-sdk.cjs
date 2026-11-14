@@ -347,3 +347,52 @@ test('ui.lifecycle continues reaching events.on before, during and after a file 
   harness.event('ui.lifecycle', shown);
   assert.equal(lifecycle.length, 4);
 });
+
+test('chat methods forward session and message parameters', async () => {
+  const harness = loadSdk();
+  const sdk = harness.sdk;
+
+  const sessions = sdk.chat.listSessions({ includeSubagents: true, limit: 20 });
+  const first = harness.requests[0];
+  assert.equal(first.method, 'chat.listSessions');
+  assert.deepEqual(first.params, { includeSubagents: true, limit: 20 });
+  harness.resolve(first, { sessions: [] });
+  assert.deepEqual(plain(await sessions), { sessions: [] });
+
+  const created = sdk.chat.createSession({ title: 'Quick prompt', mode: 'plan' });
+  const second = harness.requests[1];
+  assert.equal(second.method, 'chat.createSession');
+  assert.deepEqual(second.params, { title: 'Quick prompt', mode: 'plan' });
+  harness.resolve(second, { session: { id: 'session-1' } });
+  await created;
+
+  const messages = sdk.chat.listMessages('session-1', { limit: 10, after: 100 });
+  const third = harness.requests[2];
+  assert.equal(third.method, 'chat.listMessages');
+  assert.deepEqual(third.params, { sessionId: 'session-1', limit: 10, after: 100 });
+  harness.resolve(third, { sessionId: 'session-1', messages: [], hasMore: false });
+  await messages;
+
+  const sent = sdk.chat.sendMessage('session-1', 42);
+  const fourth = harness.requests[3];
+  assert.equal(fourth.method, 'chat.sendMessage');
+  assert.deepEqual(fourth.params, { sessionId: 'session-1', text: '42' });
+  harness.resolve(fourth, { sessionId: 'session-1', accepted: true });
+  await sent;
+
+  const stopped = sdk.chat.stop('session-1');
+  const fifth = harness.requests[4];
+  assert.equal(fifth.method, 'chat.stop');
+  assert.deepEqual(fifth.params, { sessionId: 'session-1' });
+  harness.resolve(fifth, { sessionId: 'session-1', accepted: true });
+  await stopped;
+
+  const opened = sdk.chat.openSession('session-1');
+  const sixth = harness.requests[5];
+  assert.equal(sixth.method, 'chat.openSession');
+  assert.deepEqual(sixth.params, { sessionId: 'session-1' });
+  harness.resolve(sixth, { sessionId: 'session-1', accepted: true });
+  await opened;
+
+  assert.deepEqual(harness.errors, []);
+});

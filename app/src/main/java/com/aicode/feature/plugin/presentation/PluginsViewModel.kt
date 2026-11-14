@@ -24,6 +24,7 @@ import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
+import com.aicode.feature.plugin.runtime.PluginChatService
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
@@ -109,7 +110,8 @@ class PluginsViewModel @Inject constructor(
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
     private val devSettingsRepository: PluginDevSettingsRepository,
-    private val pageEnvironment: PluginPageEnvironment
+    private val pageEnvironment: PluginPageEnvironment,
+    private val chatService: PluginChatService
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -488,6 +490,7 @@ class PluginsViewModel @Inject constructor(
             shizukuRunner = shizukuRunner,
             tipManager = tipManager,
             overlayManager = overlayManager,
+            chatService = chatService,
             environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,

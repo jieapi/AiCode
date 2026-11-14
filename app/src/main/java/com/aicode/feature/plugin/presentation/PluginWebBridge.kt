@@ -14,6 +14,7 @@ import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.overlay.PluginOverlayException
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginChatService
 import com.aicode.feature.plugin.runtime.PluginProcessException
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginShizukuException
@@ -71,6 +72,7 @@ class PluginWebBridge(
     private val shizukuRunner: PluginShizukuRunner,
     private val tipManager: PluginTipManager,
     private val overlayManager: PluginOverlayManager,
+    private val chatService: PluginChatService,
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
@@ -273,6 +275,12 @@ class PluginWebBridge(
         "terminal.poll" -> terminalPoll(params)
         "terminal.stop" -> terminalStop(params)
         "terminal.close" -> terminalClose(params)
+        "chat.listSessions" -> chatService.listSessions(page.pluginId, params)
+        "chat.createSession" -> chatService.createSession(page.pluginId, params)
+        "chat.listMessages" -> chatService.listMessages(page.pluginId, params)
+        "chat.sendMessage" -> chatService.sendMessage(page.pluginId, params)
+        "chat.stop" -> chatService.stop(page.pluginId, params)
+        "chat.openSession" -> chatService.openSession(page.pluginId, params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")
     }
 
