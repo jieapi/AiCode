@@ -4,25 +4,37 @@ package com.aicode.feature.plugin.domain
 data class PluginContributionRef(val id: String, val file: String)
 
 /**
- * 设置页入口可挂载的宿主分组。插件只能取这里的值，不能自定义插入位置，
- * 避免第三方入口打乱设置页布局；新增分组属于宿主插件 API 变更。
+ * 插件页可挂载的宿主槽位。插件只能取这里的值，不能自定义插入位置，
+ * 避免第三方入口打乱宿主布局；新增槽位属于宿主插件 API 变更。
  */
-object PluginSettingsAnchors {
-    const val GENERAL = "settings.general"
-    const val AI = "settings.ai"
-    const val ENVIRONMENT = "settings.environment"
-    const val PERMISSIONS = "settings.permissions"
-    const val DATA = "settings.data"
-    const val HELP = "settings.help"
+object PluginUiSlots {
+    const val SETTINGS_GENERAL = "settings.general"
+    const val SETTINGS_AI = "settings.ai"
+    const val SETTINGS_ENVIRONMENT = "settings.environment"
+    const val SETTINGS_PERMISSIONS = "settings.permissions"
+    const val SETTINGS_DATA = "settings.data"
+    const val SETTINGS_HELP = "settings.help"
 
-    val ALL = setOf(GENERAL, AI, ENVIRONMENT, PERMISSIONS, DATA, HELP)
+    /** 侧栏底部、浏览器与设置之上。 */
+    const val DRAWER_FOOTER = "drawer.footer"
+
+    /** 聊天顶栏「更多」菜单底部。 */
+    const val CHAT_HEADER_MENU = "chat.header.menu"
+
+    val ALL = setOf(
+        SETTINGS_GENERAL, SETTINGS_AI, SETTINGS_ENVIRONMENT, SETTINGS_PERMISSIONS, SETTINGS_DATA, SETTINGS_HELP,
+        DRAWER_FOOTER, CHAT_HEADER_MENU
+    )
+
+    /** 单插件在每个槽位可声明的入口数；超出在安装时拒绝，避免一个插件挤满列表。 */
+    const val MAX_ENTRIES_PER_PLUGIN = 2
 }
 
-/** `contributes.settingsPages` 声明的设置页入口；[page] 是包内 HTML 相对路径。 */
-data class PluginSettingsPageRef(
+/** `contributes.uiEntries` 声明的一个槽位入口；[page] 是包内 HTML 相对路径。 */
+data class PluginUiEntryRef(
     val id: String,
+    val slot: String,
     val title: LocalizedText,
-    val anchor: String,
     val page: String,
     val icon: String = "book"
 )
@@ -226,7 +238,7 @@ data class PluginManifest(
     val skills: List<PluginContributionRef>,
     val agents: List<PluginContributionRef>,
     val workspaceTools: List<PluginWorkspaceToolRef> = emptyList(),
-    val settingsPages: List<PluginSettingsPageRef> = emptyList(),
+    val uiEntries: List<PluginUiEntryRef> = emptyList(),
     val runtime: PluginRuntimeRef? = null,
     val tools: List<PluginToolRef> = emptyList(),
     val hooks: List<PluginHookRef> = emptyList(),
@@ -240,7 +252,7 @@ data class PluginManifest(
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
-        get() = skills.size + agents.size + workspaceTools.size + settingsPages.size +
+        get() = skills.size + agents.size + workspaceTools.size + uiEntries.size +
             tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
             (if (overlay != null) 1 + overlay.surfaces.size else 0) +
             (if (configPage != null) 1 else 0)

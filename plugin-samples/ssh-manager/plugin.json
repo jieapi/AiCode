@@ -34,7 +34,7 @@
         "handler": "hooks.boot"
       }
     ],
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "servers",
         "title": {
@@ -42,7 +42,7 @@
           "zh-CN": "SSH 服务器",
           "en": "SSH Servers"
         },
-        "anchor": "settings.environment",
+        "slot": "settings.environment",
         "page": "pages/servers.html",
         "icon": "settings"
       }

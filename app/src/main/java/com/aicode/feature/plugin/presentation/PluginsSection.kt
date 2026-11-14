@@ -79,7 +79,7 @@ import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginContent
 import com.aicode.feature.plugin.domain.PluginIcon
 import com.aicode.feature.plugin.domain.PluginMcpServer
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.settings.presentation.component.LazyGroupItem
 import com.aicode.feature.settings.presentation.component.McpPill
@@ -489,7 +489,7 @@ private fun PluginRow(
 internal fun PluginDetailSection(
     plugin: InstalledPlugin,
     onToggleEnabled: (Boolean) -> Unit,
-    bridgeFactory: ((page: PluginSettingsPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
+    bridgeFactory: ((page: PluginPage, post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge)? = null,
     onClosePage: () -> Unit = {},
     dependencyState: PluginDependencyUiState? = null,
     onPrepareDependencies: () -> Unit = {},
@@ -935,8 +935,8 @@ internal fun pluginContentItems(content: PluginContent, languageTag: String): Li
             entry.description.resolve(languageTag)
         )
     }
-    content.settingsPages.forEach { entry ->
-        items += PluginContentItem(FeatherIcons.Settings, entry.title.resolve(languageTag), entry.anchor)
+    content.uiEntries.forEach { entry ->
+        items += PluginContentItem(FeatherIcons.Settings, entry.title.resolve(languageTag), entry.slot.orEmpty())
     }
     content.tools.forEach { entry ->
         items += PluginContentItem(

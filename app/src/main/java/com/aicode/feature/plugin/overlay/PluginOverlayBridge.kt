@@ -5,7 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import com.aicode.feature.plugin.domain.PluginHostException
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +33,7 @@ import org.json.JSONObject
 internal class PluginOverlayBridge(
     private val pluginId: String,
     private val overlayId: String,
-    private val page: PluginSettingsPage,
+    private val page: PluginPage,
     private val density: Float,
     private val window: PluginOverlayWindow,
     private val onPageMessage: (JsonElement) -> Unit,

@@ -26,7 +26,7 @@ import com.aicode.feature.plugin.domain.PluginInstallResult
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginChatService
@@ -579,17 +579,18 @@ class PluginsViewModel @Inject constructor(
         }
     }
 
-    /** 插件专属数据目录；设置页入口与桥必须使用同一落点。 */
+    /** 插件专属数据目录；槽位入口与桥必须使用同一落点。 */
     fun dataDirFor(pluginId: String): File = manager.dataDirFor(pluginId)
 
     /** 为插件设置页构造宿主桥；桥与 WebView 一起缓存，由 [PluginWebViewCache] 统一释放。 */
     fun createWebBridge(
-        page: PluginSettingsPage,
+        page: PluginPage,
         pluginVersion: String,
         languageTag: String,
         theme: () -> String,
         onClosePage: () -> Unit,
-        post: (String) -> Unit
+        post: (String) -> Unit,
+        currentSessionId: () -> String? = { null }
     ): PluginWebBridge {
         return PluginWebBridge(
             context = context,
@@ -617,7 +618,8 @@ class PluginsViewModel @Inject constructor(
             environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,
-            post = post
+            post = post,
+            currentSessionId = currentSessionId
         )
     }
 

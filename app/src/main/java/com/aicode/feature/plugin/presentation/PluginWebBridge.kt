@@ -12,7 +12,7 @@ import com.aicode.feature.agent.domain.session.AgentRunStateStore
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.overlay.PluginOverlayException
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginEventBus
@@ -63,7 +63,7 @@ import kotlinx.serialization.json.put
  */
 class PluginWebBridge(
     private val context: Context,
-    private val page: PluginSettingsPage,
+    private val page: PluginPage,
     private val dataDir: File,
     private val pluginVersion: String,
     private val languageTag: String,
@@ -87,7 +87,9 @@ class PluginWebBridge(
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
-    @Volatile private var post: (String) -> Unit
+    @Volatile private var post: (String) -> Unit,
+    /** 聊天页当前会话；从非聊天槽位打开的页面为 null。 */
+    private val currentSessionId: () -> String? = { null }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -239,6 +241,8 @@ class PluginWebBridge(
         "context" -> buildJsonObject {
             put("pluginId", page.pluginId)
             put("pageId", page.localId)
+            page.slot?.let { put("slot", it) }
+            currentSessionId()?.let { put("sessionId", it) }
             put("version", pluginVersion)
             put("languageTag", languageTag)
             put("theme", theme())

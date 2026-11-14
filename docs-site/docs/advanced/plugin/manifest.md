@@ -89,7 +89,7 @@
 | `mcp` | 数组 | MCP 服务器配置 |
 | `providers` | 数组 | OpenAI 兼容提供商 |
 | `workspaceTools` | 数组 | 右侧项目工具抽屉中的页面 |
-| `settingsPages` | 数组 | 设置页入口 |
+| `uiEntries` | 数组 | 挂载到宿主槽位的页面入口 |
 | `shizuku` | 对象 | 声明使用 Shizuku |
 | `overlay` | 对象 | 声明系统浮层 |
 | `configPage` | 字符串 | 插件详情中的配置页 |
@@ -220,15 +220,15 @@
 | `category` | 否 | 分类名，默认 `通用` |
 | `pageFile` | 是 | 包内 `.html`/`.htm` 页面，最大 512 KiB |
 
-### settingsPages
+### uiEntries
 
 ```json
 {
-  "settingsPages": [
+  "uiEntries": [
     {
       "id": "memory",
       "title": {"zh-CN": "记忆管理", "en": "Memory"},
-      "anchor": "settings.ai",
+      "slot": "settings.ai",
       "page": "pages/memory.html",
       "icon": "book"
     }
@@ -238,20 +238,24 @@
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `id` | 是 | 局部 ID |
+| `id` | 是 | 局部 ID，同一插件的入口不可重名 |
 | `title` | 是 | 本地化名称，最多 80 字符 |
-| `anchor` | 是 | 仅可取以下六个分组之一 |
+| `slot` | 是 | 宿主槽位，仅可取下表的值 |
 | `page` | 是 | 包内 `.html`/`.htm` 页面，最大 512 KiB |
 | `icon` | 否 | 图标名，默认 `book`，最长 32 字符 |
 
-| `anchor` | 设置分组 |
+| `slot` | 位置 |
 | --- | --- |
-| `settings.general` | 通用 |
-| `settings.ai` | AI 配置 |
-| `settings.environment` | 运行环境 |
-| `settings.permissions` | 权限与后台 |
-| `settings.data` | 数据与诊断 |
-| `settings.help` | 帮助与关于 |
+| `settings.general` | 设置页「通用」分组末尾 |
+| `settings.ai` | 设置页「AI 配置」分组末尾 |
+| `settings.environment` | 设置页「运行环境」分组末尾 |
+| `settings.permissions` | 设置页「权限与后台」分组末尾 |
+| `settings.data` | 设置页「数据与诊断」分组末尾 |
+| `settings.help` | 设置页「帮助与关于」分组末尾 |
+| `drawer.footer` | 侧栏底部，浏览器与设置之上 |
+| `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
+
+同一插件在每个槽位最多声明 2 个入口；超出会在安装时拒绝。入口顺序由宿主决定：宿主自己的项始终在前，插件项按插件显示名与声明顺序排列，插件不能指定排序或插入位置。
 
 ### configPage
 
@@ -364,11 +368,11 @@
         "pageFile": "pages/build.html"
       }
     ],
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "settings",
         "title": "工作台设置",
-        "anchor": "settings.ai",
+        "slot": "settings.ai",
         "page": "pages/settings.html",
         "icon": "settings"
       }

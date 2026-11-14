@@ -16,11 +16,14 @@ import com.aicode.feature.browser.presentation.BrowserScreen
 import com.aicode.feature.browser.presentation.BrowserViewModel
 import com.aicode.feature.git.presentation.GitViewModel
 import com.aicode.feature.git.presentation.component.GitScreen
+import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.presentation.PluginPageHost
+import com.aicode.feature.plugin.presentation.PluginsViewModel
 import com.aicode.feature.terminal.presentation.TerminalViewModel
 import com.aicode.feature.terminal.presentation.component.TerminalScreen
 
 /** 大屏右栏（工作台）当前承载的内容。 */
-internal enum class WorkbenchPaneKind { NONE, EDITOR, TERMINAL, GIT, BROWSER }
+internal enum class WorkbenchPaneKind { NONE, EDITOR, TERMINAL, GIT, BROWSER, PLUGIN }
 
 /**
  * 大屏下与聊天并排的右栏内容。
@@ -38,6 +41,10 @@ internal fun WorkbenchPaneContent(
     kind: WorkbenchPaneKind,
     editorPath: String,
     editorLine: Int,
+    pluginPage: PluginPage?,
+    pluginLanguageTag: String,
+    pluginsViewModel: PluginsViewModel,
+    currentSessionId: () -> String?,
     onClose: () -> Unit,
     onOpenFile: ((String) -> Unit)? = null,
     editorLeaveGuard: EditorLeaveGuard? = null,
@@ -91,6 +98,20 @@ internal fun WorkbenchPaneContent(
                     onNavigateBack = onClose,
                     embedded = true
                 )
+            }
+
+            WorkbenchPaneKind.PLUGIN -> {
+                val page = pluginPage
+                if (page != null) {
+                    PluginPageHost(
+                        page = page,
+                        languageTag = pluginLanguageTag,
+                        pluginsViewModel = pluginsViewModel,
+                        onClose = onClose,
+                        applySystemBarInsets = false,
+                        currentSessionId = currentSessionId
+                    )
+                }
             }
         }
     }

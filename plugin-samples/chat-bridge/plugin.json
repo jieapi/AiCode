@@ -22,14 +22,14 @@
     "entry": "dist/main.js"
   },
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "chat",
         "title": {
           "default": "Chat Bridge",
           "zh-CN": "对话桥"
         },
-        "anchor": "settings.ai",
+        "slot": "settings.ai",
         "page": "pages/chat.html",
         "icon": "users"
       }

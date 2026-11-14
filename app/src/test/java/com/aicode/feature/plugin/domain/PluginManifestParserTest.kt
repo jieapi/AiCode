@@ -638,7 +638,7 @@ class PluginManifestParserTest {
     """.trimIndent()
 
     private fun settingsManifest(
-        anchor: String = "settings.ai",
+        slot: String = "settings.ai",
         page: String = "ui/memory.html",
         pluginApi: String = "^1.0.0"
     ): String = """
@@ -653,42 +653,62 @@ class PluginManifestParserTest {
           "license": "MIT",
           "engines": {"pluginApi": "$pluginApi"},
           "contributes": {
-            "settingsPages": [
-              {"id": "memory", "title": "记忆", "anchor": "$anchor", "page": "$page"}
+            "uiEntries": [
+              {"id": "memory", "title": "记忆", "slot": "$slot", "page": "$page"}
             ]
           }
         }
     """.trimIndent()
 
     @Test
-    fun settingsPage_isParsedWithDefaultIcon() {
+    fun settingsEntry_isParsedWithDefaultIcon() {
         val m = success(settingsManifest())
-        assertEquals(listOf("memory"), m.settingsPages.map { it.id })
-        assertEquals("settings.ai", m.settingsPages.single().anchor)
-        assertEquals("ui/memory.html", m.settingsPages.single().page)
-        assertEquals("book", m.settingsPages.single().icon)
+        assertEquals(listOf("memory"), m.uiEntries.map { it.id })
+        assertEquals("settings.ai", m.uiEntries.single().slot)
+        assertEquals("ui/memory.html", m.uiEntries.single().page)
+        assertEquals("book", m.uiEntries.single().icon)
     }
 
     @Test
-    fun settingsPage_rejectsUnknownAnchor() {
+    fun uiEntries_acceptsDrawerAndHeaderSlots() {
+        assertEquals("drawer.footer", success(settingsManifest(slot = "drawer.footer")).uiEntries.single().slot)
+        assertEquals("chat.header.menu", success(settingsManifest(slot = "chat.header.menu")).uiEntries.single().slot)
+    }
+
+    @Test
+    fun uiEntries_rejectsUnknownSlot() {
         assertRejected(
-            settingsManifest(anchor = "settings.nowhere"),
+            settingsManifest(slot = "settings.nowhere"),
             PluginErrorCode.FIELD_INVALID,
-            "contributes.settingsPages[0].anchor"
+            "contributes.uiEntries[0].slot"
         )
     }
 
     @Test
-    fun settingsPage_rejectsNonHtmlPage() {
+    fun uiEntries_rejectsThirdEntryInSameSlot() {
+        val text = base.replace(
+            "\"contributes\": {",
+            """"contributes": {
+            "uiEntries": [
+              {"id": "a", "title": "A", "slot": "drawer.footer", "page": "a.html"},
+              {"id": "b", "title": "B", "slot": "drawer.footer", "page": "b.html"},
+              {"id": "c", "title": "C", "slot": "drawer.footer", "page": "c.html"}
+            ],"""
+        )
+        assertRejected(text, PluginErrorCode.FIELD_INVALID, "contributes.uiEntries[2].slot")
+    }
+
+    @Test
+    fun settingsEntry_rejectsNonHtmlPage() {
         assertRejected(
             settingsManifest(page = "ui/memory.json"),
             PluginErrorCode.FIELD_INVALID,
-            "contributes.settingsPages[0].page"
+            "contributes.uiEntries[0].page"
         )
     }
 
     @Test
-    fun settingsPage_requiresCompatiblePluginApi() {
+    fun settingsEntry_requiresCompatiblePluginApi() {
         assertRejected(
             settingsManifest(pluginApi = "^2.0.0"),
             PluginErrorCode.API_INCOMPATIBLE

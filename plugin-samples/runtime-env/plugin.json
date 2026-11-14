@@ -17,14 +17,14 @@
     "pluginApi": "^1.0.0"
   },
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "runtime",
         "title": {
           "zh-CN": "运行环境",
           "en": "Runtime"
         },
-        "anchor": "settings.environment",
+        "slot": "settings.environment",
         "page": "pages/runtime.html",
         "icon": "package"
       }

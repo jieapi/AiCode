@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
 import com.aicode.feature.plugin.presentation.PluginWebBridge
 import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
@@ -40,7 +40,7 @@ import compose.icons.feathericons.Trash2
 fun ToolDetailScreen(
     tool: PluginWorkspaceTool,
     bridgeFactory: (
-        page: PluginSettingsPage,
+        page: PluginPage,
         post: (String) -> Unit,
         onClosePage: () -> Unit
     ) -> PluginWebBridge,
@@ -50,11 +50,11 @@ fun ToolDetailScreen(
 ) {
     val page = remember(tool.key, tool.installDir) {
         tool.installDir?.let { dir ->
-            PluginSettingsPage(
+            PluginPage(
                 pluginId = tool.pluginId,
                 localId = tool.localId,
                 title = tool.title,
-                anchor = "",
+                slot = null,
                 pageFile = tool.pageFile,
                 icon = tool.icon,
                 installDir = dir,

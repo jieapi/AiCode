@@ -48,7 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -59,7 +59,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 @Composable
 fun PluginWebPanelScreen(
-    page: PluginSettingsPage,
+    page: PluginPage,
     onClosePage: () -> Unit,
     bridgeFactory: (post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge,
     modifier: Modifier = Modifier,

@@ -2015,6 +2015,7 @@
 
     <!-- 插件 -->
     <string name="settings_plugins">插件</string>
+    <string name="plugins_more_in_drawer">更多插件</string>
     <string name="plugins_import">导入插件</string>
     <string name="plugins_empty_title">还没有安装插件</string>
     <string name="plugins_empty_hint">点右上角「＋」导入插件包（.zip）。插件可以为 AI 提供额外的技能和子代理。</string>

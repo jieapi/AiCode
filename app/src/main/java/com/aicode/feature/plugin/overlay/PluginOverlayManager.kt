@@ -14,7 +14,7 @@ import com.aicode.feature.plugin.data.PluginOverlayPosition
 import com.aicode.feature.plugin.data.PluginOverlayPositionRepository
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginOverlaySurface
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.presentation.PluginWebViewFactory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.ConcurrentHashMap
@@ -291,11 +291,11 @@ class PluginOverlayManager @Inject constructor(
         val density = context.resources.displayMetrics.density
         val widthPx = (widthDp * density).toInt().coerceAtLeast(1)
         val heightPx = (heightDp * density).toInt().coerceAtLeast(1)
-        val page = PluginSettingsPage(
+        val page = PluginPage(
             pluginId = surface.pluginId,
             localId = surface.localId,
             title = com.aicode.feature.plugin.domain.LocalizedText.single(surface.localId),
-            anchor = "",
+            slot = null,
             pageFile = surface.pageFile,
             icon = "circle",
             installDir = surface.installDir,

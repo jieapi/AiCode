@@ -103,7 +103,11 @@ import com.aicode.feature.credentials.presentation.component.CredentialScreen
 import com.aicode.feature.plugin.presentation.PluginWebViewCache
 import com.aicode.feature.plugin.presentation.PluginOverlayController
 import com.aicode.feature.plugin.presentation.PluginsViewModel
+import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiSlots
+import com.aicode.feature.plugin.presentation.PluginPageHost
 import com.aicode.feature.plugin.presentation.currentLanguageTag
+import com.aicode.feature.plugin.presentation.displayName
 import com.aicode.feature.plugin.presentation.drawer.AllToolsScreen
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsDrawer
 import com.aicode.feature.plugin.presentation.drawer.ProjectToolsViewModel
@@ -376,6 +380,22 @@ fun AppNavigation(
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
     val pluginsViewModel: PluginsViewModel = hiltViewModel()
+    val installedPlugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
+    val pluginLanguageTag = currentLanguageTag()
+    // 入口直接从已加载的插件快照算，不在组合期读盘；顺序按插件显示名，重装后仍稳定。
+    val pluginSlotEntries = remember(installedPlugins, pluginLanguageTag) {
+        installedPlugins.filter { it.isActive }
+            .sortedBy { it.displayName(pluginLanguageTag) }
+            .flatMap { plugin ->
+                plugin.content.uiEntries.map { page -> page.copy(pluginVersion = plugin.record.version) }
+            }
+    }
+    val drawerPluginEntries = remember(pluginSlotEntries) {
+        pluginSlotEntries.filter { it.slot == PluginUiSlots.DRAWER_FOOTER }
+    }
+    val headerPluginEntries = remember(pluginSlotEntries) {
+        pluginSlotEntries.filter { it.slot == PluginUiSlots.CHAT_HEADER_MENU }
+    }
     val rightDrawerState = rememberEndDrawerState()
 
     // ── 首次启动引导 ──
@@ -481,6 +501,12 @@ fun AppNavigation(
     var paneKind by rememberSaveable { mutableStateOf(WorkbenchPaneKind.NONE) }
     var paneEditorPath by rememberSaveable { mutableStateOf("") }
     var paneEditorLine by rememberSaveable { mutableIntStateOf(0) }
+    var panePluginKey by rememberSaveable { mutableStateOf("") }
+    // 右栏插件页只存 key，页面对象从插件快照重新解析；插件更新或卸载后不会继续用旧页面。
+    val panePluginPage = remember(pluginSlotEntries, panePluginKey) {
+        pluginSlotEntries.firstOrNull { it.key == panePluginKey }
+    }
+    var activeSlotPage by remember { mutableStateOf<PluginPage?>(null) }
     var paneSplit by rememberSaveable { mutableFloatStateOf(DEFAULT_PANE_SPLIT) }
     // 右栏编辑器有未保存修改时，换文件前先弹保存提示（窄窗全屏编辑器由返回键拦截，不经过这里）。
     val editorLeaveGuard = remember { EditorLeaveGuard() }
@@ -571,6 +597,34 @@ fun AppNavigation(
         }
     }
 
+    // 插件槽位入口：大屏聊天页进右栏，其余位置全屏覆盖，返回都回到打开前。
+    val openPluginPage: (PluginPage) -> Unit = { page ->
+        if (rightDrawerState.isOpen) scope.launch { rightDrawerState.close() }
+        if (drawerState.isOpen) scope.launch { drawerState.close() }
+        if (expanded && currentRoute == "chat") {
+            activeSlotPage = null
+            panePluginKey = page.key
+            paneKind = WorkbenchPaneKind.PLUGIN
+        } else {
+            activeSlotPage = page
+        }
+    }
+
+    // 插件停用 / 卸载或更新后，右栏与全屏页都不能继续抱着旧页面。
+    LaunchedEffect(pluginSlotEntries, panePluginKey) {
+        if (paneKind == WorkbenchPaneKind.PLUGIN &&
+            pluginSlotEntries.none { it.key == panePluginKey }
+        ) {
+            paneKind = WorkbenchPaneKind.NONE
+        }
+    }
+    LaunchedEffect(pluginSlotEntries, activeSlotPage) {
+        val active = activeSlotPage ?: return@LaunchedEffect
+        if (pluginSlotEntries.none { it.key == active.key && it.cacheKey == active.cacheKey }) {
+            activeSlotPage = null
+        }
+    }
+
     // 侧栏内容：modal 抽屉与大屏常驻栏共用同一份，不在两处重复几十行参数。
     val drawerBody: @Composable () -> Unit = {
         ChatDrawerContent(
@@ -641,6 +695,9 @@ fun AppNavigation(
                 navController.navigate("settings")
                 if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
             },
+            pluginEntries = drawerPluginEntries,
+            pluginLanguageTag = pluginLanguageTag,
+            onOpenPluginPage = openPluginPage,
             searchQuery = chatSearchQuery,
             searchState = chatSearchState,
             onSearchQueryChange = { agentViewModel.updateChatSearchQuery(it) },
@@ -711,10 +768,11 @@ fun AppNavigation(
                                     showMenuButton = !permanentDrawer,
                                     onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                     onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
-                                    onNavigateToBrowser = { openWorkbench(WorkbenchPaneKind.BROWSER) },
+                                    pluginEntries = headerPluginEntries,
+                                    pluginLanguageTag = pluginLanguageTag,
+                                    onOpenPluginPage = openPluginPage,
                                     terminalActive = paneOpen && paneKind == WorkbenchPaneKind.TERMINAL,
                                     gitActive = paneOpen && paneKind == WorkbenchPaneKind.GIT,
-                                    browserActive = paneOpen && paneKind == WorkbenchPaneKind.BROWSER,
                                     onboardingStep = if (onboardingUiState.active) onboardingUiState.step else null,
                                     onSelectModelInOnboarding = {
                                         if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_CHOOSE_MODEL) {
@@ -735,6 +793,10 @@ fun AppNavigation(
                                 kind = paneKind,
                                 editorPath = paneEditorPath,
                                 editorLine = paneEditorLine,
+                                pluginPage = panePluginPage,
+                                pluginLanguageTag = pluginLanguageTag,
+                                pluginsViewModel = pluginsViewModel,
+                                currentSessionId = { agentViewModel.currentSessionId.value },
                                 onClose = { paneKind = WorkbenchPaneKind.NONE },
                                 onOpenFile = { path -> openFile(path, 0, false) },
                                 // rc5 的平板右栏脏状态确认：主分支把调用重构进了 if (paneOpen)，
@@ -1019,6 +1081,18 @@ fun AppNavigation(
                 navBody()
             }
         }
+    }
+
+    // 插件槽位页的全局宿主：侧栏与顶栏入口共用；大屏聊天页走右栏，设置页在自身分栏内渲染。
+    activeSlotPage?.let { page ->
+        PluginPageHost(
+            page = page,
+            languageTag = pluginLanguageTag,
+            pluginsViewModel = pluginsViewModel,
+            onClose = { activeSlotPage = null },
+            modifier = Modifier.fillMaxSize(),
+            currentSessionId = { agentViewModel.currentSessionId.value }
+        )
     }
 
     // 检查更新弹窗（全局宿主：自动检测与关于页手动检查共用，覆盖所有页面）

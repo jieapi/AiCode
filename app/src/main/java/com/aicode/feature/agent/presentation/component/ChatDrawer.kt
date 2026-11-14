@@ -105,6 +105,8 @@ import com.aicode.feature.agent.presentation.BrowseClipboard
 import com.aicode.feature.agent.presentation.FileBrowseState
 import com.aicode.feature.agent.presentation.FileTreeNode
 import com.aicode.feature.agent.presentation.FileTreeRoot
+import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.workspace.domain.isValidFileEntryName
 import com.aicode.core.ui.ChevronRotationStyle
 import com.aicode.core.ui.ExpandableChevronIcon
@@ -142,6 +144,7 @@ import kotlinx.coroutines.delay
  * 侧边栏内容：顶部 Tab 切换「会话」/「文件」，底部「设置」入口卡片。
  * Tab0 为根会话列表，带子代理的会话行可就地展开；Tab1 为当前工作区的文件树。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDrawerContent(
     sessions: List<ChatSession>,
@@ -176,6 +179,9 @@ fun ChatDrawerContent(
     onClearClipboard: () -> Unit,
     onNavigateToBrowser: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
+    pluginEntries: List<PluginPage> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onOpenPluginPage: (PluginPage) -> Unit = {},
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -192,6 +198,7 @@ fun ChatDrawerContent(
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
     var pendingRename by remember { mutableStateOf<ChatSession?>(null) }
     var menuSession by remember { mutableStateOf<ChatSession?>(null) }
+    var showAllPlugins by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     BackHandler(enabled = isSelectionMode) {
@@ -368,6 +375,29 @@ fun ChatDrawerContent(
             }
         }
 
+        if (pluginEntries.isNotEmpty()) {
+            SettingsGroupHeader(text = stringResource(R.string.settings_plugins))
+            SettingsGroup {
+                pluginEntries.take(3).forEachIndexed { index, page ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(
+                        icon = pluginPageIcon(page.icon),
+                        title = page.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, page.pluginId),
+                        onClick = { onOpenPluginPage(page) }
+                    )
+                }
+                if (pluginEntries.size > 3) {
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.ChevronRight,
+                        title = stringResource(R.string.plugins_more_in_drawer),
+                        onClick = { showAllPlugins = true }
+                    )
+                }
+            }
+        }
+
         SettingsGroup {
             if (onNavigateToBrowser != null) {
                 SettingsRow(
@@ -383,6 +413,32 @@ fun ChatDrawerContent(
                 onClick = onNavigateToSettings,
                 modifier = Modifier.onboardingTarget(OnboardingStep.ENTER_SETTINGS)
             )
+        }
+    }
+
+    if (showAllPlugins && pluginEntries.isNotEmpty()) {
+        AdaptiveModalBottomSheet(onDismissRequest = { showAllPlugins = false }) {
+            Text(
+                text = stringResource(R.string.settings_plugins),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+            )
+            Column(modifier = Modifier.padding(bottom = Spacing.xl)) {
+                pluginEntries.forEachIndexed { index, page ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(
+                        icon = pluginPageIcon(page.icon),
+                        title = page.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, page.pluginId),
+                        onClick = {
+                            showAllPlugins = false
+                            onOpenPluginPage(page)
+                        }
+                    )
+                }
+            }
         }
     }
 

@@ -1,13 +1,13 @@
 # 插件页面与宿主接口
 
-插件使用 HTML/WebView 构建界面，共有三种入口：工作区工具、设置页入口、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
+插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（可挂到设置页 / 侧栏 / 顶栏菜单）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
 
 ## 三种页面
 
 | 类型 | 声明位置 | 入口 | 典型用途 |
 | --- | --- | --- | --- |
 | 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉，用户添加后打开 | 构建、清理、部署、项目状态 |
-| 设置页入口 | `contributes.settingsPages` | 设置页对应分组末尾 | 记忆管理、全局配置、工具面板 |
+| 槽位入口 | `contributes.uiEntries` | 设置页分组末尾、侧栏底部、聊天顶栏菜单 | 记忆管理、全局配置、工具面板 |
 | 插件配置页 | `configPage` | 「设置 → 插件」的插件详情中 | 插件自身的参数、密钥、开关 |
 
 三种页面使用同一套桥和主题，区别在于入口位置与生命周期。
@@ -35,16 +35,16 @@
 
 短命令使用 `aicode.bash` 同步执行；需要后台运行、实时输出或停止时，使用 `aicode.terminal.run` 创建共享标签，再通过 `terminal.poll(tabId, offset)` 按偏移读取增量输出、`terminal.stop` 发送 Ctrl-C、`terminal.close` 关闭。标签默认不在终端页显示；用户在「设置 → 终端设置 → 显示插件运行」开启后才可见。标签归属于创建它的插件，其他插件与 AI 的终端工具不得操作。
 
-### 设置页入口
+### 槽位入口
 
 ```json
 {
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "memory",
         "title": {"zh-CN": "记忆管理", "en": "Memory"},
-        "anchor": "settings.ai",
+        "slot": "settings.ai",
         "page": "pages/memory.html",
         "icon": "book"
       }
@@ -53,18 +53,22 @@
 }
 ```
 
-`anchor` 仅可取下列值，宿主据此将入口放入对应分组：
+`slot` 仅可取下列值，宿主据此将入口放入固定位置：
 
-| 值 | 分组 |
+| 值 | 位置 |
 | --- | --- |
-| `settings.general` | 通用 |
-| `settings.ai` | AI 配置 |
-| `settings.environment` | 运行环境 |
-| `settings.permissions` | 权限与后台 |
-| `settings.data` | 数据与诊断 |
-| `settings.help` | 帮助与关于 |
+| `settings.general` | 设置页「通用」分组末尾 |
+| `settings.ai` | 设置页「AI 配置」分组末尾 |
+| `settings.environment` | 设置页「运行环境」分组末尾 |
+| `settings.permissions` | 设置页「权限与后台」分组末尾 |
+| `settings.data` | 设置页「数据与诊断」分组末尾 |
+| `settings.help` | 设置页「帮助与关于」分组末尾 |
+| `drawer.footer` | 侧栏底部，浏览器与设置之上 |
+| `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
 
-安装后，设置页对应分组末尾将显示入口，副标题标明插件来源；停用或卸载插件后入口消失。入口按声明顺序展示，超出限制的部分将被忽略。
+同一插件在每个槽位最多 2 个入口；同一槽位内入口顺序由宿主按插件显示名与声明顺序决定，插件不能指定排序或插入位置。侧栏底部最多内联展示 3 条，其余收进「更多插件」；顶栏菜单没有插件项时整段隐藏。
+
+安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏或顶栏打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面。
 
 ### 插件配置页
 
@@ -99,7 +103,7 @@
 
 `/__aicode/theme.css` 提供跟随 App 主题的 CSS 变量，`/__aicode/aicode.js` 注入 `window.aicode`。页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截。
 
-页面文件最大 512 KiB。`settingsPages` 和 `workspaceTools` 的 `pageFile`/`page` 必须是包内 `.html`/`.htm`。
+页面文件最大 512 KiB。`uiEntries` 和 `workspaceTools` 的 `pageFile`/`page` 必须是包内 `.html`/`.htm`。
 
 ## 宿主接口
 
@@ -109,11 +113,11 @@
 
 | 方法 | 作用 |
 | --- | --- |
-| `aicode.context()` | 返回 `pluginId`、`pageId`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible` |
+| `aicode.context()` | 返回 `pluginId`、`pageId`、`slot`、`sessionId`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible`；`slot` 是入口所在槽位，`sessionId` 仅在聊天区打开时存在 |
 | `aicode.toast(message)` | 轻量提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话中显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.app.isForeground()` | App 当前是否处于前台（有 Activity 处于 STARTED） |
-| `aicode.ui.close()` | 退出插件页并返回设置页 |
+| `aicode.ui.close()` | 关闭插件页并回到打开前的位置（设置页、侧栏或顶栏对应的聊天页） |
 | `aicode.ui.setOverlay(visible, rect)` | 打开或关闭页面内全屏弹层并上报矩形；宿主在全局背景图上按矩形挖孔 |
 | `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理，返回注销函数 |
 | `aicode.applyTheme(variables)` | 设置 CSS 变量并派发 `aicode:theme` 事件 |
@@ -360,7 +364,7 @@ const off = aicode.ui.onBack(() => {
 ## 限制
 
 - 页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截；
-- 设置页入口在插件停用后消失，页面请求将被拒绝；
-- `settingsPages`、`workspaceTools`、`configPage` 的页面都必须是包内 HTML，单文件最大 512 KiB；
+- 槽位入口在插件停用后消失，页面请求将被拒绝；
+- `uiEntries`、`workspaceTools`、`configPage` 的页面都必须是包内 HTML，单文件最大 512 KiB；
 - 页面不可绕过宿主桥直接读取容器文件；
 - 外部样式和脚本不会加载，资源须打包进插件。

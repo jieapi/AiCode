@@ -18,14 +18,14 @@
     "pluginApi": "^1.0.0"
   },
   "contributes": {
-    "settingsPages": [
+    "uiEntries": [
       {
         "id": "memory",
         "title": {
           "zh-CN": "记忆管理",
           "en": "Memory"
         },
-        "anchor": "settings.ai",
+        "slot": "settings.ai",
         "page": "pages/memory.html",
         "icon": "book"
       }

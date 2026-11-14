@@ -51,7 +51,7 @@ object PluginManifestParser {
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
-    private val SETTINGS_PAGE_KEYS = setOf("id", "title", "anchor", "page", "icon")
+    private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
@@ -141,7 +141,7 @@ object PluginManifestParser {
                     skills = requireNotNull(contributes).skills,
                     agents = contributes.agents,
                     workspaceTools = contributes.workspaceTools,
-                    settingsPages = contributes.settingsPages,
+                    uiEntries = contributes.uiEntries,
                     runtime = runtime,
                     tools = contributes.tools,
                     hooks = contributes.hooks,
@@ -379,7 +379,7 @@ object PluginManifestParser {
             val skills: List<PluginContributionRef>,
             val agents: List<PluginContributionRef>,
             val workspaceTools: List<PluginWorkspaceToolRef>,
-            val settingsPages: List<PluginSettingsPageRef>,
+            val uiEntries: List<PluginUiEntryRef>,
             val tools: List<PluginToolRef>,
             val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>,
@@ -394,7 +394,7 @@ object PluginManifestParser {
             val contributes = raw as? JsonObject ?: return null.also { invalid("contributes") }
             var ok = true
             contributes.keys.filter {
-                it != "skills" && it != "agents" && it != "workspaceTools" && it != "settingsPages" &&
+                it != "skills" && it != "agents" && it != "workspaceTools" && it != "uiEntries" &&
                     it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
                     it != "shizuku" && it != "overlay" && it != "configPage"
             }.forEach {
@@ -404,7 +404,7 @@ object PluginManifestParser {
             val skills = readContributionList(contributes["skills"], "contributes.skills") ?: run { ok = false; emptyList() }
             val agents = readContributionList(contributes["agents"], "contributes.agents") ?: run { ok = false; emptyList() }
             val workspaceTools = readWorkspaceTools(contributes["workspaceTools"], "contributes.workspaceTools") ?: run { ok = false; emptyList() }
-            val settingsPages = readSettingsPages(contributes["settingsPages"], "contributes.settingsPages")
+            val uiEntries = readUiEntries(contributes["uiEntries"], "contributes.uiEntries")
                 ?: run { ok = false; emptyList() }
             val tools = readTools(contributes["tools"], "contributes.tools") ?: run { ok = false; emptyList() }
             val hooks = readHooks(contributes["hooks"], "contributes.hooks") ?: run { ok = false; emptyList() }
@@ -424,7 +424,7 @@ object PluginManifestParser {
                     null
                 }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
-            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && settingsPages.isEmpty() &&
+            if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && uiEntries.isEmpty() &&
                 tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
                 shizuku == null && overlay == null && configPage == null
             ) {
@@ -432,7 +432,7 @@ object PluginManifestParser {
                 ok = false
             }
             return if (ok) Contributes(
-                skills, agents, workspaceTools, settingsPages, tools, hooks, mcp, providers, shizuku, overlay, configPage
+                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers, shizuku, overlay, configPage
             ) else null
         }
 
@@ -786,12 +786,12 @@ object PluginManifestParser {
             return if (ok) result else null
         }
 
-        /** 缺省视为空列表；每项必须有局部 ID、标题、已知锚点与包内 HTML 页面。 */
-        private fun readSettingsPages(raw: JsonElement?, path: String): List<PluginSettingsPageRef>? {
+        /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位与包内 HTML 页面。 */
+        private fun readUiEntries(raw: JsonElement?, path: String): List<PluginUiEntryRef>? {
             if (raw == null) return emptyList()
             val array = raw as? JsonArray ?: return null.also { invalid(path) }
             if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
-            val result = mutableListOf<PluginSettingsPageRef>()
+            val result = mutableListOf<PluginUiEntryRef>()
             var ok = true
             array.forEachIndexed { index, element ->
                 val itemPath = "$path[$index]"
@@ -801,19 +801,19 @@ object PluginManifestParser {
                     ok = false
                     return@forEachIndexed
                 }
-                item.keys.filter { it !in SETTINGS_PAGE_KEYS }.forEach {
+                item.keys.filter { it !in UI_ENTRY_KEYS }.forEach {
                     err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
                     ok = false
                 }
                 val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
                 val titleRaw = item["title"]
                 val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
-                val anchor = item["anchor"]?.stringOrNull()?.takeIf { it in PluginSettingsAnchors.ALL }
+                val slot = item["slot"]?.stringOrNull()?.takeIf { it in PluginUiSlots.ALL }
                 val page = item["page"]?.stringOrNull()
                 val icon = item["icon"]?.stringOrNull()?.trim() ?: "book"
                 if (id == null) { invalid("$itemPath.id"); ok = false }
                 if (title == null) { invalid("$itemPath.title"); ok = false }
-                if (anchor == null) { invalid("$itemPath.anchor"); ok = false }
+                if (slot == null) { invalid("$itemPath.slot"); ok = false }
                 if (page == null || !isSafeRelativePath(page) ||
                     !(page.endsWith(".html", ignoreCase = true) || page.endsWith(".htm", ignoreCase = true))
                 ) {
@@ -824,12 +824,16 @@ object PluginManifestParser {
                     invalid("$itemPath.icon")
                     ok = false
                 }
-                if (ok && id != null && title != null && anchor != null && page != null) {
+                if (slot != null && result.count { it.slot == slot } >= PluginUiSlots.MAX_ENTRIES_PER_PLUGIN) {
+                    invalid("$itemPath.slot")
+                    ok = false
+                }
+                if (ok && id != null && title != null && slot != null && page != null) {
                     if (result.any { it.id == id }) {
                         err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
                         ok = false
                     } else {
-                        result += PluginSettingsPageRef(id, title, anchor, page, icon)
+                        result += PluginUiEntryRef(id, slot, title, page, icon)
                     }
                 }
             }

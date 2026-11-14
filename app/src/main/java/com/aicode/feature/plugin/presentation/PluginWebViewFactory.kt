@@ -12,7 +12,7 @@ import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import com.aicode.R
 import com.aicode.core.util.FileLogger
-import com.aicode.feature.plugin.domain.PluginSettingsPage
+import com.aicode.feature.plugin.domain.PluginPage
 import java.io.ByteArrayInputStream
 import java.io.File
 
@@ -27,7 +27,7 @@ internal object PluginWebViewFactory {
 
     const val PAGE_BASE_URL = "https://appassets.androidplatform.net/plugin/"
 
-    fun pageUrl(page: PluginSettingsPage): String {
+    fun pageUrl(page: PluginPage): String {
         val version = page.pluginVersion.takeIf { it.isNotBlank() }?.let { "?v=$it" }.orEmpty()
         return PAGE_BASE_URL + page.pageFile + version
     }
@@ -35,7 +35,7 @@ internal object PluginWebViewFactory {
     /** 插件浮层：透明 WebView，禁用滚动条与外部导航，页面资源仍只走虚拟域。 */
     fun createOverlay(
         context: Context,
-        page: PluginSettingsPage,
+        page: PluginPage,
         onPageFinished: (WebView) -> Unit,
         onMainFrameError: () -> Unit
     ): WebView = create(
@@ -58,7 +58,7 @@ internal object PluginWebViewFactory {
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
         context: Context,
-        page: PluginSettingsPage,
+        page: PluginPage,
         dark: Boolean,
         backgroundColor: Int,
         themeVariables: () -> Map<String, String>,
