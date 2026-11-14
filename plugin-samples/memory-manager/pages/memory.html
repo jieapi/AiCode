@@ -179,8 +179,8 @@
   (function () {
     'use strict';
 
-    var GLOBAL_ROOT = 'aicode://memory';
-    var PROJECT_ROOT = 'workspace://.aicode/memory';
+    var GLOBAL_ROOT = '';
+    var PROJECT_ROOT = '';
 
     var app = Vue.createApp({
       data: function () {
@@ -306,6 +306,8 @@
             var context = await aicode.context();
             if (this.disposed || request !== this.contextRequest) return false;
             if (typeof context.contextKey !== 'string') throw new Error('无法获取页面上下文');
+            GLOBAL_ROOT = context.home + '/.aicode/memory';
+            PROJECT_ROOT = context.workspace + '/.aicode/memory';
             this.contextError = '';
             if (this.setContext(context.contextKey)) this.loadAll();
             return true;

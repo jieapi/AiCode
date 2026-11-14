@@ -105,7 +105,7 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 
 设置页中的记忆管理器：
 
-- 读写全局 `aicode://memory/` 与工作区 `workspace://.aicode/memory/`；
+- 读写全局 `$HOME/.aicode/memory/` 与工作区内的 `.aicode/memory/`；
 - 使用 `aicode.fs.watch` 监听记忆目录变化；
 - 使用 `aicode.context()` 的 `contextKey` 拦截旧项目操作；
 - 使用 `aicode.ui.onBack` 接管页面返回；

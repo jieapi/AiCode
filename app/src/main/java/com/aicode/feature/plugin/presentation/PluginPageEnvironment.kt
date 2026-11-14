@@ -7,6 +7,7 @@ import com.aicode.feature.plugin.domain.PluginWatchTarget
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.PathHomeResolver
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -26,6 +27,7 @@ class PluginPageEnvironment @Inject constructor(
     private val modeHolder: ExecutionModeHolder,
     private val connection: RemoteSshConnection,
     private val pathMapper: WorkspacePathMapper,
+    private val homeResolver: PathHomeResolver,
     private val watchSource: PluginFileWatchSource
 ) {
     val changes: Flow<String> = combine(
@@ -52,6 +54,17 @@ class PluginPageEnvironment @Inject constructor(
         .trimEnd('/')
         .substringAfterLast('/')
         .ifBlank { "workspace" }
+
+    /**
+     * 当前工作区在插件可见路径空间里的根：远程直接用远端绝对路径，本地用容器内 `$HOME/workspace`。
+     * 本地 `currentPath()` 是宿主路径，不能直接给插件。
+     */
+    fun workspaceRoot(): String =
+        if (modeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+            workspaceRepository.currentPath()
+        } else {
+            homeResolver.home().trimEnd('/') + "/workspace"
+        }
 
     fun watch(paths: PluginHostPaths, path: String, recursive: Boolean): Flow<JsonObject> {
         val key = contextKey()

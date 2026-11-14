@@ -652,7 +652,6 @@ class PluginsViewModel @Inject constructor(
         return PluginWebBridge(
             context = context,
             page = page,
-            dataDir = manager.dataDirFor(page.pluginId),
             pluginVersion = pluginVersion,
             languageTag = languageTag,
             fileAccess = fileAccess,

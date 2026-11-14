@@ -79,7 +79,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 
 | 方法 | 参数 | 说明 |
 | --- | --- | --- |
-| `host.fs.read` / `write` / `list` / `stat` / `delete` | 见下表 | 读写四个虚拟根 |
+| `host.fs.read` / `write` / `list` / `stat` / `delete` | 见下表 | 读写真实路径与 `data://` 数据根 |
 | `host.fs.mkdir` / `rename` / `copy` / `append` / `readBinary` / `writeBinary` | 见下表 | 目录、移动、复制、追加与二进制读写 |
 | `host.app.isForeground` | 无 | App 是否有 Activity 处于 STARTED |
 | `host.bash` | `{command, timeout?}` | 在当前工作区执行一次性命令 |
@@ -155,16 +155,16 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭浮层 |
 | `host.overlay.postMessage` | `{overlayId?, surface?, payload}` | 向浮层页面发送消息 |
 
-路径必须以虚拟根开头：
+文件路径是当前执行环境的真实绝对路径：本地模式为容器内路径，SSH 模式为远端服务器路径。`~` 展开到当前 home，裸相对路径挂到工作区根。插件数据目录有稳定的虚拟根 `data://`；进程侧同时会拿到 `AICODE_DATA_DIR` 与 `AICODE_WORKSPACE`。
 
-| 根 | 位置 | 读写 |
+| 位置 | 路径写法 | 读写 |
 | --- | --- | --- |
-| `data://` | 插件自身的数据目录，卸载时清理 | 读写 |
-| `plugin://` | 插件安装目录 | 只读 |
-| `workspace://` | 当前工作区 | 读写 |
-| `aicode://` | 全局 `.aicode` 目录 | 读写 |
+| 插件自身数据目录，卸载时清理 | `data://…` 或 `AICODE_DATA_DIR` | 读写 |
+| 当前工作区 | `AICODE_WORKSPACE` | 读写 |
+| AI 配置目录 | `$HOME/.aicode` | 读写 |
+| 容器或服务器上的其它路径 | 直接写绝对路径 | 读写 |
 
-`aicode://` 下的 `plugins/`、`permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 禁止访问。单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。
+单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。本地模式下宿主只映射容器 rootfs、工作区与 `$HOME/.aicode`，App 自身的其它私有目录没有对应的容器路径，因此不可达。
 
 工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
 

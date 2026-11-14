@@ -55,7 +55,7 @@ import kotlinx.serialization.json.put
  * 插件 HTML 页面与宿主之间的桥。
  *
  * 页面通过 `__aicodeBridge.postMessage(json)` 发请求，宿主在 IO 线程处理，
- * 再用 `window.__aicodeResolve(id, payloadJson)` 回传。文件根解析与限制由
+ * 再用 `window.__aicodeResolve(id, payloadJson)` 回传。路径解析与限制由
  * [PluginHostPaths] 统一提供，与插件进程的 host API 共用同一套规则。
  *
  * 桥只由宿主注入到已启用插件的页面；方法在 WebView 的 JavaBridge 线程调用，
@@ -64,7 +64,6 @@ import kotlinx.serialization.json.put
 class PluginWebBridge(
     private val context: Context,
     private val page: PluginPage,
-    private val dataDir: File,
     private val pluginVersion: String,
     private val languageTag: String,
     private val fileAccess: FileAccessProvider,
@@ -94,7 +93,12 @@ class PluginWebBridge(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val hostPaths = PluginHostPaths(dataDir, page.installDir, fileAccess, homeResolver)
+    private val hostPaths = PluginHostPaths(
+        fileAccess,
+        homeResolver,
+        environment::workspaceRoot,
+        page.pluginId
+    )
     @Volatile private var overlayActive = false
     @Volatile private var visible = false
     @Volatile private var closed = false
@@ -196,6 +200,12 @@ class PluginWebBridge(
         postLifecycle(reason)
     }
 
+    /**
+     * 插件数据目录在当前执行环境中的真实路径。进程侧同一路径通过 AICODE_DATA_DIR 提供；
+     * 本地为容器内 `/…/.aicode/plugins/data/<id>`，远程落在服务器同名目录。
+     */
+    private fun dataDirPath(): String = PluginHostPaths.dataRoot(homeResolver, page.pluginId)
+
     private fun postLifecycle(reason: String) {
         postEvent("ui.lifecycle", buildJsonObject {
             put("visible", visible)
@@ -266,6 +276,9 @@ class PluginWebBridge(
             put("workspaceName", environment.workspaceName())
             put("contextKey", environment.contextKey())
             put("visible", visible)
+            put("home", homeResolver.home())
+            put("workspace", environment.workspaceRoot())
+            put("dataDir", dataDirPath())
         }
 
         "app.isForeground" -> JsonPrimitive(overlayManager.isAppForeground())

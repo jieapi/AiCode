@@ -358,6 +358,9 @@
         });
       }
     },
+    // 文件路径是当前执行环境的真实绝对路径：本地为容器内路径（如 /root/workspace/a.txt），
+    // SSH 为远端服务器路径。~ 展开到当前 home，裸相对路径挂到工作区根。
+    // 插件自己的数据目录用稳定的 data:// 虚拟根（如 data://config.json），与插件 ID 和执行环境无关。
     fs: {
       read: function (path, options) {
         return call('fs.read', fileParams(path, options));

@@ -92,7 +92,7 @@
 
 安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏、顶栏、会话菜单或文件树打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面；编辑器选区入口在编辑器浮动菜单内打开。
 
-文件树/编辑器动作的 `path` 在工作区内是 `workspace://…`，可直接传给 `host.fs.*`；工作区外为容器路径，宿主文件 API 不接受这种入参。
+文件树/编辑器动作的 `path` 在工作区内是 `workspace://…`，需用 `context().workspace` 换成真实路径后再传给 `host.fs.*`；工作区外是容器路径，可直接传给 `host.fs.*`。
 
 ### 插件配置页
 
@@ -137,7 +137,7 @@
 
 | 方法 | 作用 |
 | --- | --- |
-| `aicode.context()` | 返回 `pluginId`、`pageId`、`slot`、`sessionId`、`path`、`isDirectory`、`selection`、`language`、`lineStart`、`lineEnd`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible`；未使用的字段不出现 |
+| `aicode.context()` | 返回 `pluginId`、`pageId`、`slot`、`sessionId`、`path`、`isDirectory`、`selection`、`language`、`lineStart`、`lineEnd`、`version`、`languageTag`、`theme`、`workspaceName`、`contextKey`、`visible`、`home`、`workspace`、`dataDir`；未使用的字段不出现 |
 | `aicode.toast(message)` | 轻量提示 |
 | `aicode.tip({title?, text, action?{label, handler}})` | 在对话中显示可关闭提示条；按钮点击回调同插件进程的 `handler` |
 | `aicode.app.isForeground()` | App 当前是否处于前台（有 Activity 处于 STARTED） |
@@ -163,22 +163,22 @@
 | `aicode.fs.writeBinary(path, base64, options?)` | 写入 Base64 二进制；上限 1 MiB |
 | `aicode.fs.watch(path, options?, handler)` | 订阅文件来源变化，Promise 解析为取消订阅函数 |
 
-路径必须以虚拟根开头：
+文件路径是当前执行环境的真实绝对路径：本地模式为容器内路径，SSH 模式为远端服务器路径。`~` 展开到当前 home，裸相对路径挂到工作区根。插件自己的数据目录有稳定的虚拟根 `data://`，与插件 ID 和执行环境无关。
 
-| 根 | 位置 | 读写 |
+| 位置 | 路径写法 | 读写 |
 | --- | --- | --- |
-| `data://` | 插件自身的数据目录，卸载时清理 | 读写 |
-| `plugin://` | 插件安装目录 | 只读 |
-| `workspace://` | 当前工作区 | 读写 |
-| `aicode://` | 全局 `.aicode` 目录 | 读写 |
+| 插件自身数据目录，卸载时清理 | `data://…` 或 `context().dataDir` | 读写 |
+| 当前工作区 | `context().workspace` | 读写 |
+| AI 配置目录 | `context().home + '/.aicode'` | 读写 |
+| 容器或服务器上的其它路径 | 直接写绝对路径 | 读写 |
 
-单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。`aicode://` 下的 `plugins/`、`permissions.json`、`mcp.json`、`skills/`、`agents/`、`prompts.custom/`、`docs/` 禁止访问。
+单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。本地模式下宿主只映射容器 rootfs、工作区与 `~/.aicode`，App 自身的其它私有目录没有对应的容器路径，因此不可达。
 
 文件方法可在最后一个 `options` 参数中传入 `{contextKey}`。上下文已经变化时请求返回 `STALE_CONTEXT`，用于拦截仍在排队的旧项目操作：
 
 ```js
 const ctx = await aicode.context();
-const file = await aicode.fs.read('workspace://README.md', {contextKey: ctx.contextKey});
+const file = await aicode.fs.read(ctx.workspace + '/README.md', {contextKey: ctx.contextKey});
 ```
 
 ### 命令与终端
@@ -384,7 +384,7 @@ const off = aicode.ui.onBack(() => {
 </html>
 ```
 
-`data://` 是插件自身的数据目录，卸载时清理；需要在卸载后保留的配置应放在 `aicode://` 下插件自身的命名空间内，并避开受保护路径。
+`data://` 是插件自身的数据目录，卸载时清理，也与插件 ID 解耦；需要在卸载后保留的配置应放在 `context().home + '/.aicode'` 下插件自己的命名空间内。
 
 ## 限制
 

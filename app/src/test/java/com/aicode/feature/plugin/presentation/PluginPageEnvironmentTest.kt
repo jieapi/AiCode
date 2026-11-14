@@ -13,6 +13,7 @@ import com.aicode.feature.plugin.domain.PluginWatchTarget
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.PathHomeResolver
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.domain.model.Workspace
 import com.aicode.feature.workspace.domain.remote.RemoteAuth
@@ -43,6 +44,7 @@ class PluginPageEnvironmentTest {
     private val mode = ExecutionModeHolder()
     private val connection = mockk<RemoteSshConnection>()
     private val mapper = mockk<WorkspacePathMapper>()
+    private val homeResolver = mockk<PathHomeResolver>()
     private val source = mockk<PluginFileWatchSource>()
     private val paths = mockk<PluginHostPaths>()
     private val current = MutableStateFlow<Workspace?>(null)
@@ -56,9 +58,10 @@ class PluginPageEnvironmentTest {
         every { workspace.currentPath() } answers { path }
         every { connection.connectionState } returns connectionState
         every { connection.config } answers { config }
+        every { homeResolver.home() } returns "/root"
     }
 
-    private fun environment() = PluginPageEnvironment(workspace, mode, connection, mapper, source)
+    private fun environment() = PluginPageEnvironment(workspace, mode, connection, mapper, homeResolver, source)
 
     private fun remote(host: String = "server-a", port: Int = 22, username: String = "developer") =
         RemoteConnectionConfig(host, port, username, RemoteAuth.Password(""), "/projects")
@@ -109,10 +112,20 @@ class PluginPageEnvironmentTest {
     }
 
     @Test
+    fun workspaceRoot_usesContainerHomeLocallyAndRemotePathRemotely() {
+        val environment = environment()
+        assertEquals("/root/workspace", environment.workspaceRoot())
+
+        mode.setMode(ExecutionMode.REMOTE_SSH)
+        path = "/home/developer/projects"
+        assertEquals("/home/developer/projects", environment.workspaceRoot())
+    }
+
+    @Test
     fun localEvents_onlyExposeLogicalPathsAndPreserveDirtySignals() = runTest {
         val root = File("/private/plugin-data/records")
         val target = PluginWatchTarget.Local(root)
-        every { paths.watchTarget("data://records", any(), true) } returns target
+        every { paths.watchTarget("/private/plugin-data/records", any(), true) } returns target
         val changes = listOf(
             FileChange(ChangeRoot.OTHER, root.path, root.path, ChangeKind.CREATED),
             FileChange(ChangeRoot.OTHER, "${root.path}/item.json", "unused", ChangeKind.MODIFIED),
@@ -120,21 +133,21 @@ class PluginPageEnvironmentTest {
         )
         every { source.watch(target, true) } returns flowOf(FileChangeBatch(changes, truncated = true))
 
-        val payload = environment().watch(paths, "data://records", true).single()
+        val payload = environment().watch(paths, "/private/plugin-data/records", true).single()
         val events = payload["changes"]!!.jsonArray
-        assertEquals(listOf("data://records", "data://records/item.json"),
+        assertEquals(listOf("/private/plugin-data/records", "/private/plugin-data/records/item.json"),
             events.map { it.jsonObject["path"]!!.jsonPrimitive.content })
         assertEquals("modified", events.last().jsonObject["kind"]!!.jsonPrimitive.content)
         assertTrue(payload["truncated"]!!.jsonPrimitive.content.toBoolean())
-        assertFalse(payload.toString().contains("/private/"))
+        assertFalse(payload.toString().contains("/private/outside"))
     }
 
     @Test
-    fun remoteEvents_useTheSubscribedUriAndCurrentContextKey() = runTest {
+    fun remoteEvents_useTheSubscribedPathAndCurrentContextKey() = runTest {
         mode.setMode(ExecutionMode.REMOTE_SSH)
         config = remote()
         val target = PluginWatchTarget.Remote("~/workspace/settings")
-        every { paths.watchTarget("workspace://settings", any(), false) } answers {
+        every { paths.watchTarget("~/workspace/settings", any(), false) } answers {
             assertEquals(null, secondArg<(String) -> File?>().invoke("~/workspace/settings"))
             target
         }
@@ -142,9 +155,9 @@ class PluginPageEnvironmentTest {
             FileChange(ChangeRoot.OTHER, "~/workspace/settings/theme.json", "unused", ChangeKind.CREATED)
         )))
         val environment = environment()
-        val payload = environment.watch(paths, "workspace://settings", false).single()
+        val payload = environment.watch(paths, "~/workspace/settings", false).single()
         assertEquals(environment.contextKey(), payload["contextKey"]!!.jsonPrimitive.content)
-        assertEquals("workspace://settings/theme.json",
+        assertEquals("~/workspace/settings/theme.json",
             payload["changes"]!!.jsonArray.single().jsonObject["path"]!!.jsonPrimitive.content)
     }
 
@@ -152,12 +165,12 @@ class PluginPageEnvironmentTest {
     fun localTargetResolution_usesTheExistingContainerPathMapper() = runTest {
         val root = File("/projects/first/config")
         every { mapper.resolveFile("~/workspace/config") } returns root
-        every { paths.watchTarget("workspace://config", any(), false) } answers {
+        every { paths.watchTarget("~/workspace/config", any(), false) } answers {
             assertEquals(root, secondArg<(String) -> File?>().invoke("~/workspace/config"))
             PluginWatchTarget.Local(root)
         }
         every { source.watch(PluginWatchTarget.Local(root), false) } returns flowOf(FileChangeBatch(emptyList()))
-        val payload = environment().watch(paths, "workspace://config", false).single()
+        val payload = environment().watch(paths, "~/workspace/config", false).single()
         assertTrue(payload["changes"]!!.jsonArray.isEmpty())
     }
 }

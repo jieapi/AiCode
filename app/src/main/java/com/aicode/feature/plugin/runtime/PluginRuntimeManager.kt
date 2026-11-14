@@ -13,6 +13,7 @@ import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
 import com.aicode.feature.plugin.overlay.PluginOverlayException
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -53,6 +54,7 @@ class PluginRuntimeManager @Inject constructor(
     private val homeResolver: PathHomeResolver,
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
+    private val executionModeHolder: ExecutionModeHolder,
     private val eventBus: PluginEventBus,
     private val notifier: PluginNotifier,
     private val terminalRunner: PluginTerminalRunner,
@@ -184,7 +186,8 @@ class PluginRuntimeManager @Inject constructor(
             extraEnv = mapOf(
                 "AICODE_PLUGIN_ID" to pluginId,
                 "AICODE_PLUGIN_VERSION" to version,
-                "AICODE_DATA_DIR" to containerDir(pluginManager.dataDirFor(pluginId))
+                "AICODE_DATA_DIR" to dataDirectory(pluginId),
+                "AICODE_WORKSPACE" to workspaceRoot()
             ),
             onRequest = { method, params -> hostRequest(pluginId, runtime, method, params) },
             onNotification = { method, params -> handleNotification(pluginId, method, params) },
@@ -208,10 +211,10 @@ class PluginRuntimeManager @Inject constructor(
         params: JsonObject
     ): JsonElement {
         val paths = PluginHostPaths(
-            dataDir = pluginManager.dataDirFor(pluginId),
-            installDir = runtime.installDir,
             fileAccess = fileAccess,
-            homeResolver = homeResolver
+            homeResolver = homeResolver,
+            workspaceRoot = ::workspaceRoot,
+            pluginId = pluginId
         )
         return when (method) {
             "host.fs.read" -> paths.read(PluginHostPaths.requireString(params, "path"))
@@ -487,6 +490,24 @@ class PluginRuntimeManager @Inject constructor(
 
     /** 宿主文件路径映射到容器内路径：插件目录由 `.aicode` 绑定挂载到 `/root/.aicode`。 */
     private fun containerDir(file: File): String = installer.containerPathFor(file)
+
+    /**
+     * 插件数据目录在当前执行环境中的真实路径，并确保目录存在。本地落在
+     * `/…/.aicode/plugins/data/<id>`（与宿主 `aicodeDir/plugins/data/<id>` 同一份），远程落在服务器同名路径。
+     */
+    private suspend fun dataDirectory(pluginId: String): String {
+        val path = PluginHostPaths.dataRoot(homeResolver, pluginId)
+        fileAccess.mkdirs(path)
+        return path
+    }
+
+    /** 当前工作区在插件可见路径空间里的根：远程用远端绝对路径，本地用容器内 `$HOME/workspace`。 */
+    private fun workspaceRoot(): String =
+        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+            workspaceRepository.currentPath()
+        } else {
+            homeResolver.home().trimEnd('/') + "/workspace"
+        }
 
     private fun pruneIdle() {
         val now = System.currentTimeMillis()
