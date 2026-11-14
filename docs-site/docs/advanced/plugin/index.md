@@ -18,7 +18,7 @@
 | AI 工具 | `contributes.tools` | 容器内的插件进程 | 是 | [AI 工具与插件运行时](/advanced/plugin/tools-runtime) |
 | 生命周期 hook | `contributes.hooks` | 容器内的插件进程 | 是 | [生命周期 Hooks](/advanced/plugin/hooks) |
 | 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉中的 WebView 页面 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按菜单 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 插件配置页 | `configPage` | 插件详情中的配置分段 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 插件事件 | 进程发送 `plugin.event` | 推送给同插件已打开的页面 | 是 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
@@ -80,9 +80,9 @@ demo-kit/
 | --- | --- |
 | `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读 hook、插件事件 |
 | `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
-| `chat-bridge` | 设置页对话界面、`aicode.chat`、`chat.run.finished` 完成通知 |
+| `chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 |
 | `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
-| `ui-gallery` | 设置页、侧栏与顶栏槽位入口、插件配置页、宿主 Vue 组件库 |
+| `ui-gallery` | 设置页、侧栏与顶栏槽位入口、空态提示词、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |
 | `desktop-pet` | 宿主托管浮层、长按展开菜单、拖拽、点击互动、`app.started` 与 `plugin.enabled` 自启动 |
 | `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |

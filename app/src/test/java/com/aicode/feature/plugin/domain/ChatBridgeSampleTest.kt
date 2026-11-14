@@ -30,13 +30,17 @@ class ChatBridgeSampleTest {
         assertTrue("清单应解析成功：$parsed", parsed is ManifestParseResult.Success)
         val manifest = (parsed as ManifestParseResult.Success).manifest
         assertEquals("demo.chat-bridge", manifest.id)
-        assertEquals(1, manifest.uiEntries.size)
-        assertEquals(PluginUiSlots.SETTINGS_AI, manifest.uiEntries.single().slot)
+        assertEquals(2, manifest.uiEntries.size)
+        val settingsEntry = manifest.uiEntries.single { it.slot == PluginUiSlots.SETTINGS_AI }
+        assertEquals("pages/chat.html", settingsEntry.page)
+        val actionEntry = manifest.uiEntries.single { it.slot == PluginUiSlots.CHAT_SESSION_MENU }
+        assertEquals("actions.notifySession", actionEntry.handler)
 
         val loaded = PluginContentLoader.load(dir, manifest)
         assertTrue("内容应加载成功：$loaded", loaded is ContentLoadResult.Ok)
         val content = (loaded as ContentLoadResult.Ok).content
-        assertEquals("pages/chat.html", content.uiEntries.single().pageFile)
+        assertEquals("pages/chat.html", content.uiEntries.single { it.page != null }.page?.pageFile)
+        assertTrue(content.uiEntries.any { it.handler == "actions.notifySession" })
         assertNotNull("应带运行时", content.runtime)
         assertTrue(content.hooks.any {
             it.event == PluginHookEvents.AGENT_PERMISSION_REVIEW && it.mode == PluginHookModes.REVIEW

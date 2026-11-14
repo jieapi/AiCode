@@ -21,23 +21,50 @@ object PluginUiSlots {
     /** 聊天顶栏「更多」菜单底部。 */
     const val CHAT_HEADER_MENU = "chat.header.menu"
 
+    /** 聊天空态建议区。 */
+    const val CHAT_WELCOME = "chat.welcome"
+
+    /** 会话长按菜单。 */
+    const val CHAT_SESSION_MENU = "chat.session.menu"
+
     val ALL = setOf(
         SETTINGS_GENERAL, SETTINGS_AI, SETTINGS_ENVIRONMENT, SETTINGS_PERMISSIONS, SETTINGS_DATA, SETTINGS_HELP,
-        DRAWER_FOOTER, CHAT_HEADER_MENU
+        DRAWER_FOOTER, CHAT_HEADER_MENU, CHAT_WELCOME, CHAT_SESSION_MENU
     )
 
     /** 单插件在每个槽位可声明的入口数；超出在安装时拒绝，避免一个插件挤满列表。 */
     const val MAX_ENTRIES_PER_PLUGIN = 2
+
+    /** 设置页槽位：只接受页面入口，交互型入口在聊天上下文里使用。 */
+    fun isSettingsSlot(slot: String): Boolean = slot.startsWith("settings.")
 }
 
-/** `contributes.uiEntries` 声明的一个槽位入口；[page] 是包内 HTML 相对路径。 */
+/** 槽位入口的三种形态：HTML 页面、填入输入框的提示词、调用插件 runtime 的动作。 */
+enum class PluginUiEntryKind { PAGE, PROMPT, ACTION }
+
+/**
+ * `contributes.uiEntries` 声明的一个槽位入口。`page` / `prompt` / `handler`
+ * 必须且只能出现一个；`page` 是包内 HTML 相对路径，`prompt` 会填入输入框，
+ * `handler` 走插件 runtime 的 `ui.invoke`。
+ */
 data class PluginUiEntryRef(
     val id: String,
     val slot: String,
     val title: LocalizedText,
-    val page: String,
+    val page: String? = null,
+    val prompt: LocalizedText? = null,
+    val handler: String? = null,
+    /** 仅动作入口：执行前让宿主弹确认框。 */
+    val confirm: Boolean = false,
     val icon: String = "book"
-)
+) {
+    val kind: PluginUiEntryKind
+        get() = when {
+            page != null -> PluginUiEntryKind.PAGE
+            prompt != null -> PluginUiEntryKind.PROMPT
+            else -> PluginUiEntryKind.ACTION
+        }
+}
 
 /** `contributes.workspaceTools` 声明的工作区工具项，包含入口元数据与页面定义文件引用。 */
 data class PluginWorkspaceToolRef(

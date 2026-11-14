@@ -70,6 +70,13 @@ const handlers = {
   // 页面加载或重连时同步仍在等待的审批，避免刷新后卡片消失、hook 只能等超时。
   'ui.pageReady': () => ({
     pendingReviews: Array.from(pendingReviews.values()).map((entry) => entry.payload)
+  }),
+
+  // 槽位动作示例：宿主会把返回的 message 直接作为 toast 显示。
+  'actions.notifySession': (args) => ({
+    message: args.sessionId
+      ? `已触发会话动作 ${String(args.sessionId).slice(0, 8)}`
+      : '未收到会话上下文'
   })
 };
 

@@ -1,13 +1,13 @@
 # 插件页面与宿主接口
 
-插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（可挂到设置页 / 侧栏 / 顶栏菜单）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
+插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（设置页 / 侧栏 / 顶栏 / 空态 / 会话菜单）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
 
 ## 三种页面
 
 | 类型 | 声明位置 | 入口 | 典型用途 |
 | --- | --- | --- | --- |
 | 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉，用户添加后打开 | 构建、清理、部署、项目状态 |
-| 槽位入口 | `contributes.uiEntries` | 设置页分组末尾、侧栏底部、聊天顶栏菜单 | 记忆管理、全局配置、工具面板 |
+| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按 | 记忆管理、提示词库、快捷动作、工具面板 |
 | 插件配置页 | `configPage` | 「设置 → 插件」的插件详情中 | 插件自身的参数、密钥、开关 |
 
 三种页面使用同一套桥和主题，区别在于入口位置与生命周期。
@@ -37,6 +37,8 @@
 
 ### 槽位入口
 
+一个入口可以是页面、提示词或动作：
+
 ```json
 {
   "contributes": {
@@ -47,11 +49,35 @@
         "slot": "settings.ai",
         "page": "pages/memory.html",
         "icon": "book"
+      },
+      {
+        "id": "summarize",
+        "title": {"zh-CN": "总结会话", "en": "Summarize"},
+        "slot": "chat.welcome",
+        "icon": "zap",
+        "prompt": {"zh-CN": "请总结当前会话的结论和待办。"}
+      },
+      {
+        "id": "sync",
+        "title": {"zh-CN": "同步笔记", "en": "Sync notes"},
+        "slot": "drawer.footer",
+        "icon": "refresh",
+        "handler": "actions.sync"
       }
     ]
   }
 }
 ```
+
+`page` / `prompt` / `handler` 必须且只能出现一个：
+
+| 字段 | 行为 |
+| --- | --- |
+| `page` | 打开包内 HTML 页面，最大 512 KiB |
+| `prompt` | 把本地化提示词填进当前会话的输入框，不自动发送 |
+| `handler` | 调用插件 runtime 的 `ui.invoke`，需要声明 `runtime` |
+
+动作入口可用 `confirm: true` 让宿主在执行前弹确认框。handler 返回 `{message: "..."}` 时，宿主会用 toast 显示这条消息；失败请用 JSON-RPC error 返回，不要在成功结果里包一层 `ok: false`。动作的 `args` 包含 `entryId`、`slot`、`sessionId`（能确定时）；handler 内可正常调用 `host.*`，包括 `host.tip`、`host.notify` 和 `host.chat.*`。
 
 `slot` 仅可取下列值，宿主据此将入口放入固定位置：
 
@@ -65,10 +91,12 @@
 | `settings.help` | 设置页「帮助与关于」分组末尾 |
 | `drawer.footer` | 侧栏底部，浏览器与设置之上 |
 | `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
+| `chat.welcome` | 聊天空态建议区，最多展示 3 条 |
+| `chat.session.menu` | 会话长按菜单，删除项之前 |
 
-同一插件在每个槽位最多 2 个入口；同一槽位内入口顺序由宿主按插件显示名与声明顺序决定，插件不能指定排序或插入位置。侧栏底部最多内联展示 3 条，其余收进「更多插件」；顶栏菜单没有插件项时整段隐藏。
+`settings.*` 只接受 `page` 入口；聊天区槽位接受三种入口。同一插件在每个槽位最多 2 个入口；同一槽位内入口顺序由宿主按插件显示名与声明顺序决定，插件不能指定排序或插入位置。侧栏底部最多内联展示 3 条，其余收进「更多插件」；顶栏菜单没有插件项时整段隐藏。
 
-安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏或顶栏打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面。
+安装后入口立即出现，副标题标明插件来源；停用或卸载插件后入口消失。大屏下从侧栏、顶栏或会话菜单打开的页面在右侧工作台内展示，设置页入口沿用设置页自己的分栏布局，窄屏使用全屏页面。
 
 ### 插件配置页
 
@@ -103,7 +131,7 @@
 
 `/__aicode/theme.css` 提供跟随 App 主题的 CSS 变量，`/__aicode/aicode.js` 注入 `window.aicode`。页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截。
 
-页面文件最大 512 KiB。`uiEntries` 和 `workspaceTools` 的 `pageFile`/`page` 必须是包内 `.html`/`.htm`。
+页面文件最大 512 KiB。`uiEntries` 的 `page` 入口和 `workspaceTools` 的 `pageFile` 必须是包内 `.html`/`.htm`；`prompt`/`handler` 入口不涉及页面文件。
 
 ## 宿主接口
 

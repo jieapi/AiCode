@@ -445,8 +445,8 @@ fun SettingsScreen(
         plugins.filter { it.isActive }
             .sortedBy { it.displayName(pluginLanguageTag) }
             .flatMap { plugin ->
-                plugin.content.uiEntries.map { page ->
-                    page.copy(pluginVersion = plugin.record.version)
+                plugin.content.uiEntries.mapNotNull { entry ->
+                    entry.page?.copy(pluginVersion = plugin.record.version)
                 }
             }
     }

@@ -673,6 +673,91 @@ class PluginManifestParserTest {
     fun uiEntries_acceptsDrawerAndHeaderSlots() {
         assertEquals("drawer.footer", success(settingsManifest(slot = "drawer.footer")).uiEntries.single().slot)
         assertEquals("chat.header.menu", success(settingsManifest(slot = "chat.header.menu")).uiEntries.single().slot)
+        assertEquals("chat.welcome", success(settingsManifest(slot = "chat.welcome")).uiEntries.single().slot)
+        assertEquals("chat.session.menu", success(settingsManifest(slot = "chat.session.menu")).uiEntries.single().slot)
+    }
+
+    private fun entriesManifest(entries: String, runtime: Boolean = false): String {
+        val runtimeBlock = if (runtime) {
+            "\"runtime\": {\"type\": \"javascript\", \"entry\": \"dist/main.js\"},"
+        } else {
+            ""
+        }
+        return """
+            {
+              "manifestVersion": 1,
+              "id": "demo.entries",
+              "name": "Entries",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/entries",
+              "description": "Entries demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              $runtimeBlock
+              "contributes": {"uiEntries": [$entries]}
+            }
+        """.trimIndent()
+    }
+
+    @Test
+    fun uiEntries_parsesPromptEntry() {
+        val m = success(
+            entriesManifest("""{"id":"p","title":"总结","slot":"chat.welcome","prompt":"请总结当前会话"}""")
+        )
+        val entry = m.uiEntries.single()
+        assertEquals(PluginUiEntryKind.PROMPT, entry.kind)
+        assertEquals("请总结当前会话", entry.prompt?.resolve("zh-CN"))
+    }
+
+    @Test
+    fun uiEntries_parsesActionEntryWithRuntime() {
+        val m = success(
+            entriesManifest(
+                """{"id":"a","title":"同步","slot":"chat.session.menu","handler":"actions.sync","confirm":true}""",
+                runtime = true
+            )
+        )
+        val entry = m.uiEntries.single()
+        assertEquals(PluginUiEntryKind.ACTION, entry.kind)
+        assertEquals("actions.sync", entry.handler)
+        assertTrue(entry.confirm)
+    }
+
+    @Test
+    fun uiEntries_actionRequiresRuntime() {
+        assertRejected(
+            entriesManifest("""{"id":"a","title":"同步","slot":"drawer.footer","handler":"actions.sync"}"""),
+            PluginErrorCode.FIELD_MISSING,
+            "runtime"
+        )
+    }
+
+    @Test
+    fun uiEntries_rejectsEntryWithoutKind() {
+        assertRejected(
+            entriesManifest("""{"id":"x","title":"X","slot":"chat.welcome"}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0]"
+        )
+    }
+
+    @Test
+    fun uiEntries_rejectsPromptInSettingsSlot() {
+        assertRejected(
+            entriesManifest("""{"id":"p","title":"提示","slot":"settings.ai","prompt":"总结"}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0].slot"
+        )
+    }
+
+    @Test
+    fun uiEntries_rejectsConfirmWithoutHandler() {
+        assertRejected(
+            entriesManifest("""{"id":"p","title":"页","slot":"chat.welcome","page":"p.html","confirm":true}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0].confirm"
+        )
     }
 
     @Test

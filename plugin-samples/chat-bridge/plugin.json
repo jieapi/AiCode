@@ -32,6 +32,16 @@
         "slot": "settings.ai",
         "page": "pages/chat.html",
         "icon": "users"
+      },
+      {
+        "id": "session-action",
+        "title": {
+          "zh-CN": "会话动作示例",
+          "en": "Session Action Demo"
+        },
+        "slot": "chat.session.menu",
+        "icon": "zap",
+        "handler": "actions.notifySession"
       }
     ],
     "hooks": [

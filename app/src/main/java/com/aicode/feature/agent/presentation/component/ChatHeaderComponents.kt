@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -43,11 +46,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aicode.R
+import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.onboarding.presentation.onboardingTarget
-import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
+import com.aicode.feature.plugin.domain.PluginUiEntryKind
 import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.settings.presentation.component.ModelLogoIcon
 import compose.icons.FeatherIcons
@@ -74,9 +79,9 @@ internal fun ChatHeader(
     showMenuButton: Boolean = true,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
-    pluginEntries: List<PluginPage> = emptyList(),
+    pluginEntries: List<PluginUiEntry> = emptyList(),
     pluginLanguageTag: String = "zh-CN",
-    onOpenPluginPage: (PluginPage) -> Unit = {}
+    onPluginEntry: (PluginUiEntry) -> Unit = {}
 ) {
     Surface(
         color = MaterialTheme.colorScheme.background
@@ -143,7 +148,7 @@ internal fun ChatHeader(
                     onNavigateToGit = onNavigateToGit,
                     pluginEntries = pluginEntries,
                     pluginLanguageTag = pluginLanguageTag,
-                    onOpenPluginPage = onOpenPluginPage
+                    onPluginEntry = onPluginEntry
                 )
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计
@@ -173,9 +178,9 @@ private fun WorkbenchMenuButton(
     gitActive: Boolean,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
-    pluginEntries: List<PluginPage>,
+    pluginEntries: List<PluginUiEntry>,
     pluginLanguageTag: String,
-    onOpenPluginPage: (PluginPage) -> Unit
+    onPluginEntry: (PluginUiEntry) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -211,12 +216,12 @@ private fun WorkbenchMenuButton(
             )
             if (pluginEntries.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.xs))
-                pluginEntries.forEach { page ->
+                pluginEntries.forEach { entry ->
                     DropdownMenuItem(
-                        text = { Text(page.title.resolve(pluginLanguageTag)) },
+                        text = { Text(entry.title.resolve(pluginLanguageTag)) },
                         leadingIcon = {
                             Icon(
-                                pluginPageIcon(page.icon),
+                                pluginPageIcon(entry.icon),
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -224,7 +229,7 @@ private fun WorkbenchMenuButton(
                         },
                         onClick = {
                             expanded = false
-                            onOpenPluginPage(page)
+                            onPluginEntry(entry)
                         }
                     )
                 }
@@ -347,7 +352,13 @@ internal fun RemoteConnectingPlaceholder(
 }
 
 @Composable
-internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
+internal fun WelcomeState(
+    bottomReserve: Dp,
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    languageTag: String = "zh-CN",
+    onPluginEntry: (PluginUiEntry) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     BoxWithConstraints(
         modifier = modifier.padding(Spacing.xl),
         contentAlignment = Alignment.Center
@@ -374,6 +385,53 @@ internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (pluginEntries.isNotEmpty()) {
+                Spacer(Modifier.height(Spacing.lg))
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    pluginEntries.take(3).forEach { entry ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(Radius.sm),
+                            modifier = Modifier.widthIn(max = 360.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .clickable { onPluginEntry(entry) }
+                                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            ) {
+                                Icon(
+                                    pluginPageIcon(entry.icon),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = entry.title.resolve(languageTag),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (entry.kind != PluginUiEntryKind.PAGE) {
+                                    Text(
+                                        text = stringResource(
+                                            if (entry.kind == PluginUiEntryKind.PROMPT) {
+                                                R.string.plugins_entry_prompt
+                                            } else {
+                                                R.string.plugins_entry_action
+                                            }
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

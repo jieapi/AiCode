@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aicode.R
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.shizuku.ShizukuManager
@@ -27,6 +28,7 @@ import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPreview
 import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginChatService
@@ -49,6 +51,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,6 +65,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 
 /** 导入插件包的界面状态。 */
 sealed interface PluginImportState {
@@ -582,6 +591,44 @@ class PluginsViewModel @Inject constructor(
     /** 插件专属数据目录；槽位入口与桥必须使用同一落点。 */
     fun dataDirFor(pluginId: String): File = manager.dataDirFor(pluginId)
 
+    /**
+     * 槽位动作入口：复核插件仍启用后调用 runtime 的 `ui.invoke`。
+     * handler 返回 `{message}` 时交给 UI 显示；失败返回错误文案。
+     */
+    fun runUiAction(entry: PluginUiEntry, sessionId: String?, onMessage: (String?) -> Unit) {
+        val handler = entry.handler ?: return
+        viewModelScope.launch {
+            val message = try {
+                val plugin = manager.plugins.value.firstOrNull { it.id == entry.pluginId && it.isActive }
+                    ?: throw IllegalStateException(context.getString(R.string.plugin_tool_not_authorized))
+                val runtime = plugin.content.runtime
+                    ?: throw IllegalStateException(context.getString(R.string.plugin_runtime_failed))
+                val result = withContext(Dispatchers.IO) {
+                    pluginRuntimeManager.invoke(
+                        pluginId = plugin.id,
+                        version = plugin.record.version,
+                        runtime = runtime,
+                        handler = handler,
+                        args = buildJsonObject {
+                            put("entryId", entry.localId)
+                            put("slot", entry.slot)
+                            sessionId?.let { put("sessionId", it) }
+                        },
+                        method = "ui.invoke",
+                        timeoutMs = ACTION_TIMEOUT_MS
+                    )
+                }
+                (result as? JsonObject)?.get("message")?.let { (it as? JsonPrimitive)?.contentOrNull }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "插件槽位动作失败: ${entry.pluginId}/${entry.localId}", e)
+                e.message ?: context.getString(R.string.plugin_runtime_failed)
+            }
+            onMessage(message)
+        }
+    }
+
     /** 为插件设置页构造宿主桥；桥与 WebView 一起缓存，由 [PluginWebViewCache] 统一释放。 */
     fun createWebBridge(
         page: PluginPage,
@@ -627,5 +674,6 @@ class PluginsViewModel @Inject constructor(
         const val TAG = "PluginsViewModel"
         const val DEV_POLL_MS = 2_000L
         const val SETTINGS_SAVE_DEBOUNCE_MS = 500L
+        const val ACTION_TIMEOUT_MS = 10_000L
     }
 }

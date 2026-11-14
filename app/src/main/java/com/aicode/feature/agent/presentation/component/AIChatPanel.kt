@@ -92,7 +92,7 @@ import com.aicode.feature.agent.presentation.QueuedRequest
 import com.aicode.feature.agent.presentation.hasVisibleContent
 import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.onboarding.presentation.onboardingTarget
-import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.presentation.PluginTipBanner
 import com.aicode.feature.settings.presentation.SettingsViewModel
 import com.aicode.feature.settings.domain.model.DashboardContext
@@ -660,9 +660,10 @@ fun AIChatPanel(
     viewModel: AIAgentViewModel,
     onNavigateToTerminal: () -> Unit = {},
     onNavigateToGit: () -> Unit = {},
-    pluginEntries: List<PluginPage> = emptyList(),
+    pluginEntries: List<PluginUiEntry> = emptyList(),
     pluginLanguageTag: String = "zh-CN",
-    onOpenPluginPage: (PluginPage) -> Unit = {},
+    onPluginEntry: (PluginUiEntry) -> Unit = {},
+    welcomePluginEntries: List<PluginUiEntry> = emptyList(),
     settingsViewModel: SettingsViewModel? = null,
     workspaceViewModel: WorkspaceViewModel? = null,
     onOpenDrawer: () -> Unit,
@@ -1566,7 +1567,7 @@ fun AIChatPanel(
                 gitActive = gitActive,
                 pluginEntries = pluginEntries,
                 pluginLanguageTag = pluginLanguageTag,
-                onOpenPluginPage = onOpenPluginPage
+                onPluginEntry = onPluginEntry
             )
         }
     ) { padding ->
@@ -1603,6 +1604,9 @@ fun AIChatPanel(
                 } else if (messages.isEmpty()) {
                     WelcomeState(
                         bottomReserve = with(LocalDensity.current) { inputBarReservePx.toDp() },
+                        pluginEntries = welcomePluginEntries,
+                        languageTag = pluginLanguageTag,
+                        onPluginEntry = onPluginEntry,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {

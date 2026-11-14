@@ -63,7 +63,8 @@ fun PluginWebPanelScreen(
     onClosePage: () -> Unit,
     bridgeFactory: (post: (String) -> Unit, onClosePage: () -> Unit) -> PluginWebBridge,
     modifier: Modifier = Modifier,
-    applySystemBarInsets: Boolean = true
+    applySystemBarInsets: Boolean = true,
+    currentSessionId: () -> String? = { null }
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -130,7 +131,8 @@ fun PluginWebPanelScreen(
             onClosePage = onClosePage,
             post = { script ->
                 runCatching { webView.evaluateJavascript(script, null) }
-            }
+            },
+            currentSessionId = currentSessionId
         )
     }
 

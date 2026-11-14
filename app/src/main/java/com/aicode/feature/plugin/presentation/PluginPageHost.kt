@@ -36,7 +36,8 @@ fun PluginPageHost(
                 )
             },
             modifier = Modifier.fillMaxSize(),
-            applySystemBarInsets = applySystemBarInsets
+            applySystemBarInsets = applySystemBarInsets,
+            currentSessionId = currentSessionId
         )
     }
 }

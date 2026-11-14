@@ -105,7 +105,7 @@ import com.aicode.feature.agent.presentation.BrowseClipboard
 import com.aicode.feature.agent.presentation.FileBrowseState
 import com.aicode.feature.agent.presentation.FileTreeNode
 import com.aicode.feature.agent.presentation.FileTreeRoot
-import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.workspace.domain.isValidFileEntryName
 import com.aicode.core.ui.ChevronRotationStyle
@@ -179,9 +179,11 @@ fun ChatDrawerContent(
     onClearClipboard: () -> Unit,
     onNavigateToBrowser: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
-    pluginEntries: List<PluginPage> = emptyList(),
+    pluginEntries: List<PluginUiEntry> = emptyList(),
     pluginLanguageTag: String = "zh-CN",
-    onOpenPluginPage: (PluginPage) -> Unit = {},
+    onPluginEntry: (PluginUiEntry) -> Unit = {},
+    sessionPluginEntries: List<PluginUiEntry> = emptyList(),
+    onSessionPluginEntry: (ChatSession, PluginUiEntry) -> Unit = { _, _ -> },
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -378,13 +380,13 @@ fun ChatDrawerContent(
         if (pluginEntries.isNotEmpty()) {
             SettingsGroupHeader(text = stringResource(R.string.settings_plugins))
             SettingsGroup {
-                pluginEntries.take(3).forEachIndexed { index, page ->
+                pluginEntries.take(3).forEachIndexed { index, entry ->
                     if (index > 0) SettingsDivider()
                     SettingsRow(
-                        icon = pluginPageIcon(page.icon),
-                        title = page.title.resolve(pluginLanguageTag),
-                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, page.pluginId),
-                        onClick = { onOpenPluginPage(page) }
+                        icon = pluginPageIcon(entry.icon),
+                        title = entry.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, entry.pluginId),
+                        onClick = { onPluginEntry(entry) }
                     )
                 }
                 if (pluginEntries.size > 3) {
@@ -426,15 +428,15 @@ fun ChatDrawerContent(
                 modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
             )
             Column(modifier = Modifier.padding(bottom = Spacing.xl)) {
-                pluginEntries.forEachIndexed { index, page ->
+                pluginEntries.forEachIndexed { index, entry ->
                     if (index > 0) SettingsDivider()
                     SettingsRow(
-                        icon = pluginPageIcon(page.icon),
-                        title = page.title.resolve(pluginLanguageTag),
-                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, page.pluginId),
+                        icon = pluginPageIcon(entry.icon),
+                        title = entry.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, entry.pluginId),
                         onClick = {
                             showAllPlugins = false
-                            onOpenPluginPage(page)
+                            onPluginEntry(entry)
                         }
                     )
                 }
@@ -505,6 +507,9 @@ fun ChatDrawerContent(
                 menuSession = null
                 pendingDelete = session
             },
+            pluginEntries = sessionPluginEntries,
+            pluginLanguageTag = pluginLanguageTag,
+            onPluginEntry = { entry -> onSessionPluginEntry(session, entry) },
             onDismiss = { menuSession = null }
         )
     }
@@ -1448,6 +1453,9 @@ private fun SessionActionSheet(
     onExport: () -> Unit,
     onBatchSelect: () -> Unit,
     onDelete: () -> Unit,
+    pluginEntries: List<PluginUiEntry>,
+    pluginLanguageTag: String,
+    onPluginEntry: (PluginUiEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -1507,6 +1515,25 @@ private fun SessionActionSheet(
                     onBatchSelect()
                 }
             )
+            if (pluginEntries.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_plugins),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+                pluginEntries.forEach { entry ->
+                    SheetActionRow(
+                        icon = pluginPageIcon(entry.icon),
+                        label = entry.title.resolve(pluginLanguageTag),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            onDismiss()
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
             SheetActionRow(
                 icon = FeatherIcons.Trash2,
                 label = stringResource(R.string.common_delete),

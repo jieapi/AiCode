@@ -37,7 +37,7 @@ data class PluginWorkspaceTool(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
-/** 已校验存在性的插件 HTML 页面；[slot] 非空时表示它作为某个宿主槽位的入口。 */
+/** 已校验存在性的插件 HTML 页面；[slot] 非空时表示它由某个槽位入口打开。 */
 data class PluginPage(
     val pluginId: String,
     val localId: String,
@@ -52,6 +52,31 @@ data class PluginPage(
 
     /** WebView/页面桥缓存键：插件版本变化后强制创建新实例，避免继续使用旧页面。 */
     val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
+}
+
+/** 已解析的槽位入口：页面、提示词或运行时动作。 */
+data class PluginUiEntry(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val slot: String,
+    val icon: String,
+    val page: PluginPage? = null,
+    val prompt: LocalizedText? = null,
+    val handler: String? = null,
+    val confirm: Boolean = false
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+
+    val kind: PluginUiEntryKind
+        get() = when {
+            page != null -> PluginUiEntryKind.PAGE
+            prompt != null -> PluginUiEntryKind.PROMPT
+            else -> PluginUiEntryKind.ACTION
+        }
+
+    /** 仅页面入口有 WebView 缓存键。 */
+    val cacheKey: String? get() = page?.cacheKey
 }
 
 /** 已校验存在性的插件业务入口文件。 */
@@ -156,7 +181,7 @@ data class PluginContent(
     val skills: List<PluginSkill> = emptyList(),
     val agents: List<PluginAgent> = emptyList(),
     val workspaceTools: List<PluginWorkspaceTool> = emptyList(),
-    val uiEntries: List<PluginPage> = emptyList(),
+    val uiEntries: List<PluginUiEntry> = emptyList(),
     val runtime: PluginRuntime? = null,
     val tools: List<PluginTool> = emptyList(),
     val hooks: List<PluginHook> = emptyList(),
@@ -467,15 +492,39 @@ object PluginContentLoader {
         pluginVersion: String,
         ref: PluginUiEntryRef,
         errors: MutableList<PluginError>
+    ): PluginUiEntry? {
+        val page = ref.page?.let { loadUiPage(dir, pluginId, pluginVersion, ref, errors) }
+        if (ref.page != null && page == null) return null
+        return PluginUiEntry(
+            pluginId = pluginId,
+            localId = ref.id,
+            title = ref.title,
+            slot = ref.slot,
+            icon = ref.icon,
+            page = page,
+            prompt = ref.prompt,
+            handler = ref.handler,
+            confirm = ref.confirm
+        )
+    }
+
+    /** 页面入口的 HTML 只校验存在性与大小，不解析内容。 */
+    private fun loadUiPage(
+        dir: File,
+        pluginId: String,
+        pluginVersion: String,
+        ref: PluginUiEntryRef,
+        errors: MutableList<PluginError>
     ): PluginPage? {
-        val file = File(dir, ref.page)
+        val page = ref.page ?: return null
+        val file = File(dir, page)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
         if (!inside || !file.isFile) {
-            errors += PluginError(PluginErrorCode.FILE_MISSING, ref.page)
+            errors += PluginError(PluginErrorCode.FILE_MISSING, page)
             return null
         }
         if (file.length() > MAX_CONTENT_BYTES) {
-            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "${ref.page}: too large")
+            errors += PluginError(PluginErrorCode.CONTENT_INVALID, "$page: too large")
             return null
         }
         return PluginPage(
@@ -483,7 +532,7 @@ object PluginContentLoader {
             localId = ref.id,
             title = ref.title,
             slot = ref.slot,
-            pageFile = ref.page,
+            pageFile = page,
             icon = ref.icon,
             installDir = dir,
             pluginVersion = pluginVersion

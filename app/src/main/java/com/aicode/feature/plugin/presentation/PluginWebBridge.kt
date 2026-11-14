@@ -88,8 +88,8 @@ class PluginWebBridge(
     @Volatile private var theme: () -> String,
     @Volatile private var onClosePage: () -> Unit,
     @Volatile private var post: (String) -> Unit,
-    /** 聊天页当前会话；从非聊天槽位打开的页面为 null。 */
-    private val currentSessionId: () -> String? = { null }
+    /** 聊天页当前会话；缓存复用时由页面宿主刷新。 */
+    @Volatile private var currentSessionId: () -> String? = { null }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -231,10 +231,16 @@ class PluginWebBridge(
      * WebView 缓存复用时页面持有的是同一个桥实例（注入对象只能在页面加载时出现），
      * 重新进入页面要把回调换成当前组合的。
      */
-    fun updateCallbacks(theme: () -> String, onClosePage: () -> Unit, post: (String) -> Unit) {
+    fun updateCallbacks(
+        theme: () -> String,
+        onClosePage: () -> Unit,
+        post: (String) -> Unit,
+        currentSessionId: () -> String? = { null }
+    ) {
         this.theme = theme
         this.onClosePage = onClosePage
         this.post = post
+        this.currentSessionId = currentSessionId
     }
 
     private suspend fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {

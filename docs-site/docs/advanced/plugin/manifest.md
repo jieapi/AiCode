@@ -231,6 +231,21 @@
       "slot": "settings.ai",
       "page": "pages/memory.html",
       "icon": "book"
+    },
+    {
+      "id": "summarize",
+      "title": {"zh-CN": "总结会话", "en": "Summarize"},
+      "slot": "chat.welcome",
+      "icon": "zap",
+      "prompt": {"zh-CN": "请总结当前会话的结论和待办。"}
+    },
+    {
+      "id": "sync",
+      "title": {"zh-CN": "同步笔记", "en": "Sync notes"},
+      "slot": "drawer.footer",
+      "icon": "refresh",
+      "handler": "actions.sync",
+      "confirm": true
     }
   ]
 }
@@ -241,8 +256,13 @@
 | `id` | 是 | 局部 ID，同一插件的入口不可重名 |
 | `title` | 是 | 本地化名称，最多 80 字符 |
 | `slot` | 是 | 宿主槽位，仅可取下表的值 |
-| `page` | 是 | 包内 `.html`/`.htm` 页面，最大 512 KiB |
+| `page` | 三选一 | 包内 `.html`/`.htm` 页面，最大 512 KiB |
+| `prompt` | 三选一 | 本地化提示词，最多 4000 字符；填进输入框，不自动发送 |
+| `handler` | 三选一 | runtime 的 handler 名；需要声明 `runtime` |
+| `confirm` | 否 | 仅动作入口：执行前弹确认框 |
 | `icon` | 否 | 图标名，默认 `book`，最长 32 字符 |
+
+`page`、`prompt`、`handler` 必须且只能出现一个。`settings.*` 槽位只接受 `page`，聊天区槽位三种都接受。动作返回 `{message}` 时宿主用 toast 显示；错误请用 JSON-RPC error 返回。
 
 | `slot` | 位置 |
 | --- | --- |
@@ -254,6 +274,8 @@
 | `settings.help` | 设置页「帮助与关于」分组末尾 |
 | `drawer.footer` | 侧栏底部，浏览器与设置之上 |
 | `chat.header.menu` | 聊天顶栏「更多」菜单底部 |
+| `chat.welcome` | 聊天空态建议区，最多展示 3 条 |
+| `chat.session.menu` | 会话长按菜单，删除项之前 |
 
 同一插件在每个槽位最多声明 2 个入口；超出会在安装时拒绝。入口顺序由宿主决定：宿主自己的项始终在前，插件项按插件显示名与声明顺序排列，插件不能指定排序或插入位置。
 

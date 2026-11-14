@@ -51,7 +51,7 @@ object PluginManifestParser {
     private val CONTRIBUTION_KEYS = setOf("id", "file")
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
-    private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "icon")
+    private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "prompt", "handler", "confirm", "icon")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
@@ -65,6 +65,7 @@ object PluginManifestParser {
     private val LANGUAGE_TAG = Regex("^[a-z]{2,3}(-[a-z0-9]{2,8})*$")
 
     private const val MAX_NAME = 80
+    private const val MAX_PROMPT = 4_000
     private const val MAX_DESCRIPTION = 600
     private const val MAX_COMMAND_PARTS = 16
     private const val MAX_COMMAND_PART_CHARS = 200
@@ -123,7 +124,10 @@ object PluginManifestParser {
             val contributes = readContributes(obj)
             val icon = readIcon(obj)
 
-            val needsRuntime = contributes != null && (contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty())
+            val needsRuntime = contributes != null && (
+                contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty() ||
+                    contributes.uiEntries.any { it.handler != null }
+                )
             if (needsRuntime && runtime == null) missing("runtime")
             if (errors.isNotEmpty()) return ManifestParseResult.Failure(errors.toList())
 
@@ -786,7 +790,7 @@ object PluginManifestParser {
             return if (ok) result else null
         }
 
-        /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位与包内 HTML 页面。 */
+        /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位，以及 page / prompt / handler 三者之一。 */
         private fun readUiEntries(raw: JsonElement?, path: String): List<PluginUiEntryRef>? {
             if (raw == null) return emptyList()
             val array = raw as? JsonArray ?: return null.also { invalid(path) }
@@ -810,14 +814,31 @@ object PluginManifestParser {
                 val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
                 val slot = item["slot"]?.stringOrNull()?.takeIf { it in PluginUiSlots.ALL }
                 val page = item["page"]?.stringOrNull()
+                val promptRaw = item["prompt"]
+                val prompt = if (promptRaw != null) {
+                    parseLocalized(promptRaw, "$itemPath.prompt", MAX_PROMPT, allowNewlines = true)
+                } else null
+                val handlerRaw = item["handler"]?.stringOrNull()
+                val handler = handlerRaw?.trim()?.takeIf { HANDLER_NAME.matches(it) }
+                val confirmRaw = item["confirm"]
+                val confirm = if (confirmRaw != null) (confirmRaw as? JsonPrimitive)?.booleanOrNull else false
                 val icon = item["icon"]?.stringOrNull()?.trim() ?: "book"
                 if (id == null) { invalid("$itemPath.id"); ok = false }
                 if (title == null) { invalid("$itemPath.title"); ok = false }
                 if (slot == null) { invalid("$itemPath.slot"); ok = false }
-                if (page == null || !isSafeRelativePath(page) ||
-                    !(page.endsWith(".html", ignoreCase = true) || page.endsWith(".htm", ignoreCase = true))
+                if (page != null && (!isSafeRelativePath(page) ||
+                        !(page.endsWith(".html", ignoreCase = true) || page.endsWith(".htm", ignoreCase = true)))
                 ) {
                     invalid("$itemPath.page")
+                    ok = false
+                }
+                if (handlerRaw != null && handler == null) { invalid("$itemPath.handler"); ok = false }
+                if (confirmRaw != null && confirm == null) { invalid("$itemPath.confirm"); ok = false }
+                val kinds = listOfNotNull(page, prompt?.let { "prompt" }, handler)
+                if (kinds.size != 1) { invalid(itemPath); ok = false }
+                if (confirm == true && handler == null) { invalid("$itemPath.confirm"); ok = false }
+                if (slot != null && PluginUiSlots.isSettingsSlot(slot) && (prompt != null || handler != null)) {
+                    invalid("$itemPath.slot")
                     ok = false
                 }
                 if (icon.isEmpty() || icon.length > 32) {
@@ -828,12 +849,21 @@ object PluginManifestParser {
                     invalid("$itemPath.slot")
                     ok = false
                 }
-                if (ok && id != null && title != null && slot != null && page != null) {
+                if (ok && id != null && title != null && slot != null) {
                     if (result.any { it.id == id }) {
                         err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
                         ok = false
                     } else {
-                        result += PluginUiEntryRef(id, slot, title, page, icon)
+                        result += PluginUiEntryRef(
+                            id = id,
+                            slot = slot,
+                            title = title,
+                            page = page,
+                            prompt = prompt,
+                            handler = handler,
+                            confirm = confirm == true,
+                            icon = icon
+                        )
                     }
                 }
             }
