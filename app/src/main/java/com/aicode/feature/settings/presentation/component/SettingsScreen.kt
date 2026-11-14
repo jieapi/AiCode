@@ -421,6 +421,7 @@ fun SettingsScreen(
     val pluginDevProjects by pluginsViewModel.devProjects.collectAsStateWithLifecycle()
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     var showPluginSettingsSheet by remember { mutableStateOf(false) }
+    var showPluginUninstallConfirm by remember { mutableStateOf(false) }
     val selectedPlugin = plugins.firstOrNull { it.id == selectedPluginId }
     val pluginLanguageTag = currentLanguageTag()
     var activePluginPage by remember { mutableStateOf<PluginSettingsPage?>(null) }
@@ -562,9 +563,10 @@ fun SettingsScreen(
         if (section == SettingsSection.PluginDetail && selectedPlugin == null) section = SettingsSection.Plugins
     }
 
-    // 离开插件列表时收起设置弹层，避免返回列表时意外重新弹出。
+    // 离开插件列表 / 详情时收起对应弹层，避免返回时意外重新弹出。
     LaunchedEffect(section) {
         if (section != SettingsSection.Plugins) showPluginSettingsSheet = false
+        if (section != SettingsSection.PluginDetail) showPluginUninstallConfirm = false
     }
 
     // 插件停用 / 卸载后入口消失，当前停留的插件页要退回菜单。
@@ -1032,6 +1034,16 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        SettingsSection.PluginDetail -> selectedPlugin?.let {
+                            IconButton(onClick = { showPluginUninstallConfirm = true }) {
+                                Icon(
+                                    FeatherIcons.Trash2,
+                                    contentDescription = stringResource(R.string.plugins_uninstall),
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
                         SettingsSection.Log -> {
                             IconButton(onClick = { viewModel.refreshLogs() }) {
                                 Icon(FeatherIcons.RefreshCw, contentDescription = stringResource(R.string.settings_refresh_logs))
@@ -1427,8 +1439,7 @@ fun SettingsScreen(
                         selectedPluginId = it.id
                         section = SettingsSection.PluginDetail
                     },
-                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) },
-                    onUninstall = { plugin -> pluginsViewModel.uninstall(plugin.id) }
+                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) }
                 )
                 SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -1693,6 +1704,31 @@ fun SettingsScreen(
     SkillImportResultDialog(state = skillImportState, onDismiss = { viewModel.clearSkillImportState() })
 
     PluginImportHost(viewModel = pluginsViewModel)
+
+    if (showPluginUninstallConfirm) {
+        selectedPlugin?.let { plugin ->
+            AlertDialog(
+                onDismissRequest = { showPluginUninstallConfirm = false },
+                title = { Text(stringResource(R.string.plugins_uninstall_confirm_title)) },
+                text = {
+                    Text(stringResource(R.string.plugins_uninstall_confirm_message, plugin.displayName(pluginLanguageTag)))
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showPluginUninstallConfirm = false
+                            pluginsViewModel.uninstall(plugin.id)
+                        }
+                    ) { Text(stringResource(R.string.common_delete)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPluginUninstallConfirm = false }) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                }
+            )
+        }
+    }
 
     if (showPluginSettingsSheet && section == SettingsSection.Plugins) {
         PluginDeveloperSettingsSheet(

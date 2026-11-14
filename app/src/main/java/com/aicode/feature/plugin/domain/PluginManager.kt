@@ -63,9 +63,7 @@ data class PluginPreview(
     val manifest: PluginManifest,
     val content: PluginContent,
     /** 已安装的同 ID 插件版本；非空表示这次导入会替换它。 */
-    val installedVersion: String?,
-    /** 与已安装内容的包摘要完全相同。 */
-    val identical: Boolean
+    val installedVersion: String?
 )
 
 sealed interface PluginPreviewResult {
@@ -321,8 +319,7 @@ class PluginManager internal constructor(
                 token = token,
                 manifest = manifest,
                 content = content,
-                installedVersion = existing?.record?.version,
-                identical = existing?.record?.archiveSha256 == pkg.archiveSha256
+                installedVersion = existing?.record?.version
             )
         )
     }

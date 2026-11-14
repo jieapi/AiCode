@@ -29,12 +29,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
 import com.aicode.core.theme.Spacing
-import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AdaptiveModalBottomSheet
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
-import com.aicode.feature.plugin.domain.PluginPreview
-import com.aicode.feature.settings.presentation.component.SettingsDivider
 import com.aicode.feature.settings.presentation.component.SettingsGroup
 import com.aicode.feature.settings.presentation.component.SettingsGroupHeader
 
@@ -137,48 +134,13 @@ private fun PluginPreviewSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Notice(stringResource(R.string.plugins_preview_local_notice))
-            Notice(stringResource(R.string.plugins_preview_behavior_notice))
-            if (manifest.runtime != null) {
-                Notice(stringResource(R.string.plugins_preview_runtime_notice))
-            }
-            if (manifest.hooks.isNotEmpty()) {
-                Notice(stringResource(R.string.plugins_preview_hook_notice))
-            }
-            if (manifest.mcp.isNotEmpty()) {
-                Notice(stringResource(R.string.plugins_preview_mcp_notice))
-            }
-            if (manifest.shizuku != null) {
-                Notice(stringResource(R.string.plugins_preview_shizuku_notice))
-            }
-            if (manifest.overlay != null) {
-                Notice(stringResource(R.string.plugins_preview_overlay_notice))
-            }
-            preview.installedVersion?.let { installed ->
-                Notice(
-                    stringResource(
-                        if (preview.identical) R.string.plugins_preview_identical_notice
-                        else R.string.plugins_preview_replace_notice,
-                        installed
-                    )
-                )
-            }
-
             SettingsGroupHeader(text = stringResource(R.string.plugins_preview_contents))
             SettingsGroup {
-                contentLines(preview).forEachIndexed { index, line ->
-                    if (index > 0) SettingsDivider()
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 12.dp)) {
-                        Text(text = line.first, style = MaterialTheme.typography.bodyLarge)
-                        if (line.second.isNotBlank()) {
-                            Text(
-                                text = line.second,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                PluginContentRows(
+                    content = preview.content,
+                    languageTag = languageTag,
+                    active = true
+                )
             }
 
             state.error?.let { error ->
@@ -214,46 +176,6 @@ private fun PluginPreviewSheet(
         }
     }
 }
-
-@Composable
-private fun Notice(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.semanticColors.subtleText
-    )
-}
-
-/** 预览里「将提供的内容」逐行：(标题, 描述)。 */
-@Composable
-private fun contentLines(preview: PluginPreview): List<Pair<String, String>> =
-    preview.content.skills.map {
-        stringResource(R.string.plugins_content_skill, it.localId) to it.skill.description
-    } + preview.content.agents.map {
-        stringResource(R.string.plugins_content_agent, it.localId) to it.definition.description
-    } + preview.content.workspaceTools.map {
-        stringResource(
-            R.string.plugins_content_tool,
-            it.title.resolve(currentLanguageTag())
-        ) to it.description.resolve(currentLanguageTag())
-    } + preview.content.tools.map {
-        stringResource(
-            R.string.plugins_content_ai_tool,
-            it.title.resolve(currentLanguageTag())
-        ) to it.description.resolve(currentLanguageTag())
-    } + preview.content.hooks.map {
-        stringResource(R.string.plugins_content_hook, it.event) to it.handler
-    } + preview.content.mcp.map {
-        stringResource(R.string.plugins_content_mcp, it.originalName) to mcpDescription(it)
-    } + listOfNotNull(
-        preview.content.shizuku?.let {
-            stringResource(R.string.plugins_content_shizuku, it.purpose) to it.purpose
-        },
-        preview.content.overlay?.let {
-            stringResource(R.string.plugins_content_overlay, it.purpose) to
-                it.surfaces.joinToString { surface -> surface.localId }
-        }
-    )
 
 /** 把领域层的错误码翻译成界面文案；[PluginError.detail] 是语言无关的定位信息，原样带入。 */
 @Composable
