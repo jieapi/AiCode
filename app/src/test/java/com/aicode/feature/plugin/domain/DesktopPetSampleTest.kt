@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/** 桌面宠物示例：overlay 声明与浮层页面必须能被解析、校验和加载。 */
+/** 桌面宠物插件：overlay 声明与浮层页面必须能被解析、校验和加载。 */
 class DesktopPetSampleTest {
 
     private fun sampleDir(): File {
@@ -29,7 +29,7 @@ class DesktopPetSampleTest {
         val parsed = PluginManifestParser.parse(File(dir, "plugin.json").readText())
         assertTrue("清单应解析成功：$parsed", parsed is ManifestParseResult.Success)
         val manifest = (parsed as ManifestParseResult.Success).manifest
-        assertEquals("demo.desktop-pet", manifest.id)
+        assertEquals("jieapi.desktop-pet", manifest.id)
         assertNotNull(manifest.overlay)
         assertEquals(1, manifest.overlay?.surfaces?.size)
 

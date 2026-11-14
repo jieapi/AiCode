@@ -14,10 +14,20 @@
 | `repository` | 是 | 源码仓库，必须是 `https://` 地址，不能包含账号、查询参数或片段 |
 | `description` | 是 | 用途说明，字符串或按语言的对象，最多 600 字符，允许换行 |
 | `license` | 是 | 许可证名称，最多 100 字符 |
+| `icon` | 否 | 插件列表与详情图标：内置图标名，或包内 `.png` / `.webp` 相对路径 |
 | `engines` | 是 | 目前仅接受 `{"pluginApi": "版本范围"}` |
 | `runtime` | 有工具或 hook 时必填 | 业务进程的入口与启动方式 |
 | `contributes` | 是 | 提供的内容，至少一项 |
 | `configPage` | 否 | 插件配置页，包内 HTML 相对路径；也可声明在 `contributes.configPage` 中 |
+
+### 插件图标
+
+`icon` 只接受两种值：
+
+- 内置图标名：小写字母开头，仅含小写字母、数字和连字符，最多 32 个字符，如 `terminal`、`book`、`settings`、`cloud`、`tool`、`monitor`、`package`；未知名称回退 `package`。
+- 包内图片：以 `.png` 或 `.webp` 结尾的相对路径，如 `icons/logo.png`。图片必须位于包内，单文件不超过 256 KiB；宿主按最大边 160px 采样解码，无需提供多套尺寸。
+
+不支持 SVG、JPEG 等其它格式，清单里写这些后缀会直接拒绝安装。图片解码失败或未声明 `icon` 时显示宿主默认的 `package` 图标。插件 HTML 页面内部仍可自行使用包内 SVG 图片，那与清单图标无关。
 
 ### id 与 publisher
 

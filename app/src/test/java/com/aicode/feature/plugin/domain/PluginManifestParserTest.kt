@@ -694,4 +694,35 @@ class PluginManifestParserTest {
             PluginErrorCode.API_INCOMPATIBLE
         )
     }
+
+    @Test
+    fun icon_acceptsBuiltinNameAndPackageImage() {
+        val builtin = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"terminal\""))
+        assertEquals("terminal", builtin.icon)
+
+        val png = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.png\""))
+        assertEquals("icons/logo.png", png.icon)
+
+        val webp = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.WEBP\""))
+        assertEquals("icons/logo.WEBP", webp.icon)
+    }
+
+    @Test
+    fun icon_rejectsUnsupportedImageAndUnsafePath() {
+        assertRejected(
+            PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.svg\""),
+            PluginErrorCode.FIELD_INVALID,
+            "icon"
+        )
+        assertRejected(
+            PluginFixtures.manifest(extra = ",\n  \"icon\": \"../logo.png\""),
+            PluginErrorCode.FIELD_INVALID,
+            "icon"
+        )
+        assertRejected(
+            PluginFixtures.manifest(extra = ",\n  \"icon\": \"\""),
+            PluginErrorCode.FIELD_INVALID,
+            "icon"
+        )
+    }
 }

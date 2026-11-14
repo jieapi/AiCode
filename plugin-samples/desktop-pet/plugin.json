@@ -1,18 +1,19 @@
 {
   "manifestVersion": 1,
-  "id": "demo.desktop-pet",
+  "id": "jieapi.desktop-pet",
   "name": {
-    "default": "Desktop Pet Demo",
-    "zh-CN": "桌面宠物示例"
+    "default": "Desktop Pet",
+    "zh-CN": "桌面宠物"
   },
-  "version": "1.16.0",
-  "publisher": "demo",
-  "repository": "https://github.com/example/desktop-pet-demo",
+  "version": "1.0.0",
+  "publisher": "jieapi",
+  "repository": "https://github.com/jieapi/AiCode",
   "description": {
-    "default": "A host-managed overlay demo: draggable pet, click reaction, no native pet code in the app.",
-    "zh-CN": "宿主托管浮层示例：可拖拽、可点击互动的桌宠，App 内没有任何宠物专用代码。"
+    "default": "A draggable, interactive desktop pet that reacts to AI run status. Long press for the menu; size and display timing are configurable.",
+    "zh-CN": "可拖拽、可点击互动的桌面宠物：跟随 AI 运行状态变化，长按打开菜单，可在配置页调整大小与显示时机。"
   },
   "license": "MIT",
+  "icon": "icons/icon.png",
   "engines": {
     "pluginApi": "^1.0.0"
   },

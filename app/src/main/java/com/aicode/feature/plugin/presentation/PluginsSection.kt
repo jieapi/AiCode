@@ -69,6 +69,7 @@ import com.aicode.core.ui.SegmentedTabs
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginContent
+import com.aicode.feature.plugin.domain.PluginIcon
 import com.aicode.feature.plugin.domain.PluginMcpServer
 import com.aicode.feature.plugin.domain.PluginSettingsPage
 import com.aicode.feature.plugin.domain.PluginStatus
@@ -326,11 +327,11 @@ private fun PluginRow(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = FeatherIcons.Package,
-                contentDescription = null,
+            PluginIconContent(
+                icon = plugin.content.icon,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+                iconSize = 22.dp,
+                shape = RoundedCornerShape(8.dp)
             )
         }
 
@@ -548,7 +549,8 @@ private fun PluginNativeConfigContent(
         if (manifest != null) {
             PluginHeaderCard(
                 name = plugin.displayName(languageTag),
-                description = manifest.description.resolve(languageTag)
+                description = manifest.description.resolve(languageTag),
+                icon = plugin.content.icon
             )
         }
 
@@ -749,7 +751,7 @@ private fun PluginNativeConfigContent(
 }
 
 @Composable
-private fun PluginHeaderCard(name: String, description: String) {
+private fun PluginHeaderCard(name: String, description: String, icon: PluginIcon?) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -771,11 +773,11 @@ private fun PluginHeaderCard(name: String, description: String) {
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = FeatherIcons.Package,
-                    contentDescription = null,
+                PluginIconContent(
+                    icon = icon,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(26.dp)
+                    iconSize = 26.dp,
+                    shape = RoundedCornerShape(12.dp)
                 )
             }
             Spacer(modifier = Modifier.width(Spacing.lg))

@@ -234,7 +234,9 @@ data class PluginManifest(
     val providers: List<PluginProviderRef> = emptyList(),
     val shizuku: PluginShizukuRef? = null,
     val overlay: PluginOverlayRef? = null,
-    val configPage: String? = null
+    val configPage: String? = null,
+    /** 内置图标名，或包内 `.png` / `.webp` 相对路径；缺省用宿主默认图标。 */
+    val icon: String? = null
 ) {
     /** 清单声明的贡献总数。 */
     val contributionCount: Int

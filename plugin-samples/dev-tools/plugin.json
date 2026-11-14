@@ -13,6 +13,7 @@
     "zh-CN": "为当前 Flutter / Android 项目提供构建与清理工具。"
   },
   "license": "MIT",
+  "icon": "icons/icon.png",
   "engines": {
     "pluginApi": "^1.0.0"
   },

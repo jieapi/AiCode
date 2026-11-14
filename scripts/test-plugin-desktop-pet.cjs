@@ -433,7 +433,7 @@ function loadRuntime(options = {}) {
     }
     if (message.method === 'host.overlay.create') {
       return {
-        overlayId: 'demo.desktop-pet:pet',
+        overlayId: 'jieapi.desktop-pet:pet',
         width: message.params.width,
         height: message.params.height,
         visibilityPolicy: message.params.visibilityPolicy
@@ -481,7 +481,7 @@ function loadRuntime(options = {}) {
     receive({ id, method: 'hook.invoke', params: { handler, args } });
   });
   env.action = action => env.invoke('overlay.message', { payload: { type: 'menuAction', action } });
-  env.message = payload => env.invoke('overlay.message', { overlayId: 'demo.desktop-pet:pet', payload });
+  env.message = payload => env.invoke('overlay.message', { overlayId: 'jieapi.desktop-pet:pet', payload });
   env.advance = async milliseconds => {
     const target = env.now + milliseconds;
     for (let step = 0; step < 32; step++) {
@@ -637,7 +637,7 @@ test('长按、拖动不直接唤醒，明确喂食或新任务会切换状态',
 
 test('页面重新就绪会同步已有睡眠状态，关闭后停止定时器', async () => {
   const env = loadRuntime();
-  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.invoke('overlay.created', { overlayId: 'jieapi.desktop-pet:pet' });
   await env.action('sleep');
   await env.message({ type: 'petReady' });
   assert.deepEqual(env.states(), ['sleep', 'sleep']);
@@ -655,7 +655,7 @@ for (const state of ['feeding', 'success', 'error']) {
     if (state === 'feeding') await env.action('feed');
     else await env.invoke('hooks.agentRunFinished', { status: state === 'success' ? 'success' : 'failed' });
     await env.invoke('overlay.closed');
-    await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+    await env.invoke('overlay.created', { overlayId: 'jieapi.desktop-pet:pet' });
     await env.message({ type: 'petReady' });
     assert.equal(env.states().at(-1), 'idle');
     assert.equal(env.timers.size, 1);
@@ -673,7 +673,7 @@ test('旧窗口迟到的不存在错误不会取消新窗口的空闲计时', as
   const release = env.releaseResponse;
   env.holdResponse = null;
   await env.invoke('overlay.closed');
-  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.invoke('overlay.created', { overlayId: 'jieapi.desktop-pet:pet' });
   await env.message({ type: 'petReady' });
   release({ code: 'OVERLAY_NOT_FOUND', message: 'old overlay closed' });
   await feeding;
@@ -691,7 +691,7 @@ test('隐藏请求迟到回包不会清除重新显示后的空闲计时', async
   await flush();
   const release = env.releaseResponse;
   env.holdResponse = null;
-  await env.invoke('overlay.created', { overlayId: 'demo.desktop-pet:pet' });
+  await env.invoke('overlay.created', { overlayId: 'jieapi.desktop-pet:pet' });
   await env.message({ type: 'petReady' });
   release();
   await hiding;
@@ -730,7 +730,7 @@ test('启用插件后按随 App 启动设置自动显示桌宠', async () => {
   assert.deepEqual(plain(create.params), { surface: 'pet', width: 150, height: 180, visibilityPolicy: 'foreground' });
   assert.equal(env.timers.size, 1);
   const status = await env.invoke('overlay.status');
-  assert.equal(status.overlayId, 'demo.desktop-pet:pet');
+  assert.equal(status.overlayId, 'jieapi.desktop-pet:pet');
   assert.equal(status.state, 'idle');
 });
 

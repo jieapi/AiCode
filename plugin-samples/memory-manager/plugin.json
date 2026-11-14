@@ -13,6 +13,7 @@
     "en": "Manage existing global and project memories in Settings by reading and writing ~/.aicode/memory and the workspace .aicode/memory."
   },
   "license": "MIT",
+  "icon": "book",
   "engines": {
     "pluginApi": "^1.0.0"
   },

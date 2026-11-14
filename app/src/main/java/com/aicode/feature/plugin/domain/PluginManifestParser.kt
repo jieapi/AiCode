@@ -43,7 +43,7 @@ object PluginManifestParser {
 
     private val TOP_LEVEL_KEYS = setOf(
         "manifestVersion", "id", "name", "version", "publisher", "repository",
-        "description", "license", "engines", "runtime", "contributes", "configPage"
+        "description", "license", "engines", "runtime", "contributes", "configPage", "icon"
     )
     private val ENGINE_KEYS = setOf("pluginApi")
     private val RUNTIME_KEYS = setOf("type", "entry", "command", "dependencies", "resident")
@@ -61,6 +61,7 @@ object PluginManifestParser {
     private val PUBLISHER = Regex("^[a-z][a-z0-9-]{0,31}$")
     private val LOCAL_ID = Regex("^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     private val HANDLER_NAME = Regex("^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+    private val BUILTIN_ICON = Regex("^[a-z][a-z0-9-]{0,31}$")
     private val LANGUAGE_TAG = Regex("^[a-z]{2,3}(-[a-z0-9]{2,8})*$")
 
     private const val MAX_NAME = 80
@@ -83,6 +84,12 @@ object PluginManifestParser {
 
     /** 插件 ID 同时用作安装目录名，读取已保存记录时也要用它拦住被篡改的值。 */
     fun isValidPluginId(id: String): Boolean = PLUGIN_ID.matches(id)
+
+    /** 清单 `icon` 以 `.png` / `.webp` 结尾时按包内位图路径解析，其余值按内置图标名处理。 */
+    fun isIconFilePath(value: String): Boolean {
+        val lower = value.lowercase()
+        return lower.endsWith(".png") || lower.endsWith(".webp")
+    }
 
     /** 包内相对路径：不含绝对路径、`.` / `..` 段、空段、反斜杠与控制字符，长度与深度有限。 */
     fun isSafeRelativePath(path: String): Boolean {
@@ -114,6 +121,7 @@ object PluginManifestParser {
             val engines = readEngines(obj)
             val runtime = readRuntime(obj)
             val contributes = readContributes(obj)
+            val icon = readIcon(obj)
 
             val needsRuntime = contributes != null && (contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty())
             if (needsRuntime && runtime == null) missing("runtime")
@@ -141,7 +149,8 @@ object PluginManifestParser {
                     providers = contributes.providers,
                     shizuku = contributes.shizuku,
                     overlay = contributes.overlay,
-                    configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage")
+                    configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage"),
+                    icon = icon
                 )
             )
         }
@@ -186,6 +195,18 @@ object PluginManifestParser {
         private fun readVersion(obj: JsonObject): SemVer? {
             val raw = obj["version"] ?: return null.also { missing("version") }
             return raw.stringOrNull()?.let { SemVer.parse(it) } ?: null.also { invalid("version") }
+        }
+
+        /** 可选插件图标：内置标识符，或以 `.png` / `.webp` 结尾的包内相对路径。 */
+        private fun readIcon(obj: JsonObject): String? {
+            val raw = obj["icon"] ?: return null
+            val text = raw.stringOrNull()?.trim()
+            if (text.isNullOrEmpty()) return null.also { invalid("icon") }
+            if (isIconFilePath(text)) {
+                return if (isSafeRelativePath(text)) text else null.also { invalid("icon") }
+            }
+            // 不支持的图片后缀（如 .svg / .jpg）在这里明确拒绝，不静默当作内置图标名
+            return if (BUILTIN_ICON.matches(text)) text else null.also { invalid("icon") }
         }
 
         private fun readText(obj: JsonObject, key: String, maxLength: Int): String? {
