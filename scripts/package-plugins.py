@@ -7,6 +7,7 @@
     python3 scripts/package-plugins.py --clean         # 先清空 plugin-packages/*.zip
 
 输出：plugin-packages/<插件ID>-<版本>.zip，包根目录直接包含 plugin.json。
+写入后删除同一插件 ID 的旧版本包，目录里只保留每个插件的最新产物。
 脚本只做打包，不修改清单、不执行插件代码；格式与限额以宿主 PluginPackageReader 为准。
 """
 
@@ -101,6 +102,10 @@ def package_sample(sample_dir: Path, output_dir: Path) -> Path:
     finally:
         if temp.exists():
             temp.unlink()
+    for stale in output_dir.glob(f"{plugin_id}-*.zip"):
+        if stale.name != target.name:
+            stale.unlink()
+            print(f"清理旧版本 {stale.relative_to(ROOT)}")
     print(f"打包 {sample_dir.name} -> {target.relative_to(ROOT)} ({len(files)} 个文件)")
     return target
 

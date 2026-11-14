@@ -77,7 +77,7 @@ demo-kit/
 
 | 示例 | 演示内容 |
 | --- | --- |
-| `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读 hook、插件事件 |
+| `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读与可写 hook、插件事件 |
 | `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
 | `chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 |
 | `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
@@ -86,7 +86,7 @@ demo-kit/
 | `desktop-pet` | 宿主托管浮层、长按展开菜单、拖拽、点击互动、`app.started` 与 `plugin.enabled` 自启动 |
 | `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |
 | `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started` |
-| `env-guard`、`ssh-manager`、`runtime-env` | 环境检查、SSH 管理、运行时能力演示 |
+| `ssh-manager` | 常驻进程、npm 依赖准备、设置页与三个 AI 工具 |
 
 各示例的声明与关键代码摘要见[示例库](/advanced/plugin/examples)。
 

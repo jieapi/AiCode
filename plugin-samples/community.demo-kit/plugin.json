@@ -5,12 +5,12 @@
     "default": "Demo Kit",
     "zh-CN": "插件演示套件"
   },
-  "version": "1.1.1",
+  "version": "1.2.0",
   "publisher": "community",
   "repository": "https://github.com/example/demo-kit",
   "description": {
-    "default": "A demo plugin with a skill, a read-only sub-agent, a structured workspace tool, two AI tools and a read-only lifecycle hook.",
-    "zh-CN": "演示插件系统的完整能力：一个技能、一个只读审查子代理、一个带结构化页面的项目工具、两个 AI 工具，以及一个只读生命周期 Hook。"
+    "default": "A demo plugin with a skill, a read-only sub-agent, a structured workspace tool, three AI tools, a read-only lifecycle hook and a writable hook that denies .env access.",
+    "zh-CN": "演示插件系统的完整能力：一个技能、一个只读审查子代理、一个带结构化页面的项目工具、三个 AI 工具、一个只读生命周期 Hook，以及一个拒绝 .env 访问的可写 Hook。"
   },
   "license": "MIT",
   "engines": {
@@ -34,6 +34,12 @@
       }
     ],
     "hooks": [
+      {
+        "id": "deny-env",
+        "event": "agent.tool.before",
+        "handler": "hooks.denyEnv",
+        "mode": "transform"
+      },
       {
         "id": "run-log",
         "event": "agent.run.finished",

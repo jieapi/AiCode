@@ -15,7 +15,7 @@
 
 | 示例 | 插件 ID | 演示能力 | 建议阅读 |
 | --- | --- | --- | --- |
-| `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读 hook、配置页 | 综合入门 |
+| `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读与可写 hook、配置页 | 综合入门 |
 | `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
 | `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 | 会话与消息 API |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
@@ -24,20 +24,21 @@
 | `desktop-pet` | `jieapi.desktop-pet` | 单浮层 surface、长按展开菜单、拖拽、点击、运行状态 hook | 系统浮层 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
 | `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started` | 提供商 |
-| `env-guard` | `demo.env-guard` | `agent.tool.before` 可写 hook 拒绝 `.env` 访问 | 可写 hook |
 | `ssh-manager` | `demo.ssh-manager` | 常驻进程、npm 依赖、设置页、三个 AI 工具 | 常驻与依赖 |
-| `runtime-env` | `demo.runtime-env` | 设置页查看运行时版本 | 纯页面插件 |
 
 ## community.demo-kit
 
-一个包同时包含技能、子代理、AI 工具、工作区工具、只读 hook 和配置页，适合首次通读。
+一个包同时包含技能、子代理、AI 工具、工作区工具、只读与可写 hook 和配置页，适合首次通读。
 
 - 技能 `skills/project-notes/SKILL.md`：将讨论结论追加到 `NOTES.md`；
 - 子代理 `agents/reviewer.md`：`mode: plan`、只读工具、`inject: [base, projectRules]`；
 - AI 工具：`echo` 回显、`last-run` 读取 hook 保存的元数据、`notify` 调用 `host.notify`；
 - 工作区工具 `project-snapshot`：在终端标签中查看分支、改动和文件列表；
 - 只读 hook `agent.run.finished`：将运行元数据存入进程变量；
+- 可写 hook `agent.tool.before`：`mode: "transform"`，检查工具参数中的路径字段与命令字段，命中 `.env` 或 `.env.*` 时返回 `decision: "deny"`，并用 `logs` 记录被拦截的工具；
 - 配置页 `pages/config.html`。
+
+`.env` 拦截只检查路径与命令字段，不扫描 `content` / `edits`，避免正常代码提及 `.env` 时被误拦；实际策略应按项目需要调整。
 
 `tools.echo` 同时演示三项操作：返回结构化结果、写入 `data://echo.log`、发送 `plugin.event`：
 
@@ -145,16 +146,6 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 
 启用后前往「设置 → 提供商」，找到带「插件」标记的条目，拉取模型后即可对话。
 
-## env-guard
-
-可写 hook 的最小示例：
-
-- 声明 `agent.tool.before`、`mode: "transform"`；
-- 检查工具参数中的路径字段和命令字段，命中 `.env` 或 `.env.*` 时返回 `decision: "deny"`；
-- 返回 `logs` 记录被拦截的工具。
-
-该示例仅检查路径与命令字段，不扫描 `content` / `edits`，避免正常代码提及 `.env` 时被误拦。实际策略应按项目需要调整。
-
 ## ssh-manager
 
 常驻进程与依赖准备的示例：
@@ -165,14 +156,6 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 - 三个 AI 工具：服务器列表、状态检查、远程执行。
 
 依赖在插件详情页点击「准备依赖」安装，不随包提交 `node_modules`。
-
-## runtime-env
-
-纯设置页插件，展示如何在页面中执行短命令并渲染结果：
-
-- `uiEntries` 挂载到 `settings.environment`；
-- 页面使用 `aicode.bash` 查询 Java、Python、Node.js 等版本；
-- 不包含 runtime 和 AI 工具。
 
 ## 从示例创建自有插件
 
