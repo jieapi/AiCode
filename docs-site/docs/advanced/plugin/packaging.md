@@ -124,4 +124,6 @@ return {ok: true, logs: ['provider started', 'port=18080']};
 - 工具 schema 根为 `type: object`；
 - 带 handler 的贡献均声明 `runtime`；
 - 未将 `node_modules`、密钥、测试数据打入包中；
+- 发布到 GitHub Release 时，资产名使用 `{id}_{version}.zip`；
+- 在插件索引中更新自己的 `repository` 和 `version`；
 - 在真机上完整验证安装、启用、调用、停用与卸载流程。

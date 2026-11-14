@@ -19,10 +19,16 @@ data class PluginRecord(
     val version: String,
     val enabled: Boolean,
     val installedAt: Long,
-    /** 安装来源标识，目前只有 `local`（本地导入）。 */
+    /** 安装来源标识：`local`（本地导入）或 `index`（在线索引）。 */
     val origin: String,
     val archiveSha256: String,
     val manifestSha256: String,
+    /** 在线安装绑定的索引来源；本地导入为 null。 */
+    val sourceId: String? = null,
+    val sourceName: String? = null,
+    val indexUrl: String? = null,
+    val repository: String? = null,
+    val official: Boolean = false,
     /** 依赖是否已在本容器准备完成。 */
     val dependenciesReady: Boolean = false,
     /** 依赖输入文件的 sha256；变化后需要重新准备。 */
@@ -32,7 +38,7 @@ data class PluginRecord(
 @Serializable
 private data class RegistryFile(val schema: Int = SCHEMA, val plugins: List<PluginRecord> = emptyList())
 
-private const val SCHEMA = 3
+private const val SCHEMA = 4
 
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {

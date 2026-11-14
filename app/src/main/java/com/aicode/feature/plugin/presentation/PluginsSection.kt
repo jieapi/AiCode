@@ -134,7 +134,8 @@ internal fun PluginsSection(
     plugins: List<InstalledPlugin>,
     loaded: Boolean,
     onOpenDetail: (InstalledPlugin) -> Unit,
-    onToggleEnabled: (InstalledPlugin, Boolean) -> Unit
+    onToggleEnabled: (InstalledPlugin, Boolean) -> Unit,
+    onShowStorePreview: (PluginStorePreview) -> Unit
 ) {
     if (!loaded) return
 
@@ -162,7 +163,7 @@ internal fun PluginsSection(
                     onToggleEnabled = onToggleEnabled
                 )
             } else {
-                PluginStorePage()
+                PluginStorePage(onShowPreview = onShowStorePreview)
             }
         }
 
@@ -279,22 +280,8 @@ private fun InstalledPluginsPage(
 }
 
 @Composable
-private fun PluginStorePage() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = 96.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        SettingsEmptyState(
-            icon = FeatherIcons.ShoppingBag,
-            title = stringResource(R.string.plugins_store_empty_title),
-            hint = stringResource(R.string.plugins_store_empty_hint),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.xl)
-        )
-    }
+private fun PluginStorePage(onShowPreview: (PluginStorePreview) -> Unit) {
+    PluginStoreSection(onShowPreview = onShowPreview)
 }
 
 /**

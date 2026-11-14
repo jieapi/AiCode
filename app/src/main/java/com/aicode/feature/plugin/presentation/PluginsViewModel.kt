@@ -18,6 +18,7 @@ import com.aicode.feature.plugin.domain.ManifestParseResult
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginErrorCode
+import com.aicode.feature.plugin.domain.PluginInstallOrigin
 import com.aicode.feature.plugin.domain.PluginInstallResult
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginPreview
@@ -72,7 +73,15 @@ sealed interface PluginImportState {
         val installing: Boolean = false,
         val error: PluginError? = null,
         /** 开发者侧载来源目录名；普通 zip 导入为 null。 */
-        val sourceDirName: String? = null
+        val sourceDirName: String? = null,
+        /** 在线安装的来源；本地导入保持默认 local。 */
+        val origin: PluginInstallOrigin = PluginInstallOrigin(),
+        /** 非官方在线安装需要使用者手动输入该插件的源码仓库地址。 */
+        val expectedRepository: String? = null,
+        /** 展示用来源名称，例如「AiCode Plugins」。 */
+        val sourceLabel: String? = null,
+        /** 来源是否在宿主官方白名单内；只有它为 true 时跳过手输仓库。 */
+        val officialSource: Boolean = false
     ) : PluginImportState
 
     data class Failed(val errors: List<PluginError>) : PluginImportState
@@ -212,7 +221,7 @@ class PluginsViewModel @Inject constructor(
         if (state.installing) return
         _importState.value = state.copy(installing = true, error = null)
         viewModelScope.launch(Dispatchers.IO) {
-            when (val result = manager.install(state.preview.token)) {
+            when (val result = manager.install(state.preview.token, state.origin)) {
                 is PluginInstallResult.Installed -> {
                     syncProviders(result.pluginId)
                     pluginHookDispatcher.dispatchPluginInstalled(
@@ -230,6 +239,34 @@ class PluginsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** 在线商店已完成下载与包校验后，把暂存包交给统一预览/安装弹层。 */
+    fun showPreview(storePreview: PluginStorePreview) {
+        showPreview(
+            preview = storePreview.preview,
+            origin = storePreview.origin,
+            expectedRepository = storePreview.expectedRepository,
+            sourceLabel = storePreview.sourceLabel,
+            officialSource = storePreview.officialSource
+        )
+    }
+
+    fun showPreview(
+        preview: PluginPreview,
+        origin: PluginInstallOrigin,
+        expectedRepository: String?,
+        sourceLabel: String?,
+        officialSource: Boolean
+    ) {
+        if (_importState.value !is PluginImportState.Idle && _importState.value !is PluginImportState.Failed) return
+        _importState.value = PluginImportState.Preview(
+            preview = preview,
+            origin = origin,
+            expectedRepository = expectedRepository,
+            sourceLabel = sourceLabel,
+            officialSource = officialSource
+        )
     }
 
     /** 关闭预览 / 错误提示；预览中的暂存包同时丢弃。 */

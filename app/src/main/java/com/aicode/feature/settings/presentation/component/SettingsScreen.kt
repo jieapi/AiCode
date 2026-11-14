@@ -1439,7 +1439,8 @@ fun SettingsScreen(
                         selectedPluginId = it.id
                         section = SettingsSection.PluginDetail
                     },
-                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) }
+                    onToggleEnabled = { plugin, enabled -> pluginsViewModel.setEnabled(plugin.id, enabled) },
+                    onShowStorePreview = pluginsViewModel::showPreview
                 )
                 SettingsSection.PluginDetail -> selectedPlugin?.let { plugin ->
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f

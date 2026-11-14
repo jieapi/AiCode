@@ -344,7 +344,10 @@ class PluginManager internal constructor(
      * 安装暂存包。插件清单里的贡献随启用生效，安装不再逐项授权。
      * 同 ID 已安装时整体替换。
      */
-    suspend fun install(token: String): PluginInstallResult =
+    suspend fun install(
+        token: String,
+        origin: PluginInstallOrigin = PluginInstallOrigin()
+    ): PluginInstallResult =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 ensureLoaded()
@@ -352,7 +355,7 @@ class PluginManager internal constructor(
                     ?: return@withLock PluginInstallResult.Failed(PluginError(PluginErrorCode.PREVIEW_EXPIRED))
                 val manifest = pending.manifest
                 try {
-                    commitInstall(token, pending)
+                    commitInstall(token, pending, origin)
                     PluginInstallResult.Installed(manifest.id)
                 } catch (e: IOException) {
                     FileLogger.e(TAG, "安装插件失败: ${manifest.id}", e)
@@ -361,7 +364,7 @@ class PluginManager internal constructor(
             }
         }
 
-    private fun commitInstall(token: String, pending: StagedPackage) {
+    private fun commitInstall(token: String, pending: StagedPackage, origin: PluginInstallOrigin) {
         val manifest = pending.manifest
         installedDir.mkdirs()
         val target = File(installedDir, manifest.id)
@@ -373,9 +376,14 @@ class PluginManager internal constructor(
             version = manifest.version.toString(),
             enabled = true,
             installedAt = clock(),
-            origin = ORIGIN_LOCAL,
+            origin = origin.kind,
             archiveSha256 = pending.pkg.archiveSha256,
-            manifestSha256 = pending.pkg.manifestSha256
+            manifestSha256 = pending.pkg.manifestSha256,
+            sourceId = origin.sourceId,
+            sourceName = origin.sourceName,
+            indexUrl = origin.indexUrl,
+            repository = origin.repository,
+            official = origin.official
         )
 
         var movedOld = false
@@ -546,6 +554,5 @@ class PluginManager internal constructor(
         private const val PLUGINS_DIR = "plugins"
         private const val DEV_DIR = "plugin-dev"
         private const val REGISTRY_FILE = "plugin-registry.json"
-        const val ORIGIN_LOCAL = "local"
     }
 }
