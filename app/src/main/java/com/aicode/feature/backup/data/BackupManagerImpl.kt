@@ -48,6 +48,7 @@ import com.aicode.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aicode.feature.workspace.data.local.entity.RemoteConnectionEntity
 import com.aicode.feature.workspace.data.local.entity.RemoteMountEntity
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileReadTooLargeException
 import com.aicode.feature.workspace.domain.model.RemoteProtocol
 import com.aicode.feature.workspace.domain.model.Workspace
 import com.aicode.feature.workspace.domain.model.WorkspaceType
@@ -416,15 +417,16 @@ class BackupManagerImpl @Inject constructor(
             var total = 0L
             for (relative in pluginArchive.listExportFiles(section)) {
                 if (!pluginArchive.isValidSectionPath(relative)) continue
-                val bytes = runCatching { pluginArchive.readExportFile(section, relative) }.getOrNull()
-                    ?: continue
-                if (bytes.size > MAX_PLUGIN_FILE_BYTES) {
-                    FileLogger.w(TAG, "跳过过大的插件文件: ${section.pluginId}/$relative (${bytes.size}B)")
+                val remaining = MAX_PLUGIN_TOTAL_BYTES - total
+                if (remaining == 0L) break
+                val limit = minOf(MAX_PLUGIN_FILE_BYTES, remaining)
+                val bytes = try {
+                    pluginArchive.readExportFile(section, relative, limit)
+                } catch (e: FileReadTooLargeException) {
+                    FileLogger.w(TAG, "跳过超过读取上限的插件文件: ${section.pluginId}/$relative (${limit}B)")
                     continue
-                }
-                if (total + bytes.size > MAX_PLUGIN_TOTAL_BYTES) {
-                    FileLogger.w(TAG, "插件区段超过上限，后续文件已跳过: ${section.pluginId}")
-                    break
+                } catch (e: Exception) {
+                    continue
                 }
                 writeTarEntry(tar, "$PLUGIN_PREFIX${section.pluginId}/$relative", bytes)
                 total += bytes.size

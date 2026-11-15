@@ -13,6 +13,7 @@ import com.aicode.feature.plugin.domain.PluginManifest
 import com.aicode.feature.plugin.domain.PluginRuntime
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.FileReadTooLargeException
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import io.mockk.Runs
 import io.mockk.coEvery
@@ -29,6 +30,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -170,6 +172,25 @@ class PluginBackupArchiveServiceTest {
             )
         }
         verify { fileAccess.deleteRecursively("/root/.aicode/plugins/data/$PLUGIN_ID/backup-import") }
+    }
+
+    @Test
+    fun readExportFile_usesCallerLimitInsteadOfUnboundedRead() {
+        val directory = "/root/.aicode/plugins/data/$PLUGIN_ID/backup-export"
+        val section = PluginBackupArchiveService.Section(PLUGIN_ID, directory)
+        every { fileAccess.readBytes("$directory/small.bin", 3L) } returns byteArrayOf(1, 2, 3)
+        assertEquals(listOf<Byte>(1, 2, 3), service.readExportFile(section, "small.bin", 3).toList())
+        verify(exactly = 0) { fileAccess.readBytes(any()) }
+    }
+
+    @Test
+    fun readExportFile_propagatesBoundedReadFailure() {
+        val section = PluginBackupArchiveService.Section(PLUGIN_ID, "/export")
+        every { fileAccess.readBytes("/export/large.bin", 8L) } throws FileReadTooLargeException(8)
+        assertThrows(FileReadTooLargeException::class.java) {
+            service.readExportFile(section, "large.bin", 8)
+        }
+        verify(exactly = 0) { fileAccess.readBytes(any()) }
     }
 
     private companion object {

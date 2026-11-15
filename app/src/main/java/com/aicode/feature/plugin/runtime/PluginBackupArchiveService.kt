@@ -93,8 +93,8 @@ class PluginBackupArchiveService @Inject constructor(
     fun listExportFiles(section: Section): List<String> =
         runCatching { fileAccess.listFilesRecursive(section.directory, MAX_DEPTH) }.getOrDefault(emptyList())
 
-    fun readExportFile(section: Section, relativePath: String): ByteArray =
-        fileAccess.readBytes(section.directory + "/" + relativePath)
+    fun readExportFile(section: Section, relativePath: String, maxBytes: Long): ByteArray =
+        fileAccess.readBytes(section.directory + "/" + relativePath, maxBytes)
 
     /**
      * 为备份包中的某个插件区段准备导入暂存目录；插件未安装、停用、未声明备份或未授权时返回 null，
