@@ -19,7 +19,7 @@ public interface TerminalViewClient {
     /**
      * Callback function on scale events according to {@link ScaleGestureDetector#getScaleFactor()}.
      */
-    float onScale(float scale);
+    void onScale(float scale);
 
     /** Called when a pinch-to-zoom gesture starts. */
     void onScaleBegin();

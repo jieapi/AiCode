@@ -17,7 +17,7 @@ final class GestureAndScaleRecognizer {
 
         boolean onFling(MotionEvent e, float velocityX, float velocityY);
 
-        boolean onScale(float focusX, float focusY, float scale);
+        boolean onScale(float scale);
 
         boolean onScaleBegin();
 
@@ -34,6 +34,7 @@ final class GestureAndScaleRecognizer {
     private final ScaleGestureDetector mScaleDetector;
     final Listener mListener;
     boolean isAfterLongPress;
+    private boolean mMultiTouch;
 
     public GestureAndScaleRecognizer(Context context, Listener listener) {
         mListener = listener;
@@ -59,7 +60,7 @@ final class GestureAndScaleRecognizer {
                 mListener.onLongPress(e);
                 isAfterLongPress = true;
             }
-        }, null, true /* ignoreMultitouch */);
+        });
 
         mGestureDetector.setOnDoubleTapListener(new GestureDetector.OnDoubleTapListener() {
             @Override
@@ -86,7 +87,7 @@ final class GestureAndScaleRecognizer {
 
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
-                return mListener.onScale(detector.getFocusX(), detector.getFocusY(), detector.getScaleFactor());
+                return mListener.onScale(detector.getScaleFactor());
             }
 
             @Override
@@ -98,19 +99,27 @@ final class GestureAndScaleRecognizer {
     }
 
     public void onTouchEvent(MotionEvent event) {
-        mGestureDetector.onTouchEvent(event);
+        final int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            isAfterLongPress = false;
+            mMultiTouch = false;
+        }
+        if (event.getPointerCount() > 1 && !mMultiTouch) {
+            mMultiTouch = true;
+            // Cancel pending taps/long presses and keep the remaining finger out of scrolling.
+            MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            mGestureDetector.onTouchEvent(cancel);
+            cancel.recycle();
+        }
+
         mScaleDetector.onTouchEvent(event);
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                isAfterLongPress = false;
-                break;
-            case MotionEvent.ACTION_UP:
-                if (!isAfterLongPress) {
-                    // This behaviour is desired when in e.g. vim with mouse events, where we do not
-                    // want to move the cursor when lifting finger after a long press.
-                    mListener.onUp(event);
-                }
-                break;
+        if (!mMultiTouch) {
+            mGestureDetector.onTouchEvent(event);
+            if (action == MotionEvent.ACTION_UP && !isAfterLongPress) {
+                // Do not move the terminal mouse cursor after a long press.
+                mListener.onUp(event);
+            }
         }
     }
 

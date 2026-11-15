@@ -48,6 +48,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -188,7 +189,7 @@ fun TerminalScreen(
                         onNew = { viewModel.newTab() }
                     )
 
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                         val active = tabs.firstOrNull { it.id == visibleActiveTabId }
                         if (active == null) {
                             StatusView(
@@ -425,7 +426,6 @@ private fun TerminalSurface(
 ) {
     val preset = effectiveTheme
     val bgColor = Color(preset.background)
-    // 字号单一事实源：捏合缩放只改这里（预览），手势结束才落盘；设置面板的改动反向同步进来。
     var liveFontSizeSp by remember { mutableIntStateOf(settings.fontSizeSp) }
     LaunchedEffect(settings.fontSizeSp) { liveFontSizeSp = settings.fontSizeSp }
 
@@ -436,20 +436,22 @@ private fun TerminalSurface(
         factory = { ctx ->
             val view = TerminalView(ctx, null)
             view.setBackgroundColor(preset.background)
+            view.clipToOutline = true
             val density = ctx.resources.displayMetrics.density
             view.setTextSize((liveFontSizeSp * density).toInt())
             view.setTypeface(TerminalFontManager.loadTypeface(ctx, settings.fontPath) ?: Typeface.MONOSPACE)
-            view.tag = (liveFontSizeSp * density).toInt() to settings.fontPath
+            view.tag = settings.fontPath
             view.setTerminalViewClient(
                 AppTerminalViewClient(
                     context = ctx,
                     viewProvider = { view },
                     modifiers = viewModel.modifiers,
                     currentFontSizeSp = { liveFontSizeSp },
-                    onFontSizeCommit = { sp ->
+                    onFontSizeChange = { sp ->
+                        view.setTextSize((sp * view.resources.displayMetrics.density).toInt())
                         liveFontSizeSp = sp
-                        viewModel.setFontSize(sp)
-                    }
+                    },
+                    onFontSizeCommit = { sp -> viewModel.setFontSize(sp) }
                 )
             )
             view.isFocusable = true
@@ -464,12 +466,10 @@ private fun TerminalSurface(
         update = { view ->
             view.setBackgroundColor(preset.background)
             val density = view.context.resources.displayMetrics.density
-            val targetTextSize = (liveFontSizeSp * density).toInt()
-            val targetFontKey = targetTextSize to settings.fontPath
-            if (view.tag != targetFontKey) {
-                view.setTextSize(targetTextSize)
+            view.setTextSize((liveFontSizeSp * density).toInt())
+            if (view.tag != settings.fontPath) {
                 view.setTypeface(TerminalFontManager.loadTypeface(view.context, settings.fontPath) ?: Typeface.MONOSPACE)
-                view.tag = targetFontKey
+                view.tag = settings.fontPath
             }
 
             applyTerminalColors(view, tab, settings, effectiveTheme)

@@ -65,12 +65,6 @@ public final class TerminalView extends View {
     int mTopRow;
     int[] mDefaultSelectors = new int[]{-1,-1,-1,-1};
 
-    /**
-     * 捏合预览缩放倍数（1 = 无预览）。仅作用于画布绘制，不触发终端 resize；手势结束时置回 1。
-     */
-    float mScaleFactor = 1.f;
-    private float mScaleFocusX = 0f;
-    private float mScaleFocusY = 0f;
     final GestureAndScaleRecognizer mGestureRecognizer;
 
     /** Keep track of where mouse touch event started which we report as mouse scroll. */
@@ -144,29 +138,20 @@ public final class TerminalView extends View {
 
             @Override
             public boolean onScaleBegin() {
-                mScaleFactor = 1f;
+                if (mEmulator == null || isSelectingText()) return false;
                 mClient.onScaleBegin();
                 return true;
             }
 
             @Override
-            public boolean onScale(float focusX, float focusY, float scale) {
-                if (mEmulator == null || isSelectingText()) return true;
-                // 捏合期间只做画布级预览缩放，不改字号也不 resize PTY。
-                // 连续 resize 会给 shell 连发 SIGWINCH，令其重绘与回流行重组交错、内容错乱；
-                // 手势结束时由 client 按最终字号 resize 一次。
-                mScaleFactor = mClient.onScale(scale);
-                mScaleFocusX = focusX;
-                mScaleFocusY = focusY;
-                invalidate();
+            public boolean onScale(float scale) {
+                mClient.onScale(scale);
                 return true;
             }
 
             @Override
             public void onScaleEnd() {
-                mScaleFactor = 1f;
                 mClient.onScaleEnd();
-                invalidate();
             }
 
             @Override
@@ -207,6 +192,9 @@ public final class TerminalView extends View {
 
             @Override
             public boolean onDown(float x, float y) {
+                mScroller.abortAnimation();
+                mScrollRemainder = 0f;
+                scrolledWithFinger = false;
                 // Why is true not returned here?
                 // https://developer.android.com/training/gestures/detector.html#detect-a-subset-of-supported-gestures
                 // Although setting this to true still does not solve the following errors when long pressing in terminal view text area
@@ -470,8 +458,10 @@ public final class TerminalView extends View {
      * @param textSize the new font size, in density-independent pixels.
      */
     public void setTextSize(int textSize) {
+        if (mRenderer != null && mRenderer.mTextSize == textSize) return;
         mRenderer = new TerminalRenderer(textSize, mRenderer == null ? Typeface.MONOSPACE : mRenderer.mTypeface);
         updateSize();
+        invalidate();
     }
 
     public void setTypeface(Typeface newTypeface) {
@@ -942,17 +932,10 @@ public final class TerminalView extends View {
                 mTextSelectionCursorController.getSelectors(sel);
             }
 
-            // 捏合预览缩放：仅缩放画布，不改变终端尺寸。
-            final boolean previewScaling = mScaleFactor != 1f;
-            if (previewScaling) canvas.save();
-            if (previewScaling) canvas.scale(mScaleFactor, mScaleFactor, mScaleFocusX, mScaleFocusY);
-
             mRenderer.render(mEmulator, canvas, mTopRow, sel[0], sel[1], sel[2], sel[3]);
 
             // render the text selection handles
             renderTextSelection();
-
-            if (previewScaling) canvas.restore();
         }
     }
 
