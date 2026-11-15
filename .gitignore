@@ -40,6 +40,9 @@ __pycache__/
 # 插件打包产物（scripts/package-plugins.py 生成），不入库
 /plugin-packages/
 
+# 正式插件源码各自独立成仓库，不随 App 仓库提交
+/plugin-official/
+
 # 容器镜像目录：由 scripts/sync-container-images.py 生成，CI 发布到 data 分支；
 # 内置兜底快照另存于 app/src/main/assets/container-images.json
 /data/container-images.json

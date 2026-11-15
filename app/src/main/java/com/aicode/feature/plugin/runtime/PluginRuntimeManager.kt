@@ -67,7 +67,8 @@ class PluginRuntimeManager @Inject constructor(
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
     private val toolService: PluginToolService,
-    private val httpService: PluginHttpService
+    private val httpService: PluginHttpService,
+    private val portService: PluginPortService
 ) {
 
     private class Entry(
@@ -363,6 +364,9 @@ class PluginRuntimeManager @Inject constructor(
             "host.tools.resolve" -> hostCall { toolService.resolve(pluginId, params) }
             "host.mcp.status" -> hostCall { introspectionService.mcpStatus(pluginId) }
             "host.http.request" -> hostCall { httpService.request(pluginId, params) }
+            "host.ports.forward" -> hostCall { portService.forward(pluginId, params) }
+            "host.ports.close" -> hostCall { portService.close(pluginId, params) }
+            "host.ports.list" -> hostCall { portService.list(pluginId) }
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")
         }
     }

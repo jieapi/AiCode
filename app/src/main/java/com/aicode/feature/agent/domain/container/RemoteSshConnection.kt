@@ -174,8 +174,8 @@ class RemoteSshConnection @Inject constructor(
         sftpSshClient = null
     }
 
-    /** 建立一条 SSH transport 并完成认证与保活（exec 与 SFTP 各建一条）。 */
-    private fun newSshClient(
+    /** 建立一条 SSH transport 并完成认证与保活（exec、SFTP、端口转发各建一条）。 */
+    internal fun newSshClient(
         config: RemoteConnectionConfig,
         onCreated: (SSHClient) -> Unit = {}
     ): SSHClient = SSHClient().apply {
