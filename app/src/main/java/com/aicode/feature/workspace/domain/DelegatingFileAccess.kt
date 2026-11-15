@@ -14,6 +14,9 @@ import javax.inject.Singleton
  *
  * 这样 Hilt 注入时机不再影响最终行为——无论 [FileAccessProvider] 在何时被首次注入，
  * 真正读写文件时才读取当前模式。
+ *
+ * 文件树添加的本机文件夹（[WorkspacePathMapper.LOCAL_FS_ROOT] 下的虚拟路径）在任何执行模式下
+ * 都走本地实现：它们就是当前设备上的目录，与远程服务器无关。
  */
 @Singleton
 class DelegatingFileAccess @Inject constructor(
@@ -22,64 +25,87 @@ class DelegatingFileAccess @Inject constructor(
     private val remoteSftpFileAccess: RemoteSftpFileAccess
 ) : FileAccessProvider {
 
-    private fun delegate(): FileAccessProvider =
-        if (modeHolder.currentMode() == ExecutionMode.REMOTE_SSH) remoteSftpFileAccess
-        else localFileAccess
+    private fun delegate(path: String): FileAccessProvider =
+        if (WorkspacePathMapper.isLocalFolderContainerPath(path) ||
+            modeHolder.currentMode() != ExecutionMode.REMOTE_SSH
+        ) {
+            localFileAccess
+        } else {
+            remoteSftpFileAccess
+        }
 
-    override fun readFile(path: String): String = delegate().readFile(path)
+    override fun backendFor(path: String): FileAccessProvider = delegate(path)
 
-    override fun readLines(path: String): Sequence<String> = delegate().readLines(path)
+    override fun readFile(path: String): String = delegate(path).readFile(path)
+
+    override fun readLines(path: String): Sequence<String> = delegate(path).readLines(path)
 
     override fun writeFile(path: String, content: String, overwrite: Boolean, encoding: Charset) =
-        delegate().writeFile(path, content, overwrite, encoding)
+        delegate(path).writeFile(path, content, overwrite, encoding)
 
-    override fun exists(path: String): Boolean = delegate().exists(path)
+    override fun exists(path: String): Boolean = delegate(path).exists(path)
 
-    override fun isDirectory(path: String): Boolean = delegate().isDirectory(path)
+    override fun isDirectory(path: String): Boolean = delegate(path).isDirectory(path)
 
-    override fun isFile(path: String): Boolean = delegate().isFile(path)
+    override fun isFile(path: String): Boolean = delegate(path).isFile(path)
 
-    override fun fileSize(path: String): Long = delegate().fileSize(path)
+    override fun fileSize(path: String): Long = delegate(path).fileSize(path)
 
-    override fun lastModified(path: String): Long = delegate().lastModified(path)
+    override fun lastModified(path: String): Long = delegate(path).lastModified(path)
 
-    override fun fingerprint(path: String): String? = delegate().fingerprint(path)
+    override fun fingerprint(path: String): String? = delegate(path).fingerprint(path)
 
-    override fun permissions(path: String): String = delegate().permissions(path)
+    override fun permissions(path: String): String = delegate(path).permissions(path)
 
-    override fun listFiles(path: String): List<FileEntry> = delegate().listFiles(path)
+    override fun listFiles(path: String): List<FileEntry> = delegate(path).listFiles(path)
 
     override fun listFilesRecursive(path: String, maxDepth: Int): List<String> =
-        delegate().listFilesRecursive(path, maxDepth)
+        delegate(path).listFilesRecursive(path, maxDepth)
 
-    override fun readBytes(path: String): ByteArray = delegate().readBytes(path)
+    override fun readBytes(path: String): ByteArray = delegate(path).readBytes(path)
 
-    override fun readBytes(path: String, maxBytes: Long): ByteArray = delegate().readBytes(path, maxBytes)
+    override fun readBytes(path: String, maxBytes: Long): ByteArray = delegate(path).readBytes(path, maxBytes)
 
     override fun resolvePath(path: String, followFinalLink: Boolean): String =
-        delegate().resolvePath(path, followFinalLink)
+        delegate(path).resolvePath(path, followFinalLink)
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) =
-        delegate().writeBytes(path, bytes, overwrite)
+        delegate(path).writeBytes(path, bytes, overwrite)
 
     override fun writeStream(path: String, input: InputStream, overwrite: Boolean): Long =
-        delegate().writeStream(path, input, overwrite)
+        delegate(path).writeStream(path, input, overwrite)
 
-    override fun copyToLocal(path: String): File = delegate().copyToLocal(path)
+    override fun copyToLocal(path: String): File = delegate(path).copyToLocal(path)
 
-    override fun delete(path: String) = delegate().delete(path)
+    override fun delete(path: String) = delegate(path).delete(path)
 
-    override fun deleteRecursively(path: String) = delegate().deleteRecursively(path)
+    override fun deleteRecursively(path: String) = delegate(path).deleteRecursively(path)
 
-    override fun rename(path: String, newPath: String) = delegate().rename(path, newPath)
+    override fun rename(path: String, newPath: String) {
+        ensureSameBackend(path, newPath)
+        delegate(path).rename(path, newPath)
+    }
 
-    override fun copy(path: String, newPath: String, overwrite: Boolean) = delegate().copy(path, newPath, overwrite)
+    override fun copy(path: String, newPath: String, overwrite: Boolean) {
+        ensureSameBackend(path, newPath)
+        delegate(path).copy(path, newPath, overwrite)
+    }
 
-    override fun move(path: String, newPath: String, overwrite: Boolean) = delegate().move(path, newPath, overwrite)
+    override fun move(path: String, newPath: String, overwrite: Boolean) {
+        ensureSameBackend(path, newPath)
+        delegate(path).move(path, newPath, overwrite)
+    }
 
-    override fun mkdirs(path: String) = delegate().mkdirs(path)
+    /** 单后端操作才能直接交给实现；跨后端复制/移动由调用方分成读、写两步。 */
+    private fun ensureSameBackend(path: String, newPath: String) {
+        require(delegate(path) === delegate(newPath)) {
+            "cross-backend operation: $path -> $newPath"
+        }
+    }
 
-    override fun parentPath(path: String): String? = delegate().parentPath(path)
+    override fun mkdirs(path: String) = delegate(path).mkdirs(path)
 
-    override fun toDisplayPath(path: String): String = delegate().toDisplayPath(path)
+    override fun parentPath(path: String): String? = delegate(path).parentPath(path)
+
+    override fun toDisplayPath(path: String): String = delegate(path).toDisplayPath(path)
 }

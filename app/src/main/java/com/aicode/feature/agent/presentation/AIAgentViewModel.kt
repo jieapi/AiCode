@@ -3,7 +3,9 @@ package com.aicode.feature.agent.presentation
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.PowerManager
+import android.provider.OpenableColumns
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -74,6 +76,7 @@ import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import com.aicode.feature.terminal.domain.takeTailLines
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.FileEntry
+import com.aicode.feature.workspace.domain.UriPathResolver
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.domain.isValidFileEntryName
 import com.aicode.feature.agent.domain.workflow.AgentEvent
@@ -141,7 +144,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
 import java.io.OutputStream
+import java.nio.file.FileAlreadyExistsException
 import java.util.Calendar
 import java.util.UUID
 import javax.inject.Inject
@@ -448,6 +456,17 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
+    /** 文件树「+」添加的本机文件夹记录：宿主真实路径 + 目录选择器 URI。 */
+    @Serializable
+    private data class LocalFolderPref(val hostPath: String, val uri: String)
+
+    /** 本机文件夹根的持久化（重启保留）。 */
+    private val localFolderPrefs =
+        context.getSharedPreferences("file_tree_local_folders", Context.MODE_PRIVATE)
+
+    /** 文件树「+」添加的本机文件夹根，按添加顺序排在容器根之后。 */
+    private val _localFolders = MutableStateFlow(readLocalFolders())
+
     /** 侧边栏「文件」Tab 已展开的目录集合（容器路径）。含工作区根：根也可折叠，默认展开；按工作区持久化。 */
     private val _expandedPaths = MutableStateFlow(setOf(WorkspacePathMapper.CONTAINER_ROOT))
 
@@ -623,6 +642,19 @@ class AIAgentViewModel @Inject constructor(
         if (containerExpanded && containerEntries != null) {
             appendBrowseChildren(CONTAINER_FS_ROOT, containerEntries, depth = 1, expanded = expanded, ignorePatterns = emptyList(), relParts = emptyList(), out = nodes)
         }
+        // 用户添加的本机文件夹：读不到（目录被删除/未授权）时只把该行标红，不影响其它根。
+        for (folder in _localFolders.value) {
+            val path = WorkspacePathMapper.toLocalFolderContainerPath(folder.hostPath)
+            val open = path in expanded
+            val entries = if (open) ensureDir(path) else browseListings[path]
+            nodes += rootNode(
+                FileTreeRoot.LocalFolder(folder.hostPath), path, expanded,
+                hasError = path in browseDirErrors
+            )
+            if (open && entries != null) {
+                appendBrowseChildren(path, entries, depth = 1, expanded = expanded, ignorePatterns = emptyList(), relParts = emptyList(), out = nodes)
+            }
+        }
         browseDirtyAll = false
         browseDirtyDirs.clear()
         return nodes
@@ -701,14 +733,19 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
-    /** [path] 的父目录容器路径；两个根与工作区根返回 null。 */
+    /** [path] 的父目录容器路径；各根节点返回 null。 */
     private fun parentDirOf(path: String): String? = when {
-        path == WorkspacePathMapper.CONTAINER_ROOT || path == CONTAINER_FS_ROOT -> null
+        isBrowseRoot(path) -> null
         else -> {
             val index = path.lastIndexOf('/')
             if (index <= 0) CONTAINER_FS_ROOT else path.substring(0, index)
         }
     }
+
+    /** [path] 是否是文件树的根节点（工作区 / 容器 / 本机文件夹）。 */
+    private fun isBrowseRoot(path: String): Boolean =
+        path == WorkspacePathMapper.CONTAINER_ROOT || path == CONTAINER_FS_ROOT ||
+            _localFolders.value.any { WorkspacePathMapper.toLocalFolderContainerPath(it.hostPath) == path }
 
     /**
      * 清掉已不在树上的展开路径（目录被删除/改名），否则会一直给不存在的目录挂监听协程。
@@ -721,7 +758,7 @@ class AIAgentViewModel @Inject constructor(
         val containerRootEmpty = browseListings[CONTAINER_FS_ROOT].isNullOrEmpty()
         // 按层级由浅到深：父目录已消失时子目录一并算消失，不必再依赖父目录列表
         for (path in expanded.sortedBy { p -> p.count { it == '/' } }) {
-            if (path == WorkspacePathMapper.CONTAINER_ROOT || path == CONTAINER_FS_ROOT) continue
+            if (isBrowseRoot(path)) continue
             val parent = parentDirOf(path) ?: continue
             if (parent in gone) {
                 gone += path
@@ -739,9 +776,10 @@ class AIAgentViewModel @Inject constructor(
         return true
     }
 
-    /** 缓存只保留当前展开集与两个根，其余（已折叠/已删除目录）丢弃，避免长期占用内存。 */
+    /** 缓存只保留当前展开集与全部根，其余（已折叠/已删除目录）丢弃，避免长期占用内存。 */
     private fun pruneBrowseCache() {
-        val keep = _expandedPaths.value + WorkspacePathMapper.CONTAINER_ROOT + CONTAINER_FS_ROOT
+        val keep = _expandedPaths.value + WorkspacePathMapper.CONTAINER_ROOT + CONTAINER_FS_ROOT +
+            _localFolders.value.map { WorkspacePathMapper.toLocalFolderContainerPath(it.hostPath) }
         browseListings.keys.retainAll(keep)
         browseDirErrors.keys.retainAll(keep)
     }
@@ -773,6 +811,41 @@ class AIAgentViewModel @Inject constructor(
 
     /** 手动刷新：丢弃全部目录缓存后整树重读；远程模式没有 inotify，这是唯一的新鲜度来源。 */
     fun refreshBrowse() {
+        browseCommands.trySend(BrowseReload(full = true))
+    }
+
+    /** 文件树「+」选择本机文件夹：登记为根并整树重读；重复添加同一目录视为成功。 */
+    fun addLocalFolder(uri: Uri, onResult: (Boolean) -> Unit) = viewModelScope.launch {
+        val added = withContext(Dispatchers.IO) {
+            val hostPath = UriPathResolver.toFilePath(context, uri) ?: return@withContext false
+            val normalized = WorkspacePathMapper.normalizeLocalFolderHostPath(hostPath)
+            if (_localFolders.value.any { it.hostPath == normalized }) return@withContext true
+            val dir = File(normalized)
+            if (!dir.isDirectory || !dir.canRead()) return@withContext false
+            val entry = LocalFolderPref(normalized, uri.toString())
+            WorkspacePathMapper.registerLocalFolder(normalized)
+            saveLocalFolders(_localFolders.value + entry)
+            _localFolders.value = _localFolders.value + entry
+            true
+        }
+        if (added) browseCommands.trySend(BrowseReload(full = true))
+        onResult(added)
+    }
+
+    /** 从文件树移除本机文件夹根：只解除关联，不删除目录内容。 */
+    fun removeLocalFolder(hostPath: String) = viewModelScope.launch {
+        val normalized = WorkspacePathMapper.normalizeLocalFolderHostPath(hostPath)
+        val removed = _localFolders.value.firstOrNull { it.hostPath == normalized } ?: return@launch
+        val updated = _localFolders.value - removed
+        WorkspacePathMapper.unregisterLocalFolder(normalized)
+        saveLocalFolders(updated)
+        _localFolders.value = updated
+        val rootPath = WorkspacePathMapper.toLocalFolderContainerPath(normalized)
+        val expanded = _expandedPaths.value
+            .filterNot { it == rootPath || it.startsWith("$rootPath/") }
+            .toSet()
+        _expandedPaths.value = expanded
+        saveExpansion(_currentWorkspace.value, expanded)
         browseCommands.trySend(BrowseReload(full = true))
     }
 
@@ -939,16 +1012,23 @@ class AIAgentViewModel @Inject constructor(
         performPaste(clip, target, overwrite = false, onResult)
     }
 
-    /** 用户确认覆盖后强制粘贴（目标已存在同名项也会覆盖）。 */
+    /** 用户确认覆盖后强制粘贴（目标已存在同名项也会覆盖）；若当前待确认的是上传，则执行上传。 */
     fun pasteBrowseEntryOverwrite() {
+        pendingUploadAction?.let { upload ->
+            pendingUploadAction = null
+            _pasteConflict.value = null
+            upload(true)
+            return
+        }
         val conflict = _pasteConflict.value ?: return
         val clip = _browseClipboard.value ?: return
         _pasteConflict.value = null
         performPaste(clip, conflict.second, overwrite = true) {}
     }
 
-    /** 清空粘贴冲突待确认状态（用户点了「取消」时）。 */
+    /** 清空粘贴/上传的覆盖待确认状态（用户点了「取消」时）。 */
     fun clearPasteConflict() {
+        pendingUploadAction = null
         _pasteConflict.value = null
     }
 
@@ -959,15 +1039,153 @@ class AIAgentViewModel @Inject constructor(
             if (success) _browseClipboard.value = null
             onResult(success)
         }) {
-            if (clip.isCut) {
-                fileAccess.move(clip.sourcePath, target, overwrite)
-                remapExpandedPath(clip.sourcePath, target)
-                true
+            val sourceAccess = fileAccess.backendFor(clip.sourcePath)
+            val targetAccess = fileAccess.backendFor(target)
+            if (sourceAccess === targetAccess) {
+                if (clip.isCut) {
+                    sourceAccess.move(clip.sourcePath, target, overwrite)
+                    remapExpandedPath(clip.sourcePath, target)
+                } else {
+                    sourceAccess.copy(clip.sourcePath, target, overwrite)
+                }
             } else {
-                fileAccess.copy(clip.sourcePath, target, overwrite)
-                true
+                // 本机文件夹 ↔ 容器/远程：两端不是同一个文件系统，逐项读写中转。
+                copyAcrossBackends(sourceAccess, clip.sourcePath, targetAccess, target, overwrite)
+                if (clip.isCut) {
+                    sourceAccess.deleteRecursively(clip.sourcePath)
+                    remapExpandedPath(clip.sourcePath, target)
+                }
+            }
+            true
+        }
+    }
+
+    /**
+     * 跨后端复制（本机文件夹 ↔ 容器/远程）：目录递归，文件经本地临时文件中转——
+     * [FileAccessProvider.copyToLocal] 在本地返回宿主文件、在远程下载到缓存，两端都不用整份进内存。
+     */
+    private fun copyAcrossBackends(
+        source: FileAccessProvider,
+        sourcePath: String,
+        target: FileAccessProvider,
+        targetPath: String,
+        overwrite: Boolean
+    ) {
+        if (source.isDirectory(sourcePath)) {
+            if (target.exists(targetPath)) {
+                if (!overwrite) throw FileAlreadyExistsException(File(targetPath))
+                target.deleteRecursively(targetPath)
+            }
+            target.mkdirs(targetPath)
+            for (entry in source.listFiles(sourcePath)) {
+                copyAcrossBackends(
+                    source, childPathPrefix(sourcePath) + entry.name,
+                    target, childPathPrefix(targetPath) + entry.name,
+                    overwrite
+                )
+            }
+        } else {
+            val local = source.copyToLocal(sourcePath)
+            local.inputStream().use { target.writeStream(targetPath, it, overwrite) }
+        }
+    }
+
+    // endregion
+
+    // region 上传（系统选择器 → 当前目录）
+
+    /** 待上传的单个文件：URI 已解析出显示名。 */
+    private data class UploadFile(val uri: Uri, val name: String)
+
+    /** 覆盖确认后要执行的上传动作；与粘贴冲突共用同一个确认弹窗。只在主线程读写。 */
+    private var pendingUploadAction: ((Boolean) -> Unit)? = null
+
+    /** 上传本机文件（系统文件选择器多选）到 [targetDir]；同名项已存在时先弹覆盖确认。 */
+    fun uploadBrowseFiles(targetDir: String, uris: List<Uri>, onResult: (Boolean) -> Unit) = viewModelScope.launch {
+        if (uris.isEmpty()) return@launch onResult(false)
+        val files = withContext(Dispatchers.IO) {
+            uris.mapNotNull { uri ->
+                displayNameOf(uri)?.takeIf { isValidFileEntryName(it) }?.let { UploadFile(uri, it) }
             }
         }
+        if (files.isEmpty()) return@launch onResult(false)
+        val conflict = withContext(Dispatchers.IO) {
+            files.firstOrNull { fileAccess.exists(childPathPrefix(targetDir) + it.name) }
+        }
+        val upload: (Boolean) -> Unit = { overwrite ->
+            performUpload(targetDir, files, folder = null, overwrite = overwrite, onResult = onResult)
+        }
+        if (conflict != null) {
+            pendingUploadAction = upload
+            _pasteConflict.value = conflict.name to childPathPrefix(targetDir) + conflict.name
+        } else {
+            upload(false)
+        }
+    }
+
+    /** 上传本机文件夹（系统目录选择器）到 [targetDir]；同名目录已存在时先弹覆盖确认。 */
+    fun uploadBrowseFolder(targetDir: String, treeUri: Uri, onResult: (Boolean) -> Unit) = viewModelScope.launch {
+        val folder = withContext(Dispatchers.IO) {
+            UriPathResolver.toFilePath(context, treeUri)
+                ?.let { File(it) }
+                ?.takeIf { it.isDirectory && it.canRead() }
+        }
+        if (folder == null || folder.name.isBlank()) return@launch onResult(false)
+        val target = childPathPrefix(targetDir) + folder.name
+        val exists = withContext(Dispatchers.IO) { fileAccess.exists(target) }
+        val upload: (Boolean) -> Unit = { overwrite ->
+            performUpload(targetDir, emptyList(), folder, overwrite, onResult)
+        }
+        if (exists) {
+            pendingUploadAction = upload
+            _pasteConflict.value = folder.name to target
+        } else {
+            upload(false)
+        }
+    }
+
+    private fun performUpload(
+        targetDir: String,
+        files: List<UploadFile>,
+        folder: File?,
+        overwrite: Boolean,
+        onResult: (Boolean) -> Unit
+    ) {
+        val busyPaths = files.map { childPathPrefix(targetDir) + it.name }.toSet() +
+            listOfNotNull(folder?.let { childPathPrefix(targetDir) + it.name })
+        mutateBrowse(busyPaths = busyPaths, onResult = onResult) {
+            for (file in files) {
+                val target = childPathPrefix(targetDir) + file.name
+                val input = context.contentResolver.openInputStream(file.uri) ?: return@mutateBrowse false
+                input.use { fileAccess.writeStream(target, it, overwrite) }
+            }
+            if (folder != null) uploadHostDirectory(folder, childPathPrefix(targetDir) + folder.name, overwrite)
+            true
+        }
+    }
+
+    /** 递归把宿主目录写到 [targetDir]；目标在远程模式下经 SFTP 上传。 */
+    private fun uploadHostDirectory(source: File, targetDir: String, overwrite: Boolean) {
+        fileAccess.mkdirs(targetDir)
+        source.listFiles().orEmpty().forEach { child ->
+            val target = childPathPrefix(targetDir) + child.name
+            if (child.isDirectory) {
+                uploadHostDirectory(child, target, overwrite)
+            } else {
+                child.inputStream().use { fileAccess.writeStream(target, it, overwrite) }
+            }
+        }
+    }
+
+    /** 系统选择器 URI 的显示名；取不到时回退到路径末段。 */
+    private fun displayNameOf(uri: Uri): String? {
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) return cursor.getString(0)
+                }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
     }
 
     // endregion
@@ -1148,9 +1366,31 @@ class AIAgentViewModel @Inject constructor(
 
         /** 当前容器在容器内的根路径，对应宿主上的 rootfs 目录（随当前 profile 变化）。 */
         const val CONTAINER_FS_ROOT = "/"
+
+        /** 文件树本机文件夹根的持久化 key 与编解码器。 */
+        const val LOCAL_FOLDERS_KEY = "folders"
+        val localFolderJson = Json { ignoreUnknownKeys = true }
+    }
+
+    private fun readLocalFolders(): List<LocalFolderPref> {
+        val raw = localFolderPrefs.getString(LOCAL_FOLDERS_KEY, null) ?: return emptyList()
+        return runCatching { localFolderJson.decodeFromString<List<LocalFolderPref>>(raw) }
+            .getOrElse {
+                FileLogger.w(TAG, "本机文件夹记录解析失败", it)
+                emptyList()
+            }
+    }
+
+    private fun saveLocalFolders(folders: List<LocalFolderPref>) {
+        localFolderPrefs.edit()
+            .putString(LOCAL_FOLDERS_KEY, localFolderJson.encodeToString(folders))
+            .apply()
     }
 
     init {
+        // 恢复文件树添加的本机文件夹映射（宿主路径 → 显示路径的反向还原用）
+        _localFolders.value.forEach { WorkspacePathMapper.registerLocalFolder(it.hostPath) }
+
         // 文件树：命令串行执行（读目录 + 拼节点）；作用域变化时整树重读，只变容器名/图标时仅重排行。
         viewModelScope.launch(Dispatchers.IO) { browseCommandLoop() }
         viewModelScope.launch(Dispatchers.IO) {

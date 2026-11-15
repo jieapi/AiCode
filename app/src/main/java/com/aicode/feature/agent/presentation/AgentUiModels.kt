@@ -22,6 +22,15 @@ sealed interface FileTreeRoot {
     }
 
     /**
+     * 用户通过文件树「+」添加的本机文件夹（宿主真实目录）。
+     * 与工作区/容器不同，它不随执行模式变化：远程模式下仍读写当前设备上的目录。
+     */
+    data class LocalFolder(val hostPath: String) : FileTreeRoot {
+        override val label: String =
+            hostPath.trimEnd('/').substringAfterLast('/').ifBlank { hostPath }
+    }
+
+    /**
      * 当前容器根，对应容器内 `/`。
      * 图标与「容器与镜像」列表一致：[osId] 识别到系统时用该系统 logo，
      * 未识别时 [remote] 为真用服务器图标、为假用硬盘图标。

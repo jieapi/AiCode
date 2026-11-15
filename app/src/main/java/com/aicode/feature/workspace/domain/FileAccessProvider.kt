@@ -174,6 +174,12 @@ interface FileAccessProvider {
     /** 获取父目录路径（容器路径形式）。 */
     fun parentPath(path: String): String?
 
+    /**
+     * 访问 [path] 时应使用的后端。跨后端复制用它决定源/目标 provider；
+     * 单一实现直接返回自身，委托层按路径路由。
+     */
+    fun backendFor(path: String): FileAccessProvider = this
+
     /** 把内部真实路径还原为 AI 视角的容器路径（回显用）。 */
     fun toDisplayPath(path: String): String
 }

@@ -12,6 +12,7 @@ import java.io.File
 import java.nio.file.FileSystemLoopException
 import java.nio.file.Files
 import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArraySet
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +45,55 @@ class WorkspacePathMapper @Inject constructor(
         const val CONTAINER_ROOT = "~/workspace"
         /** AI 配置目录在容器内的路径，绑定到宿主 [ContainerInstaller.aicodeDir]（独立于 rootfs）。 */
         const val AICODE_ROOT = "/root/.aicode"
+
+        /**
+         * 文件树「+」添加的本机文件夹在路径空间中的虚拟根。
+         *
+         * 宿主 `/storage/emulated/0/Download` 对应虚拟路径
+         * `/mnt/.aicode-local-fs/storage/emulated/0/Download`。用容器内不存在的专用前缀，
+         * 避免与容器自身的 `/storage/...` 混淆；虚拟路径唯一对应宿主路径，
+         * 因此读写不依赖注册表（注册表只用于反向还原显示路径）。
+         */
+        const val LOCAL_FS_ROOT = "/mnt/.aicode-local-fs"
+
+        /** 宿主目录 → 虚拟容器路径。 */
+        fun toLocalFolderContainerPath(hostPath: String): String =
+            LOCAL_FS_ROOT + normalizeLocalFolderHostPath(hostPath)
+
+        /** 去尾斜杠的宿主绝对路径；根目录归一为 `/`。 */
+        fun normalizeLocalFolderHostPath(hostPath: String): String =
+            File(hostPath).absolutePath.replace('\\', '/').trimEnd('/').ifEmpty { "/" }
+
+        /** [path] 是否落在本机文件夹的虚拟前缀下。 */
+        fun isLocalFolderContainerPath(path: String): Boolean =
+            path == LOCAL_FS_ROOT || path.startsWith("$LOCAL_FS_ROOT/")
+
+        /** 虚拟路径 → 宿主绝对路径；不是虚拟路径（或虚拟根本身）时返回 null。 */
+        fun localFolderHostPath(path: String): String? {
+            if (!path.startsWith("$LOCAL_FS_ROOT/")) return null
+            return path.removePrefix(LOCAL_FS_ROOT).takeIf { it.length > 1 && it.startsWith("/") }
+        }
+
+        /** 已注册为文件树根的本机目录（宿主绝对路径），仅供 [toContainerPath] 反向还原虚拟路径。 */
+        private val localFolderRoots = CopyOnWriteArraySet<String>()
+
+        /** 注册一个本机文件夹根；只影响宿主路径 → 显示路径的反向映射。 */
+        fun registerLocalFolder(hostPath: String) {
+            localFolderRoots += normalizeLocalFolderHostPath(hostPath)
+        }
+
+        fun unregisterLocalFolder(hostPath: String) {
+            localFolderRoots -= normalizeLocalFolderHostPath(hostPath)
+        }
+
+        /** 宿主 [abs] 落在已注册的本机文件夹根下时还原为虚拟路径；未注册时返回 null。 */
+        internal fun localFolderContainerPathFor(abs: String): String? {
+            val normalized = abs.trimEnd('/').ifEmpty { "/" }
+            val matched = localFolderRoots
+                .filter { normalized == it || normalized.startsWith("$it/") }
+                .maxByOrNull { it.length } ?: return null
+            return LOCAL_FS_ROOT + normalized
+        }
     }
 
     /**
@@ -95,6 +145,7 @@ class WorkspacePathMapper @Inject constructor(
         val root = hostRoot()
         val wsRoot = resolvedContainerRoot()
         val p = pathHomeResolver.expandHome(path.trim())
+        localFolderHostPath(p)?.let { return File(it) }
         val file = when {
             p == wsRoot || p == "$wsRoot/" || p == CONTAINER_ROOT || p == "$CONTAINER_ROOT/" -> root
             p.startsWith("$wsRoot/") -> File(root, p.removePrefix("$wsRoot/"))
@@ -170,7 +221,7 @@ class WorkspacePathMapper @Inject constructor(
             abs.startsWith("$aicodePath/") -> AICODE_ROOT + "/" + abs.removePrefix("$aicodePath/")
             abs == rootfsPath -> "/"
             abs.startsWith("$rootfsPath/") -> "/" + abs.removePrefix("$rootfsPath/")
-            else -> mountedContainerPath(abs) ?: hostPath
+            else -> WorkspacePathMapper.localFolderContainerPathFor(abs) ?: mountedContainerPath(abs) ?: hostPath
         }
     }
 

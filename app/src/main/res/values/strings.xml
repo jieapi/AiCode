@@ -717,6 +717,13 @@
     <string name="drawer_expand_subagents">展开子代理</string>
     <string name="drawer_collapse_subagents">收起子代理</string>
     <string name="file_browser_up">上一级</string>
+    <string name="file_browser_title">文件树</string>
+    <string name="file_browser_add_folder">添加本机文件夹</string>
+    <string name="file_browser_add_folder_failed">无法添加该文件夹，请选择设备存储中的目录并授予存储权限</string>
+    <string name="file_browser_upload_file">上传文件</string>
+    <string name="file_browser_upload_folder">上传文件夹</string>
+    <string name="file_browser_upload_failed">上传失败，请检查存储权限与目标目录写入权限</string>
+    <string name="file_browser_remove_folder">移除此文件夹</string>
     <string name="file_browser_empty">空目录</string>
     <string name="file_browser_error">读取目录失败</string>
     <string name="file_browser_refresh">刷新</string>
