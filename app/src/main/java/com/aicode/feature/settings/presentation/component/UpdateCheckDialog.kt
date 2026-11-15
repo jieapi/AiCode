@@ -124,11 +124,13 @@ internal fun UpdateCheckDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     Text(state.message)
-                    Text(
-                        text = stringResource(R.string.about_update_download_failed_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (state.showMirrorHint) {
+                        Text(
+                            text = stringResource(R.string.about_update_download_failed_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             },
             confirmButton = {

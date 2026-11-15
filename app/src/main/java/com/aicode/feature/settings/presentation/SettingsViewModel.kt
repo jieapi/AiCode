@@ -210,7 +210,9 @@ sealed interface UpdateCheckUiState {
     /** 下载或自检失败。[previous] 保留版本信息，供「重试」与「浏览器下载」继续使用。 */
     data class DownloadFailed(
         val previous: NewVersion,
-        val message: String
+        val message: String,
+        /** 换镜像只影响下载来源；自检判定同版本/更旧时换镜像无用，不展示该提示。 */
+        val showMirrorHint: Boolean = true
     ) : UpdateCheckUiState
 
     data class Error(val message: String) : UpdateCheckUiState
@@ -1902,7 +1904,8 @@ class SettingsViewModel @Inject constructor(
                     } else {
                         _updateCheckState.value = UpdateCheckUiState.DownloadFailed(
                             previous = target,
-                            message = verifyFailureMessage(verify)
+                            message = verifyFailureMessage(verify),
+                            showMirrorHint = verify !is ApkVerifyResult.NotNewer
                         )
                     }
                 }

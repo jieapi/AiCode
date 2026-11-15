@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import androidx.core.content.pm.PackageInfoCompat
+import com.aicode.core.util.compareVersions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
@@ -12,7 +13,7 @@ import javax.inject.Singleton
 
 /** 更新包自检结果。 */
 sealed interface ApkVerifyResult {
-    /** 通过：包名与签名都与已装 App 一致，且 versionCode 更高。 */
+    /** 通过：包名与签名都与已装 App 一致，且版本高于已装版本。 */
     data class Ok(val versionCode: Long) : ApkVerifyResult
 
     /** 不是可解析的安装包（下载到 HTML 错误页、文件被截断等）。 */
@@ -24,12 +25,12 @@ sealed interface ApkVerifyResult {
     /** 签名证书与已装 App 不一致（改包、F-Droid 版、本地无 keystore 的包等）。 */
     data object SignatureMismatch : ApkVerifyResult
 
-    /** versionCode 不高于已装版本，装了也是原地踏步。 */
+    /** 版本不高于已装 App（versionCode 更低，或 versionCode 相同且版本名不更高）。 */
     data class NotNewer(val versionCode: Long) : ApkVerifyResult
 }
 
 /**
- * 更新包自检：**包名 → 签名 → versionCode** 三项都过才允许交给系统安装器。
+ * 更新包自检：**包名 → 签名 → 版本** 三项都过才允许交给系统安装器。
  *
  * 签名一致是安全锚：更新包可能来自第三方镜像，sha256 摘要只证明「传输过程中没被改」，
  * 而签名一致才证明「这就是同一个开发者签的包」。签名不符时一律拒绝安装，引导用户改用
@@ -62,7 +63,7 @@ class ApkVerifier @Inject constructor(
 
         val archiveCode = PackageInfoCompat.getLongVersionCode(archive)
         val installedCode = PackageInfoCompat.getLongVersionCode(installed)
-        return if (archiveCode > installedCode) {
+        return if (isNewerInstall(archiveCode, archive.versionName, installedCode, installed.versionName)) {
             ApkVerifyResult.Ok(archiveCode)
         } else {
             ApkVerifyResult.NotNewer(archiveCode)
@@ -102,4 +103,22 @@ class ApkVerifier @Inject constructor(
 
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+/**
+ * 更新包是否值得安装：versionCode 更高，或 versionCode 相同但 versionName 更高。
+ *
+ * 同一 commit 上先打 rc、后打正式 tag 时两者 versionCode 相等（versionCode = git 提交数），
+ * 只比 versionCode 会把「rc 升正式版」误判成不更新。版本名缺失时无法证明更新，按不更新处理。
+ */
+internal fun isNewerInstall(
+    archiveCode: Long,
+    archiveVersionName: String?,
+    installedCode: Long,
+    installedVersionName: String?
+): Boolean {
+    if (archiveCode > installedCode) return true
+    if (archiveCode < installedCode) return false
+    if (archiveVersionName.isNullOrBlank() || installedVersionName.isNullOrBlank()) return false
+    return compareVersions(archiveVersionName, installedVersionName) > 0
 }

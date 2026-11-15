@@ -3,9 +3,9 @@ package com.aicode.feature.settings.data.remote
 import android.content.Context
 import android.os.Build
 import com.aicode.R
+import com.aicode.core.util.compareVersions
+import com.aicode.core.util.parseVersionTag
 import com.aicode.feature.settings.data.repository.UpdateChannel
-import com.aicode.feature.settings.presentation.component.compareVersions
-import com.aicode.feature.settings.presentation.component.parseVersionTag
 import com.google.gson.JsonParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
