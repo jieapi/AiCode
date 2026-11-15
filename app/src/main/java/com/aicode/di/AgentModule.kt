@@ -62,6 +62,7 @@ import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.DelegatingFileAccess
 import com.aicode.feature.workspace.domain.LocalFileAccess
 import com.aicode.feature.workspace.domain.RemoteSftpFileAccess
+import com.aicode.feature.workspace.domain.RemoteAgentConfigCache
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -343,8 +344,9 @@ object AgentModule {
     @Singleton
     fun provideRemoteSftpFileAccess(
         connection: RemoteSshConnection,
-        workspaceRepository: WorkspaceRepository
-    ): RemoteSftpFileAccess = RemoteSftpFileAccess(connection, workspaceRepository)
+        workspaceRepository: WorkspaceRepository,
+        agentConfigCache: RemoteAgentConfigCache
+    ): RemoteSftpFileAccess = RemoteSftpFileAccess(connection, workspaceRepository, agentConfigCache)
 
     @Provides
     @Singleton

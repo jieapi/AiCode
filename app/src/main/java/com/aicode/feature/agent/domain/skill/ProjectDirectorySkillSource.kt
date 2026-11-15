@@ -1,6 +1,7 @@
 package com.aicode.feature.agent.domain.skill
 
 import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.AgentConfigKind
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,6 +19,11 @@ class ProjectDirectorySkillSource @Inject constructor(
 
     override fun listSkills(): List<Skill> = SkillDirectoryScanner.scan(fileAccess, skillsRoot)
 
-    override fun loadInstructions(name: String): String? =
-        listSkills().firstOrNull { it.name.equals(name, ignoreCase = true) }?.instructions
+    override fun loadInstructions(name: String): String? {
+        val snapshot = fileAccess.cachedAgentConfigSnapshot(skillsRoot, AgentConfigKind.SKILLS)
+        val skills = snapshot?.let(SkillDirectoryScanner::fromSnapshot) ?: listSkills()
+        val skill = skills.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
+        val dir = skill.dirPath ?: return skill.instructions
+        return SkillParser.parse(fileAccess, dir)?.takeIf { it.name.equals(name, ignoreCase = true) }?.instructions
+    }
 }

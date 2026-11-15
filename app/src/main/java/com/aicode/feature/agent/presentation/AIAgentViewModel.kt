@@ -1735,7 +1735,7 @@ class AIAgentViewModel @Inject constructor(
 
     /** 重新扫描技能并刷新命令菜单；进入 `/` 菜单时调用，反映技能的增删改。 */
     fun refreshSlashCommands() {
-        viewModelScope.launch { slashCommandRegistry.refresh() }
+        viewModelScope.launch { slashCommandRegistry.refresh(force = true) }
     }
 
     /** /init —— 触发 agent 回合，分析代码库并生成/改进项目规则文件。 */

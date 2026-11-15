@@ -36,6 +36,11 @@ class AgentDefinitionRepository @Inject constructor(
         definitionsVersionField++
     }
 
+    fun refreshDirectoryCache() {
+        fileAccess.invalidateAgentConfigCache(globalSource.agentsRoot)
+        fileAccess.invalidateAgentConfigCache(projectSource.agentsRoot)
+    }
+
     /** 用户自建的全部定义（全局 + 项目级）。 */
     fun listOwn(): List<AgentDefinitionEntry> =
         mergeAll(globalSource.listDefinitions(), projectSource.listDefinitions())
@@ -60,15 +65,20 @@ class AgentDefinitionRepository @Inject constructor(
     }
 
     /** 按名称查找可派发的定义（忽略大小写）；不存在或已被禁用时返回 null。 */
-    fun find(name: String): AgentDefinition? =
-        listEnabled().firstOrNull { it.definition.name.equals(name, ignoreCase = true) }?.definition
+    fun find(name: String): AgentDefinition? {
+        if (name.lowercase() in configRepository.disabledNames()) return null
+        return projectSource.find(name)
+            ?: globalSource.find(name)
+            ?: pluginSource.listDefinitions().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
 
     /**
      * 按名称查找定义，包含已禁用的。已经派出去的子会话要用它还原自己的提示词与工具集——
      * 禁用只该拦住新的派发，不该让在跑的子代理中途换一套配置。
      */
     fun findIncludingDisabled(name: String): AgentDefinition? =
-        listAll().firstOrNull { it.definition.name.equals(name, ignoreCase = true) }?.definition
+        projectSource.find(name)
+            ?: globalSource.find(name)
             ?: pluginSource.listAllDefinitions().firstOrNull { it.name.equals(name, ignoreCase = true) }
 
     /** 当前被禁用的子代理名集合（小写归一化）。批量判断取一次即可，避免逐个重读配置文件。 */

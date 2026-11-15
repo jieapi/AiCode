@@ -36,6 +36,17 @@ class DelegatingFileAccess @Inject constructor(
 
     override fun backendFor(path: String): FileAccessProvider = delegate(path)
 
+    override fun agentConfigSnapshot(path: String, kind: AgentConfigKind, forceRefresh: Boolean): AgentConfigSnapshot? =
+        delegate(path).agentConfigSnapshot(path, kind, forceRefresh)
+
+    override fun cachedAgentConfigSnapshot(path: String, kind: AgentConfigKind): AgentConfigSnapshot? =
+        delegate(path).cachedAgentConfigSnapshot(path, kind)
+
+    override fun invalidateAgentConfigCache(path: String?) {
+        if (path == null) remoteSftpFileAccess.invalidateAgentConfigCache()
+        else delegate(path).invalidateAgentConfigCache(path)
+    }
+
     override fun readFile(path: String): String = delegate(path).readFile(path)
 
     override fun readLines(path: String): Sequence<String> = delegate(path).readLines(path)

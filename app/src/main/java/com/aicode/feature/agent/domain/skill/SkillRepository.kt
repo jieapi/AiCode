@@ -23,6 +23,11 @@ class SkillRepository @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val pluginSkillSource: PluginSkillSource
 ) {
+    fun refreshDirectoryCache() {
+        fileAccess.invalidateAgentConfigCache(globalDirectorySkillSource.skillsRoot)
+        fileAccess.invalidateAgentConfigCache(projectDirectorySkillSource.skillsRoot)
+    }
+
     /** 用户自建的全部技能（全局 + 项目级）。 */
     fun listOwnSkills(): List<SkillEntry> =
         mergeAll(globalDirectorySkillSource.listSkills(), projectDirectorySkillSource.listSkills())

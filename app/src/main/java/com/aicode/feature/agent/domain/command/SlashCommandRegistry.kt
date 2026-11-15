@@ -7,6 +7,8 @@ import com.aicode.feature.agent.domain.skill.SkillRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicode.feature.plugin.domain.PluginManager
 import javax.inject.Inject
+import java.io.IOException
+import java.io.InterruptedIOException
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -16,7 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 
 /**
  * 斜杠命令注册表：聚合内置命令（[ActionCommandHandler]）与已启用技能，
@@ -70,8 +72,15 @@ class SlashCommandRegistry @Inject constructor(
     }
 
     /** 重新扫描技能并重建菜单。涉及文件 IO，调用方应在 IO 上下文调用。 */
-    suspend fun refresh() = withContext(Dispatchers.IO) {
-        skills = skillRepository.listSkills()
+    suspend fun refresh(force: Boolean = false) = runInterruptible(Dispatchers.IO) {
+        if (force) skillRepository.refreshDirectoryCache()
+        try {
+            skills = skillRepository.listSkills()
+        } catch (error: IOException) {
+            if (error is InterruptedIOException) throw error
+            skills = emptyList()
+            FileLogger.w(TAG, "斜杠命令技能清单暂不可用", error)
+        }
         _commands.value = buildCommands()
     }
 

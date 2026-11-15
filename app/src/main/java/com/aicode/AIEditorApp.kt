@@ -15,7 +15,9 @@ import com.aicode.core.util.AILogger
 import com.aicode.core.util.FileLogger
 import com.aicode.core.util.TombstoneParser
 import net.schmizz.sshj.common.SecurityUtils
+import com.aicode.feature.agent.domain.container.BuiltinDocsSync
 import com.aicode.feature.agent.domain.container.ContainerInstaller
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.mcp.McpManager
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginToolManager
@@ -26,7 +28,9 @@ import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.terminal.domain.KeepaliveWorker
 import com.aicode.feature.terminal.domain.TerminalKeepaliveService
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +39,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import javax.inject.Inject
 
@@ -252,6 +258,11 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     /** 长驻作用域：持续把持久化的日志等级同步到 FileLogger。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val docsSnapshotMutex = Mutex()
+    private var docsSnapshot: BuiltinDocsSync.Snapshot? = null
+    private val docsSyncLock = Any()
+    private var docsSyncJob: Job? = null
+    private var docsSyncTarget: RemoteSshConnection.DocsSyncTarget? = null
 
     override fun onCreate() {
         if (isCrashProcess(this)) {
@@ -338,6 +349,7 @@ class AIEditorApp : Application(), Configuration.Provider {
                 executionModeHolder.mode
             ) { config, mode -> config to mode }.collect { (config, mode) ->
                 if (mode != com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+                    cancelDocsSync()
                     remoteSshConnection.stopSupervisor()
                     remoteTerminalSessionManager.tabs.value.map { it.id }.forEach {
                         remoteTerminalSessionManager.closeTab(it)
@@ -345,7 +357,11 @@ class AIEditorApp : Application(), Configuration.Provider {
                     withContext(Dispatchers.IO) { remoteSshConnection.disconnect() }
                     return@collect
                 }
-                if (config == null) return@collect
+                if (config == null) {
+                    cancelDocsSync()
+                    return@collect
+                }
+                if (config != remoteSshConnection.config || !remoteSshConnection.isConnected()) cancelDocsSync()
                 remoteSshConnection.startSupervisor(appScope) {
                     if (executionModeHolder.currentMode() != com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
                         return@startSupervisor
@@ -355,7 +371,10 @@ class AIEditorApp : Application(), Configuration.Provider {
                     syncDocsToRemote()
                     releaseBuiltinAssetsToRemote()
                 }
-                if (config == remoteSshConnection.config && remoteSshConnection.isConnected()) return@collect
+                if (config == remoteSshConnection.config && remoteSshConnection.isConnected()) {
+                    syncDocsToRemote()
+                    return@collect
+                }
                 runCatching {
                     remoteSshConnection.connect(config)
                     // 连接成功后同步内置文档到远程 ~/.aicode/docs/，供 AI 查阅。
@@ -456,17 +475,42 @@ class AIEditorApp : Application(), Configuration.Provider {
             .setWorkerFactory(workerFactory)
             .build()
 
-    /**
-     * 读取 assets/docs 下所有内置文档（含 guide/ advanced/ 等分类子目录），通过 SSH exec 同步到远程 ~/.aicode/docs/。
-     * 远程模式下 AI 查阅 ~/.aicode/docs/ 的设置说明文档时，需要这些文件存在于远程服务器。
-     * 连接成功与重连成功后调用，保证远程文档随 App 升级更新。失败仅记日志，不阻断流程。
-     */
-    private suspend fun syncDocsToRemote() {
-        runCatching {
-            val docs = linkedMapOf<String, String>()
-            collectAssetDocs("docs", "", docs)
-            remoteSshConnection.uploadDocs(docs)
-        }.onFailure { FileLogger.w(TAG, "同步内置文档到远程失败", it) }
+    private fun syncDocsToRemote() {
+        val target = remoteSshConnection.captureDocsSyncTarget() ?: return
+        synchronized(docsSyncLock) {
+            if (docsSyncJob?.isActive == true && docsSyncTarget?.sameConnection(target) == true) return
+            docsSyncJob?.cancel()
+            docsSyncTarget = target
+            docsSyncJob = appScope.launch {
+                try {
+                    val snapshot = cachedDocsSnapshot()
+                    if (executionModeHolder.currentMode() == com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+                        remoteSshConnection.uploadDocs(snapshot, target)
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    FileLogger.w(TAG, "同步内置文档到远程失败", error)
+                }
+            }
+        }
+    }
+
+    private fun cancelDocsSync() {
+        synchronized(docsSyncLock) {
+            docsSyncJob?.cancel()
+            docsSyncTarget = null
+        }
+    }
+
+    private suspend fun cachedDocsSnapshot(): BuiltinDocsSync.Snapshot = withContext(Dispatchers.IO) {
+        docsSnapshotMutex.withLock {
+            docsSnapshot ?: run {
+                val docs = linkedMapOf<String, String>()
+                collectAssetDocs("docs", "", docs)
+                BuiltinDocsSync.snapshot(docs).also { docsSnapshot = it }
+            }
+        }
     }
 
     /**
@@ -494,10 +538,9 @@ class AIEditorApp : Application(), Configuration.Provider {
         for (entry in entries) {
             val assetPath = "$assetDir/$entry"
             val relativePath = if (relativePrefix.isEmpty()) entry else "$relativePrefix/$entry"
-            try {
-                out[relativePath] = assets.open(assetPath).bufferedReader().use { it.readText() }
-            } catch (e: java.io.IOException) {
-                // 目录项：assets.open 对目录抛 IOException，递归处理
+            if (entry.endsWith(".md")) {
+                out[relativePath] = assets.open(assetPath).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            } else {
                 collectAssetDocs(assetPath, relativePath, out)
             }
         }

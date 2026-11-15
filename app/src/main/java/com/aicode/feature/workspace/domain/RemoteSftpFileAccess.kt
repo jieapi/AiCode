@@ -55,10 +55,19 @@ class RemoteOutputTooLargeException(message: String) : IOException(message)
  */
 class RemoteSftpFileAccess @Inject constructor(
     private val connection: RemoteSshConnection,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val agentConfigCache: RemoteAgentConfigCache
 ) : FileAccessProvider {
 
     private val sftpMutex get() = connection.sftpOperationMutex
+
+    override fun agentConfigSnapshot(path: String, kind: AgentConfigKind, forceRefresh: Boolean): AgentConfigSnapshot =
+        agentConfigCache.directory(path, kind, forceRefresh)
+
+    override fun cachedAgentConfigSnapshot(path: String, kind: AgentConfigKind): AgentConfigSnapshot? =
+        agentConfigCache.cachedDirectory(path, kind)
+
+    override fun invalidateAgentConfigCache(path: String?) = agentConfigCache.invalidate(path)
 
     /** 当前选中工作区在远程服务器上的真实路径（如 /data/.../test/111）。 */
     private fun currentWorkspaceRoot(): String {
@@ -296,6 +305,7 @@ class RemoteSftpFileAccess @Inject constructor(
                 throw e
             }
         }
+        agentConfigCache.invalidate(path)
     }
 
     /**
@@ -318,7 +328,7 @@ class RemoteSftpFileAccess @Inject constructor(
         val remote = toRemotePath(path)
         // 先落到 .aicode-part 再改名：传输中途断开时不会在目标位置留下半截文件
         val tmp = tmpPathFor(remote)
-        return withSftp { sftp ->
+        val written = withSftp { sftp ->
             if (sftp.statExistence(remote) != null && !overwrite) throw FileAlreadyExistsException(File(remote))
             ensureParent(sftp, remote)
             val written = try {
@@ -342,6 +352,8 @@ class RemoteSftpFileAccess @Inject constructor(
             replaceVia(sftp, tmp, remote)
             written
         }
+        agentConfigCache.invalidate(path)
+        return written
     }
 
     override fun copyToLocal(path: String): File {
@@ -369,6 +381,7 @@ class RemoteSftpFileAccess @Inject constructor(
             val attrs = lstatOrNull(sftp, remote) ?: return@withSftp
             if (attrs.type == FileMode.Type.DIRECTORY) sftp.rmdir(remote) else sftp.rm(remote)
         }
+        agentConfigCache.invalidate(path)
     }
 
     override fun deleteRecursively(path: String) {
@@ -376,6 +389,7 @@ class RemoteSftpFileAccess @Inject constructor(
             val remote = resolveRemotePath(sftp, toRemotePath(path), followFinalLink = false)
             deleteRecursive(sftp, remote)
         }
+        agentConfigCache.invalidate(path)
     }
 
     override fun rename(path: String, newPath: String) {
@@ -386,6 +400,8 @@ class RemoteSftpFileAccess @Inject constructor(
             if (lstatOrNull(sftp, to) != null) throw FileAlreadyExistsException(File(to))
             sftp.rename(from, to)
         }
+        agentConfigCache.invalidate(path)
+        agentConfigCache.invalidate(newPath)
     }
 
     override fun copy(path: String, newPath: String, overwrite: Boolean) {
@@ -402,6 +418,7 @@ class RemoteSftpFileAccess @Inject constructor(
             }
             copyRecursive(sftp, from, to)
         }
+        agentConfigCache.invalidate(newPath)
     }
 
     override fun move(path: String, newPath: String, overwrite: Boolean) {
@@ -418,11 +435,14 @@ class RemoteSftpFileAccess @Inject constructor(
             }
             sftp.rename(from, to)
         }
+        agentConfigCache.invalidate(path)
+        agentConfigCache.invalidate(newPath)
     }
 
     override fun mkdirs(path: String) {
         val remote = toRemotePath(path)
         withSftp { it.mkdirs(remote) }
+        agentConfigCache.invalidate(path)
     }
 
     override fun parentPath(path: String): String? {

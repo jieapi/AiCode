@@ -13,9 +13,11 @@ class AgentDefinitionRepositoryPluginTest {
 
     private val global = mockk<GlobalDirectoryAgentSource>().apply {
         every { listDefinitions() } returns emptyList()
+        every { find(any()) } answers { listDefinitions().firstOrNull { it.name.equals(firstArg<String>(), true) } }
     }
     private val project = mockk<ProjectDirectoryAgentSource>().apply {
         every { listDefinitions() } returns emptyList()
+        every { find(any()) } answers { listDefinitions().firstOrNull { it.name.equals(firstArg<String>(), true) } }
     }
     private val config = mockk<AgentDefinitionConfigRepository>().apply {
         every { disabledNames() } returns emptySet()

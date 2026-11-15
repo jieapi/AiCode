@@ -66,6 +66,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
@@ -488,7 +489,7 @@ class StatefulAgentWorkflow @Inject constructor(
         // 否则远程模式下每次会话首次发消息都会在主线程做多次文件/网络往返。
         val promptStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "prompt.start", details = "operation=$promptStartedNs")
-        val systemPrompt = withContext(Dispatchers.IO) { promptProvider.build(currentContext) }
+        val systemPrompt = runInterruptible(Dispatchers.IO) { promptProvider.build(currentContext) }
         FileLogger.memoryCheckpoint(
             TAG,
             "prompt.ready",

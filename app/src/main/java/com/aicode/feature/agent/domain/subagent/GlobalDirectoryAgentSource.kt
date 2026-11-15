@@ -1,6 +1,7 @@
 package com.aicode.feature.agent.domain.subagent
 
 import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.AgentConfigKind
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,4 +19,12 @@ class GlobalDirectoryAgentSource @Inject constructor(
 
     override fun listDefinitions(): List<AgentDefinition> =
         AgentDefinitionDirectoryScanner.scan(fileAccess, agentsRoot)
+
+    fun find(name: String): AgentDefinition? {
+        val snapshot = fileAccess.cachedAgentConfigSnapshot(agentsRoot, AgentConfigKind.AGENTS)
+        val definitions = snapshot?.let(AgentDefinitionDirectoryScanner::fromSnapshot) ?: listDefinitions()
+        val definition = definitions.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
+        val path = definition.filePath ?: return definition
+        return AgentDefinitionParser.parse(fileAccess, path)?.takeIf { it.name.equals(name, ignoreCase = true) }
+    }
 }

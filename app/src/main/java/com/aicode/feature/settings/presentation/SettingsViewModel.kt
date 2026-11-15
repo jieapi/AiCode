@@ -1517,18 +1517,25 @@ class SettingsViewModel @Inject constructor(
     /** 重新扫描技能（进入设置页 / 启停切换后调用，反映磁盘上增删改）。 */
     fun refreshSkills() {
         viewModelScope.launch {
-            _skills.value = withContext(Dispatchers.IO) {
-                val disabled = skillRepository.disabledNames()
-                skillRepository.listAllSkills().map { entry ->
-                    SkillUiEntry(
-                        name = entry.skill.name,
-                        description = entry.skill.description,
-                        scope = entry.scope,
-                        disabled = entry.skill.name.lowercase() in disabled,
-                        instructions = entry.skill.instructions,
-                        requiredTools = entry.skill.requiredTools
-                    )
+            _skills.value = try {
+                withContext(Dispatchers.IO) {
+                    skillRepository.refreshDirectoryCache()
+                    val disabled = skillRepository.disabledNames()
+                    skillRepository.listAllSkills().map { entry ->
+                        SkillUiEntry(
+                            name = entry.skill.name,
+                            description = entry.skill.description,
+                            scope = entry.scope,
+                            disabled = entry.skill.name.lowercase() in disabled,
+                            instructions = entry.skill.instructions,
+                            requiredTools = entry.skill.requiredTools
+                        )
+                    }
                 }
+            } catch (error: java.io.IOException) {
+                if (error is java.io.InterruptedIOException) throw error
+                FileLogger.w("Settings", "技能清单读取失败", error)
+                emptyList()
             }
         }
     }
@@ -1672,25 +1679,32 @@ class SettingsViewModel @Inject constructor(
     /** 重新扫描子代理定义（进入设置页 / 删除后调用，反映盘上增删改）。 */
     fun refreshSubAgents() {
         viewModelScope.launch {
-            _subAgents.value = withContext(Dispatchers.IO) {
-                val disabled = agentDefinitionRepository.disabledNames()
-                agentDefinitionRepository.listAll().map { entry ->
-                    SubAgentUiEntry(
-                        name = entry.definition.name,
-                        description = entry.definition.description,
-                        scope = entry.scope,
-                        disabled = entry.definition.name.lowercase() in disabled,
-                        providerId = entry.definition.providerId,
-                        model = entry.definition.model,
-                        reasoningEffort = entry.definition.reasoningEffort,
-                        mode = entry.definition.mode,
-                        allowedTools = entry.definition.allowedTools,
-                        disallowedTools = entry.definition.disallowedTools,
-                        inject = entry.definition.inject,
-                        prompt = entry.definition.prompt,
-                        filePath = entry.definition.filePath
-                    )
+            _subAgents.value = try {
+                withContext(Dispatchers.IO) {
+                    agentDefinitionRepository.refreshDirectoryCache()
+                    val disabled = agentDefinitionRepository.disabledNames()
+                    agentDefinitionRepository.listAll().map { entry ->
+                        SubAgentUiEntry(
+                            name = entry.definition.name,
+                            description = entry.definition.description,
+                            scope = entry.scope,
+                            disabled = entry.definition.name.lowercase() in disabled,
+                            providerId = entry.definition.providerId,
+                            model = entry.definition.model,
+                            reasoningEffort = entry.definition.reasoningEffort,
+                            mode = entry.definition.mode,
+                            allowedTools = entry.definition.allowedTools,
+                            disallowedTools = entry.definition.disallowedTools,
+                            inject = entry.definition.inject,
+                            prompt = entry.definition.prompt,
+                            filePath = entry.definition.filePath
+                        )
+                    }
                 }
+            } catch (error: java.io.IOException) {
+                if (error is java.io.InterruptedIOException) throw error
+                FileLogger.w("Settings", "子代理清单读取失败", error)
+                emptyList()
             }
         }
     }

@@ -25,7 +25,7 @@ class RemoteSftpFileAccessSafetyTest {
     private val connection = mockk<RemoteSshConnection>(relaxed = true)
     private val workspace = mockk<WorkspaceRepository>()
     private val sftp = mockk<SFTPClient>(relaxed = true)
-    private val access = RemoteSftpFileAccess(connection, workspace)
+    private val access = RemoteSftpFileAccess(connection, workspace, mockk(relaxed = true))
     private val directory = FileAttributes.Builder().withType(FileMode.Type.DIRECTORY).build()
     private val symlink = FileAttributes.Builder().withType(FileMode.Type.SYMLINK).build()
 
