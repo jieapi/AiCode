@@ -244,13 +244,26 @@ class RemoteSshEngine @Inject constructor(
 
     /** 拼接 cd 到 projectPath 再执行 command 的完整命令；projectPath 为 null 则直接执行。
      *  优先 cd 到 ~/workspace（符号链接），让 AI 执行 pwd 时看到 ~/workspace 而非真实路径。
-     *  ~/workspace 不存在（符号链接未建成）时 fallback 到 projectPath。
-     *  注入 GIT_CONFIG_GLOBAL 指向 App 管理的 ~/.aicode/gitconfig：
-     *  仅当用户开启「自动注入」时该文件存在（含 include 用户全局配置 + includeIf 限定工作区根），
-     *  文件不存在时 git 静默跳过——不影响用户在服务器上手动 git。 */
+     *  ~/workspace 不存在（符号链接未建成）时 fallback 到 projectPath。 */
     private fun buildCdCommand(command: String, projectPath: String?): String {
-        val prefix = "export GIT_CONFIG_GLOBAL=\"\$HOME/.aicode/gitconfig\"; "
+        val prefix = gitCredentialEnvPrefix()
         if (projectPath == null) return prefix + command
         return prefix + "cd ~/workspace 2>/dev/null || cd ${shellQuote(projectPath)} 2>/dev/null; $command"
+    }
+
+    /**
+     * 凭证经 GIT_CONFIG_* 环境变量按命令注入，includeIf 限定到工作区根。
+     *
+     * 不用 GIT_CONFIG_GLOBAL 接管全局配置：那会把 App 生成的文件当成唯一全局配置，
+     * `git config --global`（署名、代理等）也写进该文件，注入时整份重写就会丢失；
+     * 同时读不到 ~/.config/git/config 与系统级配置。环境变量只影响当前 git 进程，
+     * 用户自己的全局配置照常生效。未注入时返回空串，命令完全走用户自己的 git 配置。
+     */
+    private fun gitCredentialEnvPrefix(): String {
+        val wsRoot = connection.gitCredentialWorkspaceRoot?.trimEnd('/') ?: return ""
+        val key = shellQuote("includeIf.gitdir:$wsRoot/.path")
+        return "export GIT_CONFIG_COUNT=1; " +
+            "export GIT_CONFIG_KEY_0=$key; " +
+            "export GIT_CONFIG_VALUE_0=\"\${HOME}/.aicode/gitconfig.credential\"; "
     }
 }

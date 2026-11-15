@@ -105,6 +105,11 @@ class RemoteSshConnection @Inject constructor(
     var connectionGeneration: Long = 0L
         private set
 
+    /** 已注入凭证的工作区根（真实路径）；null 表示未注入，远程命令不附加凭证配置。 */
+    @Volatile
+    var gitCredentialWorkspaceRoot: String? = null
+        private set
+
     suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock {
         if (isConnected() && this.config == config) return@withLock
         disconnectInternal()
@@ -157,6 +162,7 @@ class RemoteSshConnection @Inject constructor(
         runCatching { sshClient?.disconnect() }
         sshClient = null
         remoteHome = null
+        gitCredentialWorkspaceRoot = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
@@ -613,11 +619,12 @@ class RemoteSshConnection @Inject constructor(
 
     /**
      * 把 App 的 git 凭据注入远程服务器（仅当用户开启「自动注入」时调用）：
-     * 写 `~/.aicode/git-credentials`（store 格式）+ `~/.aicode/gitconfig` + `~/.aicode/gitconfig.credential`。
+     * 写 `~/.aicode/git-credentials`（store 格式）+ `~/.aicode/gitconfig.credential`。
      *
-     * 生效机制：[RemoteSshEngine] 执行命令时注入 `GIT_CONFIG_GLOBAL=$HOME/.aicode/gitconfig`，其中
-     * `[include] path=~/.gitconfig` 保留服务器用户自己的全局配置（署名等），`[includeIf "gitdir:<工作区根>/"]`
-     * 限定只有工作区根目录下的仓库才加载 store helper——不影响用户在服务器上手动 git，也不影响其它目录的仓库。
+     * 生效机制：[RemoteSshEngine] 执行命令时用 `GIT_CONFIG_*` 环境变量指向 credential 文件，
+     * 并经 `includeIf "gitdir:<工作区根>/"` 限定只有工作区根目录下的仓库才加载 store helper。
+     * 不接管 `GIT_CONFIG_GLOBAL`——服务器用户自己的全局配置（署名、代理等）照常生效，
+     * App 里的 `git config --global` 也仍写用户自己的配置，不会被后续注入覆盖。
      *
      * @param credentials 要注入的凭据列表（每 host 一条）。
      * @param workspaceRoot 远程工作区根路径（AI 的 ~/workspace 映射目录），限定注入范围。
@@ -648,28 +655,21 @@ class RemoteSshConnection @Inject constructor(
                 writeRemoteFile("$aicodeDir/git-credential-aicode", remoteHelperScript.toByteArray(Charsets.UTF_8), executable = true)
                 writeRemoteFile("$aicodeDir/git-credentials", encodeCreds(creds).toByteArray(Charsets.UTF_8))
 
-
-                val gitconfig = buildString {
-                    append("[include]\n")
-                    append("    path = ~/.gitconfig\n")
-                    append("[includeIf \"gitdir:${gitConfigValue(wsRoot)}/\"]\n")
-                    append("    path = ~/.aicode/gitconfig.credential\n")
-                }
-                writeRemoteFile("$aicodeDir/gitconfig", gitconfig.toByteArray(Charsets.UTF_8))
-
                 val credentialConfig = buildString {
                     append("[credential]\n")
                     append("    helper = !AICODE_CRED_NO_PROMPT=1 $aicodeDir/git-credential-aicode\n")
                 }
                 writeRemoteFile("$aicodeDir/gitconfig.credential", credentialConfig.toByteArray(Charsets.UTF_8))
+                gitCredentialWorkspaceRoot = wsRoot
                 FileLogger.i(TAG, "已注入 git 凭据到远程 $aicodeDir（限定 $wsRoot/）")
             }.onFailure { FileLogger.w(TAG, "注入 git 凭据到远程失败", it) }
         }
     }
 
     /**
-     * 撤销远程注入：删除 App 管理的三个配置/凭据文件。
-     * `GIT_CONFIG_GLOBAL` 指向不存在的文件时 git 静默跳过，注入即失效，服务器用户配置不受影响。
+     * 撤销远程注入：删除 App 管理的凭据与 helper 文件，命令不再附加凭证配置。
+     * `~/.aicode/gitconfig` 是旧版实现生成的文件，旧版期间写入其中的用户配置可能只存在于该文件，
+     * 这里不作删除。
      */
     suspend fun removeGitCredentialConfig() = credentialSyncMutex.withLock {
         val client = sshClient ?: return@withLock
@@ -679,11 +679,12 @@ class RemoteSshConnection @Inject constructor(
             runCatching {
                 sftpOperationMutex.withLock {
                     val sftp = sftp()
-                    listOf("gitconfig", "gitconfig.credential", "git-credentials", "git-credential-aicode").forEach { name ->
+                    listOf("gitconfig.credential", "git-credentials", "git-credential-aicode").forEach { name ->
                         val path = "$aicodeDir/$name"
                         if (sftp.statExistence(path) != null) sftp.rm(path)
                     }
                 }
+                gitCredentialWorkspaceRoot = null
                 FileLogger.i(TAG, "已撤销远程 git 凭据注入")
             }.onFailure { FileLogger.w(TAG, "撤销远程 git 凭据注入失败", it) }
         }
@@ -717,10 +718,6 @@ class RemoteSshConnection @Inject constructor(
             runCatching { client.rm(temporary) }
         }
     }
-
-    /** gitconfig 值转义：转义反斜杠与双引号并去换行，避免工作区路径注入结构性配置项。 */
-    private fun gitConfigValue(value: String): String =
-        value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "")
 
     private fun enc(part: String): String = java.net.URLEncoder.encode(part, "UTF-8")
 
