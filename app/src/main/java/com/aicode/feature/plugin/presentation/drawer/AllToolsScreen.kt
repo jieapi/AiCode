@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,7 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,13 +43,14 @@ import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AppTextField
+import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.plugin.domain.PluginWorkspaceTool
 import com.aicode.feature.plugin.presentation.drawer.resolveToolIcon
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Check
-import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.MoreVertical
+import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Search
 
 /**
@@ -66,6 +64,7 @@ fun AllToolsScreen(
     languageTag: String = "zh-CN",
     onBack: () -> Unit,
     onAddTool: (PluginWorkspaceTool) -> Unit,
+    onRemoveTool: (PluginWorkspaceTool) -> Unit,
     onViewDetail: (PluginWorkspaceTool) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -167,6 +166,7 @@ fun AllToolsScreen(
                             isAdded = isAdded,
                             languageTag = languageTag,
                             onAdd = { onAddTool(tool) },
+                            onRemove = { onRemoveTool(tool) },
                             onClick = { onViewDetail(tool) }
                         )
                     }
@@ -182,13 +182,48 @@ private fun AllToolItemRow(
     isAdded: Boolean,
     languageTag: String,
     onAdd: () -> Unit,
+    onRemove: () -> Unit,
     onClick: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(Radius.mdLarge)
+    if (isAdded) {
+        SwipeToDeleteRow(
+            onDelete = onRemove,
+            onClick = onClick,
+            modifier = Modifier.clip(cardShape)
+        ) {
+            AllToolCard(
+                tool = tool,
+                isAdded = true,
+                languageTag = languageTag,
+                onAdd = onAdd,
+                onClick = null
+            )
+        }
+    } else {
+        AllToolCard(
+            tool = tool,
+            isAdded = false,
+            languageTag = languageTag,
+            onAdd = onAdd,
+            onClick = onClick
+        )
+    }
+}
+
+@Composable
+private fun AllToolCard(
+    tool: PluginWorkspaceTool,
+    isAdded: Boolean,
+    languageTag: String,
+    onAdd: () -> Unit,
+    onClick: (() -> Unit)?
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.mdLarge))
-            .clickable(onClick = onClick),
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(Radius.mdLarge),
         color = MaterialTheme.semanticColors.cardSurface,
         tonalElevation = 1.dp
@@ -241,44 +276,25 @@ private fun AllToolItemRow(
 
             Spacer(modifier = Modifier.width(Spacing.sm))
 
-            Icon(
-                imageVector = FeatherIcons.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.semanticColors.subtleText,
-                modifier = Modifier.size(18.dp)
-            )
-
-            Spacer(modifier = Modifier.width(Spacing.xs))
-
-            Button(
-                onClick = onAdd,
-                enabled = !isAdded,
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isAdded) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                    contentColor = if (isAdded) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                modifier = Modifier.height(34.dp)
-            ) {
-                if (isAdded) {
+            if (isAdded) {
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = FeatherIcons.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
+                        contentDescription = stringResource(R.string.plugins_tool_added),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = stringResource(R.string.plugins_tool_added),
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.plugins_tool_add),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
+                }
+            } else {
+                IconButton(onClick = onAdd) {
+                    Icon(
+                        imageVector = FeatherIcons.Plus,
+                        contentDescription = stringResource(R.string.plugins_tool_add),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

@@ -2142,7 +2142,6 @@
     <string name="plugin_tool_run_stop">Stop</string>
     <string name="plugin_tool_run_no_output">No output yet</string>
     <string name="plugin_tool_unavailable">Plugin disabled, tool unavailable</string>
-    <string name="plugin_tool_remove">Remove from project</string>
     <string name="plugin_tool_not_found">Tool unavailable</string>
     <string name="plugin_tool_not_found_hint">The plugin may be disabled, uninstalled, or no longer providing this tool.</string>
     <string name="plugin_tool_not_authorized">The plugin is disabled, so this tool is unavailable</string>

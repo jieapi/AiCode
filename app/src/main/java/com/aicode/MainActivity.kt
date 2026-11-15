@@ -1027,6 +1027,7 @@ fun AppNavigation(
                     enabledToolKeys = enabledKeys,
                     onBack = { navController.popBackStack() },
                     onAddTool = { tool -> projectToolsViewModel.addToolToProject(tool) },
+                    onRemoveTool = { tool -> projectToolsViewModel.removeToolFromProject(tool.key) },
                     onViewDetail = { tool ->
                         projectToolsViewModel.selectTool(tool)
                         navController.navigate("plugin_tool_detail/${tool.key}")
@@ -1057,11 +1058,7 @@ fun AppNavigation(
                                 post = post
                             )
                         },
-                        onBack = returnFromToolDetail,
-                        onRemove = {
-                            projectToolsViewModel.removeToolFromProject(toolKey)
-                            returnFromToolDetail()
-                        }
+                        onBack = returnFromToolDetail
                     )
                 } else {
                     ToolUnavailableScreen(onBack = returnFromToolDetail)

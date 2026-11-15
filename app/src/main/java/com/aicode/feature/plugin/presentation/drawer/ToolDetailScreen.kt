@@ -27,12 +27,11 @@ import com.aicode.feature.plugin.presentation.PluginWebBridge
 import com.aicode.feature.plugin.presentation.PluginWebPanelScreen
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft
-import compose.icons.feathericons.Trash2
 
 /**
  * 界面 ②：工具详情（全屏页面）。
  *
- * 页面统一由插件自己的 HTML 实现，宿主只提供标题栏与返回/移除操作，
+ * 页面统一由插件自己的 HTML 实现，宿主只提供标题栏与返回操作，
  * WebView 容器与设置页、插件配置页共用 [PluginWebPanelScreen]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,7 +44,6 @@ fun ToolDetailScreen(
         onClosePage: () -> Unit
     ) -> PluginWebBridge,
     languageTag: String = "zh-CN",
-    onRemove: () -> Unit = {},
     onBack: () -> Unit
 ) {
     val page = remember(tool.key, tool.installDir) {
@@ -79,15 +77,6 @@ fun ToolDetailScreen(
                             imageVector = FeatherIcons.ArrowLeft,
                             contentDescription = stringResource(R.string.common_back),
                             modifier = Modifier.size(22.dp)
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onRemove) {
-                        Icon(
-                            imageVector = FeatherIcons.Trash2,
-                            contentDescription = stringResource(R.string.plugin_tool_remove),
-                            modifier = Modifier.size(20.dp)
                         )
                     }
                 },
