@@ -82,11 +82,14 @@ demo-kit/
 | `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读与可写 hook、插件事件 |
 | `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
 | `chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 |
-| `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` 与终端 |
+| `team-chat` | 设置页多模型群聊、模型句柄流式请求、工具调用与审批、图片输入 |
+| `backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包，并在还原后写回 |
+| `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` |
 | `ui-gallery` | 设置页、侧栏与顶栏槽位入口、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |
 | `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |
 | `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started` |
+| `external-api` | 插件私有加密存储、通用 HTTP 请求、把外部接口包成 AI 工具 |
 | `ssh-manager` | 常驻进程、npm 依赖准备、设置页与三个 AI 工具 |
 
 各示例的声明与关键代码摘要见[示例库](/advanced/plugin/examples)。

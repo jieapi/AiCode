@@ -5,7 +5,7 @@
     "default": "Demo Kit",
     "zh-CN": "插件演示套件"
   },
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "community",
   "repository": "https://github.com/example/demo-kit",
   "description": {
@@ -102,7 +102,6 @@
         "category": "项目",
         "pageFile": "pages/project-snapshot.html"
       }
-    ],
-    "configPage": "pages/config.html"
+    ]
   }
 }

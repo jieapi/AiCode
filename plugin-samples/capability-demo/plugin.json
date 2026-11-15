@@ -5,7 +5,7 @@
     "default": "Capability Demo",
     "zh-CN": "能力演示"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "demo",
   "repository": "https://github.com/example/capability-demo",
   "description": {

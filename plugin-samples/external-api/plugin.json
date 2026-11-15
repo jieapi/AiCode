@@ -1,0 +1,42 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.external-api",
+  "name": {
+    "default": "External API",
+    "zh-CN": "外部接口"
+  },
+  "version": "1.0.0",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "default": "Stores an API key in the host's encrypted secret store and calls a Bearer-protected endpoint from an AI tool. Demonstrates host.secrets.* and host.http.request.",
+    "zh-CN": "把 API Key 存进宿主加密存储，再由 AI 工具带它对需要 Bearer 认证的接口发起请求。演示 host.secrets.* 与 host.http.request。"
+  },
+  "license": "MIT",
+  "icon": "cloud",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "tools": [
+      {
+        "id": "whoami",
+        "title": {
+          "default": "Verify API Key",
+          "zh-CN": "验证 API Key"
+        },
+        "description": {
+          "default": "Call the configured endpoint with the stored API key and report whether it is accepted. Use it to check the key saved in the plugin settings.",
+          "zh-CN": "用已保存的 API Key 请求配置的接口，返回该 Key 是否被接受；用于验证插件设置里保存的凭据。"
+        },
+        "inputSchema": "schemas/whoami.input.json",
+        "handler": "tools.whoami"
+      }
+    ],
+    "configPage": "pages/config.html"
+  }
+}

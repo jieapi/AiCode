@@ -5,7 +5,7 @@
     "default": "Background Approval",
     "zh-CN": "后台审批"
   },
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "demo",
   "repository": "https://github.com/jieapi/AiCode",
   "description": {

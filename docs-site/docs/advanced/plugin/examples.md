@@ -15,8 +15,8 @@
 
 | 示例 | 插件 ID | 演示能力 | 建议阅读 |
 | --- | --- | --- | --- |
-| `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读与可写 hook、配置页 | 综合入门 |
-| `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
+| `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读与可写 hook | 综合入门 |
+| `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、动作型槽位、配置页 | Shizuku 与 `host.tip` |
 | `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 | 会话与消息 API |
 | `team-chat` | `demo.team-chat` | 设置页多模型群聊、模型句柄流式轮流请求、工具调用与审批、图片输入 | 模型句柄 |
 | `backup-helper` | `jieapi.backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包；`backup.data` 数据选项、备份与还原事件、独立授权 | 备份事件与授权 |
@@ -25,19 +25,19 @@
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
 | `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started` | 提供商 |
+| `external-api` | `demo.external-api` | 插件私有加密存储、通用 HTTP 请求、把外部接口包成 AI 工具 | 凭据与外部请求 |
 | `ssh-manager` | `demo.ssh-manager` | 常驻进程、npm 依赖、设置页、三个 AI 工具 | 常驻与依赖 |
 
 ## community.demo-kit
 
-一个包同时包含技能、子代理、AI 工具、工作区工具、只读与可写 hook 和配置页，适合首次通读。
+一个包同时包含技能、子代理、AI 工具、工作区工具与只读/可写 hook，适合首次通读。
 
 - 技能 `skills/project-notes/SKILL.md`：将讨论结论追加到 `NOTES.md`；
 - 子代理 `agents/reviewer.md`：`mode: plan`、只读工具、`inject: [base, projectRules]`；
 - AI 工具：`echo` 回显、`last-run` 读取 hook 保存的元数据、`notify` 调用 `host.notify`；
 - 工作区工具 `project-snapshot`：在终端标签中查看分支、改动和文件列表；
 - 只读 hook `agent.run.finished`：将运行元数据存入进程变量；
-- 可写 hook `agent.tool.before`：`mode: "transform"`，检查工具参数中的路径字段与命令字段，命中 `.env` 或 `.env.*` 时返回 `decision: "deny"`，并用 `logs` 记录被拦截的工具；
-- 配置页 `pages/config.html`。
+- 可写 hook `agent.tool.before`：`mode: "transform"`，检查工具参数中的路径字段与命令字段，命中 `.env` 或 `.env.*` 时返回 `decision: "deny"`，并用 `logs` 记录被拦截的工具。
 
 `.env` 拦截只检查路径与命令字段，不扫描 `content` / `edits`，避免正常代码提及 `.env` 时被误拦；实际策略应按项目需要调整。
 
@@ -66,11 +66,18 @@
 - `chat.welcome` 动作「填入演示提示词」调用 `host.chat.setDraft`，把文本写入当前输入框；
 - `files.tree.menu` 动作「查看文件信息」根据长按路径调用 `host.fs.stat`；
 - `editor.selection.menu` 动作「解释选中代码」把选中文本交给 `host.chat.setDraft`；
-- 配置页可直接触发提示、Shizuku 与「创建会话并发送」，后者依次调用 `aicode.chat.createSession`、`openSession` 和 `sendMessage`，便于验证会话 API。
+- 配置页可直接触发提示与 Shizuku 查询，便于在真机上逐项验证权限。
 
 ## chat-bridge
 
 演示给 AI 下达指令并读取回复的网页对话界面，可作为 QQ / 微信机器人接入的消息回路示例。
+
+- 在设置 → AI 中打开「对话桥」设置页；首次打开创建会话，之后复用 `data://chat-bridge.json` 里的会话 id；
+- 页面调用 `aicode.chat.createSession`、`sendMessage`、`listMessages`、`stop`，并在当前工作区范围内读写消息；
+- 页面监听宿主的 `chat.run.started` / `chat.run.finished` 事件，收到完成后拉取最终 assistant 文本；同时保留轮询兜底；
+- 同时声明 `agent.permission.review` 代审核 hook：AI 遇到需要确认的工具时，页面弹出「允许本次 / 拒绝」卡片，通过 `aicode.invoke('ui.permissionDecision')` 回传决定；4.5 分钟未处理会返回 `pass`，交回宿主自己的确认 UI；
+- 页面提供复制回复按钮，方便把结果回传到外部机器人。真实 QQ / 微信接入需要把同样的「收到消息 → sendMessage → 等完成 → 读取回复」回路放到常驻进程或自己的服务里；
+- 同时演示 `chat.session.menu` 动作入口：长按会话选「会话动作示例」，handler 返回 `{message}`，宿主用 toast 显示。
 
 ## team-chat
 
@@ -94,13 +101,6 @@
 - `backup.import.finished` 时从宿主解开的 `data://backup-import` 写回真实路径；若宿主本次已恢复 MCP（`stats.mcpServers > 0`），跳过区段里的 `mcp.json`，避免覆盖宿主备份；
 - 单文件超过 512 KiB、目录读取失败或超过 1500 个文件会跳过并记录在区段 manifest；
 - 导出/导入暂存目录由宿主在操作结束后清理。
-
-- 在设置 → AI 中打开「对话桥」设置页；首次打开创建会话，之后复用 `data://chat-bridge.json` 里的会话 id；
-- 页面调用 `aicode.chat.createSession`、`sendMessage`、`listMessages`、`stop`，并在当前工作区范围内读写消息；
-- 页面监听宿主的 `chat.run.started` / `chat.run.finished` 事件，收到完成后拉取最终 assistant 文本；同时保留轮询兜底；
-- 同时声明 `agent.permission.review` 代审核 hook：AI 遇到需要确认的工具时，页面弹出「允许本次 / 拒绝」卡片，通过 `aicode.invoke('ui.permissionDecision')` 回传决定；4.5 分钟未处理会返回 `pass`，交回宿主自己的确认 UI；
-- 页面提供复制回复按钮，方便把结果回传到外部机器人。真实 QQ / 微信接入需要把同样的「收到消息 → sendMessage → 等完成 → 读取回复」回路放到常驻进程或自己的服务里；
-- 同时演示 `chat.session.menu` 动作入口：长按会话选「会话动作示例」，handler 返回 `{message}`，宿主用 toast 显示。
 
 ## dev-tools
 
@@ -157,6 +157,17 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 - 配置页显示服务状态。
 
 启用后前往「设置 → 提供商」，找到带「插件」标记的条目，拉取模型后即可对话。
+
+## external-api
+
+把外部接口的 API Key 存进宿主加密存储，再由 AI 工具带着它请求接口：
+
+- 配置页保存时调 `host.secrets.set`，删除调 `host.secrets.delete`，列表只返回键名（`host.secrets.list`）；
+- 请求链路：`host.secrets.get` 取出 Key，再 `host.http.request` 带 `Authorization: Bearer` 请求 `https://httpbin.org/bearer`；
+- `whoami` 工具与配置页「测试连接」复用同一段逻辑，只返回是否通过，不回显 Key 原文；
+- 未保存 Key 时返回 `NO_TOKEN`，不发起请求；接口非 200 时返回状态码。
+
+该示例需要联网；`host.http.request` 只允许 http/https，不跟随重定向，也不注入任何宿主凭据。
 
 ## ssh-manager
 
