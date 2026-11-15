@@ -132,6 +132,17 @@ data class RetryState(val attempt: Int, val maxRetries: Int, val error: RetryErr
 data class KeySwitchState(val newIndex: Int, val total: Int)
 
 @Immutable
+data class StreamingAssistantMessage(
+    val sessionId: String,
+    val messageId: String,
+    val content: String = "",
+    val reasoning: String = "",
+    val settled: Boolean = false,
+    val reasoningStartMs: Long? = null,
+    val reasoningEndMs: Long? = null
+)
+
+@Immutable
 data class AgentUIMessage(
     val id: String,
     val role: MessageRole,

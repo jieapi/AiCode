@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -676,13 +678,15 @@ internal fun ReasoningBubble(
     /** 展开态的外部覆盖（宿主持久化，见 [AIAgentViewModel.reasoningExpansionOverrides]）；null = 用内部状态。 */
     expandedOverride: Boolean? = null,
     /** 手动展开/收起时回传新状态，由上层持久化。 */
-    onExpandedChange: ((Boolean) -> Unit)? = null
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    scrollState: LazyListState = rememberLazyListState(),
 ) {
     var localExpanded by remember { mutableStateOf(false) }
     val expanded = expandedOverride ?: localExpanded
     val toggleExpanded: (Boolean) -> Unit = { next ->
         if (onExpandedChange != null) onExpandedChange(next) else localExpanded = next
     }
+    val latestToggleExpanded by rememberUpdatedState(toggleExpanded)
     // 存绝对起始时间戳而非累加
     // 毫秒数，切页返回或气泡滚出视口重挂载后显示的仍是真实时长；起始戳连同已见文本的长度与
     // 指纹一起进 saveable，恢复时文本若不是同一轮的延续（期间已换轮）则重新计时。
@@ -763,13 +767,14 @@ internal fun ReasoningBubble(
                     cache = cache,
                     compact = true,
                     lazyScroll = true,
+                    lazyListState = scrollState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = ReasoningWindowMaxHeight)
                         .nestedScroll(rememberBoundNestedScrollConnection())
-                        .pointerInput(text) {
+                        .pointerInput(Unit) {
                             detectTapGestures(
-                                onDoubleTap = { toggleExpanded(false) }
+                                onDoubleTap = { latestToggleExpanded(false) }
                             )
                         }
                 )

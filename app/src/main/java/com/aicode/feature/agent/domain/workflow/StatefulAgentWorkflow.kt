@@ -601,7 +601,8 @@ class StatefulAgentWorkflow @Inject constructor(
                         val callKind = "chat"
                         var callError: String? = null
                         var callCompleted = false
-                        val stream = StreamAccumulator(callStartElapsed) { send(it) }
+                        val responseMessageId = UUID.randomUUID().toString()
+                        val stream = StreamAccumulator(callStartElapsed, responseMessageId) { send(it) }
 
                         try {
                             // 发送前按实际模型的视觉能力处理图片（同 execute 路径）。
@@ -638,7 +639,6 @@ class StatefulAgentWorkflow @Inject constructor(
                             send(AgentEvent.ContextUsage(
                                 if (baselineUsage > 0) baselineUsage else requestEstimate, inputBudget, baselineUsage <= 0
                             ))
-                            val responseMessageId = UUID.randomUUID().toString()
                             val responseWithReasoning = if (stream.reasoning.isNotEmpty()) {
                                 aiResponse.copy(reasoning = stream.reasoning.toString())
                             } else aiResponse
@@ -692,7 +692,7 @@ class StatefulAgentWorkflow @Inject constructor(
                             // 而落库的接力消息又没产生，表现为「思考显示后凭空消失且无报错」。
                             // 有正文或有思考其一即落库；两者皆空则不写空消息。
                             if (partial.isNotEmpty() || reasoning.isNotBlank()) {
-                                send(AgentEvent.AssistantText(partial, emptyList(), reasoning))
+                                send(AgentEvent.AssistantText(partial, emptyList(), reasoning, messageId = responseMessageId))
                             }
                             // 多 Key 的自动切换与重发已在 adapter 内完成（见 AIProvider.keySwitcher）；
                             // 走到这里说明不是 Key 问题、或候选 Key 已全部失败，直接上报原始错误。
@@ -1046,6 +1046,7 @@ class StatefulAgentWorkflow @Inject constructor(
      */
     private class StreamAccumulator(
         private val callStartElapsed: Long,
+        private val responseMessageId: String,
         private val emit: suspend (AgentEvent) -> Unit
     ) {
         private companion object {
@@ -1136,13 +1137,13 @@ class StatefulAgentWorkflow @Inject constructor(
         private suspend fun flushText() {
             val t = pendingText ?: return
             pendingText = null
-            emit(AgentEvent.AssistantDelta(t))
+            emit(AgentEvent.AssistantDelta(t, responseMessageId))
         }
 
         private suspend fun flushReasoning() {
             val t = pendingReasoning ?: return
             pendingReasoning = null
-            emit(AgentEvent.ReasoningDelta(t))
+            emit(AgentEvent.ReasoningDelta(t, responseMessageId))
         }
     }
 

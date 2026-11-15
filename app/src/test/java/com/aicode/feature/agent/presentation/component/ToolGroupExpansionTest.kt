@@ -489,7 +489,7 @@ class ToolGroupExpansionTest {
         val rendered = flattenChatProcesses(items(
             listOf(user("u0"), answer), turnOverrides = mapOf("turn:u0" to true),
         ))
-        assertEquals("a1#chunk0", rendered[findChatMessageIndex(rendered, "a1")].key)
+        assertEquals("a1", rendered[findChatMessageIndex(rendered, "a1")].key)
         assertEquals(-1, findChatMessageIndex(rendered, "missing"))
     }
 

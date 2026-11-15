@@ -31,10 +31,10 @@ sealed class AgentEvent {
     ) : AgentEvent()
 
     /** 流式过程中模型逐字吐出的文字（[accumulated] 为本轮已累积的完整文本，用于 UI 实时渲染，不落库）。 */
-    data class AssistantDelta(val accumulated: String) : AgentEvent()
+    data class AssistantDelta(val accumulated: String, val messageId: String) : AgentEvent()
 
     /** 流式过程中模型逐字吐出的思考过程（[accumulated] 为本轮已累积的完整思考，用于 UI 实时渲染，不落库）。 */
-    data class ReasoningDelta(val accumulated: String) : AgentEvent()
+    data class ReasoningDelta(val accumulated: String, val messageId: String) : AgentEvent()
 
     /** 模型决定调用某工具（执行前）。 */
     data class ToolCallStarted(val id: String, val toolName: String, val argsPreview: String) : AgentEvent()

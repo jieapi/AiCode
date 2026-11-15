@@ -246,6 +246,10 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var providerProxyRegistry: com.aicode.feature.settings.data.repository.ProviderProxyRegistry
 
+    /** 进程级 AI 执行器：启动即接管运行态与订阅，Activity 被回收后任务继续。 */
+    @Inject
+    lateinit var agentRunManager: com.aicode.feature.agent.presentation.run.AgentRunManager
+
     /** 长驻作用域：持续把持久化的日志等级同步到 FileLogger。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -257,6 +261,7 @@ class AIEditorApp : Application(), Configuration.Provider {
             return
         }
         super.onCreate()
+        agentRunManager.start()
         logDeviceInfo()
         // 补记 Java 未捕获异常处理器覆盖不到的异常退出（native 崩溃 / ANR / 低内存被杀 / 被信号杀死）。
         appScope.launch { reportAbnormalExits() }

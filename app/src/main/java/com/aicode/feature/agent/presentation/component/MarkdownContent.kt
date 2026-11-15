@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -132,7 +134,8 @@ internal fun MarkdownContent(
     loading: (@Composable () -> Unit)? = null,
     /** 长文本虚拟化渲染：正文改用 LazyColumn 逐块渲染（调用方需配合 heightIn 等有限高度约束
      *  才能触发懒加载），避免超大 md 一次性全量组合/测量造成的卡顿。 */
-    lazyScroll: Boolean = false
+    lazyScroll: Boolean = false,
+    lazyListState: LazyListState? = null
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val semantic = MaterialTheme.semanticColors
@@ -252,10 +255,13 @@ internal fun MarkdownContent(
                 state: MarkdownParseState.Success,
                 components: MarkdownComponents,
                 modifier: Modifier
-            ) -> Unit = remember(lazyScroll) {
+            ) -> Unit = remember(lazyScroll, lazyListState) {
                 if (lazyScroll) {
                     { state, components, m ->
-                        LazyColumn(modifier = m) {
+                        LazyColumn(
+                            modifier = m,
+                            state = lazyListState ?: rememberLazyListState(),
+                        ) {
                             items(
                                 items = state.node.children,
                                 key = { node -> node.startOffset },
