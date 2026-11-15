@@ -1,15 +1,19 @@
 package com.aicode.feature.plugin.runtime
 
 import com.aicode.feature.agent.domain.mcp.McpManager
+import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCapability
 import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginManager
+import com.google.gson.Gson
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -17,8 +21,10 @@ import kotlinx.serialization.json.put
 /**
  * 插件查看宿主 AI 工具与 MCP server 状态的只读入口。
  *
- * 只给出名字、描述、来源类型、授权策略与能力，不暴露参数 schema 与执行结果；插件未启用或内容
- * 损坏时所有方法返回 `PLUGIN_INACTIVE`。`type` 取 `plugin` / `mcp` / `builtin`，
+ * 默认只给出名字、描述、来源类型、授权策略与能力，不暴露参数 schema 与执行结果；
+ * `includeSchema=true` 时额外附带 [AgentTool.toJsonSchema] 生成的 `inputSchema`，
+ * 单条超过 [MAX_SCHEMA_BYTES]、或累计超过 [MAX_TOTAL_SCHEMA_BYTES] 的 schema 省略。
+ * 插件未启用或内容损坏时所有方法返回 `PLUGIN_INACTIVE`。`type` 取 `plugin` / `mcp` / `builtin`，
  * `permissionPolicy` 与 `capabilities` 取枚举名的小写形式（如 `ask`、`execute_commands`）。
  */
 @Singleton
@@ -28,9 +34,15 @@ class PluginIntrospectionService @Inject constructor(
     private val mcpManager: McpManager
 ) {
 
-    /** 已注册工具，按注册顺序最多 [MAX_TOOLS] 项；description 截断到 [MAX_DESCRIPTION_CHARS] 字符。 */
-    fun listTools(pluginId: String): JsonElement {
+    private val gson = Gson()
+
+    /**
+     * 已注册工具，按注册顺序最多 [MAX_TOOLS] 项；description 截断到 [MAX_DESCRIPTION_CHARS] 字符。
+     * [includeSchema] 为 true 时附带参数 schema，体积超限则省略该项。
+     */
+    fun listTools(pluginId: String, includeSchema: Boolean = false): JsonElement {
         ensureActive(pluginId)
+        var schemaBudget = MAX_TOTAL_SCHEMA_BYTES
         val tools = toolRegistry.getAvailableTools()
             .take(MAX_TOOLS)
             .map { tool ->
@@ -40,6 +52,13 @@ class PluginIntrospectionService @Inject constructor(
                     put("type", toolType(tool.name))
                     put("permissionPolicy", tool.permissionPolicy.name.lowercase(Locale.ROOT))
                     put("capabilities", JsonArray(tool.capabilities.map { capabilityName(it) }))
+                    if (includeSchema) {
+                        val schema = schemaJson(tool)
+                        if (schema != null && schema.second <= MAX_SCHEMA_BYTES && schema.second <= schemaBudget) {
+                            put("inputSchema", schema.first)
+                            schemaBudget -= schema.second
+                        }
+                    }
                 }
             }
         return buildJsonObject { put("tools", JsonArray(tools)) }
@@ -71,12 +90,22 @@ class PluginIntrospectionService @Inject constructor(
         else -> "builtin"
     }
 
+    /** 工具的 JSON Schema 与序列化后字节数；序列化失败返回 null，由调用方省略该项。 */
+    private fun schemaJson(tool: AgentTool): Pair<JsonObject, Int>? {
+        val encoded = runCatching { gson.toJson(tool.toJsonSchema()) }.getOrNull() ?: return null
+        val element = runCatching { Json.parseToJsonElement(encoded) as? JsonObject }.getOrNull()
+            ?: return null
+        return element to encoded.toByteArray(Charsets.UTF_8).size
+    }
+
     private fun capabilityName(capability: ToolCapability): JsonPrimitive =
         JsonPrimitive(capability.name.lowercase(Locale.ROOT))
 
     private companion object {
         const val MAX_TOOLS = 200
         const val MAX_DESCRIPTION_CHARS = 500
+        const val MAX_SCHEMA_BYTES = 64 * 1024
+        const val MAX_TOTAL_SCHEMA_BYTES = 256 * 1024
         const val PLUGIN_TOOL_PREFIX = "plugin__"
         const val MCP_TOOL_PREFIX = "mcp__"
     }

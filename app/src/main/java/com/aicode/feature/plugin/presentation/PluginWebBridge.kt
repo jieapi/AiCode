@@ -30,6 +30,7 @@ import com.aicode.feature.plugin.runtime.PluginTipException
 import com.aicode.feature.plugin.runtime.PluginTipManager
 import com.aicode.feature.plugin.runtime.PluginTerminalException
 import com.aicode.feature.plugin.runtime.PluginTerminalRunner
+import com.aicode.feature.plugin.runtime.PluginToolService
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import java.io.File
@@ -84,6 +85,7 @@ class PluginWebBridge(
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
+    private val toolService: PluginToolService,
     private val httpService: PluginHttpService,
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
@@ -419,7 +421,13 @@ class PluginWebBridge(
             PluginHostPaths.requireString(params, "key")
         )
         "secrets.list" -> secretStore.list(page.pluginId)
-        "tools.list" -> introspectionService.listTools(page.pluginId)
+        "tools.list" -> introspectionService.listTools(
+            page.pluginId,
+            includeSchema = (params["includeSchema"] as? JsonPrimitive)?.booleanOrNull ?: false
+        )
+        "tools.execute" -> toolService.execute(page.pluginId, params)
+        "tools.pending" -> toolService.pending(page.pluginId, params)
+        "tools.resolve" -> toolService.resolve(page.pluginId, params)
         "mcp.status" -> introspectionService.mcpStatus(page.pluginId)
         "http.request" -> httpService.request(page.pluginId, params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")

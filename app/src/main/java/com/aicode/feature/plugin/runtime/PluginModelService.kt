@@ -1,5 +1,6 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.provider.AIProvider
 import com.aicode.feature.agent.domain.provider.AIResponse
@@ -7,6 +8,9 @@ import com.aicode.feature.agent.domain.provider.AIStreamChunk
 import com.aicode.feature.agent.domain.provider.AllKeysFailedException
 import com.aicode.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicode.feature.agent.domain.provider.StreamApiException
+import com.aicode.feature.agent.domain.tool.AgentTool
+import com.aicode.feature.agent.domain.tool.ToolCall
+import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.agent.domain.workflow.ContextTokenEstimator
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHostException
@@ -14,10 +18,16 @@ import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
+import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelContextPolicy
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.PathHomeResolver
+import com.google.gson.Gson
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.UUID
@@ -52,6 +62,9 @@ import kotlinx.serialization.json.put
  * 插件模型句柄：把「供应商 + 模型 + 默认提示词/参数」封装成宿主托管的句柄，
  * 插件用它直接发起单次模型补全。不走聊天页 ViewModel，也不执行 Agent 工具循环。
  *
+ * 请求可携带工具定义（宿主只透传给 provider、不执行）、assistant 工具调用与 tool 结果、
+ * 各家的思考签名快照与图片；工具执行、跨轮上下文和 providerState 回传都由插件自己负责。
+ *
  * 流式采用 start / read / cancel 的拉取式协议：请求体只经一次 JSON-RPC，
  * 事件在宿主缓冲后由插件按 cursor 批量读取，避免逐 token 跨进程调用。
  */
@@ -61,7 +74,12 @@ class PluginModelService @Inject constructor(
     private val providerRepository: AIProviderRepository,
     private val providerFactory: ProviderInstanceFactory,
     private val modelMetadataService: ModelMetadataService,
-    private val defaultModelSettingsRepository: DefaultModelSettingsRepository
+    private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
+    private val toolRegistry: ToolRegistry,
+    private val fileAccess: FileAccessProvider,
+    private val homeResolver: PathHomeResolver,
+    private val workspaceRepository: WorkspaceRepository,
+    private val executionModeHolder: ExecutionModeHolder
 ) {
     private data class ModelParams(
         val reasoningEffort: String? = null,
@@ -109,6 +127,7 @@ class PluginModelService @Inject constructor(
     private val handles = ConcurrentHashMap<String, Handle>()
     private val streams = ConcurrentHashMap<String, Stream>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val gson = Gson()
 
     init {
         scope.launch {
@@ -210,11 +229,23 @@ class PluginModelService @Inject constructor(
     suspend fun start(pluginId: String, params: JsonObject, origin: String): JsonElement {
         ensureAccess(pluginId)
         cleanupStale()
+        if (params.toString().length > MAX_START_REQUEST_CHARS) {
+            throw PluginHostException("REQUEST_TOO_LARGE", "start request is too large")
+        }
         val handleId = PluginHostPaths.requireString(params, "handleId").trim()
         val handle = handles[handleId]?.takeIf { it.pluginId == pluginId }
             ?: throw PluginHostException("HANDLE_NOT_FOUND", "model handle not found: $handleId")
-        val messages = parseMessages(params["messages"])
-        if (messages.all { it.textContent().isBlank() }) throw paramInvalid("messages are empty")
+        val hostPaths = PluginHostPaths(
+            fileAccess = fileAccess,
+            homeResolver = homeResolver,
+            workspaceRoot = ::workspaceRoot,
+            pluginId = pluginId
+        )
+        val messages = parseMessages(params["messages"], hostPaths)
+        if (messages.all { it.textContent().isBlank() && it.imagesOf().isEmpty() }) {
+            throw paramInvalid("messages are empty")
+        }
+        val tools = parseTools(params["tools"])
         val systemPrompt = optionalString(params, "systemPrompt") ?: handle.systemPrompt
         if (systemPrompt != null && systemPrompt.length > MAX_SYSTEM_PROMPT_CHARS) {
             throw paramInvalid("systemPrompt too long")
@@ -226,7 +257,7 @@ class PluginModelService @Inject constructor(
         val metadata = modelMetadataService.resolve(config.id, config.type, model)
         ensureChatModel(metadata)
         validateParams(modelParams, metadata)
-        val estimated = ContextTokenEstimator.estimate(systemPrompt.orEmpty(), messages, emptyList())
+        val estimated = ContextTokenEstimator.estimate(systemPrompt.orEmpty(), messages, tools)
         val budget = ModelContextPolicy.effectiveInputBudget(metadata)
         if (estimated >= budget) {
             throw PluginHostException(
@@ -260,6 +291,7 @@ class PluginModelService @Inject constructor(
                 provider = provider,
                 systemPrompt = systemPrompt.orEmpty(),
                 messages = messages,
+                tools = tools,
                 params = modelParams,
                 secretValues = config.effectiveApiKeys.map { it.value }
             )
@@ -327,6 +359,7 @@ class PluginModelService @Inject constructor(
         provider: AIProvider,
         systemPrompt: String,
         messages: List<AgentMessage>,
+        tools: List<AgentTool>,
         params: ModelParams,
         secretValues: List<String>
     ) {
@@ -374,7 +407,7 @@ class PluginModelService @Inject constructor(
                     }
                 }
                 try {
-                    provider.completeStream(systemPrompt, messages, emptyList(), params.reasoningEffort)
+                    provider.completeStream(systemPrompt, messages, tools, params.reasoningEffort)
                         .collect { chunk ->
                             if (stream.done) return@collect
                             when (chunk) {
@@ -651,11 +684,13 @@ class PluginModelService @Inject constructor(
         }
     }
 
-    private fun parseMessages(raw: JsonElement?): List<AgentMessage> {
+    private fun parseMessages(raw: JsonElement?, hostPaths: PluginHostPaths): List<AgentMessage> {
         val array = raw as? JsonArray
             ?: throw paramInvalid("messages must be an array")
         if (array.isEmpty()) throw paramInvalid("messages must not be empty")
         if (array.size > MAX_MESSAGES) throw paramInvalid("too many messages")
+        val images = PluginModelImageCodec(hostPaths)
+        val toolCallIds = mutableSetOf<String>()
         var totalChars = 0
         return array.mapIndexed { index, element ->
             val item = element as? JsonObject
@@ -671,9 +706,150 @@ class PluginModelService @Inject constructor(
             totalChars += content.length
             if (totalChars > MAX_MESSAGES_CHARS) throw paramInvalid("messages too large")
             when (role) {
-                "user" -> AgentMessage.UserMessage(content = content)
-                "assistant" -> AgentMessage.AssistantMessage(content = content)
-                else -> throw paramInvalid("messages[$index].role must be user or assistant")
+                "user" -> AgentMessage.UserMessage(
+                    content = content,
+                    images = images.parse(item["images"], index)
+                )
+                "assistant" -> {
+                    val toolCalls = parseToolCalls(item["toolCalls"], index)
+                    val reasoning = optionalString(item, "reasoning") ?: ""
+                    if (reasoning.length > MAX_REASONING_CHARS) {
+                        throw paramInvalid("messages[$index].reasoning too long")
+                    }
+                    val providerState = parseProviderState(item["providerState"], index)
+                    toolCalls.forEach { toolCallIds += it.id }
+                    AgentMessage.AssistantMessage(
+                        content = content,
+                        toolCalls = toolCalls,
+                        reasoning = reasoning,
+                        signature = providerState.signature,
+                        thinkingBlocksJson = providerState.thinkingBlocksJson
+                    )
+                }
+                "tool" -> {
+                    val toolCallId = (item["toolCallId"] as? JsonPrimitive)
+                        ?.takeIf { it.isString }?.content?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: throw paramInvalid("messages[$index].toolCallId is required")
+                    if (toolCallId !in toolCallIds) {
+                        throw paramInvalid(
+                            "messages[$index].toolCallId does not match a preceding assistant toolCalls"
+                        )
+                    }
+                    val name = (item["name"] as? JsonPrimitive)
+                        ?.takeIf { it.isString }?.content?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: throw paramInvalid("messages[$index].name is required")
+                    AgentMessage.ToolResultMessage(
+                        id = toolCallId,
+                        toolName = name,
+                        result = content,
+                        images = images.parse(item["images"], index)
+                    )
+                }
+                else -> throw paramInvalid("messages[$index].role must be user, assistant or tool")
+            }
+        }
+    }
+
+    private fun parseToolCalls(raw: JsonElement?, messageIndex: Int): List<ToolCall> {
+        if (raw == null || raw is JsonNull) return emptyList()
+        val array = raw as? JsonArray
+            ?: throw paramInvalid("messages[$messageIndex].toolCalls must be an array")
+        if (array.size > MAX_TOOL_CALLS) {
+            throw paramInvalid("messages[$messageIndex].toolCalls has too many entries")
+        }
+        var totalArgs = 0
+        return array.mapIndexed { callIndex, element ->
+            val label = "messages[$messageIndex].toolCalls[$callIndex]"
+            val item = element as? JsonObject ?: throw paramInvalid("$label must be an object")
+            val id = (item["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw paramInvalid("$label.id is required")
+            val name = (item["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw paramInvalid("$label.name is required")
+            val arguments = item["arguments"] as? JsonObject
+                ?: throw paramInvalid("$label.arguments must be an object")
+            totalArgs += arguments.toString().length
+            if (totalArgs > MAX_TOOL_CALL_ARGS_CHARS) throw paramInvalid("$label.arguments too large")
+            ToolCall(id = id, name = name, arguments = arguments)
+        }
+    }
+
+    private class ProviderState(val signature: String, val thinkingBlocksJson: String)
+
+    private fun parseProviderState(raw: JsonElement?, messageIndex: Int): ProviderState {
+        if (raw == null || raw is JsonNull) return ProviderState("", "")
+        val item = raw as? JsonObject
+            ?: throw paramInvalid("messages[$messageIndex].providerState must be an object")
+        val signature = optionalString(item, "signature") ?: ""
+        val thinkingBlocksJson = optionalString(item, "thinkingBlocksJson") ?: ""
+        if (signature.length + thinkingBlocksJson.length > MAX_PROVIDER_STATE_CHARS) {
+            throw paramInvalid("messages[$messageIndex].providerState too long")
+        }
+        return ProviderState(signature, thinkingBlocksJson)
+    }
+
+    private fun parseTools(raw: JsonElement?): List<AgentTool> {
+        if (raw == null || raw is JsonNull) return emptyList()
+        val array = raw as? JsonArray ?: throw paramInvalid("tools must be an array")
+        if (array.size > MAX_TOOLS) throw paramInvalid("too many tools")
+        val names = mutableSetOf<String>()
+        var totalSchemaChars = 0
+        return array.mapIndexed { index, element ->
+            val item = element as? JsonObject ?: throw paramInvalid("tools[$index] must be an object")
+            val type = (item["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?.trim()?.lowercase(Locale.ROOT)
+                ?: throw paramInvalid("tools[$index].type is required")
+            val name = (item["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: throw paramInvalid("tools[$index].name is required")
+            if (!names.add(name)) throw paramInvalid("duplicate tool name: $name")
+            when (type) {
+                "app" -> {
+                    if (name.startsWith(PLUGIN_TOOL_PREFIX)) {
+                        throw PluginHostException(
+                            "TOOL_NOT_ALLOWED",
+                            "plugin tools cannot be referenced: $name"
+                        )
+                    }
+                    val tool = toolRegistry.getTool(name)
+                        ?: throw PluginHostException("TOOL_NOT_FOUND", "tool not found: $name")
+                    totalSchemaChars += gson.toJson(tool.toJsonSchema()).length
+                    if (totalSchemaChars > MAX_TOOL_SCHEMAS_CHARS) {
+                        throw paramInvalid("tool schemas are too large")
+                    }
+                    tool
+                }
+                "custom" -> {
+                    if (!CUSTOM_TOOL_NAME_REGEX.matches(name)) {
+                        throw paramInvalid("tools[$index].name is invalid")
+                    }
+                    val description = optionalString(item, "description")?.trim() ?: ""
+                    if (description.length > MAX_CUSTOM_TOOL_DESCRIPTION_CHARS) {
+                        throw paramInvalid("tools[$index].description too long")
+                    }
+                    val inputSchema = when (val schema = item["inputSchema"]) {
+                        null, is JsonNull -> EMPTY_TOOL_SCHEMA
+                        is JsonObject -> schema
+                        else -> throw paramInvalid("tools[$index].inputSchema must be an object")
+                    }
+                    val schemaChars = inputSchema.toString().length
+                    if (schemaChars > MAX_TOOL_SCHEMA_CHARS) {
+                        throw paramInvalid("tools[$index].inputSchema too large")
+                    }
+                    totalSchemaChars += schemaChars
+                    if (totalSchemaChars > MAX_TOOL_SCHEMAS_CHARS) {
+                        throw paramInvalid("tool schemas are too large")
+                    }
+                    PluginModelToolDefinition(
+                        name = name,
+                        description = description,
+                        inputSchema = inputSchema
+                    )
+                }
+                else -> throw paramInvalid("tools[$index].type must be app or custom")
             }
         }
     }
@@ -683,6 +859,20 @@ class PluginModelService @Inject constructor(
         is AgentMessage.AssistantMessage -> content
         is AgentMessage.ToolResultMessage -> result
     }
+
+    private fun AgentMessage.imagesOf(): List<AgentImage> = when (this) {
+        is AgentMessage.UserMessage -> images
+        is AgentMessage.AssistantMessage -> images
+        is AgentMessage.ToolResultMessage -> images
+    }
+
+    /** 当前工作区在插件可见路径空间里的根：远程用远端绝对路径，本地用容器内 `$HOME/workspace`。 */
+    private fun workspaceRoot(): String =
+        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+            workspaceRepository.currentPath()
+        } else {
+            homeResolver.home().trimEnd('/') + "/workspace"
+        }
 
     private fun parseParams(raw: JsonElement?): ModelParams {
         if (raw == null || raw is JsonNull) return ModelParams()
@@ -763,12 +953,19 @@ class PluginModelService @Inject constructor(
             if (reasoning.length > MAX_FINAL_REASONING_CHARS) put("reasoningTruncated", true)
         }
         if (response.toolCalls.isNotEmpty()) {
-            put("toolCalls", JsonArray(response.toolCalls.take(MAX_FINAL_TOOL_CALLS).map { call ->
+            var totalArgs = 0
+            var toolCallsTruncated = response.toolCalls.size > MAX_FINAL_TOOL_CALLS
+            val calls = response.toolCalls.take(MAX_FINAL_TOOL_CALLS).mapNotNull { call ->
+                val arguments = JsonObject(call.arguments)
+                val encoded = arguments.toString()
+                if (totalArgs + encoded.length > MAX_FINAL_TOOL_ARGS_TOTAL_CHARS) {
+                    toolCallsTruncated = true
+                    return@mapNotNull null
+                }
+                totalArgs += encoded.length
                 buildJsonObject {
                     put("id", call.id)
                     put("name", call.name)
-                    val arguments = JsonObject(call.arguments)
-                    val encoded = arguments.toString()
                     if (encoded.length <= MAX_TOOL_ARGS_CHARS) {
                         put("arguments", arguments)
                     } else {
@@ -776,12 +973,22 @@ class PluginModelService @Inject constructor(
                         put("argumentsTruncated", true)
                     }
                 }
-            }))
-            if (response.toolCalls.size > MAX_FINAL_TOOL_CALLS) put("toolCallsTruncated", true)
+            }
+            put("toolCalls", JsonArray(calls))
+            if (toolCallsTruncated) put("toolCallsTruncated", true)
         }
         response.stopReason?.let { put("stopReason", it) }
         response.stopDetail?.let { put("stopDetail", it.take(MAX_STOP_DETAIL_CHARS)) }
+        val providerState = buildJsonObject {
+            response.signature?.takeIf { it.isNotEmpty() }?.let { put("signature", it) }
+            response.thinkingBlocksJson?.takeIf { it.isNotEmpty() }
+                ?.let { put("thinkingBlocksJson", it) }
+        }
+        if (providerState.isNotEmpty()) put("providerState", providerState)
         if (response.images.isNotEmpty()) put("imageCount", response.images.size)
+        val images = PluginModelImageCodec.encodeOutput(response.images)
+        if (images.array.isNotEmpty()) put("images", images.array)
+        if (images.truncated) put("imagesTruncated", true)
         put("usage", buildJsonObject {
             put("input", response.inputTokens)
             put("output", response.outputTokens)
@@ -850,8 +1057,25 @@ class PluginModelService @Inject constructor(
     private companion object {
         const val MAX_MODELS = 500
         const val MAX_MESSAGES = 200
-        const val MAX_MESSAGE_CHARS = 64 * 1024
-        const val MAX_MESSAGES_CHARS = 256 * 1024
+        const val MAX_MESSAGE_CHARS = 128 * 1024
+        const val MAX_MESSAGES_CHARS = 512 * 1024
+        const val MAX_TOOL_CALLS = 32
+        const val MAX_TOOL_CALL_ARGS_CHARS = 64 * 1024
+        const val MAX_REASONING_CHARS = 64 * 1024
+        const val MAX_PROVIDER_STATE_CHARS = 256 * 1024
+        const val MAX_TOOLS = 64
+        const val MAX_START_REQUEST_CHARS = 3 * 1024 * 1024
+        const val MAX_CUSTOM_TOOL_DESCRIPTION_CHARS = 600
+        const val MAX_TOOL_SCHEMA_CHARS = 64 * 1024
+        const val MAX_TOOL_SCHEMAS_CHARS = 256 * 1024
+        const val PLUGIN_TOOL_PREFIX = "plugin__"
+        val CUSTOM_TOOL_NAME_REGEX = Regex("^[A-Za-z0-9_-]{1,64}$")
+        val EMPTY_TOOL_SCHEMA = JsonObject(
+            mapOf(
+                "type" to JsonPrimitive("object"),
+                "properties" to JsonObject(emptyMap())
+            )
+        )
         const val MAX_SYSTEM_PROMPT_CHARS = 64 * 1024
         const val MAX_HANDLE_NAME_CHARS = 64
         const val MAX_REASONING_EFFORT_CHARS = 32
@@ -874,8 +1098,9 @@ class PluginModelService @Inject constructor(
         const val MAX_BUFFERED_CHARS = 2L * 1024 * 1024
         const val MAX_FINAL_CONTENT_CHARS = 256 * 1024
         const val MAX_FINAL_REASONING_CHARS = 64 * 1024
-        const val MAX_FINAL_TOOL_CALLS = 20
-        const val MAX_TOOL_ARGS_CHARS = 4_000
+        const val MAX_FINAL_TOOL_CALLS = 32
+        const val MAX_TOOL_ARGS_CHARS = 64 * 1024
+        const val MAX_FINAL_TOOL_ARGS_TOTAL_CHARS = 256 * 1024
         const val MAX_STOP_DETAIL_CHARS = 4_000
         const val MAX_ERROR_MESSAGE_CHARS = 4_000
         const val MAX_ERROR_PARTIAL_CHARS = 32 * 1024

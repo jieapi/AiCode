@@ -92,7 +92,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.clipboard.read` / `write`、`host.share.text`、`host.ui.openUrl` | 见下表 | 系统剪贴板、分享与打开链接 |
 | `host.app.info`、`host.log` | 见下表 | App 信息与宿主日志 |
 | `host.secrets.get` / `set` / `delete` / `list` | 见下表 | 插件私有加密键值存储 |
-| `host.tools.list`、`host.mcp.status` | 见下表 | 工具与 MCP 状态 introspection |
+| `host.tools.list` / `execute` / `pending` / `resolve`、`host.mcp.status` | 见下表 | 工具目录、代执行与审批，以及 MCP 状态 |
 | `host.http.request` | 见下表 | 宿主代理 HTTP 请求 |
 | `host.overlay.create` / `close` / `postMessage` / `update` | 同页面桥 | 管理系统浮层 |
 | `plugin.event` | `{name, payload}` | 通知，推送给同插件已打开的页面 |
@@ -155,7 +155,10 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.log` | `{level, message, tag?}` | 写宿主日志；正文最多 2000 字符 |
 | `host.secrets.get` / `set` / `delete` | `{key}` / `{key, value}` / `{key}` | 加密键值；值最多 64 KiB |
 | `host.secrets.list` | 无 | `{keys}`，只返回键名 |
-| `host.tools.list` | 无 | `{tools}`；最多 200 项 |
+| `host.tools.list` | `{includeSchema?}` | `{tools}`；最多 200 项，描述最多 500 字符；`includeSchema` 为 true 时附带参数 schema |
+| `host.tools.execute` | `{name, arguments, sessionId?, context?, timeoutMs?}` | 工具结果；只允许内置 / MCP 工具，ASK 时挂起等待审批 |
+| `host.tools.pending` | `{sessionId?}` | `{approval}`；没有待审批请求时 `approval` 为 `null` |
+| `host.tools.resolve` | `{requestId, choice}` | `{ok}`；`choice` 为 `once` / `always` / `reject` |
 | `host.mcp.status` | 无 | `{servers}` 连接状态 |
 | `host.http.request` | `{url, method?, headers?, body?, timeout?}` | `{status, headers, body, truncated}`；不跟随重定向、不注入凭据 |
 | `host.overlay.create` | `{surface?, width?, height?, visibilityPolicy?}` | 创建清单声明的浮层 |
@@ -183,6 +186,27 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 `host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
 
 `host.http.request` 只接受 http/https，不跟随重定向、不注入宿主凭据；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
+
+### 工具目录与代执行
+
+`host.tools.list({includeSchema?})` 返回宿主注册的工具：`name`、`description`、`type`（`builtin` / `mcp` / `plugin`）、`permissionPolicy`（如 `ask`、`auto_approve`）与 `capabilities`。`includeSchema: true` 时额外返回 `inputSchema`；单个 schema 超过 64 KiB 或累计超过 256 KiB 时省略该项，不会报错。最多返回 200 项。
+
+`host.tools.execute({name, arguments, sessionId?, context?, timeoutMs?})` 把一次工具调用交给宿主：
+
+| 项 | 行为 |
+| --- | --- |
+| 工具范围 | 只允许内置与 MCP 工具；`plugin__` 前缀返回 `TOOL_NOT_ALLOWED`，未知工具返回 `TOOL_NOT_FOUND` |
+| 会话型工具 | `askUserQuestion`、`planMode`、`goalStatus`、`todo`、`task`、`messageParent` 依赖聊天会话，经此执行返回 `TOOL_NOT_ALLOWED` |
+| 会话命名空间 | `sessionId` 缺省 `plugin:<插件ID>`，只能使用该会话或它的 `:` 子会话，其它值返回 `SESSION_FORBIDDEN` |
+| 上下文 | `context` 支持 `path`、`selection`、`language`；`projectRoot` 始终是当前工作区 |
+| 超时 | `timeoutMs` 默认 120000，范围 1000–600000，同时约束等待授权与执行本身 |
+| 结果 | `{status, data?, message?, code?, images?, imagesTruncated?, dataTruncated?}`；`status` 为 `success` / `error` / `partial` |
+
+`data` 超过 256 KiB 时转为截断字符串并带 `dataTruncated: true`；结果图片为 `{mimeType, base64, path?}`，单图超过 1.5 MiB 或合计超过 2 MiB 时整张省略并带 `imagesTruncated: true`。`arguments` 超过 2 MiB 返回 `PARAM_INVALID`。
+
+权限策略判定为 ASK 时，`execute` 会挂起等待确认。插件发起的请求不进入聊天页弹窗队列，也不会点亮侧边栏等待指示，只能由插件自己展示：轮询 `host.tools.pending({sessionId})` 拿到 `approval`（`id`、`toolName`、`title`、`summary`、`details`、`argsPreview`、`sessionId`、`rememberablePatterns`、`rememberDisabledReason?`），再由使用者点击按钮调用 `host.tools.resolve({requestId, choice})`。`always` 只在 `rememberablePatterns` 非空时有效；请求已过期、已处理或不属于当前插件会话时返回 `APPROVAL_NOT_FOUND`。等待授权超时返回 `TOOL_APPROVAL_TIMEOUT`，执行超时返回 `TOOL_TIMEOUT`，策略拒绝返回 `TOOL_DENIED`，使用者拒绝返回 `TOOL_USER_REJECTED`。
+
+页面侧同名接口为 `aicode.tools.list` / `execute` / `pending` / `resolve`，参数与进程侧一致，详见[插件页面与宿主接口](/advanced/plugin/ui-pages)。工具循环、`app` / `custom` 工具定义与模型侧配合方式见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
 ## handler 约定
 

@@ -173,7 +173,7 @@
 | --- | --- | --- |
 | `purpose` | 是 | 用途说明，最多 200 字符；显示在安装预览与插件详情 |
 
-声明后插件可以使用进程 `host.model.*` 与页面 `aicode.model.*`。宿主直接使用使用者已配置的供应商与 Key 发起请求，请求会计入对应渠道的用量；插件拿不到 Key。未声明时调用返回 `MODEL_ACCESS_NOT_DECLARED`。完整接口见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+声明后插件可以使用进程 `host.model.*` 与页面 `aicode.model.*`。宿主直接使用使用者已配置的供应商与 Key 发起请求，请求会计入对应渠道的用量；插件拿不到 Key。请求可携带工具定义、工具结果、思考签名与图片；工具执行走 `aicode.tools.*` / `host.tools.*`，需要授权时由插件页面展示审批。未声明时调用返回 `MODEL_ACCESS_NOT_DECLARED`。完整接口见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
 ### mcp
 

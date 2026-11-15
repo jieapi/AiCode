@@ -85,13 +85,16 @@ class PluginHostPaths(
     }
 
     /** 读取原始字节并以 Base64 返回；单文件受 [MAX_READ_BYTES] 限制。 */
-    fun readBinary(path: String): JsonElement {
+    fun readBinary(path: String): JsonElement = readBinary(path, MAX_READ_BYTES)
+
+    /** 读取原始字节并以 Base64 返回；单文件大小上限由调用方按场景给出（如模型图片输入）。 */
+    fun readBinary(path: String, maxBytes: Long): JsonElement {
         val target = resolve(path)
         if (!fileAccess.exists(target) || fileAccess.isDirectory(target)) {
             throw PluginHostException("NOT_FOUND", "not a file: $path")
         }
         val size = fileAccess.fileSize(target)
-        if (size > MAX_READ_BYTES) throw PluginHostException("TOO_LARGE", "file too large: $path")
+        if (size > maxBytes) throw PluginHostException("TOO_LARGE", "file too large: $path")
         val bytes = mapIoError(path) { fileAccess.readBytes(target) }
         return buildJsonObject {
             put("base64", Base64.getEncoder().encodeToString(bytes))

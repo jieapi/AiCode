@@ -47,6 +47,7 @@ import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginShizukuRunner
 import com.aicode.feature.plugin.runtime.PluginTerminalRunner
 import com.aicode.feature.plugin.runtime.PluginTipManager
+import com.aicode.feature.plugin.runtime.PluginToolService
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -170,6 +171,7 @@ class PluginsViewModel @Inject constructor(
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
+    private val toolService: PluginToolService,
     private val httpService: PluginHttpService
 ) : ViewModel() {
 
@@ -732,6 +734,7 @@ class PluginsViewModel @Inject constructor(
             secretStore = secretStore,
             systemService = systemService,
             introspectionService = introspectionService,
+            toolService = toolService,
             httpService = httpService,
             environment = pageEnvironment,
             theme = theme,

@@ -34,9 +34,12 @@ class PluginIntrospectionServiceTest {
         override val name: String,
         override val description: String,
         override val permissionPolicy: ToolPermissionPolicy = ToolPermissionPolicy.AUTO_APPROVE,
-        override val capabilities: Set<ToolCapability> = emptySet()
+        override val capabilities: Set<ToolCapability> = emptySet(),
+        private val schema: Map<String, Any>? = null
     ) : AgentTool() {
         override val parameters: Map<String, ToolParameter> = emptyMap()
+
+        override fun toJsonSchema(): Map<String, Any> = schema ?: super.toJsonSchema()
 
         override suspend fun execute(args: Map<String, JsonElement>): ToolResult =
             ToolResult.Success(JsonPrimitive("ok"))
@@ -147,6 +150,78 @@ class PluginIntrospectionServiceTest {
         assertEquals(200, listed.size)
         assertEquals("tool0", listed.first().jsonObject["name"]!!.jsonPrimitive.content)
         assertEquals("tool199", listed.last().jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun listTools_includeSchemaAddsInputSchema() {
+        val result = service(
+            tools = listOf(
+                FakeTool(
+                    name = "readFile",
+                    description = "read a file",
+                    schema = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf("path" to mapOf("type" to "string"))
+                    )
+                )
+            )
+        ).listTools(pluginId, includeSchema = true) as JsonObject
+
+        val tool = result["tools"]!!.jsonArray[0].jsonObject
+        val schema = tool["inputSchema"]!!.jsonObject
+        assertEquals("object", schema["type"]!!.jsonPrimitive.content)
+        val path = schema["properties"]!!.jsonObject["path"]!!.jsonObject
+        assertEquals("string", path["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun listTools_withoutSchemaFlagOmitsInputSchema() {
+        val result = service(
+            tools = listOf(
+                FakeTool(
+                    name = "readFile",
+                    description = "read a file",
+                    schema = mapOf("type" to "object")
+                )
+            )
+        ).listTools(pluginId) as JsonObject
+
+        val tool = result["tools"]!!.jsonArray[0].jsonObject
+        assertTrue("inputSchema" !in tool)
+    }
+
+    @Test
+    fun listTools_omitsSchemaLargerThan64KiB() {
+        val result = service(
+            tools = listOf(
+                FakeTool(
+                    name = "readFile",
+                    description = "read a file",
+                    schema = mapOf("type" to "object", "description" to "x".repeat(70 * 1024))
+                )
+            )
+        ).listTools(pluginId, includeSchema = true) as JsonObject
+
+        val tool = result["tools"]!!.jsonArray[0].jsonObject
+        assertTrue("inputSchema" !in tool)
+    }
+
+    @Test
+    fun listTools_stopsAt256KiBTotalSchemaBudget() {
+        val tools = (0 until 5).map { index ->
+            FakeTool(
+                name = "tool$index",
+                description = "d$index",
+                schema = mapOf("type" to "object", "description" to "x".repeat(60 * 1024))
+            )
+        }
+
+        val result = service(tools = tools).listTools(pluginId, includeSchema = true) as JsonObject
+
+        val listed = result["tools"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(5, listed.size)
+        assertEquals(4, listed.count { "inputSchema" in it })
+        assertTrue("inputSchema" !in listed.last())
     }
 
     @Test

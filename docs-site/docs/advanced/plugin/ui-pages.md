@@ -250,7 +250,7 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 
 ### 模型句柄
 
-声明 `contributes.modelAccess` 后，页面可以直接调用已配置的供应商与模型，不经过聊天页或 Agent 循环。句柄只保存供应商、模型与默认提示词；对话历史由插件每次传入。
+声明 `contributes.modelAccess` 后，页面可以直接调用已配置的供应商与模型，不经过聊天页或 Agent 循环。句柄只保存供应商、模型与默认提示词；对话历史由插件每次传入。`start` 还可以携带工具定义、工具结果、思考签名与图片，工具循环由插件自己驱动。
 
 | 方法 | 作用 |
 | --- | --- |
@@ -258,12 +258,43 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 | `aicode.model.listModels({providerId})` | 返回 `{providerId, models}`，含窗口、能力与单价元数据 |
 | `aicode.model.create({providerId, model, name?, systemPrompt?, params?})` | 返回 `{handle}`；每个插件最多 16 个 |
 | `aicode.model.close(handleId)` | 关闭句柄并取消它的流 |
-| `aicode.model.start({handleId, messages, systemPrompt?, params?})` | 返回 `{streamId}`；立即返回，事件由 `read` 拉取 |
+| `aicode.model.start({handleId, messages, tools?, systemPrompt?, params?})` | 返回 `{streamId}`；立即返回，事件由 `read` 拉取 |
 | `aicode.model.read({streamId, cursor?, maxEvents?, waitMs?})` | 返回 `{events, cursor, done, status?, final?, error?}` |
 | `aicode.model.cancel(streamId)` | 取消请求，保留已产生的事件 |
 | `aicode.model.stream(options, onEvent)` | `start` + `read` 循环，逐条回调事件并返回最终 read 结果 |
 
-完整事件格式、限额与团队群聊示例见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+`messages` 支持 `user`、`assistant`、`tool` 三种角色：`user` 可带 `images`；`assistant` 可带 `toolCalls`、`reasoning` 与 `providerState`；`tool` 必带 `toolCallId` 与 `name`。`tools` 里 `{type: 'app', name}` 引用内置 / MCP 工具，`{type: 'custom', name, description?, inputSchema?}` 由插件自己执行。`final` 带 `toolCalls`，并新增 `providerState` 与 `images`（base64）。完整消息格式、工具循环、审批与限额见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+
+### 工具与 MCP
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.tools.list(options?)` | 列出宿主注册工具；`options.includeSchema` 为 true 时附带参数 schema |
+| `aicode.tools.execute(name, args, options?)` | 代执行一次工具调用；`options.sessionId` / `context` / `timeoutMs` 可选 |
+| `aicode.tools.pending(sessionId?)` | 返回 `{approval}`；没有待审批请求时为 `null` |
+| `aicode.tools.resolve(requestId, choice)` | 回传审批结果，`choice` 为 `once` / `always` / `reject` |
+
+`execute` 只接受内置与 MCP 工具，`plugin__` 前缀返回 `TOOL_NOT_ALLOWED`；`askUserQuestion`、`planMode`、`goalStatus`、`todo`、`task`、`messageParent` 依赖聊天会话，同样返回 `TOOL_NOT_ALLOWED`。`sessionId` 缺省为 `plugin:<插件ID>`，只能使用该会话或其 `:` 子会话，否则返回 `SESSION_FORBIDDEN`。`timeoutMs` 默认 120000、范围 1000–600000，同时约束等待授权与执行本身。
+
+权限策略为 ASK 时 `execute` 会挂起，且不会弹出聊天页审批框。页面需要轮询 `pending` 并自行渲染审批条：
+
+```js
+const sessionId = 'plugin:' + (await aicode.context()).pluginId + ':my-page'
+const timer = setInterval(async () => {
+  const pending = await aicode.tools.pending(sessionId).catch(() => null)
+  renderApproval(pending ? pending.approval : null) // 按钮调用 aicode.tools.resolve(approval.id, 'once')
+}, 800)
+
+try {
+  const result = await aicode.tools.execute('writeFile', {path, content}, {sessionId})
+  appendToolResult(result)
+} finally {
+  clearInterval(timer)
+  renderApproval(null)
+}
+```
+
+`approval` 含 `id`、`toolName`、`title`、`summary`、`details`、`argsPreview`、`rememberablePatterns`、`rememberDisabledReason?`；`rememberablePatterns` 为空时不要展示「始终允许」。结果对象为 `{status, data?, message?, code?, images?, imagesTruncated?, dataTruncated?}`，`status` 为 `success` / `error` / `partial`。`aicode.mcp.status()` 返回 MCP server 连接状态。
 
 ### 系统、密钥与网络
 
@@ -275,8 +306,6 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 | `aicode.app.info()` | 返回包名、版本、SDK、语言与前后台状态 |
 | `aicode.log.write(level, message, {tag?})` | 写宿主日志；`level` 为 debug/info/warn/error，正文最多 2000 字符 |
 | `aicode.secrets.get(key)` / `set(key, value)` / `delete(key)` / `list()` | 插件私有加密键值存储；值最多 64 KiB，`list` 只返回键名 |
-| `aicode.tools.list()` | 列出宿主注册工具（名称、描述、来源类型、授权策略、能力） |
-| `aicode.mcp.status()` | 列出 MCP server 连接状态 |
 | `aicode.http.request({url, method?, headers?, body?, timeout?})` | 宿主代理 HTTP 请求；仅 http/https，不跟随重定向，不注入宿主凭据；响应体上限 1 MiB |
 
 密钥值由 Android Keystore 加密后存放在插件私有目录，明文只在请求瞬间存在于内存；不要在 `data://` 明文保存 API Key。HTTP 请求的 headers 由插件自行提供，插件应避免把密钥写进日志。

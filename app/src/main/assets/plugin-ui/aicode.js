@@ -528,10 +528,36 @@
         return call('secrets.list');
       }
     },
-    // 只读查询宿主已注册工具与 MCP 连接状态。
+    // 宿主工具目录与执行：只允许内置 / MCP 工具，插件工具（plugin__）不能经此调用。
+    // 执行受宿主授权策略约束：需要确认时 execute 会挂起，用 pending / resolve 处理。
     tools: {
-      list: function () {
-        return call('tools.list');
+      list: function (options) {
+        var params = {};
+        if (options && options.includeSchema != null) params.includeSchema = !!options.includeSchema;
+        return call('tools.list', params);
+      },
+      // options: { sessionId?, context?: { path?, selection?, language? }, timeoutMs? }
+      execute: function (name, args, options) {
+        var params = { name: String(name), arguments: args || {} };
+        if (options && options.sessionId != null) params.sessionId = String(options.sessionId);
+        if (options && options.timeoutMs != null) params.timeoutMs = Number(options.timeoutMs);
+        if (options && options.context) {
+          var source = options.context;
+          var context = {};
+          if (source.path != null) context.path = String(source.path);
+          if (source.selection != null) context.selection = String(source.selection);
+          if (source.language != null) context.language = String(source.language);
+          params.context = context;
+        }
+        return call('tools.execute', params);
+      },
+      pending: function (sessionId) {
+        var params = {};
+        if (sessionId != null) params.sessionId = String(sessionId);
+        return call('tools.pending', params);
+      },
+      resolve: function (requestId, choice) {
+        return call('tools.resolve', { requestId: String(requestId), choice: String(choice) });
       }
     },
     mcp: {

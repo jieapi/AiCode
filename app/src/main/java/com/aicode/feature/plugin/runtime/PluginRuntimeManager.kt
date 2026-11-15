@@ -66,6 +66,7 @@ class PluginRuntimeManager @Inject constructor(
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
+    private val toolService: PluginToolService,
     private val httpService: PluginHttpService
 ) {
 
@@ -351,7 +352,15 @@ class PluginRuntimeManager @Inject constructor(
                 secretStore.delete(pluginId, PluginHostPaths.requireString(params, "key"))
             }
             "host.secrets.list" -> hostCall { secretStore.list(pluginId) }
-            "host.tools.list" -> hostCall { introspectionService.listTools(pluginId) }
+            "host.tools.list" -> hostCall {
+                introspectionService.listTools(
+                    pluginId,
+                    includeSchema = (params["includeSchema"] as? JsonPrimitive)?.booleanOrNull ?: false
+                )
+            }
+            "host.tools.execute" -> hostCall { toolService.execute(pluginId, params) }
+            "host.tools.pending" -> hostCall { toolService.pending(pluginId, params) }
+            "host.tools.resolve" -> hostCall { toolService.resolve(pluginId, params) }
             "host.mcp.status" -> hostCall { introspectionService.mcpStatus(pluginId) }
             "host.http.request" -> hostCall { httpService.request(pluginId, params) }
             else -> throw PluginProcessException("METHOD_UNKNOWN", "unknown host method: $method")

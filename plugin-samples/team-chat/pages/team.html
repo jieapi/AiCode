@@ -87,8 +87,30 @@
     .bubble.error { border-color: var(--aicode-error, #cf222e); }
     .bubble-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--aicode-subtle-text, #59636e); margin-bottom: 3px; }
     .bubble-body { font-size: 14px; line-height: 1.45; }
+    .bubble-image { display: block; max-width: 100%; max-height: 220px; margin-top: 6px; border-radius: 8px; }
     .composer { display: flex; gap: 8px; }
     .composer input { flex: 1; }
+    .composer #pick-image { flex-shrink: 0; background: var(--aicode-page-bg, #ffffff); color: inherit; border-color: var(--aicode-outline, #d0d7de); }
+    .attachment { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .attachment[hidden] { display: none; }
+    .attachment img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--aicode-outline, #d0d7de); }
+    .attachment button { padding: 6px 10px; background: var(--aicode-page-bg, #ffffff); color: inherit; border-color: var(--aicode-outline, #d0d7de); }
+    .approval {
+      border: 1px solid var(--aicode-warning, #bf8700);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: var(--aicode-warning-container, #fff8c5);
+    }
+    .approval[hidden] { display: none; }
+    .approval-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+    .approval-tool { color: var(--aicode-subtle-text, #59636e); font-size: 12px; }
+    .approval-summary { margin: 0; font-size: 13px; }
+    .approval-details { margin: 0; max-height: 120px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+    .approval .actions button { padding: 6px 10px; }
+    .approval .actions button[data-choice="reject"] { background: var(--aicode-page-bg, #ffffff); color: var(--aicode-error, #cf222e); border-color: var(--aicode-error, #cf222e); }
     .status { margin: 0; min-height: 18px; font-size: 12px; color: var(--aicode-subtle-text, #59636e); }
     .status.error { color: var(--aicode-error, #cf222e); }
   </style>
@@ -98,7 +120,7 @@
     <header>
       <div>
         <h1>团队群聊</h1>
-        <p class="hint">每个成员一个模型句柄；发送时依次请求，后发言的成员能看到前面的回复。</p>
+        <p class="hint">每个成员一个模型句柄；发送时依次请求，后发言的成员能看到前面的回复。模型可调用 team_vote 或 writeFile，写文件前会在页面内请求确认。</p>
       </div>
     </header>
 
@@ -128,9 +150,31 @@
       <button id="apply" type="button">创建 / 更新句柄</button>
     </div>
 
+    <section class="approval" id="approval" hidden>
+      <div class="approval-head">
+        <strong id="approval-title">需要确认</strong>
+        <span class="approval-tool" id="approval-tool"></span>
+      </div>
+      <p class="approval-summary" id="approval-summary"></p>
+      <pre class="approval-details" id="approval-details"></pre>
+      <div class="actions">
+        <button type="button" data-choice="once">允许一次</button>
+        <button type="button" data-choice="always" id="approval-always">始终允许</button>
+        <button type="button" data-choice="reject">拒绝</button>
+      </div>
+    </section>
+
     <section class="chat" id="chat"></section>
 
+    <div class="attachment" id="attachment" hidden>
+      <img id="attachment-preview" alt="待发送图片">
+      <span id="attachment-name"></span>
+      <button id="attachment-remove" type="button">移除</button>
+    </div>
+
     <form class="composer" id="composer">
+      <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+      <button id="pick-image" type="button" title="添加图片">图片</button>
       <input id="input" placeholder="输入群聊消息…" autocomplete="off">
       <button id="send" type="submit">轮流发送</button>
     </form>
@@ -142,7 +186,33 @@
     (function () {
       var handles = [null, null];
       var history = [];
+      var memberModels = [[], []];
+      var supportsTools = [true, true];
+      var supportsVision = [true, true];
+      var pendingImage = null;
       var busy = false;
+      var currentApproval = null;
+      var voteTally = {};
+      var sessionId = 'plugin:demo.team-chat:team-chat';
+
+      var TOOLS = [
+        {
+          type: 'custom',
+          name: 'team_vote',
+          description: '记录群聊成员对某个议题的选择，并返回插件本地的投票统计。',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              topic: {type: 'string', description: '议题'},
+              options: {type: 'array', items: {type: 'string'}, description: '候选选项'},
+              choice: {type: 'string', description: '本次选择'},
+              voter: {type: 'string', description: '投票成员，缺省为当前发言成员'}
+            },
+            required: ['choice']
+          }
+        },
+        {type: 'app', name: 'writeFile'}
+      ];
 
       function status(text, isError) {
         var el = document.getElementById('status');
@@ -172,17 +242,20 @@
         var providerId = document.getElementById('provider-' + index).value;
         var modelSelect = document.getElementById('model-' + index);
         if (!providerId) {
+          memberModels[index] = [];
           fillSelect(modelSelect, [], '先选择供应商');
           return;
         }
         fillSelect(modelSelect, [], '加载中…');
         try {
           var result = await aicode.model.listModels({ providerId: providerId });
-          fillSelect(modelSelect, result.models.map(function (model) {
+          memberModels[index] = result.models || [];
+          fillSelect(modelSelect, memberModels[index].map(function (model) {
             return { value: model.id, label: model.displayName + ' · ' + model.id };
-          }), result.models.length ? '选择模型' : '没有已添加的模型');
-          if (result.models.length === 1) modelSelect.selectedIndex = 1;
+          }), memberModels[index].length ? '选择模型' : '没有已添加的模型');
+          if (memberModels[index].length === 1) modelSelect.selectedIndex = 1;
         } catch (e) {
+          memberModels[index] = [];
           fillSelect(modelSelect, [], '加载失败');
           status((e.code ? e.code + ': ' : '') + (e.message || String(e)), true);
         }
@@ -227,6 +300,9 @@
             var providerId = document.getElementById('provider-' + index).value;
             var model = document.getElementById('model-' + index).value;
             if (!providerId || !model) continue;
+            var meta = memberModels[index].find(function (item) { return item.id === model; });
+            supportsTools[index] = !meta || meta.supportsTools !== false;
+            supportsVision[index] = !meta || meta.supportsVision !== false;
             var created = await aicode.model.create({
               providerId: providerId,
               model: model,
@@ -243,7 +319,17 @@
         }
       }
 
-      function appendBubble(role, name, text) {
+      function renderImages(container, images) {
+        (images || []).forEach(function (image) {
+          if (!image || !image.base64) return;
+          var img = document.createElement('img');
+          img.className = 'bubble-image';
+          img.src = 'data:' + image.mimeType + ';base64,' + image.base64;
+          container.appendChild(img);
+        });
+      }
+
+      function appendBubble(role, name, text, images) {
         var chat = document.getElementById('chat');
         var el = document.createElement('article');
         el.className = 'bubble ' + role;
@@ -258,6 +344,7 @@
         var body = document.createElement('div');
         body.className = 'bubble-body';
         body.textContent = text || '';
+        renderImages(body, images);
         el.appendChild(head);
         el.appendChild(body);
         chat.appendChild(el);
@@ -265,10 +352,260 @@
         return { el: el, meta: meta, body: body };
       }
 
+      // 群聊里多个成员会连续发言，相邻同角色消息会破坏 user/assistant 交替；
+      // 发送前把同角色消息合并，图片顺带拼接（单条最多 4 张）。
+      function buildMessages() {
+        var merged = [];
+        history.forEach(function (item) {
+          var last = merged[merged.length - 1];
+          if (last && last.role === item.role && item.role !== 'tool') {
+            last.content = [last.content, item.content].filter(Boolean).join('\n\n');
+            if (item.images && item.images.length) {
+              last.images = (last.images || []).concat(item.images).slice(-4);
+            }
+            return;
+          }
+          merged.push({
+            role: item.role,
+            content: item.content,
+            images: item.images ? item.images.slice() : undefined
+          });
+        });
+        // 旧图片不重复上传：内联图片单次总量只有 2 MiB，只保留最近 2 张。
+        var imageBudget = 2;
+        for (var index = merged.length - 1; index >= 0; index--) {
+          var message = merged[index];
+          if (!message.images || message.images.length === 0) continue;
+          if (imageBudget <= 0) {
+            delete message.images;
+            continue;
+          }
+          message.images = message.images.slice(-imageBudget);
+          imageBudget -= message.images.length;
+        }
+        return merged;
+      }
+
+      function messagesForMember(messages, index) {
+        if (supportsVision[index] !== false) return messages;
+        return messages.map(function (message) {
+          if (!message.images) return message;
+          var copy = Object.assign({}, message);
+          delete copy.images;
+          return copy;
+        });
+      }
+
+      function callArguments(call) {
+        if (call.arguments && typeof call.arguments === 'object') return call.arguments;
+        if (typeof call.arguments === 'string') {
+          try {
+            return JSON.parse(call.arguments);
+          } catch (_) {
+            return {};
+          }
+        }
+        return {};
+      }
+
+      function assistantMessage(final, calls) {
+        return {
+          role: 'assistant',
+          content: final.content || '',
+          reasoning: final.reasoning,
+          providerState: final.providerState,
+          toolCalls: calls.map(function (call) {
+            return {
+              id: call.id,
+              name: call.name,
+              arguments: call.argumentsTruncated ? {} : callArguments(call)
+            };
+          })
+        };
+      }
+
+      function runTeamVote(call, memberIndex) {
+        var args = callArguments(call);
+        var topic = String(args.topic || '未命名议题');
+        var choice = String(args.choice || '');
+        if (!choice) {
+          return JSON.stringify({ error: 'MISSING_CHOICE', message: 'team_vote 需要 choice' });
+        }
+        var tally = voteTally[topic] || (voteTally[topic] = {});
+        (Array.isArray(args.options) ? args.options : []).forEach(function (option) {
+          var key = String(option);
+          if (tally[key] == null) tally[key] = 0;
+        });
+        tally[choice] = (tally[choice] || 0) + 1;
+        return JSON.stringify({
+          topic: topic,
+          voter: String(args.voter || memberName(memberIndex)),
+          choice: choice,
+          tally: tally
+        });
+      }
+
+      function renderApproval(approval) {
+        var panel = document.getElementById('approval');
+        currentApproval = approval || null;
+        if (!currentApproval) {
+          panel.hidden = true;
+          return;
+        }
+        document.getElementById('approval-title').textContent = currentApproval.title || '需要确认';
+        document.getElementById('approval-tool').textContent = currentApproval.toolName || '';
+        document.getElementById('approval-summary').textContent = currentApproval.summary || '';
+        document.getElementById('approval-details').textContent = currentApproval.details || currentApproval.argsPreview || '';
+        var rememberable = currentApproval.rememberablePatterns || [];
+        document.getElementById('approval-always').hidden = rememberable.length === 0;
+        panel.hidden = false;
+      }
+
+      // execute 遇到 ASK 会一直挂起；轮询 pending 把审批条显示出来，resolve 后 execute 才继续。
+      async function executeHostTool(name, args) {
+        var timer = setInterval(async function () {
+          try {
+            var pending = await aicode.tools.pending(sessionId);
+            renderApproval(pending ? pending.approval : null);
+          } catch (_) {
+            // 页面关闭或会话失效时忽略，execute 本身会返回错误。
+          }
+        }, 700);
+        try {
+          return await aicode.tools.execute(name, args, { sessionId: sessionId, timeoutMs: 120000 });
+        } finally {
+          clearInterval(timer);
+          renderApproval(null);
+        }
+      }
+
+      async function runTool(call, memberIndex, bubble) {
+        if (call.argumentsTruncated) {
+          return JSON.stringify({ error: 'ARGUMENTS_TRUNCATED', message: '工具参数被截断，请减少内容后重试' });
+        }
+        if (call.name === 'team_vote') {
+          bubble.meta.textContent = '本地执行 team_vote…';
+          return runTeamVote(call, memberIndex);
+        }
+        if (call.name === 'writeFile') {
+          bubble.meta.textContent = '等待宿主执行 writeFile…';
+          try {
+            var result = await executeHostTool('writeFile', callArguments(call));
+            bubble.meta.textContent = result.status === 'success' ? 'writeFile 已完成' : 'writeFile 返回 ' + result.status;
+            return JSON.stringify(result);
+          } catch (e) {
+            bubble.meta.textContent = 'writeFile 未完成';
+            return JSON.stringify({ error: e.code || 'TOOL_ERROR', message: e.message || String(e) });
+          }
+        }
+        return JSON.stringify({ error: 'UNKNOWN_TOOL', message: '未知工具：' + call.name });
+      }
+
+      async function requestMember(index, messages, bubble) {
+        var streamed = '';
+        var current = messages;
+        var tools = supportsTools[index] === false ? undefined : TOOLS;
+        var prompt = document.getElementById('prompt-' + index).value;
+        if (tools) {
+          prompt += '\n\n需要表决时调用 team_vote；需要把结论落盘时调用 writeFile。';
+        }
+
+        var onEvent = function (event) {
+          if (event.type === 'text') {
+            streamed += event.text;
+            bubble.body.textContent = streamed;
+            bubble.el.parentElement.scrollTop = bubble.el.parentElement.scrollHeight;
+          } else if (event.type === 'toolCall') {
+            bubble.meta.textContent = '调用工具 ' + event.name + '…';
+          } else if (event.type === 'retry') {
+            bubble.meta.textContent = '重试中…';
+          } else if (event.type === 'keySwitch') {
+            bubble.meta.textContent = '切换 Key ' + event.index + '/' + event.total;
+          }
+        };
+
+        for (var round = 0; round < 3; round++) {
+          if (round > 0 && streamed) {
+            streamed += '\n\n';
+            bubble.body.textContent = streamed;
+          }
+          var result = await aicode.model.stream({
+            handleId: handles[index],
+            messages: current,
+            tools: tools,
+            systemPrompt: prompt
+          }, onEvent);
+
+          if (result.status !== 'success') return result;
+          var calls = (result.final && result.final.toolCalls) || [];
+          if (calls.length === 0) return result;
+
+          current = current.concat([assistantMessage(result.final, calls)]);
+          for (var callIndex = 0; callIndex < calls.length; callIndex++) {
+            var call = calls[callIndex];
+            var output = await runTool(call, index, bubble);
+            // 工具中间消息只用于本轮请求，不写进群聊历史。
+            current.push({
+              role: 'tool',
+              toolCallId: call.id,
+              name: call.name,
+              content: output
+            });
+          }
+          bubble.meta.textContent = '工具结果已返回，继续请求…';
+        }
+        return { status: 'error', error: { code: 'TOOL_LOOP_LIMIT', message: '工具轮数超过上限' } };
+      }
+
+      function readImage(file) {
+        return new Promise(function (resolve, reject) {
+          var allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+          if (allowed.indexOf(file.type) < 0) {
+            reject(new Error('仅支持 png / jpeg / webp / gif'));
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function () {
+            var dataUrl = String(reader.result || '');
+            var comma = dataUrl.indexOf(',');
+            var base64 = comma >= 0 ? dataUrl.slice(comma + 1) : '';
+            var padding = base64.endsWith('==') ? 2 : (base64.endsWith('=') ? 1 : 0);
+            var size = Math.floor(base64.length * 3 / 4) - padding;
+            if (!base64) {
+              reject(new Error('读取图片失败'));
+            } else if (size > 1024 * 1024) {
+              reject(new Error('图片超过 1 MiB，请压缩后再试'));
+            } else {
+              resolve({ mimeType: file.type, base64: base64, name: file.name, size: size });
+            }
+          };
+          reader.onerror = function () {
+            reject(new Error('读取图片失败'));
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function clearPendingImage() {
+        pendingImage = null;
+        document.getElementById('image-input').value = '';
+        document.getElementById('attachment').hidden = true;
+        document.getElementById('attachment-preview').removeAttribute('src');
+        document.getElementById('attachment-name').textContent = '';
+      }
+
+      function setPendingImage(image) {
+        pendingImage = image;
+        document.getElementById('attachment-preview').src = 'data:' + image.mimeType + ';base64,' + image.base64;
+        document.getElementById('attachment-name').textContent =
+          image.name + ' · ' + Math.max(1, Math.round(image.size / 1024)) + ' KiB';
+        document.getElementById('attachment').hidden = false;
+      }
+
       async function sendGroupMessage() {
         var input = document.getElementById('input');
         var text = input.value.trim();
-        if (!text || busy) return;
+        if ((!text && !pendingImage) || busy) return;
         if (!handles.some(Boolean)) {
           await applyMembers();
           if (!handles.some(Boolean)) return;
@@ -277,40 +614,28 @@
         busy = true;
         document.getElementById('send').disabled = true;
         input.value = '';
-        history.push({ role: 'user', content: text });
-        appendBubble('user', '你', text);
+        var images = pendingImage ? [{ mimeType: pendingImage.mimeType, base64: pendingImage.base64 }] : [];
+        var content = text || '请查看这张图片';
+        clearPendingImage();
+        history.push({ role: 'user', content: content, images: images });
+        appendBubble('user', '你', content, images);
 
         try {
           for (var index = 0; index < 2; index++) {
             if (!handles[index]) continue;
             var name = memberName(index);
             var bubble = appendBubble('assistant', name, '');
-            var streamed = '';
             try {
-              var result = await aicode.model.stream({
-                handleId: handles[index],
-                messages: history,
-                systemPrompt: document.getElementById('prompt-' + index).value
-              }, function (event) {
-                if (event.type === 'text') {
-                  streamed += event.text;
-                  bubble.body.textContent = streamed;
-                  bubble.el.parentElement.scrollTop = bubble.el.parentElement.scrollHeight;
-                } else if (event.type === 'retry') {
-                  bubble.meta.textContent = '重试中…';
-                } else if (event.type === 'keySwitch') {
-                  bubble.meta.textContent = '切换 Key ' + event.index + '/' + event.total;
-                }
-              });
-
+              var result = await requestMember(index, messagesForMember(buildMessages(), index), bubble);
               if (result.status === 'success') {
-                var finalText = (result.final && result.final.content) || streamed;
+                var finalText = (result.final && result.final.content) || bubble.body.textContent || '';
                 bubble.body.textContent = finalText;
+                renderImages(bubble.body, result.final && result.final.images);
                 var usage = result.final && result.final.usage;
                 bubble.meta.textContent = usage ? (usage.input + ' in / ' + usage.output + ' out') : '';
                 history.push({ role: 'assistant', content: name + ': ' + finalText });
               } else if (result.status === 'cancelled') {
-                bubble.body.textContent = streamed || '已取消';
+                bubble.body.textContent = bubble.body.textContent || '已取消';
               } else {
                 bubble.el.classList.add('error');
                 bubble.body.textContent = (result.error && result.error.message) || '请求失败';
@@ -338,6 +663,40 @@
         if (!event.target.id || event.target.id.indexOf('provider-') !== 0) return;
         loadModels(Number(event.target.id.split('-')[1]));
       });
+      document.getElementById('pick-image').addEventListener('click', function () {
+        document.getElementById('image-input').click();
+      });
+      document.getElementById('attachment-remove').addEventListener('click', clearPendingImage);
+      document.getElementById('image-input').addEventListener('change', async function (event) {
+        var file = event.target.files && event.target.files[0];
+        if (!file) return;
+        try {
+          setPendingImage(await readImage(file));
+          status('图片已附加');
+        } catch (e) {
+          clearPendingImage();
+          status(e.message || String(e), true);
+        }
+      });
+      document.getElementById('approval').addEventListener('click', async function (event) {
+        var choice = event.target.getAttribute('data-choice');
+        if (!choice || !currentApproval) return;
+        var requestId = currentApproval.id;
+        var buttons = event.currentTarget.querySelectorAll('button');
+        Array.prototype.forEach.call(buttons, function (button) { button.disabled = true; });
+        try {
+          await aicode.tools.resolve(requestId, choice);
+          status('已提交审批：' + choice);
+        } catch (e) {
+          status((e.code ? e.code + ': ' : '') + (e.message || String(e)), true);
+        } finally {
+          Array.prototype.forEach.call(buttons, function (button) { button.disabled = false; });
+        }
+      });
+
+      aicode.context().then(function (ctx) {
+        if (ctx && ctx.pluginId) sessionId = 'plugin:' + ctx.pluginId + ':team-chat';
+      }).catch(function () {});
 
       loadProviders();
     })();

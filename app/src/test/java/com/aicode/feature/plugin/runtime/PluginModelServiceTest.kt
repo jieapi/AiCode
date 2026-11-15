@@ -1,9 +1,16 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.model.AgentImage
+import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.provider.AIProvider
 import com.aicode.feature.agent.domain.provider.AIResponse
 import com.aicode.feature.agent.domain.provider.AIStreamChunk
 import com.aicode.feature.agent.domain.provider.ProviderInstanceFactory
+import com.aicode.feature.agent.domain.tool.AgentTool
+import com.aicode.feature.agent.domain.tool.ToolCall
+import com.aicode.feature.agent.domain.tool.ToolParameter
+import com.aicode.feature.agent.domain.tool.ToolRegistry
+import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.plugin.data.PluginRecord
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginContent
@@ -13,19 +20,29 @@ import com.aicode.feature.plugin.domain.PluginManifest
 import com.aicode.feature.plugin.domain.PluginModelAccessDefinition
 import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
+import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.PathHomeResolver
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import java.util.Base64
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
@@ -44,12 +61,23 @@ class PluginModelServiceTest {
     private val providerId = "provider-1"
     private val modelId = "model-1"
 
-    private fun metadata(model: String = modelId): ModelMetadata = ModelMetadata(
+    private class CapturedRequest(
+        val systemPrompt: String,
+        val messages: List<AgentMessage>,
+        val tools: List<AgentTool>
+    )
+
+    private fun metadata(
+        model: String = modelId,
+        contextTokens: Int = 100_000,
+        inputTokens: Int? = 90_000,
+        outputTokens: Int? = 4_096
+    ): ModelMetadata = ModelMetadata(
         id = model,
         displayName = model,
-        contextTokens = 100_000,
-        inputTokens = 90_000,
-        outputTokens = 4_096,
+        contextTokens = contextTokens,
+        inputTokens = inputTokens,
+        outputTokens = outputTokens,
         supportsTools = true,
         supportsCustomTemperature = true,
         modelType = ModelMetadata.ModelType.CHAT,
@@ -90,7 +118,10 @@ class PluginModelServiceTest {
     private fun service(
         declared: Boolean = true,
         provider: AIProvider = mockk(relaxed = true),
-        providerConfig: AIProviderConfig = config()
+        providerConfig: AIProviderConfig = config(),
+        modelMetadata: ModelMetadata = metadata(),
+        toolRegistry: ToolRegistry = ToolRegistry(),
+        fileAccess: FileAccessProvider = mockk(relaxed = true)
     ): PluginModelService {
         val pluginManager = mockk<PluginManager>(relaxed = true)
         every { pluginManager.plugins } returns MutableStateFlow(listOf(installedPlugin(declared)))
@@ -100,7 +131,7 @@ class PluginModelServiceTest {
         every { repository.getAllProviders() } returns flowOf(listOf(providerConfig))
 
         val metadataService = mockk<ModelMetadataService>(relaxed = true)
-        coEvery { metadataService.resolve(any(), any(), any()) } returns metadata(providerConfig.selectedModel)
+        coEvery { metadataService.resolve(any(), any(), any()) } returns modelMetadata
         coEvery { metadataService.resolveAll(any(), any(), any()) } answers {
             val ids = thirdArg<List<String>>()
             ids.associateWith { metadata(it) }
@@ -112,12 +143,28 @@ class PluginModelServiceTest {
         val defaultModel = mockk<DefaultModelSettingsRepository>(relaxed = true)
         coEvery { defaultModel.getDefaultProviderId() } returns providerId
 
+        val homeResolver = mockk<PathHomeResolver>()
+        every { homeResolver.home() } returns "/root"
+        every { homeResolver.aicodeRoot() } returns "/root/.aicode"
+        every { homeResolver.expandHome(any()) } answers { firstArg<String>() }
+
+        val workspaceRepository = mockk<WorkspaceRepository>(relaxed = true)
+        every { workspaceRepository.currentPath() } returns "$WORKSPACE"
+
+        val executionModeHolder = mockk<ExecutionModeHolder>(relaxed = true)
+        every { executionModeHolder.currentMode() } returns ExecutionMode.LOCAL_PROOT
+
         return PluginModelService(
             pluginManager = pluginManager,
             providerRepository = repository,
             providerFactory = factory,
             modelMetadataService = metadataService,
-            defaultModelSettingsRepository = defaultModel
+            defaultModelSettingsRepository = defaultModel,
+            toolRegistry = toolRegistry,
+            fileAccess = fileAccess,
+            homeResolver = homeResolver,
+            workspaceRepository = workspaceRepository,
+            executionModeHolder = executionModeHolder
         )
     }
 
@@ -130,19 +177,174 @@ class PluginModelServiceTest {
         created.getValue("handle").jsonObject.getValue("id").jsonPrimitive.content
     }
 
-    private fun startStream(service: PluginModelService, handleId: String, text: String = "hi"): String =
-        runBlocking {
-            val started = service.start(pluginId, buildJsonObject {
-                put("handleId", handleId)
-                put("messages", JsonArray(listOf(
-                    buildJsonObject {
-                        put("role", "user")
-                        put("content", text)
-                    }
-                )))
-            }, "process").jsonObject
-            started.getValue("streamId").jsonPrimitive.content
+    private fun capturingProvider(
+        response: AIResponse = AIResponse(content = "ok")
+    ): Pair<AIProvider, CompletableDeferred<CapturedRequest>> {
+        val provider = mockk<AIProvider>(relaxed = true)
+        val captured = CompletableDeferred<CapturedRequest>()
+        every { provider.completeStream(any(), any(), any(), any()) } answers {
+            captured.complete(
+                CapturedRequest(
+                    systemPrompt = firstArg<String>(),
+                    messages = secondArg<List<AgentMessage>>(),
+                    tools = thirdArg<List<AgentTool>>()
+                )
+            )
+            flowOf(AIStreamChunk.Final(response))
         }
+        return provider to captured
+    }
+
+    private suspend fun startCapturing(
+        service: PluginModelService,
+        handleId: String,
+        messages: JsonArray,
+        tools: JsonArray? = null,
+        captured: CompletableDeferred<CapturedRequest>
+    ): CapturedRequest {
+        service.start(pluginId, buildJsonObject {
+            put("handleId", handleId)
+            put("messages", messages)
+            tools?.let { put("tools", it) }
+        }, "process")
+        return withTimeout(5_000) { captured.await() }
+    }
+
+    private suspend fun startError(
+        service: PluginModelService,
+        handleId: String,
+        messages: JsonArray,
+        tools: JsonArray? = null
+    ): PluginHostException? = runCatching {
+        service.start(pluginId, buildJsonObject {
+            put("handleId", handleId)
+            put("messages", messages)
+            tools?.let { put("tools", it) }
+        }, "process")
+    }.exceptionOrNull() as? PluginHostException
+
+    private suspend fun assertStartCode(
+        service: PluginModelService,
+        handleId: String,
+        messages: JsonArray,
+        code: String,
+        tools: JsonArray? = null
+    ) {
+        val error = startError(service, handleId, messages, tools)
+        assertTrue("expected PluginHostException but was $error", error is PluginHostException)
+        assertEquals(code, error?.code)
+    }
+
+    private suspend fun readUntilDone(service: PluginModelService, streamId: String): JsonObject {
+        var cursor = 0
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            val result = service.read(pluginId, buildJsonObject {
+                put("streamId", streamId)
+                put("cursor", cursor)
+                put("waitMs", 500)
+            }).jsonObject
+            cursor = result.getValue("cursor").jsonPrimitive.int
+            if (result.getValue("done").jsonPrimitive.boolean) return result
+        }
+        error("stream did not finish in time")
+    }
+
+    private fun startStream(
+        service: PluginModelService,
+        handleId: String,
+        messages: JsonArray = JsonArray(listOf(userMessage("hi")))
+    ): String = runBlocking {
+        service.start(pluginId, buildJsonObject {
+            put("handleId", handleId)
+            put("messages", messages)
+        }, "process").jsonObject.getValue("streamId").jsonPrimitive.content
+    }
+
+    private fun userMessage(content: String = "hi", images: JsonArray? = null): JsonObject =
+        buildJsonObject {
+            put("role", "user")
+            put("content", content)
+            images?.let { put("images", it) }
+        }
+
+    private fun assistantMessage(
+        content: String = "",
+        toolCalls: JsonArray? = null,
+        reasoning: String? = null,
+        providerState: JsonObject? = null
+    ): JsonObject = buildJsonObject {
+        put("role", "assistant")
+        put("content", content)
+        toolCalls?.let { put("toolCalls", it) }
+        reasoning?.let { put("reasoning", it) }
+        providerState?.let { put("providerState", it) }
+    }
+
+    private fun toolMessage(
+        toolCallId: String,
+        name: String,
+        content: String,
+        images: JsonArray? = null
+    ): JsonObject = buildJsonObject {
+        put("role", "tool")
+        put("toolCallId", toolCallId)
+        put("name", name)
+        put("content", content)
+        images?.let { put("images", it) }
+    }
+
+    private fun toolCallJson(
+        id: String,
+        name: String,
+        arguments: JsonObject = JsonObject(emptyMap())
+    ): JsonObject = buildJsonObject {
+        put("id", id)
+        put("name", name)
+        put("arguments", arguments)
+    }
+
+    private fun imageJson(
+        mimeType: String = "image/png",
+        path: String? = null,
+        base64: String? = null
+    ): JsonObject = buildJsonObject {
+        put("mimeType", mimeType)
+        path?.let { put("path", it) }
+        base64?.let { put("base64", it) }
+    }
+
+    private fun appTool(name: String): JsonObject = buildJsonObject {
+        put("type", "app")
+        put("name", name)
+    }
+
+    private fun customTool(
+        name: String,
+        description: String? = null,
+        inputSchema: JsonElement? = null
+    ): JsonObject = buildJsonObject {
+        put("type", "custom")
+        put("name", name)
+        description?.let { put("description", it) }
+        inputSchema?.let { put("inputSchema", it) }
+    }
+
+    private fun fakeTool(toolName: String, toolDescription: String = "fake tool"): AgentTool =
+        object : AgentTool() {
+            override val name = toolName
+            override val description = toolDescription
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun execute(args: Map<String, JsonElement>): ToolResult =
+                ToolResult.Success(JsonPrimitive("ok"))
+        }
+
+    private fun stubFile(fileAccess: FileAccessProvider, path: String, bytes: ByteArray) {
+        every { fileAccess.exists(path) } returns true
+        every { fileAccess.isDirectory(path) } returns false
+        every { fileAccess.fileSize(path) } returns bytes.size.toLong()
+        every { fileAccess.readBytes(path) } returns bytes
+    }
 
     @Test
     fun listProviders_doesNotExposeSecrets() = runBlocking {
@@ -268,5 +470,545 @@ class PluginModelServiceTest {
         }).jsonObject
         assertTrue(after.getValue("done").jsonPrimitive.boolean)
         assertEquals("cancelled", after.getValue("status").jsonPrimitive.content)
+    }
+
+    @Test
+    fun appToolFromRegistryIsPassedToProvider() = runBlocking {
+        val registry = ToolRegistry()
+        val tool = fakeTool("readFile")
+        registry.register("readFile", tool)
+        val (provider, captured) = capturingProvider()
+        val service = service(provider = provider, toolRegistry = registry)
+        val handleId = createHandle(service)
+
+        val request = startCapturing(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(userMessage())),
+            tools = JsonArray(listOf(appTool("readFile"))),
+            captured = captured
+        )
+
+        assertEquals(listOf("readFile"), request.tools.map { it.name })
+        assertEquals("fake tool", request.tools.single().description)
+    }
+
+    @Test
+    fun pluginNamespacedAppToolIsRejected() = runBlocking {
+        val registry = ToolRegistry()
+        registry.register("plugin__demo__echo", fakeTool("plugin__demo__echo"))
+        val service = service(toolRegistry = registry)
+        val handleId = createHandle(service)
+
+        assertStartCode(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(userMessage())),
+            code = "TOOL_NOT_ALLOWED",
+            tools = JsonArray(listOf(appTool("plugin__demo__echo")))
+        )
+    }
+
+    @Test
+    fun unknownAppToolIsRejected() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        assertStartCode(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(userMessage())),
+            code = "TOOL_NOT_FOUND",
+            tools = JsonArray(listOf(appTool("missingTool")))
+        )
+    }
+
+    @Test
+    fun customToolSchemaIsPassedToProvider() = runBlocking {
+        val schema = buildJsonObject {
+            put("type", "object")
+            put("properties", buildJsonObject {
+                put("query", buildJsonObject {
+                    put("type", "string")
+                    put("description", "搜索词")
+                })
+            })
+            put("required", JsonArray(listOf(JsonPrimitive("query"))))
+        }
+        val (provider, captured) = capturingProvider()
+        val service = service(provider = provider)
+        val handleId = createHandle(service)
+
+        val request = startCapturing(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(userMessage())),
+            tools = JsonArray(listOf(customTool("lookup_docs", "查询文档", schema))),
+            captured = captured
+        )
+
+        val tool = request.tools.single()
+        assertEquals("lookup_docs", tool.name)
+        assertEquals("查询文档", tool.description)
+        assertEquals(
+            mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "query" to mapOf("type" to "string", "description" to "搜索词")
+                ),
+                "required" to listOf("query")
+            ),
+            tool.toJsonSchema()
+        )
+        val error = runCatching { tool.execute(emptyMap()) }.exceptionOrNull()
+        assertTrue(error is UnsupportedOperationException)
+    }
+
+    @Test
+    fun customToolValidationRejectsBadDefinitions() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+        val messages = JsonArray(listOf(userMessage()))
+
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            customTool("bad name")
+        )))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            customTool("same"),
+            customTool("same")
+        )))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            customTool("long_description", "x".repeat(601))
+        )))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            customTool("bad_schema", inputSchema = JsonPrimitive("not an object"))
+        )))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            customTool(
+                "oversized_schema",
+                inputSchema = buildJsonObject { put("description", "x".repeat(65 * 1024)) }
+            )
+        )))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(
+            (1..5).map { index ->
+                customTool(
+                    "schema_$index",
+                    inputSchema = buildJsonObject { put("description", "x".repeat(60 * 1024)) }
+                )
+            }
+        ))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(
+            (1..65).map { index -> customTool("tool_$index") }
+        ))
+        assertStartCode(service, handleId, messages, "PARAM_INVALID", JsonArray(listOf(
+            buildJsonObject {
+                put("type", "unknown")
+                put("name", "whatever")
+            }
+        )))
+    }
+
+    @Test
+    fun toolsMustBeAnArray() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        val error = runCatching {
+            service.start(pluginId, buildJsonObject {
+                put("handleId", handleId)
+                put("messages", JsonArray(listOf(userMessage())))
+                put("tools", "not-an-array")
+            }, "process")
+        }.exceptionOrNull()
+
+        assertTrue(error is PluginHostException)
+        assertEquals("PARAM_INVALID", (error as PluginHostException).code)
+    }
+
+    @Test
+    fun toolCallsAndToolMessagesAreMapped() = runBlocking {
+        val (provider, captured) = capturingProvider()
+        val service = service(provider = provider)
+        val handleId = createHandle(service)
+        val thinkingBlocks = """[{"type":"thinking","thinking":"plan"}]"""
+
+        val request = startCapturing(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(
+                userMessage("查一下"),
+                assistantMessage(
+                    content = "",
+                    toolCalls = JsonArray(listOf(
+                        toolCallJson(
+                            id = "call_1",
+                            name = "lookup",
+                            arguments = buildJsonObject { put("query", "kotlin") }
+                        )
+                    )),
+                    reasoning = "先查文档",
+                    providerState = buildJsonObject {
+                        put("signature", "sig-1")
+                        put("thinkingBlocksJson", thinkingBlocks)
+                    }
+                ),
+                toolMessage(
+                    toolCallId = "call_1",
+                    name = "lookup",
+                    content = "结果正文",
+                    images = JsonArray(listOf(
+                        imageJson(mimeType = "image/webp", base64 = "AQID")
+                    ))
+                )
+            )),
+            captured = captured
+        )
+
+        val assistant = request.messages[1] as AgentMessage.AssistantMessage
+        assertEquals("call_1", assistant.toolCalls.single().id)
+        assertEquals("lookup", assistant.toolCalls.single().name)
+        assertEquals("kotlin", assistant.toolCalls.single().arguments.getValue("query").jsonPrimitive.content)
+        assertEquals("先查文档", assistant.reasoning)
+        assertEquals("sig-1", assistant.signature)
+        assertEquals(thinkingBlocks, assistant.thinkingBlocksJson)
+
+        val toolResult = request.messages[2] as AgentMessage.ToolResultMessage
+        assertEquals("call_1", toolResult.id)
+        assertEquals("lookup", toolResult.toolName)
+        assertEquals("结果正文", toolResult.result)
+        assertEquals("image/webp", toolResult.images.single().mimeType)
+        assertEquals("AQID", toolResult.images.single().base64Data)
+    }
+
+    @Test
+    fun orphanToolMessageIsRejected() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        assertStartCode(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(
+                userMessage("hi"),
+                toolMessage("call_missing", "lookup", "结果")
+            )),
+            code = "PARAM_INVALID"
+        )
+    }
+
+    @Test
+    fun toolCallsValidationRejectsBadEntries() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        val tooMany = JsonArray((1..33).map { index -> toolCallJson("call_$index", "lookup") })
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(content = "ok", toolCalls = tooMany)
+        )), "PARAM_INVALID")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(
+                content = "ok",
+                toolCalls = JsonArray(listOf(toolCallJson("", "lookup")))
+            )
+        )), "PARAM_INVALID")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(
+                content = "ok",
+                toolCalls = JsonArray(listOf(toolCallJson("call_1", "")))
+            )
+        )), "PARAM_INVALID")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(
+                content = "ok",
+                toolCalls = JsonArray(listOf(
+                    buildJsonObject {
+                        put("id", "call_1")
+                        put("name", "lookup")
+                        put("arguments", "not-an-object")
+                    }
+                ))
+            )
+        )), "PARAM_INVALID")
+
+        val bigArguments = buildJsonObject { put("payload", "x".repeat(40 * 1024)) }
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(
+                content = "ok",
+                toolCalls = JsonArray(listOf(
+                    toolCallJson("call_1", "lookup", bigArguments),
+                    toolCallJson("call_2", "lookup", bigArguments)
+                ))
+            )
+        )), "PARAM_INVALID")
+    }
+
+    @Test
+    fun reasoningAndProviderStateLimitsAreEnforced() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(content = "ok", reasoning = "x".repeat(64 * 1024 + 1))
+        )), "PARAM_INVALID")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            assistantMessage(
+                content = "ok",
+                providerState = buildJsonObject {
+                    put("signature", "s".repeat(200 * 1024))
+                    put("thinkingBlocksJson", "t".repeat(60 * 1024))
+                }
+            )
+        )), "PARAM_INVALID")
+    }
+
+    @Test
+    fun messageTextLimitsAreEnforced() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage("x".repeat(128 * 1024 + 1))
+        )), "PARAM_INVALID")
+
+        assertStartCode(service, handleId, JsonArray(
+            (1..5).map { userMessage("x".repeat(110 * 1024)) }
+        ), "PARAM_INVALID")
+    }
+
+    @Test
+    fun imageFromPathIsLoadedWithPriority() = runBlocking {
+        val fileAccess = mockk<FileAccessProvider>(relaxed = true)
+        stubFile(fileAccess, "$WORKSPACE/pic.png", byteArrayOf(1, 2, 3))
+        val (provider, captured) = capturingProvider()
+        val service = service(provider = provider, fileAccess = fileAccess)
+        val handleId = createHandle(service)
+
+        val request = startCapturing(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(
+                userMessage(
+                    content = "",
+                    images = JsonArray(listOf(
+                        imageJson(mimeType = "image/png", path = "pic.png", base64 = "AAAA")
+                    ))
+                )
+            )),
+            captured = captured
+        )
+
+        val image = (request.messages.single() as AgentMessage.UserMessage).images.single()
+        assertEquals("image/png", image.mimeType)
+        assertEquals("AQID", image.base64Data)
+        assertEquals("pic.png", image.path)
+    }
+
+    @Test
+    fun imageFromBase64IsAccepted() = runBlocking {
+        val (provider, captured) = capturingProvider()
+        val service = service(provider = provider)
+        val handleId = createHandle(service)
+        val encoded = Base64.getEncoder().encodeToString(byteArrayOf(9, 8, 7))
+
+        val request = startCapturing(
+            service = service,
+            handleId = handleId,
+            messages = JsonArray(listOf(
+                userMessage(
+                    content = "",
+                    images = JsonArray(listOf(
+                        imageJson(mimeType = "image/jpeg", base64 = encoded)
+                    ))
+                )
+            )),
+            captured = captured
+        )
+
+        val image = (request.messages.single() as AgentMessage.UserMessage).images.single()
+        assertEquals("image/jpeg", image.mimeType)
+        assertEquals(encoded, image.base64Data)
+    }
+
+    @Test
+    fun unsupportedImageTypeIsRejected() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray(listOf(imageJson(mimeType = "image/bmp", base64 = "AQID")))
+            )
+        )), "IMAGE_TYPE_UNSUPPORTED")
+    }
+
+    @Test
+    fun imageLimitsAreEnforced() = runBlocking {
+        val fileAccess = mockk<FileAccessProvider>(relaxed = true)
+        every { fileAccess.exists("$WORKSPACE/huge.png") } returns true
+        every { fileAccess.isDirectory("$WORKSPACE/huge.png") } returns false
+        every { fileAccess.fileSize("$WORKSPACE/huge.png") } returns 8L * 1024 * 1024 + 1
+        val bigImage = ByteArray(6 * 1024 * 1024)
+        stubFile(fileAccess, "$WORKSPACE/big.png", bigImage)
+        val service = service(fileAccess = fileAccess)
+        val handleId = createHandle(service)
+        val tiny = Base64.getEncoder().encodeToString(byteArrayOf(1))
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray((1..5).map { imageJson(base64 = tiny) })
+            )
+        )), "IMAGE_TOO_LARGE")
+
+        assertStartCode(service, handleId, JsonArray(
+            (1..3).map {
+                userMessage(
+                    content = "",
+                    images = JsonArray((1..3).map { imageJson(base64 = tiny) })
+                )
+            }
+        ), "IMAGE_TOO_LARGE")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray(listOf(imageJson(path = "huge.png")))
+            )
+        )), "IMAGE_TOO_LARGE")
+
+        val oversizedInline = Base64.getEncoder().encodeToString(ByteArray(1024 * 1024 + 1))
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray(listOf(imageJson(base64 = oversizedInline)))
+            )
+        )), "IMAGE_TOO_LARGE")
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray((1..3).map { imageJson(path = "big.png") })
+            )
+        )), "IMAGE_TOO_LARGE")
+    }
+
+    @Test
+    fun inlineImageTotalIsCapped() = runBlocking {
+        val service = service()
+        val handleId = createHandle(service)
+        val chunk = Base64.getEncoder().encodeToString(ByteArray(700 * 1024))
+
+        assertStartCode(service, handleId, JsonArray(listOf(
+            userMessage(
+                content = "",
+                images = JsonArray((1..3).map { imageJson(base64 = chunk) })
+            )
+        )), "IMAGE_TOO_LARGE")
+    }
+
+    @Test
+    fun finalIncludesToolCallsProviderStateAndImages() = runBlocking {
+        val provider = mockk<AIProvider>(relaxed = true)
+        every { provider.completeStream(any(), any(), any(), any()) } returns flowOf(
+            AIStreamChunk.Final(
+                AIResponse(
+                    content = "done",
+                    toolCalls = listOf(
+                        ToolCall(
+                            id = "call_1",
+                            name = "lookup",
+                            arguments = mapOf("query" to JsonPrimitive("kotlin"))
+                        )
+                    ),
+                    signature = "sig-1",
+                    thinkingBlocksJson = """[{"type":"thinking"}]""",
+                    images = listOf(AgentImage(mimeType = "image/png", base64Data = "QUJD"))
+                )
+            )
+        )
+        val service = service(provider = provider)
+        val handleId = createHandle(service)
+        val streamId = startStream(service, handleId)
+
+        val result = readUntilDone(service, streamId)
+        assertEquals("success", result.getValue("status").jsonPrimitive.content)
+        val final = result.getValue("final").jsonObject
+
+        val call = final.getValue("toolCalls").jsonArray.single().jsonObject
+        assertEquals("call_1", call.getValue("id").jsonPrimitive.content)
+        assertEquals("lookup", call.getValue("name").jsonPrimitive.content)
+
+        val providerState = final.getValue("providerState").jsonObject
+        assertEquals("sig-1", providerState.getValue("signature").jsonPrimitive.content)
+        assertEquals(
+            """[{"type":"thinking"}]""",
+            providerState.getValue("thinkingBlocksJson").jsonPrimitive.content
+        )
+
+        val image = final.getValue("images").jsonArray.single().jsonObject
+        assertEquals("image/png", image.getValue("mimeType").jsonPrimitive.content)
+        assertEquals("QUJD", image.getValue("base64").jsonPrimitive.content)
+        assertEquals(1, final.getValue("imageCount").jsonPrimitive.int)
+        assertFalse(final.containsKey("imagesTruncated"))
+    }
+
+    @Test
+    fun finalDropsOversizedImages() = runBlocking {
+        val provider = mockk<AIProvider>(relaxed = true)
+        every { provider.completeStream(any(), any(), any(), any()) } returns flowOf(
+            AIStreamChunk.Final(
+                AIResponse(
+                    content = "done",
+                    images = listOf(
+                        AgentImage(mimeType = "image/png", base64Data = "QUJD"),
+                        AgentImage(mimeType = "image/png", base64Data = "A".repeat(2 * 1024 * 1024 + 1))
+                    )
+                )
+            )
+        )
+        val service = service(provider = provider)
+        val handleId = createHandle(service)
+        val streamId = startStream(service, handleId)
+
+        val final = readUntilDone(service, streamId).getValue("final").jsonObject
+
+        assertEquals(1, final.getValue("images").jsonArray.size)
+        assertTrue(final.getValue("imagesTruncated").jsonPrimitive.boolean)
+        assertEquals(2, final.getValue("imageCount").jsonPrimitive.int)
+    }
+
+    @Test
+    fun toolsCountTowardContextEstimate() = runBlocking {
+        val (provider, captured) = capturingProvider()
+        val service = service(
+            provider = provider,
+            modelMetadata = metadata(contextTokens = 2_000, inputTokens = null, outputTokens = null)
+        )
+        val handleId = createHandle(service)
+        val messages = JsonArray(listOf(userMessage("hi")))
+
+        startCapturing(service, handleId, messages, captured = captured)
+
+        assertStartCode(
+            service = service,
+            handleId = handleId,
+            messages = messages,
+            code = "CONTEXT_TOO_LARGE",
+            tools = JsonArray(listOf(
+                customTool(
+                    "huge_schema",
+                    inputSchema = buildJsonObject { put("description", "x".repeat(16 * 1024)) }
+                )
+            ))
+        )
+    }
+
+    private companion object {
+        const val WORKSPACE = "/root/workspace"
     }
 }
