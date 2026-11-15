@@ -338,13 +338,30 @@ class PluginManagerTest {
     }
 
     @Test
-    fun corruptRegistry_isBackedUpAndTreatedAsEmpty() = runTest {
+    fun corruptRegistry_isBackedUpAndPreservesInstalledDirectories() = runTest {
         installValid()
         File(root, "registry.json").writeText("{ not json")
         val restarted = newManager().also { it.ensureLoaded() }
         assertTrue(restarted.plugins.value.isEmpty())
         assertTrue(root.listFiles().orEmpty().any { it.name.startsWith("registry.json.corrupt-") })
-        // 记录丢失后遗留的安装目录没有任何授权，被当作孤儿清理
-        assertFalse(File(root, "installed/community.demo-kit").exists())
+        // registry 解析失败不能触发 sweep；目录留待用户恢复或重新导入
+        assertTrue(File(root, "installed/community.demo-kit").isDirectory)
+
+        // 下一次启动时 registry 文件已不存在，但损坏备份仍在，也不能 sweep
+        val restartedAgain = newManager().also { it.ensureLoaded() }
+        assertTrue(File(root, "installed/community.demo-kit").isDirectory)
+    }
+
+    @Test
+    fun interruptedInstall_restoresReplacedDirectory() = runTest {
+        installValid()
+        val installed = File(root, "installed/community.demo-kit")
+        val backup = File(root, "installed/community.demo-kit.replaced")
+        assertTrue(installed.renameTo(backup))
+
+        val restarted = newManager().also { it.ensureLoaded() }
+        assertEquals(PluginStatus.OK, restarted.plugins.value.single().status)
+        assertTrue(installed.isDirectory)
+        assertFalse(backup.exists())
     }
 }

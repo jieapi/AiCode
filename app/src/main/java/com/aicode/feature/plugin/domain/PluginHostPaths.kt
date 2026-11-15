@@ -181,7 +181,7 @@ class PluginHostPaths(
 
     private fun resolveWritable(path: String): String {
         val target = resolve(path)
-        if (isRoot(target)) throw PluginHostException("PATH_DENIED", "cannot modify a root: $path")
+        if (isProtectedRoot(target)) throw PluginHostException("PATH_DENIED", "cannot modify a root: $path")
         return target
     }
 
@@ -220,9 +220,26 @@ class PluginHostPaths(
 
     private fun dataRoot(): String = dataRoot(homeResolver, pluginId)
 
-    private fun isRoot(path: String): Boolean {
+    /**
+     * 这些根目录一旦被递归删除或整体覆盖，会丢掉工作区、AI 配置或全部插件，
+     * 因此所有写操作（写入、移动、复制目标、删除）都必须拦住根本身，子路径不受影响。
+     */
+    private fun isProtectedRoot(path: String): Boolean {
         val trimmed = path.trimEnd('/')
-        return trimmed.isEmpty() || trimmed == dataRoot().trimEnd('/')
+        if (trimmed.isEmpty()) return true
+        val aicode = homeResolver.aicodeRoot().trimEnd('/')
+        val protected = listOf(
+            homeResolver.home(),
+            aicode,
+            workspaceRoot(),
+            dataRoot(),
+            "$aicode/plugins",
+            "$aicode/plugins/installed",
+            "$aicode/plugins/staging",
+            "$aicode/plugins/data",
+            "$aicode/plugin-dev"
+        )
+        return protected.any { it.trimEnd('/') == trimmed }
     }
 
     /**

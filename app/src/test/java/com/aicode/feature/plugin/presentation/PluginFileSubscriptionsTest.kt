@@ -37,11 +37,11 @@ class PluginFileSubscriptionsTest {
         val subscriptions = PluginFileSubscriptions(backgroundScope, probe::watch) { events += it }
 
         subscriptions.add("settings", "data://settings/layout.json", false)
-        subscriptions.add("sources", "workspace://src/components", true)
+        subscriptions.add("sources", "~/workspace/src/components", true)
         runCurrent()
 
         assertEquals(
-            listOf("data://settings/layout.json" to false, "workspace://src/components" to true),
+            listOf("data://settings/layout.json" to false, "~/workspace/src/components" to true),
             probe.calls
         )
         assertTrue(probe.started.isEmpty())
@@ -80,7 +80,7 @@ class PluginFileSubscriptionsTest {
         subscriptions.add("first", "data://preferences.json", false)
         subscriptions.setActive(true)
         runCurrent()
-        subscriptions.add("second", "workspace://docs", true)
+        subscriptions.add("second", "~/workspace/docs", true)
         runCurrent()
 
         val payload = buildJsonObject {
@@ -90,13 +90,13 @@ class PluginFileSubscriptionsTest {
             put("contextKey", "workspace-a")
         }
         probe.send("data://preferences.json", payload)
-        probe.send("workspace://docs", change("docs-updated"))
+        probe.send("~/workspace/docs", change("docs-updated"))
         runCurrent()
 
         assertEquals(1, probe.started["data://preferences.json"])
-        assertEquals(1, probe.started["workspace://docs"])
+        assertEquals(1, probe.started["~/workspace/docs"])
         assertEquals(listOf("first", "second"), events.map { it["subscriptionId"]!!.jsonPrimitive.content })
-        assertEquals(listOf("data://preferences.json", "workspace://docs"), events.map { it["path"]!!.jsonPrimitive.content })
+        assertEquals(listOf("data://preferences.json", "~/workspace/docs"), events.map { it["path"]!!.jsonPrimitive.content })
         assertEquals("updated", events.first()["marker"]!!.jsonPrimitive.content)
         assertEquals("workspace-a", events.first()["contextKey"]!!.jsonPrimitive.content)
         assertEquals("untrusted-id", payload["subscriptionId"]!!.jsonPrimitive.content)
@@ -111,7 +111,7 @@ class PluginFileSubscriptionsTest {
         val probe = WatchProbe()
         val events = mutableListOf<JsonObject>()
         val subscriptions = PluginFileSubscriptions(backgroundScope, probe::watch) { events += it }
-        val path = "workspace://notes/project.md"
+        val path = "~/workspace/notes/project.md"
         subscriptions.add("notes", path, false)
         subscriptions.setActive(true)
         runCurrent()
@@ -233,7 +233,7 @@ class PluginFileSubscriptionsTest {
         val probe = LateCallbackProbe()
         val events = mutableListOf<JsonObject>()
         val subscriptions = PluginFileSubscriptions(backgroundScope, { _, _ -> probe.watch() }) { events += it }
-        val path = "workspace://src"
+        val path = "~/workspace/src"
         subscriptions.add("sources", path, true)
         subscriptions.setActive(true)
         runCurrent()
@@ -279,12 +279,12 @@ class PluginFileSubscriptionsTest {
         val previous = probe.callbacks.single()
 
         subscriptions.remove("same")
-        subscriptions.add("same", "workspace://new.json", false)
+        subscriptions.add("same", "~/workspace/new.json", false)
         runCurrent()
         previous(change("stale"))
         probe.callbacks.last()(change("current"))
 
-        assertEquals(listOf(change("current", "same", "workspace://new.json")), events)
+        assertEquals(listOf(change("current", "same", "~/workspace/new.json")), events)
         assertEquals(1, probe.finished)
         subscriptions.close()
         runCurrent()
@@ -297,7 +297,7 @@ class PluginFileSubscriptionsTest {
         val events = mutableListOf<JsonObject>()
         val subscriptions = PluginFileSubscriptions(backgroundScope, probe::watch) { events += it }
         subscriptions.add("one", "data://one", false)
-        subscriptions.add("two", "workspace://two", true)
+        subscriptions.add("two", "~/workspace/two", true)
         subscriptions.setActive(true)
         runCurrent()
         val callsBeforeClose = probe.calls.size
@@ -340,7 +340,7 @@ class PluginFileSubscriptionsTest {
         }) { events += it }
         subscriptions.add("denied", "data://denied", false)
         subscriptions.add("failed", "data://failed", false)
-        subscriptions.add("healthy", "workspace://src", true)
+        subscriptions.add("healthy", "~/workspace/src", true)
         subscriptions.setActive(true)
         runCurrent()
 
@@ -353,7 +353,7 @@ class PluginFileSubscriptionsTest {
         val failed = byId.getValue("failed")
         assertEquals("WATCH_FAILED", failed["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
         assertEquals("transport unavailable", failed["error"]!!.jsonObject["message"]!!.jsonPrimitive.content)
-        assertEquals(change("healthy", "healthy", "workspace://src"), byId.getValue("healthy"))
+        assertEquals(change("healthy", "healthy", "~/workspace/src"), byId.getValue("healthy"))
         assertEquals(2, finished)
 
         subscriptions.close()
@@ -402,7 +402,7 @@ class PluginFileSubscriptionsTest {
         for (id in listOf("", "a".repeat(65), "a b", "a.b", "a/b", "a:b", "id\n", "订阅")) {
             assertCode("PARAM_INVALID") { subscriptions.add(id, "data://invalid", false) }
         }
-        assertCode("PARAM_INVALID") { subscriptions.add("a", "workspace://duplicate", true) }
+        assertCode("PARAM_INVALID") { subscriptions.add("a", "~/workspace/duplicate", true) }
         assertEquals(valid.size, probe.calls.size)
         assertTrue(probe.started.isEmpty())
         subscriptions.close()
@@ -418,7 +418,7 @@ class PluginFileSubscriptionsTest {
         assertTrue(probe.started.isEmpty())
 
         subscriptions.remove("watch-7")
-        subscriptions.add("replacement", "workspace://replacement", true)
+        subscriptions.add("replacement", "~/workspace/replacement", true)
         assertEquals(17, probe.calls.size)
         subscriptions.setActive(true)
         runCurrent()

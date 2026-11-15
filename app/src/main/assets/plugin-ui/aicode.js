@@ -243,7 +243,7 @@
       return call('plugin.invoke', { handler: String(handler), args: args || {} });
     },
     // 在当前工作区执行一次性 Shell 命令，返回 { output, exitCode, truncated }。
-    // 需要插件获得 workspace.exec 授权；环境检测等短命令使用，不适合常驻进程。
+    // 适合环境检测等短命令，不适合常驻进程。
     bash: function (command, options) {
       var params = { command: String(command) };
       if (options && options.timeout != null) params.timeout = Number(options.timeout);

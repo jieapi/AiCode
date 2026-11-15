@@ -51,7 +51,8 @@ class FileChangeHub @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val containerInstaller: ContainerInstaller,
     private val pathMapper: WorkspacePathMapper,
-    private val executionModeHolder: ExecutionModeHolder
+    private val executionModeHolder: ExecutionModeHolder,
+    private val remoteFileWatchHub: RemoteFileWatchHub
 ) {
     companion object {
         private const val TAG = "FileChangeHub"
@@ -178,6 +179,13 @@ class FileChangeHub @Inject constructor(
             batchWindowMs = batchWindowMs
         )
     }
+
+    /**
+     * 订阅任意远端目录。远端没有宿主 [File]，由 [RemoteFileWatchHub] 按根共享轮询；
+     * 返回值只含变化批次，调用方按自己的根过滤路径。
+     */
+    fun watchRemoteDir(rootPath: String, recursive: Boolean = false): Flow<FileChangeBatch> =
+        remoteFileWatchHub.watch(rootPath, recursive)
 
     /**
      * 订阅任意宿主目录（如同步引擎的本地镜像目录）。[containerRootPath] 为 null 时容器路径由

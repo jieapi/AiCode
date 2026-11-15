@@ -133,7 +133,9 @@ class PluginHostPathsTest {
         assertOk(paths.write("nested/a.txt", "hi"))
 
         assertCode("TOO_LARGE") { paths.write("big.txt", "x".repeat(PluginHostPaths.MAX_WRITE_BYTES.toInt() + 1)) }
-        assertCode("PATH_DENIED") { paths.write("/", "x") }
+        for (root in PROTECTED_ROOTS) {
+            assertCode("PATH_DENIED") { paths.write(root, "x") }
+        }
     }
 
     @Test
@@ -142,6 +144,9 @@ class PluginHostPathsTest {
         assertOk(paths.mkdir("a/b"))
 
         assertCode("PATH_DENIED") { paths.mkdir("/") }
+        for (root in PROTECTED_ROOTS) {
+            assertCode("PATH_DENIED") { paths.mkdir(root) }
+        }
     }
 
     @Test
@@ -262,7 +267,9 @@ class PluginHostPathsTest {
     fun delete_rejectsRoots() {
         every { fileAccess.deleteRecursively("$WORKSPACE/tmp") } returns Unit
         assertOk(paths.delete("$WORKSPACE/tmp"))
-        assertCode("PATH_DENIED") { paths.delete("/") }
+        for (root in PROTECTED_ROOTS) {
+            assertCode("PATH_DENIED") { paths.delete(root) }
+        }
     }
 
     @Test
@@ -327,5 +334,17 @@ class PluginHostPathsTest {
         const val WORKSPACE = "/root/workspace"
         const val PLUGIN_ID = "demo.test"
         const val DATA = "$AICODE/plugins/data/$PLUGIN_ID"
+        val PROTECTED_ROOTS = listOf(
+            "/",
+            HOME,
+            AICODE,
+            WORKSPACE,
+            DATA,
+            "$AICODE/plugins",
+            "$AICODE/plugins/installed",
+            "$AICODE/plugins/staging",
+            "$AICODE/plugins/data",
+            "$AICODE/plugin-dev"
+        )
     }
 }

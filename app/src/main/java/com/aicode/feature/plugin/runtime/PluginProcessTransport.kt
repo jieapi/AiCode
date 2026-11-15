@@ -7,6 +7,7 @@ import java.io.BufferedWriter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,9 @@ class PluginProcessTransport(
     private val extraEnv: Map<String, String>,
     private val onRequest: suspend (method: String, params: JsonObject) -> JsonElement,
     private val onNotification: (method: String, params: JsonObject) -> Unit,
-    private val onExit: () -> Unit
+    private val onExit: () -> Unit,
+    /** 为 false 时常驻进程在单次请求超时后保留，避免一个慢 handler 拖垮后续调用。 */
+    private val closeOnTimeout: Boolean = true
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val startMutex = Mutex()
@@ -59,7 +62,7 @@ class PluginProcessTransport(
     @Volatile private var writer: BufferedWriter? = null
     @Volatile private var closed = false
 
-    /** 发送请求并等待插件返回的 `result`；超时会结束进程，避免死循环拖住调用方。 */
+    /** 发送请求并等待插件返回的 `result`；超时默认结束进程，常驻进程可保留（见 [closeOnTimeout]）。 */
     suspend fun request(method: String, params: JsonObject, timeoutMs: Long): JsonElement {
         ensureStarted()
         val id = idCounter.incrementAndGet()
@@ -67,24 +70,28 @@ class PluginProcessTransport(
         pending[id] = deferred
         FileLogger.d(TAG, "→ [$pluginId] $method id=$id")
         try {
-            writeLine(buildJsonObject {
-                put("jsonrpc", "2.0")
-                put("id", id)
-                put("method", method)
-                put("params", params)
-            })
-        } catch (e: Exception) {
-            pending.remove(id)
-            throw PluginProcessException("PLUGIN_WRITE_FAILED", "[$pluginId] 写入 stdin 失败: ${e.message}")
-        }
+            try {
+                writeLine(buildJsonObject {
+                    put("jsonrpc", "2.0")
+                    put("id", id)
+                    put("method", method)
+                    put("params", params)
+                })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw PluginProcessException("PLUGIN_WRITE_FAILED", "[$pluginId] 写入 stdin 失败: ${e.message}")
+            }
 
-        val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
-        if (result == null) {
+            val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
+            if (result == null) {
+                if (closeOnTimeout) close()
+                throw PluginProcessException("PLUGIN_TIMEOUT", "[$pluginId] $method 超时（${timeoutMs}ms）")
+            }
+            return result
+        } finally {
             pending.remove(id)
-            close()
-            throw PluginProcessException("PLUGIN_TIMEOUT", "[$pluginId] $method 超时（${timeoutMs}ms）")
         }
-        return result
     }
 
     fun close() {
@@ -163,7 +170,13 @@ class PluginProcessTransport(
     private fun handlePeerRequest(idElement: JsonElement, method: String, obj: JsonObject) {
         val params = obj["params"] as? JsonObject ?: JsonObject(emptyMap())
         scope.launch {
-            val reply = runCatching { onRequest(method, params) }
+            val reply = try {
+                Result.success(onRequest(method, params))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Result.failure(e)
+            }
             reply.onSuccess { result ->
                 runCatching {
                     writeLine(buildJsonObject {

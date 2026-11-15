@@ -112,7 +112,6 @@ import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.domain.PluginUiEntryKind
 import com.aicode.feature.plugin.domain.PluginUiSlots
 import com.aicode.feature.plugin.presentation.PluginEntryContext
-import com.aicode.feature.plugin.presentation.pluginHostPath
 import com.aicode.feature.plugin.presentation.PluginPageHost
 import com.aicode.feature.plugin.presentation.currentLanguageTag
 import com.aicode.feature.plugin.presentation.displayName
@@ -653,12 +652,10 @@ fun AppNavigation(
     val showPluginActionResult: (String?) -> Unit = { message ->
         if (!message.isNullOrBlank()) Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
-    // 文件树/编辑器给的是容器路径；工作区内转成插件宿主可读的 workspace:// 路径。
+    // 文件树/编辑器给的是当前执行环境的真实路径，插件直接交给 fs.* 即可。
     val runPluginEntry: (PluginUiEntry, PluginEntryContext) -> Unit = { entry, context ->
         if (drawerState.isOpen) scope.launch { drawerState.close() }
-        val entryContext = context.copy(
-            path = pluginHostPath(context.path, currentWorkspace?.path)
-        )
+        val entryContext = context
         when (entry.kind) {
             PluginUiEntryKind.PAGE -> openPluginEntryPage(entry, entryContext)
             PluginUiEntryKind.ACTION -> {

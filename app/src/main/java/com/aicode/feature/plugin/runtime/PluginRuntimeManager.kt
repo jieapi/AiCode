@@ -120,7 +120,13 @@ class PluginRuntimeManager @Inject constructor(
         method: String = "tool.invoke",
         timeoutMs: Long = TOOL_TIMEOUT_MS
     ): JsonElement {
+        requireActive(pluginId)
         val entry = getOrCreate(pluginId, version, runtime)
+        if (!isActive(pluginId)) {
+            synchronized(processes) { processes.remove(entry.key, entry) }
+            entry.transport.close()
+            throw PluginProcessException("PLUGIN_INACTIVE", "[$pluginId] 插件已停用或卸载")
+        }
         entry.lastUsed = System.currentTimeMillis()
         return try {
             entry.transport.request(
@@ -132,8 +138,8 @@ class PluginRuntimeManager @Inject constructor(
                 timeoutMs = timeoutMs
             )
         } catch (e: PluginProcessException) {
-            if (e.code == "PLUGIN_EXITED" || e.code == "PLUGIN_TIMEOUT") {
-                synchronized(processes) { processes.remove(entry.key) }
+            if (e.code == "PLUGIN_EXITED" || (e.code == "PLUGIN_TIMEOUT" && !entry.resident)) {
+                synchronized(processes) { processes.remove(entry.key, entry) }
                 entry.transport.close()
             }
             throw e
@@ -147,7 +153,7 @@ class PluginRuntimeManager @Inject constructor(
             processes.entries
                 .filter { (key, entry) -> entry.pluginId == pluginId && key != keepKey }
                 .forEach { (key, entry) ->
-                    processes.remove(key)
+                    processes.remove(key, entry)
                     entry.transport.close()
                 }
         }
@@ -159,7 +165,7 @@ class PluginRuntimeManager @Inject constructor(
             processes.entries
                 .filter { (_, entry) -> entry.pluginId == pluginId }
                 .forEach { (key, entry) ->
-                    processes.remove(key)
+                    processes.remove(key, entry)
                     entry.transport.close()
                 }
         }
@@ -175,6 +181,14 @@ class PluginRuntimeManager @Inject constructor(
         engine.notReadyHintFor(profile)?.let {
             throw PluginProcessException("PLUGIN_RUNTIME_UNAVAILABLE", it)
         }
+        val dataDir = dataDirectory(pluginId)
+        val wsRoot = workspaceRoot()
+        // 上面的挂起调用期间可能已有并发调用创建了同一版本的进程。
+        processes[key]?.let { entry ->
+            entry.resident = runtime.resident
+            return entry
+        }
+        var createdEntry: Entry? = null
         val transport = PluginProcessTransport(
             pluginId = pluginId,
             engine = engine,
@@ -186,16 +200,20 @@ class PluginRuntimeManager @Inject constructor(
             extraEnv = mapOf(
                 "AICODE_PLUGIN_ID" to pluginId,
                 "AICODE_PLUGIN_VERSION" to version,
-                "AICODE_DATA_DIR" to dataDirectory(pluginId),
-                "AICODE_WORKSPACE" to workspaceRoot()
+                "AICODE_DATA_DIR" to dataDir,
+                "AICODE_WORKSPACE" to wsRoot
             ),
             onRequest = { method, params -> hostRequest(pluginId, runtime, method, params) },
             onNotification = { method, params -> handleNotification(pluginId, method, params) },
             onExit = {
-                synchronized(processes) { processes.remove(key) }
-            }
+                createdEntry?.let { entry ->
+                    synchronized(processes) { processes.remove(key, entry) }
+                }
+            },
+            closeOnTimeout = !runtime.resident
         )
         val entry = Entry(pluginId, key, transport, System.currentTimeMillis(), runtime.resident)
+        createdEntry = entry
         val existing = synchronized(processes) { processes.putIfAbsent(key, entry) }
         if (existing != null) {
             transport.close()
@@ -217,14 +235,16 @@ class PluginRuntimeManager @Inject constructor(
             pluginId = pluginId
         )
         return when (method) {
-            "host.fs.read" -> paths.read(PluginHostPaths.requireString(params, "path"))
-            "host.fs.write" -> paths.write(
-                PluginHostPaths.requireString(params, "path"),
-                PluginHostPaths.requireString(params, "content")
-            )
-            "host.fs.list" -> paths.list(PluginHostPaths.requireString(params, "path"))
-            "host.fs.delete" -> paths.delete(PluginHostPaths.requireString(params, "path"))
-            "host.fs.stat" -> paths.stat(PluginHostPaths.requireString(params, "path"))
+            "host.fs.read" -> hostCall { paths.read(PluginHostPaths.requireString(params, "path")) }
+            "host.fs.write" -> hostCall {
+                paths.write(
+                    PluginHostPaths.requireString(params, "path"),
+                    PluginHostPaths.requireString(params, "content")
+                )
+            }
+            "host.fs.list" -> hostCall { paths.list(PluginHostPaths.requireString(params, "path")) }
+            "host.fs.delete" -> hostCall { paths.delete(PluginHostPaths.requireString(params, "path")) }
+            "host.fs.stat" -> hostCall { paths.stat(PluginHostPaths.requireString(params, "path")) }
             "host.fs.mkdir" -> hostCall { paths.mkdir(PluginHostPaths.requireString(params, "path")) }
             "host.fs.rename" -> hostCall {
                 paths.rename(
@@ -472,6 +492,17 @@ class PluginRuntimeManager @Inject constructor(
         return buildJsonObject { put("ok", written) }
     }
 
+    private fun isActive(pluginId: String): Boolean {
+        pluginManager.ensureLoaded()
+        return pluginManager.plugins.value.any { it.id == pluginId && it.isActive }
+    }
+
+    private fun requireActive(pluginId: String) {
+        if (!isActive(pluginId)) {
+            throw PluginProcessException("PLUGIN_INACTIVE", "[$pluginId] 插件已停用或卸载")
+        }
+    }
+
     private fun handleNotification(pluginId: String, method: String, params: JsonObject) {
         if (method != "plugin.event") {
             FileLogger.d(TAG, "[$pluginId] 忽略插件通知: $method")
@@ -515,7 +546,7 @@ class PluginRuntimeManager @Inject constructor(
             processes.entries
                 .filter { !it.value.resident && now - it.value.lastUsed > IDLE_TIMEOUT_MS }
                 .forEach { (key, entry) ->
-                    processes.remove(key)
+                    processes.remove(key, entry)
                     entry.transport.close()
                 }
         }

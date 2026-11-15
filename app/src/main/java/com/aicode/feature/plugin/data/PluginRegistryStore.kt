@@ -43,8 +43,15 @@ private const val SCHEMA = 4
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {
 
+    @Volatile
+    private var lastLoadFailed = false
+
+    /** 最近一次 [load] 是否因文件损坏或版本不认识而失败；调用方据此避免误删安装目录。 */
+    val loadFailed: Boolean get() = lastLoadFailed
+
     /** 文件不存在返回空。文件损坏或版本不认识时先备份再按空处理，不覆盖原内容。 */
     fun load(): List<PluginRecord> {
+        lastLoadFailed = false
         if (!file.isFile) return emptyList()
         return try {
             val parsed = JSON.decodeFromString<RegistryFile>(file.readText())
@@ -55,6 +62,7 @@ class PluginRegistryStore(private val file: File) {
                 }
             }.distinctBy { it.id }
         } catch (e: Exception) {
+            lastLoadFailed = true
             val backup = File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")
             FileLogger.e(TAG, "插件安装记录无法读取，已备份为 ${backup.name}", e)
             file.renameTo(backup)

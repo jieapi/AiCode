@@ -137,6 +137,11 @@ class PluginManager internal constructor(
         val content: PluginContent
     )
 
+    private class LoadedRegistry(
+        val records: List<PluginRecord>,
+        val failed: Boolean
+    )
+
     private val staged = ConcurrentHashMap<String, StagedPackage>()
 
     /** 首次调用时从磁盘读取安装记录；会做文件 IO，调用方不要放在主线程。 */
@@ -147,9 +152,11 @@ class PluginManager internal constructor(
             migrateLegacyRoot()
             // 进程重启后不可能存在进行中的安装，暂存目录里的都是残留
             stagingDir.deleteRecursively()
-            val records = loadRecords()
-            publish(records.map { loadInstalled(it) })
-            sweepOrphans(records.map { it.id }.toSet())
+            val registry = loadRecords()
+            recoverInterruptedInstall(registry.records)
+            publish(registry.records.map { loadInstalled(it) })
+            // registry 读取失败时保留 installed 目录，避免一次坏 JSON 清空全部插件
+            if (!registry.failed) sweepOrphans(registry.records.map { it.id }.toSet())
             loaded = true
             _isLoaded.value = true
         }
@@ -159,9 +166,10 @@ class PluginManager internal constructor(
     suspend fun refresh() = withContext(Dispatchers.IO) {
         mutex.withLock {
             ensureLoaded()
-            val records = loadRecords()
-            publish(records.map { loadInstalled(it) })
-            sweepOrphans(records.map { it.id }.toSet())
+            val loaded = loadRecords()
+            recoverInterruptedInstall(loaded.records)
+            publish(loaded.records.map { loadInstalled(it) })
+            if (!loaded.failed) sweepOrphans(loaded.records.map { it.id }.toSet())
         }
     }
 
@@ -531,10 +539,70 @@ class PluginManager internal constructor(
      * 记录尚未搬到宿主私有目录时（迁移未完成），退回到包目录里的副本读取，
      * 避免把已安装插件当成孤儿清掉。
      */
-    private fun loadRecords(): List<PluginRecord> {
-        if (registryFile.isFile) return store.load()
+    private fun loadRecords(): LoadedRegistry {
+        if (registryFile.isFile) {
+            val records = store.load()
+            val failed = store.loadFailed || hasCorruptRegistryBackup() || hasLegacyCorruptBackup()
+            return LoadedRegistry(records, failed)
+        }
         val inside = File(rootDir, "registry.json")
-        return if (inside.isFile) PluginRegistryStore(inside).load() else emptyList()
+        if (!inside.isFile) {
+            return LoadedRegistry(emptyList(), failed = hasCorruptRegistryBackup() || hasLegacyCorruptBackup())
+        }
+        val legacyStore = PluginRegistryStore(inside)
+        return LoadedRegistry(
+            legacyStore.load(),
+            legacyStore.loadFailed || hasCorruptRegistryBackup() || hasLegacyCorruptBackup()
+        )
+    }
+
+    /** 上一次读取失败会留下备份；此时 registry 文件已不存在，但安装目录不能当孤儿清理。 */
+    private fun hasCorruptRegistryBackup(): Boolean =
+        registryFile.parentFile?.listFiles().orEmpty().any {
+            it.name.startsWith("${registryFile.name}.corrupt-")
+        }
+
+    private fun hasLegacyCorruptBackup(): Boolean {
+        val backupPrefix = "registry.json.corrupt-"
+        return rootDir.listFiles().orEmpty().any { it.name.startsWith(backupPrefix) }
+    }
+
+    /**
+     * 安装/升级在“旧目录已移走、新目录尚未就位或 registry 尚未落盘”之间崩溃时，
+     * 按 registry 仍指向的版本恢复，避免下一次 sweep 把备份当孤儿删掉。
+     */
+    private fun recoverInterruptedInstall(records: List<PluginRecord>) {
+        records.forEach { record ->
+            val target = File(installedDir, record.id)
+            val backup = File(installedDir, "${record.id}$REPLACED_SUFFIX")
+            if (!backup.isDirectory) return@forEach
+            when {
+                !target.exists() -> {
+                    if (!backup.renameTo(target)) {
+                        FileLogger.w(TAG, "恢复中断安装失败: ${record.id}")
+                    }
+                }
+                manifestMatches(target, record) -> backup.deleteRecursively()
+                manifestMatches(backup, record) -> {
+                    target.deleteRecursively()
+                    if (!backup.renameTo(target)) {
+                        FileLogger.w(TAG, "回滚中断安装失败: ${record.id}")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun manifestMatches(dir: File, record: PluginRecord): Boolean {
+        val manifestFile = File(dir, PluginPackageReader.MANIFEST_FILE)
+        if (!manifestFile.isFile || manifestFile.length() > PluginManifestParser.MAX_MANIFEST_BYTES) {
+            return false
+        }
+        val bytes = runCatching { manifestFile.readBytes() }.getOrNull() ?: return false
+        if (PluginPackageReader.sha256Hex(bytes) != record.manifestSha256) return false
+        val parsed = PluginManifestParser.parse(String(bytes, Charsets.UTF_8), hostApi)
+        val manifest = (parsed as? ManifestParseResult.Success)?.manifest ?: return false
+        return manifest.id == record.id && manifest.version.toString() == record.version
     }
 
     /** 没有安装记录的目录不具备任何授权，直接清掉（多半是安装中途崩溃留下的）。 */
