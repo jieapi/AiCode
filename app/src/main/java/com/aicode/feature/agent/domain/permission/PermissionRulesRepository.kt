@@ -127,7 +127,10 @@ class PermissionRulesRepository @Inject constructor(
     }
 
     private fun getProjectState(workspacePath: String): MutableStateFlow<List<PermissionRule>?> =
-        projectStates.getOrPut(workspacePath) { MutableStateFlow(null) }
+        getProjectState(captureProject(workspacePath))
+
+    private fun getProjectState(project: ProjectContext): MutableStateFlow<List<PermissionRule>?> =
+        projectStates.getOrPut(project.file.absolutePath) { MutableStateFlow(null) }
 
     // ── 懒加载 ──────────────────────────────────────────────────
 
@@ -139,37 +142,72 @@ class PermissionRulesRepository @Inject constructor(
         }
     }
 
-    private suspend fun ensureProjectLoaded(workspacePath: String) {
-        val state = getProjectState(workspacePath)
+    private suspend fun ensureProjectLoaded(workspacePath: String) =
+        ensureProjectLoaded(captureProject(workspacePath))
+
+    private suspend fun ensureProjectLoaded(project: ProjectContext) {
+        val state = getProjectState(project)
         if (state.value != null) return
         mutex.withLock {
             if (state.value != null) return
-            state.value = loadFromFile(projectFileForPath(workspacePath))
+            state.value = loadFromResolvedFile(project.file)
         }
     }
 
     private suspend fun loadFromFile(file: File): List<PermissionRule> =
         withContext(Dispatchers.IO) {
-            val resolved = pathMapper.resolveHostFile(file)
-            if (!resolved.isFile) return@withContext emptyList()
+            loadFromResolvedFile(pathMapper.resolveHostFile(file))
+        }
+
+    private suspend fun loadFromResolvedFile(file: File): List<PermissionRule> =
+        withContext(Dispatchers.IO) {
+            if (!file.isFile) return@withContext emptyList()
             runCatching {
-                JSON.decodeFromString<PermissionFile>(resolved.readText()).toRuleList()
+                JSON.decodeFromString<PermissionFile>(file.readText()).toRuleList()
             }.getOrElse {
                 FileLogger.w(TAG, "读取 ${file.path} 失败: ${it.message}")
                 emptyList()
             }
         }
 
-    private fun writeToFile(file: File, rules: List<PermissionRule>) {
-        val resolved = pathMapper.resolveHostFile(file)
-        val parent = resolved.parentFile
+    private fun writeToFile(file: File, rules: List<PermissionRule>) =
+        writeToResolvedFile(pathMapper.resolveHostFile(file), rules)
+
+    private fun writeToResolvedFile(file: File, rules: List<PermissionRule>) {
+        val parent = file.parentFile
         if (parent != null && !parent.isDirectory && !parent.mkdirs() && !parent.isDirectory) {
             throw IOException("Cannot create permissions directory: ${parent.absolutePath}")
         }
-        resolved.writeText(JSON.encodeToString(PermissionFile.serializer(), rules.toPermissionFile()))
+        file.writeText(JSON.encodeToString(PermissionFile.serializer(), rules.toPermissionFile()))
     }
 
     // ── 公共 API ────────────────────────────────────────────────
+
+    class ProjectContext internal constructor(internal val file: File)
+
+    /** 在挂起前固定模式、服务器与工作区映射后的宿主文件，后续 IO 不再读取当前项目。 */
+    fun captureProject(workspacePath: String): ProjectContext =
+        ProjectContext(pathMapper.resolveHostFile(projectFileForPath(workspacePath)))
+
+    suspend fun loadEffectiveForProject(project: ProjectContext): List<PermissionRule> {
+        ensureGlobalLoaded()
+        val global = globalState.value ?: emptyList()
+        ensureProjectLoaded(project)
+        val rules = getProjectState(project).value ?: emptyList()
+        return rules + global
+    }
+
+    suspend fun addToProject(project: ProjectContext, rule: PermissionRule) {
+        ensureProjectLoaded(project)
+        mutex.withLock {
+            val state = getProjectState(project)
+            val rules = (state.value ?: emptyList()).toMutableList()
+            if (rule !in rules) rules.add(rule)
+            withContext(Dispatchers.IO) { writeToResolvedFile(project.file, rules) }
+            state.value = rules
+        }
+        FileLogger.i(TAG, "记忆授权规则[PROJECT]: ${rule.toolName} ${rule.pattern}")
+    }
 
     /** 当前选中的项目名；无选中时为 null（此时项目级规则不可用，仅全局生效）。 */
     fun currentProjectName(): String? = workspaceRepository.current.value?.name

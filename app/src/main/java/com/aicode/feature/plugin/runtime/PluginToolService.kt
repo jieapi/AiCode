@@ -1,10 +1,11 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.permission.PermissionChoice
-import com.aicode.feature.agent.domain.permission.PermissionScope
+import com.aicode.feature.agent.domain.permission.PermissionRulesRepository
 import com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.PendingToolPermission
@@ -15,12 +16,24 @@ import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -50,7 +63,9 @@ class PluginToolService @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val toolRegistry: ToolRegistry,
     private val policyEngine: ToolPermissionPolicyEngine,
-    private val permissionManager: ToolPermissionManager
+    private val permissionManager: ToolPermissionManager,
+    private val executionModeHolder: ExecutionModeHolder,
+    private val remoteSshConnection: RemoteSshConnection
 ) {
 
     /** 待审批请求 → 发起它的会话；resolve 只带 requestId，需要据此找回会话。 */
@@ -85,30 +100,42 @@ class PluginToolService @Inject constructor(
         val sessionId = resolveSessionId(pluginId, params)
         val timeoutMs = readTimeoutMs(params)
 
-        val eval = policyEngine.evaluate(tool, name, arguments, AgentMode.BUILD)
-        if (eval.verdict == ToolPermissionPolicyEngine.Verdict.DENY) {
-            throw PluginHostException(
-                "TOOL_DENIED",
-                eval.denyReason ?: "tool denied by permission policy: $name"
-            )
-        }
-        val needsApproval = eval.verdict == ToolPermissionPolicyEngine.Verdict.ASK &&
-            tool.permissionPolicy != ToolPermissionPolicy.AUTO_APPROVE
-        if (needsApproval) {
-            awaitApproval(tool, name, arguments, eval, sessionId, timeoutMs)
-        }
-
         val context = buildContext(params, sessionId)
-        val result = try {
-            withTimeoutOrNull(timeoutMs) { tool.executeWithContext(arguments, context) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: PluginHostException) {
-            throw e
-        } catch (e: Exception) {
-            throw PluginHostException("TOOL_ERROR", e.message ?: e.javaClass.simpleName)
-        } ?: throw PluginHostException("TOOL_TIMEOUT", "tool execution timed out: $name")
-        return resultJson(result)
+        val guard = ExecutionGuard(pluginId, context.projectRoot)
+        return guard.run {
+            val project = policyEngine.captureProject(context.projectRoot)
+            guard.check()
+            val eval = policyEngine.evaluate(tool, name, arguments, AgentMode.BUILD, project)
+            guard.check()
+            if (eval.verdict == ToolPermissionPolicyEngine.Verdict.DENY) {
+                throw PluginHostException(
+                    "TOOL_DENIED",
+                    eval.denyReason ?: "tool denied by permission policy: $name"
+                )
+            }
+            val needsApproval = eval.verdict == ToolPermissionPolicyEngine.Verdict.ASK &&
+                tool.permissionPolicy != ToolPermissionPolicy.AUTO_APPROVE
+            if (needsApproval) {
+                awaitApproval(tool, name, arguments, eval, sessionId, timeoutMs, project, guard)
+            }
+
+            guard.check()
+            val result = try {
+                withTimeoutOrNull(timeoutMs) {
+                    // 工具后端仍动态选路；这里只保护调用边界，不能原子锁住后端内部的所有挂起点。
+                    guard.check()
+                    tool.executeWithContext(arguments, context)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: PluginHostException) {
+                throw e
+            } catch (e: Exception) {
+                throw PluginHostException("TOOL_ERROR", e.message ?: e.javaClass.simpleName)
+            } ?: throw PluginHostException("TOOL_TIMEOUT", "tool execution timed out: $name")
+            guard.check()
+            resultJson(result)
+        }
     }
 
     /** 当前会话里由本插件发起的待审批请求；没有时 `approval` 为 null。 */
@@ -151,7 +178,9 @@ class PluginToolService @Inject constructor(
         arguments: Map<String, JsonElement>,
         eval: ToolPermissionPolicyEngine.EvalResult,
         sessionId: String,
-        timeoutMs: Long
+        timeoutMs: Long,
+        project: PermissionRulesRepository.ProjectContext,
+        guard: ExecutionGuard
     ) {
         val callId = "plugin-tool-${UUID.randomUUID()}"
         val argsPreview = JsonObject(arguments).toString().take(MAX_ARGS_PREVIEW_CHARS)
@@ -161,12 +190,17 @@ class PluginToolService @Inject constructor(
             sessionId = sessionId,
             origin = PendingToolPermission.ORIGIN_PLUGIN
         )
+        guard.check()
         approvalSessions[callId] = sessionId
         val choice = try {
-            withTimeoutOrNull(timeoutMs) { permissionManager.awaitApproval(request) }
+            withTimeoutOrNull(timeoutMs) {
+                guard.check()
+                permissionManager.awaitApproval(request)
+            }
         } finally {
             approvalSessions.remove(callId)
         }
+        guard.check()
         if (choice == null) {
             throw PluginHostException("TOOL_APPROVAL_TIMEOUT", "tool approval timed out: $name")
         }
@@ -174,9 +208,97 @@ class PluginToolService @Inject constructor(
             PermissionChoice.REJECT ->
                 throw PluginHostException("TOOL_USER_REJECTED", "user rejected tool execution: $name")
             PermissionChoice.ALWAYS -> if (eval.rememberablePatterns.isNotEmpty()) {
-                policyEngine.remember(name, eval.rememberablePatterns, PermissionScope.PROJECT)
+                policyEngine.remember(name, eval.rememberablePatterns, project)
+                guard.check()
             }
             PermissionChoice.ONCE -> Unit
+        }
+    }
+
+    private data class ServerIdentity(
+        val host: String,
+        val port: Int,
+        val username: String
+    )
+
+    private fun serverIdentity(): ServerIdentity? = remoteSshConnection.config?.let {
+        ServerIdentity(it.host, it.port, it.username)
+    }
+
+    private inner class ExecutionGuard(
+        private val pluginId: String,
+        private val workspacePath: String
+    ) {
+        private val mode = executionModeHolder.currentMode()
+        private val server = if (mode == ExecutionMode.REMOTE_SSH) serverIdentity() else null
+        private val failure = AtomicReference<PluginHostException?>()
+        private val invalidated = CompletableDeferred<PluginHostException>()
+
+        private fun refresh(
+            currentWorkspacePath: String? = workspaceRepository.current.value?.path,
+            currentMode: ExecutionMode = executionModeHolder.currentMode(),
+            pluginActive: Boolean = pluginManager.plugins.value.any { it.id == pluginId && it.isActive }
+        ) {
+            if (failure.get() != null) return
+            val error = when {
+                !pluginActive -> PluginHostException("PLUGIN_INACTIVE", "plugin is not active: $pluginId")
+                currentWorkspacePath != workspacePath || currentMode != mode ||
+                    (mode == ExecutionMode.REMOTE_SSH && serverIdentity() != server) ->
+                    PluginHostException("STALE_CONTEXT", "tool execution context has changed")
+                else -> null
+            }
+            if (error != null && failure.compareAndSet(null, error)) invalidated.complete(error)
+        }
+
+        fun check() {
+            refresh()
+            failure.get()?.let { throw it }
+        }
+
+        suspend fun <T> run(block: suspend () -> T): T = supervisorScope {
+            // Unconfined 让状态发布时立即留下失效标记，避免切走再切回恢复旧授权。
+            val watchers = listOf(
+                launch(Dispatchers.Unconfined) {
+                    workspaceRepository.current.collect { refresh(currentWorkspacePath = it?.path) }
+                },
+                launch(Dispatchers.Unconfined) {
+                    executionModeHolder.mode.collect { refresh(currentMode = it) }
+                },
+                launch(Dispatchers.Unconfined) {
+                    pluginManager.plugins.collect { plugins ->
+                        refresh(pluginActive = plugins.any { it.id == pluginId && it.isActive })
+                    }
+                },
+                launch(Dispatchers.Unconfined) { remoteSshConnection.connectionState.collect { refresh() } },
+                // config 只有同步快照，没有专门的身份流；连接状态之外补充有界检查。
+                launch {
+                    while (isActive) {
+                        refresh()
+                        delay(CONTEXT_CHECK_INTERVAL_MS)
+                    }
+                }
+            )
+            val execution = async {
+                check()
+                block()
+            }
+            try {
+                select {
+                    invalidated.onAwait { throw it }
+                    execution.onAwait {
+                        check()
+                        it
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                check()
+                throw e
+            } finally {
+                execution.cancel()
+                watchers.forEach { it.cancel() }
+            }
         }
     }
 
@@ -324,6 +446,7 @@ class PluginToolService @Inject constructor(
     private companion object {
         const val SESSION_PREFIX = "plugin:"
         const val PLUGIN_TOOL_PREFIX = "plugin__"
+        const val CONTEXT_CHECK_INTERVAL_MS = 100L
         const val DEFAULT_TIMEOUT_MS = 120_000L
         const val MIN_TIMEOUT_MS = 1_000L
         const val MAX_TIMEOUT_MS = 600_000L

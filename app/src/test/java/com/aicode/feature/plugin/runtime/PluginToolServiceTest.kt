@@ -1,9 +1,12 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.container.ConnectionState
+import com.aicode.feature.agent.domain.container.RemoteConnectionConfig
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMode
-import com.aicode.feature.agent.domain.permission.PermissionScope
+import com.aicode.feature.agent.domain.permission.PermissionRulesRepository
 import com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.PendingToolPermission
@@ -16,12 +19,16 @@ import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.model.Workspace
+import com.aicode.feature.workspace.domain.remote.RemoteAuth
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -61,6 +68,8 @@ class PluginToolServiceTest {
         override val parameters: Map<String, ToolParameter> = emptyMap()
         var lastContext: AgentContext? = null
             private set
+        var completed = false
+            private set
 
         override suspend fun execute(args: Map<String, JsonElement>): ToolResult = result
 
@@ -70,6 +79,7 @@ class PluginToolServiceTest {
         ): ToolResult {
             lastContext = context
             if (delayMs > 0) delay(delayMs)
+            completed = true
             return result
         }
     }
@@ -77,7 +87,13 @@ class PluginToolServiceTest {
     private class Env(
         val service: PluginToolService,
         val permissionManager: ToolPermissionManager,
-        val policyEngine: ToolPermissionPolicyEngine
+        val policyEngine: ToolPermissionPolicyEngine,
+        val project: PermissionRulesRepository.ProjectContext,
+        val workspaces: MutableStateFlow<Workspace?>,
+        val plugins: MutableStateFlow<List<InstalledPlugin>>,
+        val modeHolder: ExecutionModeHolder,
+        val servers: MutableStateFlow<RemoteConnectionConfig?>,
+        val connectionState: MutableStateFlow<ConnectionState>
     )
 
     private fun allow(): ToolPermissionPolicyEngine.EvalResult =
@@ -99,32 +115,50 @@ class PluginToolServiceTest {
         tools: List<AgentTool> = emptyList(),
         eval: ToolPermissionPolicyEngine.EvalResult = allow(),
         active: Boolean = true,
-        workspace: String? = workspacePath
+        workspace: String? = workspacePath,
+        mode: ExecutionMode = ExecutionMode.LOCAL_PROOT,
+        server: RemoteConnectionConfig? = null
     ): Env {
         val plugin = mockk<InstalledPlugin> {
             every { id } returns pluginId
             every { isActive } returns active
         }
         val pluginManager = mockk<PluginManager>(relaxed = true)
-        every { pluginManager.plugins } returns MutableStateFlow(listOf(plugin))
+        val plugins = MutableStateFlow(listOf(plugin))
+        every { pluginManager.plugins } returns plugins
         val workspaceRepository = mockk<WorkspaceRepository>(relaxed = true)
-        every { workspaceRepository.current } returns MutableStateFlow(
-            workspace?.let { Workspace(name = "project", path = it) }
-        )
+        val workspaces = MutableStateFlow(workspace?.let { Workspace(name = "project", path = it) })
+        every { workspaceRepository.current } returns workspaces
         val registry = ToolRegistry()
         tools.forEach { registry.register(it.name, it) }
         val policyEngine = mockk<ToolPermissionPolicyEngine>(relaxed = true)
-        coEvery { policyEngine.evaluate(any(), any(), any(), any()) } returns eval
+        val project = mockk<PermissionRulesRepository.ProjectContext>()
+        every { policyEngine.captureProject(any()) } returns project
+        coEvery { policyEngine.evaluate(any(), any(), any(), any(), any()) } returns eval
         val permissionManager = ToolPermissionManager()
+        val modeHolder = ExecutionModeHolder().apply { setMode(mode) }
+        val servers = MutableStateFlow(server)
+        val connectionState = MutableStateFlow(ConnectionState.CONNECTED)
+        val sshConnection = mockk<RemoteSshConnection>()
+        every { sshConnection.config } answers { servers.value }
+        every { sshConnection.connectionState } returns connectionState
         val service = PluginToolService(
             pluginManager = pluginManager,
             workspaceRepository = workspaceRepository,
             toolRegistry = registry,
             policyEngine = policyEngine,
-            permissionManager = permissionManager
+            permissionManager = permissionManager,
+            executionModeHolder = modeHolder,
+            remoteSshConnection = sshConnection
         )
-        return Env(service, permissionManager, policyEngine)
+        return Env(service, permissionManager, policyEngine, project, workspaces, plugins, modeHolder, servers, connectionState)
     }
+
+    private fun server(
+        host: String = "server-a",
+        port: Int = 22,
+        username: String = "alice"
+    ) = RemoteConnectionConfig(host, port, username, RemoteAuth.Password(""), "/srv/workspaces")
 
     private fun executeParams(
         name: String,
@@ -179,6 +213,31 @@ class PluginToolServiceTest {
     }
 
     @Test
+    fun execute_inactivePluginDoesNotEvaluateOrExecute() = runTest {
+        val tool = FakeTool(name = "writeFile")
+        val env = env(tools = listOf(tool), active = false)
+
+        val error = errorOf { env.service.execute(pluginId, executeParams("writeFile")) }
+
+        assertEquals("PLUGIN_INACTIVE", error!!.code)
+        assertNull(tool.lastContext)
+        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun execute_missingWorkspaceDoesNotEvaluateOrPublishApproval() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask(), workspace = null)
+
+        val error = errorOf { env.service.execute(pluginId, executeParams("writeFile")) }
+
+        assertEquals("WORKSPACE_UNAVAILABLE", error!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun execute_autoApprovePolicySkipsAskVerdict() = runTest {
         val env = env(tools = listOf(FakeTool(name = "readFile")), eval = ask())
 
@@ -197,7 +256,7 @@ class PluginToolServiceTest {
         }
 
         assertEquals("TOOL_NOT_ALLOWED", error!!.code)
-        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -210,7 +269,7 @@ class PluginToolServiceTest {
 
         assertNotNull(error)
         assertEquals("TOOL_NOT_ALLOWED", error!!.code)
-        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -276,6 +335,8 @@ class PluginToolServiceTest {
         assertTrue(job.isCompleted)
         assertEquals("success", job.await().jsonObject["status"]!!.jsonPrimitive.content)
         assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        assertEquals(workspacePath, tool.lastContext!!.projectRoot)
+        coVerify(exactly = 1) { env.policyEngine.evaluate(tool, "writeFile", any(), AgentMode.BUILD, env.project) }
     }
 
     @Test
@@ -297,8 +358,227 @@ class PluginToolServiceTest {
 
         assertEquals("success", job.await().jsonObject["status"]!!.jsonPrimitive.content)
         coVerify {
-            env.policyEngine.remember("writeFile", listOf("*"), PermissionScope.PROJECT)
+            env.policyEngine.remember("writeFile", listOf("*"), env.project)
         }
+    }
+
+    @Test
+    fun execute_workspaceChangeInvalidatesPendingApprovalEvenAfterSwitchingBack() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        val requestId = env.permissionManager.pendingForSession("plugin:$pluginId")!!.id
+        val original = env.workspaces.value
+
+        env.workspaces.value = Workspace(name = "other", path = "/root/workspace/other")
+        env.workspaces.value = original
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+        val error = errorOf {
+            env.service.resolve(pluginId, buildJsonObject {
+                put("requestId", requestId)
+                put("choice", "always")
+            })
+        }
+        assertEquals("APPROVAL_NOT_FOUND", error!!.code)
+    }
+
+    @Test
+    fun execute_workspaceChangeAfterAlwaysChoiceDoesNotRememberOrExecute() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        val requestId = env.permissionManager.pendingForSession("plugin:$pluginId")!!.id
+
+        env.service.resolve(pluginId, buildJsonObject {
+            put("requestId", requestId)
+            put("choice", "always")
+        })
+        env.workspaces.value = Workspace(name = "other", path = "/root/workspace/other")
+        runCurrent()
+
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+    }
+
+    @Test
+    fun execute_modeChangeInvalidatesPendingApprovalEvenAfterSwitchingBack() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+
+        env.modeHolder.setMode(ExecutionMode.REMOTE_SSH)
+        env.modeHolder.setMode(ExecutionMode.LOCAL_PROOT)
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+    }
+
+    @Test
+    fun execute_serverIdentityChangesInvalidatePendingApprovalEvenAfterSwitchingBack() = runTest {
+        val original = server()
+        val alternatives = listOf(
+            original.copy(host = "server-b"),
+            original.copy(port = 2222),
+            original.copy(username = "bob")
+        )
+        for (replacement in alternatives) {
+            val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+            val env = env(tools = listOf(tool), eval = ask(), mode = ExecutionMode.REMOTE_SSH, server = original)
+            val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+            runCurrent()
+            assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+
+            env.servers.value = replacement
+            env.connectionState.value = ConnectionState.CONNECTING
+            env.servers.value = original
+            env.connectionState.value = ConnectionState.CONNECTED
+            runCurrent()
+
+            assertTrue(job.isCompleted)
+            assertEquals("STALE_CONTEXT", job.await()!!.code)
+            assertNull(tool.lastContext)
+            assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+            coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+        }
+    }
+
+    @Test
+    fun execute_serverSnapshotChangeWithoutConnectionEventInvalidatesApproval() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask(), mode = ExecutionMode.REMOTE_SSH, server = server())
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+
+        env.servers.value = server(host = "server-b")
+        advanceTimeBy(101)
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+    }
+
+    @Test
+    fun execute_serverCredentialChangeKeepsApprovalValid() = runTest {
+        val original = server()
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask(), mode = ExecutionMode.REMOTE_SSH, server = original)
+        val job = async { env.service.execute(pluginId, executeParams("writeFile")) }
+        runCurrent()
+        val requestId = env.permissionManager.pendingForSession("plugin:$pluginId")!!.id
+
+        env.servers.value = original.copy(auth = RemoteAuth.PrivateKey("/keys/test"))
+        env.connectionState.value = ConnectionState.CONNECTING
+        env.connectionState.value = ConnectionState.CONNECTED
+        env.service.resolve(pluginId, buildJsonObject {
+            put("requestId", requestId)
+            put("choice", "once")
+        })
+        runCurrent()
+
+        assertEquals("success", job.await().jsonObject["status"]!!.jsonPrimitive.content)
+        assertEquals(workspacePath, tool.lastContext!!.projectRoot)
+    }
+
+    @Test
+    fun execute_pluginDisableInvalidatesPendingApprovalEvenAfterEnablingAgain() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        val original = env.plugins.value
+
+        env.plugins.value = emptyList()
+        env.plugins.value = original
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("PLUGIN_INACTIVE", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+    }
+
+    @Test
+    fun execute_workspaceChangeDuringPolicyEvaluationDoesNotPublishApprovalOrExecute() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val evaluation = CompletableDeferred<ToolPermissionPolicyEngine.EvalResult>()
+        coEvery { env.policyEngine.evaluate(any(), any(), any(), any(), env.project) } coAnswers {
+            evaluation.await()
+        }
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+
+        env.workspaces.value = Workspace(name = "other", path = "/root/workspace/other")
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 1) { env.policyEngine.evaluate(tool, "writeFile", any(), AgentMode.BUILD, env.project) }
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+    }
+
+    @Test
+    fun execute_contextIsValidatedBeforePolicyEvaluation() = runTest {
+        val env = env(tools = listOf(FakeTool(name = "writeFile")), eval = ask())
+        val error = errorOf {
+            env.service.execute(pluginId, buildJsonObject {
+                put("name", "writeFile")
+                put("context", JsonPrimitive("invalid"))
+            })
+        }
+
+        assertEquals("PARAM_INVALID", error!!.code)
+        coVerify(exactly = 0) { env.policyEngine.evaluate(any(), any(), any(), any(), any()) }
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+    }
+
+    @Test
+    fun execute_workspaceChangeDuringRememberDoesNotExecute() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val writing = CompletableDeferred<Unit>()
+        coEvery { env.policyEngine.remember("writeFile", any(), env.project) } coAnswers {
+            writing.await()
+        }
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        val requestId = env.permissionManager.pendingForSession("plugin:$pluginId")!!.id
+        env.service.resolve(pluginId, buildJsonObject {
+            put("requestId", requestId)
+            put("choice", "always")
+        })
+        runCurrent()
+        coVerify(exactly = 1) { env.policyEngine.remember("writeFile", listOf("*"), env.project) }
+
+        env.workspaces.value = Workspace(name = "other", path = "/root/workspace/other")
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
     }
 
     @Test
@@ -377,6 +657,42 @@ class PluginToolServiceTest {
         val error = job.await().exceptionOrNull() as? PluginHostException
         assertEquals("TOOL_APPROVAL_TIMEOUT", error!!.code)
         assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+    }
+
+    @Test
+    fun execute_contextChangeCancelsSuspendedTool() = runTest {
+        val tool = FakeTool(name = "Bash", delayMs = 10_000)
+        val env = env(tools = listOf(tool))
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("Bash")) } }
+        runCurrent()
+        assertEquals(workspacePath, tool.lastContext!!.projectRoot)
+
+        env.workspaces.value = Workspace(name = "other", path = "/root/workspace/other")
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        advanceTimeBy(10_001)
+        runCurrent()
+        assertTrue(!tool.completed)
+    }
+
+    @Test
+    fun execute_cancellationClearsPendingApproval() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val job = async { env.service.execute(pluginId, executeParams("writeFile")) }
+        runCurrent()
+        assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+
+        job.cancel()
+        job.join()
+        runCurrent()
+
+        assertTrue(job.isCancelled)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
     }
 
     @Test

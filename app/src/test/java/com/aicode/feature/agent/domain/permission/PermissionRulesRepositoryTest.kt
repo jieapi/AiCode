@@ -32,6 +32,9 @@ class PermissionRulesRepositoryTest {
     val tmp = TemporaryFolder()
 
     private lateinit var repository: PermissionRulesRepository
+    private lateinit var workspace: WorkspaceRepository
+    private lateinit var projectRoot: ProjectAicodeRoot
+    private lateinit var workspaceDir: File
     private lateinit var target: File
     private lateinit var link: File
 
@@ -40,14 +43,14 @@ class PermissionRulesRepositoryTest {
         mockkObject(FileLogger)
         every { FileLogger.i(any(), any()) } returns Unit
         val context: Context = mockk()
-        val workspace: WorkspaceRepository = mockk()
+        workspace = mockk()
         val installer: ContainerInstaller = mockk()
         val settings: ContainerSettingsRepository = mockk()
         val home: PathHomeResolver = mockk()
-        val projectRoot: ProjectAicodeRoot = mockk()
+        projectRoot = mockk()
         val changes: FileChangeHub = mockk()
         val filesDir = tmp.newFolder("files")
-        val workspaceDir = tmp.newFolder("workspace")
+        workspaceDir = tmp.newFolder("workspace")
         target = File(workspaceDir, "project/.aicode").apply { mkdirs() }
         link = File(workspaceDir, ".aicode")
         Files.createSymbolicLink(link.toPath(), File("/root/workspace/project/.aicode").toPath())
@@ -79,6 +82,47 @@ class PermissionRulesRepositoryTest {
             ),
             repository.loadEffectiveForCurrentProject()
         )
+    }
+
+    @Test
+    fun explicitProjectRules_keepCapturedTargetAfterWorkspaceAndEnvironmentChange() = runBlocking {
+        val existing = PermissionRule("readFile", "*")
+        File(target, "permissions.json").writeText("""{"permissions":{"allow":["readFile"]}}""")
+        val project = repository.captureProject(workspaceDir.absolutePath)
+        val otherWorkspace = tmp.newFolder("other-workspace")
+        val otherConfig = tmp.newFolder("other-server-config")
+        every { workspace.currentPath() } returns otherWorkspace.absolutePath
+        every { projectRoot.forPath(workspaceDir.absolutePath) } returns otherConfig
+        every { projectRoot.forPath(otherWorkspace.absolutePath) } returns otherConfig
+
+        assertEquals(listOf(existing), repository.loadEffectiveForProject(project))
+        val remembered = PermissionRule("writeFile", "*")
+        repository.addToProject(project, remembered)
+
+        assertEquals(listOf(existing, remembered), repository.loadEffectiveForProject(project))
+        assertTrue(File(target, "permissions.json").readText().contains("writeFile"))
+        assertTrue(!File(otherConfig, "permissions.json").exists())
+        assertTrue(repository.loadEffectiveForCurrentProject().isEmpty())
+        assertTrue(Files.isSymbolicLink(link.toPath()))
+    }
+
+    @Test
+    fun explicitProjectRules_separateCachesForSamePathOnDifferentServers() = runBlocking {
+        val original = repository.captureProject(workspaceDir.absolutePath)
+        val otherConfig = tmp.newFolder("other-server-config")
+        every { projectRoot.forPath(workspaceDir.absolutePath) } returns otherConfig
+        val other = repository.captureProject(workspaceDir.absolutePath)
+        val originalRule = PermissionRule("readFile", "*")
+        val otherRule = PermissionRule("writeFile", "*")
+
+        repository.addToProject(original, originalRule)
+        repository.addToProject(other, otherRule)
+
+        assertEquals(listOf(originalRule), repository.loadEffectiveForProject(original))
+        assertEquals(listOf(otherRule), repository.loadEffectiveForProject(other))
+        assertEquals(listOf(otherRule), repository.loadEffectiveForCurrentProject())
+        every { projectRoot.forPath(workspaceDir.absolutePath) } returns link
+        assertEquals(listOf(originalRule), repository.loadEffectiveForCurrentProject())
     }
 
     @Test
