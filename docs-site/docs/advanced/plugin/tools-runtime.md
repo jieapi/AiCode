@@ -282,7 +282,7 @@ const result = await aicode.invoke('tools.echo', {text: 'hi'});
 }
 ```
 
-在插件详情页点击「准备依赖」，宿主将在插件目录中执行 `npm ci`/`npm install`，或 `python3 -m venv` 加 `pip install`。容器缺少 node/npm 或 python3 时仅提示前往终端执行「环境安装」，不会自动安装系统包。
+在插件详情页点击「准备依赖」，宿主将在插件目录中执行 `npm ci`/`npm install`，或 `python3 -m venv` 加 `pip install`。准备结果会保存，刷新或重启后仍可识别；准备期间若插件已替换或卸载，旧任务的结果不会覆盖新安装的状态。容器缺少 node/npm 或 python3 时仅提示前往终端执行「环境安装」，不会自动安装系统包。
 
 ## 常驻与自启动
 

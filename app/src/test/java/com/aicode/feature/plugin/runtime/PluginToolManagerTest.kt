@@ -100,6 +100,18 @@ class PluginToolManagerTest {
     }
 
     @Test
+    fun sync_sameVersionReinstallReloadsWhenInstallationRevisionChanges() {
+        sync(plugin(record.copy(installRevision = "first")))
+
+        sync(plugin(record.copy(installRevision = "second")))
+
+        verifySequence {
+            runtime.closePlugin(record.id)
+            overlayManager.reloadPlugin(record.id)
+        }
+    }
+
+    @Test
     fun sync_newInstallationDoesNotReload() {
         sync()
 

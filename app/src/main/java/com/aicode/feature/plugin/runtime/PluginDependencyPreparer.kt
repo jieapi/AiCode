@@ -21,7 +21,7 @@ sealed interface PluginDependencyResult {
     data class MissingRuntime(val message: String) : PluginDependencyResult
 
     /** 安装命令失败，[message] 带截断后的输出。 */
-    data class Failed(val message: String) : PluginDependencyResult
+    data class Failed(val message: String, val code: String? = null) : PluginDependencyResult
 }
 
 /**

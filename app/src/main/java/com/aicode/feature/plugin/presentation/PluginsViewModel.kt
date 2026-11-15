@@ -460,7 +460,8 @@ class PluginsViewModel @Inject constructor(
     fun uninstall(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             pluginHookDispatcher.dispatchPluginUninstalled(id)
-            if (manager.uninstall(id)) {
+            manager.uninstall(id)
+            if (manager.plugins.value.none { it.id == id }) {
                 removeProviders(id)
                 shizukuPermissionRepository.revoke(id)
                 overlayPermissionRepository.revoke(id)
@@ -644,8 +645,12 @@ class PluginsViewModel @Inject constructor(
                 is PluginDependencyResult.Ready -> PluginDependencyUiState(ready = true)
                 is PluginDependencyResult.MissingRuntime ->
                     PluginDependencyUiState(ready = false, message = result.message)
-                is PluginDependencyResult.Failed ->
-                    PluginDependencyUiState(ready = false, message = result.message)
+                is PluginDependencyResult.Failed -> PluginDependencyUiState(
+                    ready = false,
+                    message = if (result.code == "STATE_NOT_SAVED") {
+                        context.getString(R.string.plugins_dependencies_state_not_saved)
+                    } else result.message
+                )
             }
             _dependencyStates.update { it + (id to state) }
         }

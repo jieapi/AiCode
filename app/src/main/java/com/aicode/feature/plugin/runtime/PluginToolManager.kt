@@ -40,7 +40,8 @@ class PluginToolManager @Inject constructor(
     private data class InstallRevision(
         val version: String,
         val installedAt: Long,
-        val archiveSha256: String
+        val archiveSha256: String,
+        val installRevision: String?
     )
 
     fun start(scope: CoroutineScope) {
@@ -80,7 +81,8 @@ class PluginToolManager @Inject constructor(
             plugin.id to InstallRevision(
                 version = plugin.record.version,
                 installedAt = plugin.record.installedAt,
-                archiveSha256 = plugin.record.archiveSha256
+                archiveSha256 = plugin.record.archiveSha256,
+                installRevision = plugin.record.installRevision
             )
         }
         (activePluginRevisions.keys - currentRevisions.keys).forEach { pluginId ->

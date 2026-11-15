@@ -7,6 +7,7 @@ import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.plugin.data.ExtractedPackage
 import com.aicode.feature.plugin.data.PackageReadResult
+import com.aicode.feature.plugin.data.PluginInstallTransaction
 import com.aicode.feature.plugin.data.PluginPackageReader
 import com.aicode.feature.plugin.data.PluginRecord
 import com.aicode.feature.plugin.data.PluginRegistryStore
@@ -16,6 +17,13 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -155,12 +163,12 @@ class PluginManager internal constructor(
             if (loaded) return
             migrateLegacyRoot()
             // 进程重启后不可能存在进行中的安装，暂存目录里的都是残留
-            stagingDir.deleteRecursively()
+            cleanup { deleteTree(stagingDir) }
             val registry = loadRecords()
-            recoverInterruptedInstall(registry.records)
+            val recovered = !registry.failed && recoverInterruptedInstall(registry.records)
             publish(registry.records.map { loadInstalled(it) })
-            // registry 读取失败时保留 installed 目录，避免一次坏 JSON 清空全部插件
-            if (!registry.failed) sweepOrphans(registry.records.map { it.id }.toSet())
+            // registry 或事务恢复失败时保留目录，避免把待恢复的备份当成孤儿。
+            if (recovered) sweepOrphans(registry.records.map { it.id }.toSet())
             loaded = true
             _isLoaded.value = true
         }
@@ -171,9 +179,9 @@ class PluginManager internal constructor(
         mutex.withLock {
             ensureLoaded()
             val loaded = loadRecords()
-            recoverInterruptedInstall(loaded.records)
+            val recovered = !loaded.failed && recoverInterruptedInstall(loaded.records)
             publish(loaded.records.map { loadInstalled(it) })
-            if (!loaded.failed) sweepOrphans(loaded.records.map { it.id }.toSet())
+            if (recovered) sweepOrphans(loaded.records.map { it.id }.toSet())
         }
     }
 
@@ -235,14 +243,16 @@ class PluginManager internal constructor(
      */
     suspend fun prepareDependencies(id: String): PluginDependencyResult = withContext(Dispatchers.IO) {
         ensureLoaded()
-        val plugin = _plugins.value.firstOrNull { it.id == id }
+        val plugin = mutex.withLock { _plugins.value.firstOrNull { it.id == id } }
             ?: return@withContext PluginDependencyResult.Failed("插件不存在")
         val runtime = plugin.content.runtime
             ?: return@withContext PluginDependencyResult.Failed("插件没有运行时，无需依赖")
         val preparer = dependencyPreparer
             ?: return@withContext PluginDependencyResult.Failed("依赖准备不可用")
         val result = preparer.prepare(runtime)
-        mutateRecords { current ->
+        val saved = mutateRecords { current ->
+            val installed = current.firstOrNull { it.id == id } ?: return@mutateRecords null
+            if (!sameInstallation(installed.record, plugin.record)) return@mutateRecords null
             current.map { installed ->
                 if (installed.id != id) installed else {
                     val record = when (result) {
@@ -254,10 +264,18 @@ class PluginManager internal constructor(
                     }
                     installed.copy(record = record)
                 }
-            }
+            }.also { next -> store.save(next.map { it.record }) }
         }
-        result
+        if (saved) result else PluginDependencyResult.Failed(
+            "Plugin changed or dependency state could not be saved",
+            code = "STATE_NOT_SAVED"
+        )
     }
+
+    private fun sameInstallation(current: PluginRecord, prepared: PluginRecord): Boolean =
+        if (prepared.installRevision != null) current.installRevision == prepared.installRevision
+        else current.installRevision == null && current.installedAt == prepared.installedAt &&
+            current.archiveSha256 == prepared.archiveSha256 && current.manifestSha256 == prepared.manifestSha256
 
     /** 当前生效的插件 AI 工具：插件启用即可用。 */
     fun activeTools(): List<PluginTool> {
@@ -303,9 +321,14 @@ class PluginManager internal constructor(
 
     /** 读取并校验 [input] 中的插件包，通过后暂存等待 [install]。同一时刻只保留一个待确认的暂存包。 */
     suspend fun preview(input: InputStream): PluginPreviewResult = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            ensureLoaded()
-            discardAll()
+        try {
+            mutex.withLock {
+                ensureLoaded()
+                discardAll()
+            }
+        } catch (e: IOException) {
+            FileLogger.w(TAG, "清理插件暂存包失败", e)
+            return@withContext PluginPreviewResult.Failed(listOf(PluginError(PluginErrorCode.STORAGE_FAILED)))
         }
         val token = UUID.randomUUID().toString()
         val dir = File(stagingDir, token)
@@ -340,19 +363,27 @@ class PluginManager internal constructor(
     }
 
     private fun rejected(pkg: ExtractedPackage, errors: List<PluginError>): PluginPreviewResult {
-        pkg.dir.deleteRecursively()
-        return PluginPreviewResult.Failed(errors)
+        val cleaned = cleanup { deleteTree(pkg.dir) }
+        return PluginPreviewResult.Failed(
+            if (cleaned) errors else errors + PluginError(PluginErrorCode.STORAGE_FAILED)
+        )
     }
 
     /** 放弃一个待确认的暂存包。 */
-    suspend fun discard(token: String) = withContext(Dispatchers.IO) {
-        mutex.withLock { staged.remove(token)?.pkg?.dir?.deleteRecursively() }
-        Unit
+    suspend fun discard(token: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val pending = staged[token] ?: return@withLock false
+            if (!cleanup { deleteTree(pending.pkg.dir) }) return@withLock false
+            staged.remove(token)
+            true
+        }
     }
 
     private fun discardAll() {
-        staged.values.forEach { it.pkg.dir.deleteRecursively() }
-        staged.clear()
+        staged.entries.forEach { (token, pending) ->
+            deleteTree(pending.pkg.dir)
+            staged.remove(token)
+        }
     }
 
     /**
@@ -381,12 +412,17 @@ class PluginManager internal constructor(
 
     private fun commitInstall(token: String, pending: StagedPackage, origin: PluginInstallOrigin) {
         val manifest = pending.manifest
+        if (!recoverInterruptedInstall(_plugins.value.map { it.record })) {
+            throw IOException("上次安装事务尚未恢复")
+        }
         installedDir.mkdirs()
         val target = File(installedDir, manifest.id)
         val backup = File(installedDir, "${manifest.id}$REPLACED_SUFFIX")
-        backup.deleteRecursively()
+        deleteTree(backup)
 
         val existing = _plugins.value.firstOrNull { it.id == manifest.id }
+        if (existing == null) deleteTree(dataDirFor(manifest.id))
+        val installRevision = UUID.randomUUID().toString()
         val record = PluginRecord(
             id = manifest.id,
             version = manifest.version.toString(),
@@ -399,37 +435,55 @@ class PluginManager internal constructor(
             sourceName = origin.sourceName,
             indexUrl = origin.indexUrl,
             repository = origin.repository,
-            official = origin.official
+            official = origin.official,
+            installRevision = installRevision
         )
 
+        val transaction = PluginInstallTransaction(manifest.id, installRevision, entryExists(target))
+        store.saveInstallTransaction(transaction)
         var movedOld = false
         var movedNew = false
+        val others = _plugins.value.filter { it.id != manifest.id }
+        val installed: InstalledPlugin
         try {
-            if (target.exists()) {
+            if (transaction.hadPrevious) {
                 moveDirectory(target, backup)
                 movedOld = true
             }
             moveDirectory(pending.pkg.dir, target)
             movedNew = true
-            val others = _plugins.value.filter { it.id != manifest.id }
+            installed = loadInstalled(record)
             store.save(others.map { it.record } + record)
-            staged.remove(token)
-            backup.deleteRecursively()
-            publish(others + loadInstalled(record))
         } catch (e: IOException) {
-            // 记录没写成功：把新目录放回暂存区（使用者可以直接重试），旧版本放回原位
-            if (movedNew && !target.renameTo(pending.pkg.dir)) target.deleteRecursively()
-            if (movedOld) backup.renameTo(target)
+            // 只在 registry 提交前回滚；恢复失败时保留私有事务与备份供下次重试。
+            try {
+                if (movedNew) moveDirectory(target, pending.pkg.dir)
+                if (movedOld) moveDirectory(backup, target)
+                store.clearInstallTransaction()
+            } catch (rollback: IOException) {
+                e.addSuppressed(rollback)
+            }
             throw e
+        }
+        staged.remove(token)
+        publish(others + installed)
+        cleanup {
+            deleteTree(backup)
+            store.clearInstallTransaction()
         }
     }
 
-    suspend fun uninstall(id: String): Boolean = mutateRecords { current ->
-        if (current.none { it.id == id }) return@mutateRecords null
-        current.filter { it.id != id }.also { next ->
-            store.save(next.map { it.record })
-            File(installedDir, id).deleteRecursively()
-            dataDirFor(id).deleteRecursively()
+    suspend fun uninstall(id: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            ensureLoaded()
+            val current = _plugins.value
+            if (current.none { it.id == id }) return@withLock false
+            val next = current.filter { it.id != id }
+            if (!cleanup { store.save(next.map { it.record }) }) return@withLock false
+            publish(next)
+            val installedDeleted = cleanup { deleteTree(File(installedDir, id)) }
+            val dataDeleted = cleanup { deleteTree(dataDirFor(id)) }
+            installedDeleted && dataDeleted
         }
     }
 
@@ -579,24 +633,38 @@ class PluginManager internal constructor(
      * 安装/升级在“旧目录已移走、新目录尚未就位或 registry 尚未落盘”之间崩溃时，
      * 按 registry 仍指向的版本恢复，避免下一次 sweep 把备份当孤儿删掉。
      */
-    private fun recoverInterruptedInstall(records: List<PluginRecord>) {
+    private fun recoverInterruptedInstall(records: List<PluginRecord>): Boolean = cleanup {
+        val transaction = store.loadInstallTransaction()
+        if (transaction != null) {
+            val target = File(installedDir, transaction.id)
+            val backup = File(installedDir, "${transaction.id}$REPLACED_SUFFIX")
+            val committed = records.any {
+                it.id == transaction.id && it.installRevision == transaction.revision
+            }
+            when {
+                committed -> deleteTree(backup)
+                transaction.hadPrevious && entryExists(backup) -> {
+                    deleteTree(target)
+                    moveDirectory(backup, target)
+                }
+                !transaction.hadPrevious -> deleteTree(target)
+                !entryExists(target) -> throw IOException("安装事务的旧目录已丢失: ${transaction.id}")
+            }
+            store.clearInstallTransaction()
+        }
+        // 兼容尚未写事务记录的旧安装：清单相同时优先保留 registry 对应的备份。
         records.forEach { record ->
             val target = File(installedDir, record.id)
             val backup = File(installedDir, "${record.id}$REPLACED_SUFFIX")
-            if (!backup.isDirectory) return@forEach
+            if (!Files.isDirectory(backup.toPath(), NOFOLLOW_LINKS)) return@forEach
             when {
-                !target.exists() -> {
-                    if (!backup.renameTo(target)) {
-                        FileLogger.w(TAG, "恢复中断安装失败: ${record.id}")
-                    }
-                }
-                manifestMatches(target, record) -> backup.deleteRecursively()
+                !entryExists(target) -> moveDirectory(backup, target)
                 manifestMatches(backup, record) -> {
-                    target.deleteRecursively()
-                    if (!backup.renameTo(target)) {
-                        FileLogger.w(TAG, "回滚中断安装失败: ${record.id}")
-                    }
+                    deleteTree(target)
+                    moveDirectory(backup, target)
                 }
+                manifestMatches(target, record) -> deleteTree(backup)
+                else -> throw IOException("无法确定中断安装的旧目录: ${record.id}")
             }
         }
     }
@@ -615,12 +683,64 @@ class PluginManager internal constructor(
 
     /** 没有安装记录的目录不具备任何授权，直接清掉（多半是安装中途崩溃留下的）。 */
     private fun sweepOrphans(knownIds: Set<String>) {
-        installedDir.listFiles().orEmpty()
-            .filter { it.name !in knownIds }
-            .forEach { it.deleteRecursively() }
+        cleanup {
+            if (Files.isSymbolicLink(installedDir.toPath())) {
+                deleteTree(installedDir)
+            } else if (entryExists(installedDir)) {
+                Files.newDirectoryStream(installedDir.toPath()).use { entries ->
+                    entries.filter { it.fileName.toString() !in knownIds }.forEach { deleteTree(it.toFile()) }
+                }
+            }
+        }
+    }
+
+    private fun entryExists(file: File): Boolean = try {
+        Files.readAttributes(file.toPath(), BasicFileAttributes::class.java, NOFOLLOW_LINKS)
+        true
+    } catch (_: NoSuchFileException) {
+        false
+    }
+
+    private fun checkCleanupParents(file: File) {
+        val root = rootDir.toPath().toAbsolutePath().normalize()
+        val path = file.toPath().toAbsolutePath().normalize()
+        if (!path.startsWith(root)) throw IOException("清理路径不在插件目录内")
+        var parent = path.parent
+        while (parent != null && parent.startsWith(root)) {
+            if (Files.isSymbolicLink(parent)) throw IOException("清理路径的父目录是符号链接: $parent")
+            parent = parent.parent
+        }
+    }
+
+    private fun deleteTree(file: File) {
+        checkCleanupParents(file)
+        if (!entryExists(file)) return
+        // walkFileTree 默认不跟随链接，目录链接（包括悬空链接）只作为文件删除。
+        Files.walkFileTree(file.toPath(), object : SimpleFileVisitor<Path>() {
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                Files.deleteIfExists(file)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                if (exc != null) throw exc
+                Files.deleteIfExists(dir)
+                return FileVisitResult.CONTINUE
+            }
+        })
+    }
+
+    private inline fun cleanup(block: () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (e: IOException) {
+        FileLogger.w(TAG, "插件存储操作失败", e)
+        false
     }
 
     private fun moveDirectory(from: File, to: File) {
+        checkCleanupParents(from)
+        checkCleanupParents(to)
         if (!from.renameTo(to)) throw IOException("无法移动 ${from.name} 到 ${to.name}")
     }
 
