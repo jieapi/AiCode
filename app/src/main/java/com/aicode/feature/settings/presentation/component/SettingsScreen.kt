@@ -493,7 +493,7 @@ fun SettingsScreen(
                 backgroundColor = pluginThemeBackground,
                 themeVariables = { pluginThemeVariables },
                 onPageFinished = { view ->
-                    PluginWebViewCache.markLoaded(target.cacheKey, PluginWebViewFactory.pageUrl(target))
+                    PluginWebViewCache.markLoaded(target.cacheKey, PluginWebViewFactory.pageUrl(target), view)
                     view.evaluateJavascript(PluginThemeTokens.applyScript(pluginThemeVariables), null)
                 },
                 onMainFrameError = {}

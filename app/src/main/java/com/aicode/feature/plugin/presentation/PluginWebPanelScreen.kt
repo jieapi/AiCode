@@ -107,7 +107,7 @@ fun PluginWebPanelScreen(
             themeVariables = { currentVariables },
             onPageFinished = { view ->
                 failed = false
-                PluginWebViewCache.markLoaded(page.cacheKey, pageUrl)
+                PluginWebViewCache.markLoaded(page.cacheKey, pageUrl, view)
                 view.evaluateJavascript(PluginThemeTokens.applyScript(currentVariables), null)
             },
             onMainFrameError = { failed = true }

@@ -97,6 +97,8 @@ class PluginWebBridge(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val installation = pluginManager.plugins.value.firstOrNull { it.id == page.pluginId }?.record
+    internal val isActive: Boolean get() = isAuthorized()
     private val hostPaths = PluginHostPaths(
         fileAccess,
         homeResolver,
@@ -133,6 +135,19 @@ class PluginWebBridge(
     }
 
     init {
+        // 状态发布时立即关闭旧桥，避免快速停用再启用被 StateFlow 合并后恢复旧授权。
+        scope.launch(Dispatchers.Unconfined) {
+            pluginManager.plugins.collect {
+                if (!isAuthorized()) {
+                    val wasVisible = visible
+                    close()
+                    mainHandler.post {
+                        PluginWebViewCache.invalidateBridge(this@PluginWebBridge)
+                        if (wasVisible) onClosePage()
+                    }
+                }
+            }
+        }
         scope.launch {
             environment.changes.collect {
                 val key = environment.contextKey()
@@ -184,7 +199,9 @@ class PluginWebBridge(
         }
     }
 
+    @Synchronized
     fun close() {
+        if (closed) return
         closed = true
         visible = false
         modelService.closeOrigin("page:${page.cacheKey}")
@@ -237,7 +254,7 @@ class PluginWebBridge(
         val contextual = (event["name"] as? JsonPrimitive)?.contentOrNull in setOf("fs.changed", "ui.lifecycle")
         val script = "window.__aicodeEvent(${jsString(event.toString())})"
         mainHandler.post {
-            if (!closed && (!contextual || key == null || key == environment.contextKey())) {
+            if (isAuthorized() && (!contextual || key == null || key == environment.contextKey())) {
                 runCatching { post(script) }
             }
         }
@@ -262,7 +279,23 @@ class PluginWebBridge(
         lastPageContext = next
     }
 
-    private suspend fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
+    private fun isAuthorized(): Boolean {
+        if (closed) return false
+        val expected = installation ?: return false
+        val plugin = pluginManager.plugins.value.firstOrNull { it.id == page.pluginId && it.isActive }
+            ?: return false
+        return plugin.record.version == pluginVersion &&
+            plugin.record.version == expected.version &&
+            plugin.record.installedAt == expected.installedAt &&
+            plugin.record.archiveSha256 == expected.archiveSha256 &&
+            plugin.record.installRevision == expected.installRevision
+    }
+
+    internal suspend fun dispatch(method: String, params: JsonObject): JsonElement {
+        if (!isAuthorized()) {
+            throw PluginHostException("PLUGIN_INACTIVE", "plugin page is no longer active: ${page.pluginId}")
+        }
+        return when (method) {
         "context" -> buildJsonObject {
             put("pluginId", page.pluginId)
             put("pageId", page.localId)
@@ -431,6 +464,7 @@ class PluginWebBridge(
         "mcp.status" -> introspectionService.mcpStatus(page.pluginId)
         "http.request" -> httpService.request(page.pluginId, params)
         else -> throw PluginHostException("METHOD_UNKNOWN", "unknown method: $method")
+        }
     }
 
     /** 页面调用自身插件的常驻进程；不允许跨插件。 */
@@ -633,7 +667,7 @@ class PluginWebBridge(
     private fun deliver(id: String, payload: JsonObject) {
         val script = "window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})"
         // 预热时 WebView 还没 attach，View.post 会一直排队；直接走主线程 Handler，不依赖窗口。
-        mainHandler.post { if (!closed) post(script) }
+        mainHandler.post { if (isAuthorized()) post(script) }
     }
 
     private fun jsString(value: String): String = buildString {

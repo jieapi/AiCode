@@ -1,0 +1,240 @@
+package com.aicode.feature.plugin.presentation
+
+import android.app.Application
+import android.content.Context
+import android.os.Looper
+import android.webkit.WebView
+import androidx.test.core.app.ApplicationProvider
+import com.aicode.feature.agent.domain.container.CommandEngine
+import com.aicode.feature.agent.domain.container.CommandResult
+import com.aicode.feature.agent.domain.session.AgentRunEvent
+import com.aicode.feature.agent.domain.session.AgentRunStateStore
+import com.aicode.feature.plugin.data.PluginRecord
+import com.aicode.feature.plugin.domain.InstalledPlugin
+import com.aicode.feature.plugin.domain.LocalizedText
+import com.aicode.feature.plugin.domain.PluginContent
+import com.aicode.feature.plugin.domain.PluginHostException
+import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginStatus
+import com.aicode.feature.plugin.runtime.PluginEventBus
+import com.aicode.feature.plugin.runtime.PluginModelService
+import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.PathHomeResolver
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [28], manifest = Config.NONE, application = Application::class)
+@LooperMode(LooperMode.Mode.PAUSED)
+class PluginWebBridgeTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    private val bridges = mutableListOf<PluginWebBridge>()
+    private val pluginId = "test.web"
+
+    private data class Env(
+        val bridge: PluginWebBridge,
+        val plugins: MutableStateFlow<List<InstalledPlugin>>,
+        val commandEngine: CommandEngine,
+        val fileAccess: FileAccessProvider,
+        val modelService: PluginModelService
+    )
+
+    @After
+    fun tearDown() {
+        bridges.forEach { it.close() }
+        shadowOf(Looper.getMainLooper()).idle()
+        PluginWebViewCache.clear()
+    }
+
+    private fun env(enabled: Boolean = true): Env {
+        val page = PluginPage(
+            pluginId, "settings", LocalizedText.single("Settings"), null,
+            "settings.html", "settings", tmp.newFolder(), "1.0.0"
+        )
+        val plugin = InstalledPlugin(
+            record = PluginRecord(pluginId, "1.0.0", enabled, 1L, "local", "archive-1", "manifest"),
+            status = PluginStatus.OK,
+            manifest = mockk(),
+            content = PluginContent(configPage = page)
+        )
+        val plugins = MutableStateFlow(listOf(plugin))
+        val manager = mockk<PluginManager>(relaxed = true)
+        every { manager.plugins } returns plugins
+        val engine = mockk<CommandEngine>(relaxed = true)
+        coEvery { engine.runCommandSyncWithExit(any(), any(), any()) } returns CommandResult("ok", 0)
+        val fileAccess = mockk<FileAccessProvider>(relaxed = true)
+        val home = mockk<PathHomeResolver>(relaxed = true)
+        every { home.home() } returns "/root"
+        every { home.aicodeRoot() } returns "/root/.aicode"
+        val environment = mockk<PluginPageEnvironment>(relaxed = true)
+        every { environment.contextKey() } returns "workspace-a"
+        every { environment.changes } returns MutableSharedFlow()
+        every { environment.workspaceRoot() } returns "/root/workspace"
+        val runs = mockk<AgentRunStateStore>(relaxed = true)
+        every { runs.events } returns MutableSharedFlow<AgentRunEvent>()
+        val modelService = mockk<PluginModelService>(relaxed = true)
+        val bridge = PluginWebBridge(
+            context = ApplicationProvider.getApplicationContext(),
+            page = page,
+            pluginVersion = "1.0.0",
+            languageTag = "zh-CN",
+            fileAccess = fileAccess,
+            homeResolver = home,
+            commandEngine = engine,
+            workspacePath = { "/projects/a" },
+            eventBus = PluginEventBus(),
+            pluginManager = manager,
+            pluginRuntimeManager = mockk(relaxed = true),
+            terminalRunner = mockk(relaxed = true),
+            shizukuRunner = mockk(relaxed = true),
+            tipManager = mockk(relaxed = true),
+            overlayManager = mockk(relaxed = true),
+            chatService = mockk(relaxed = true),
+            modelService = modelService,
+            agentRunStateStore = runs,
+            secretStore = mockk(relaxed = true),
+            systemService = mockk(relaxed = true),
+            introspectionService = mockk(relaxed = true),
+            toolService = mockk(relaxed = true),
+            httpService = mockk(relaxed = true),
+            environment = environment,
+            theme = { "light" },
+            onClosePage = {},
+            post = {}
+        )
+        bridges += bridge
+        return Env(bridge, plugins, engine, fileAccess, modelService)
+    }
+
+    private suspend fun assertInactive(bridge: PluginWebBridge, method: String, params: JsonObject) {
+        val failure = runCatching { bridge.dispatch(method, params) }.exceptionOrNull()
+        assertTrue(failure is PluginHostException)
+        assertEquals("PLUGIN_INACTIVE", (failure as PluginHostException).code)
+    }
+
+    @Test
+    fun activeInstallationCanExecuteCommands() = runBlocking {
+        val env = env()
+        val result = env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") }) as JsonObject
+        assertEquals("ok", result.getValue("output").jsonPrimitive.content)
+        coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit("pwd", "/projects/a", any()) }
+    }
+
+    @Test
+    fun disabledInstallationCannotExecuteCommandsOrWriteFiles() = runBlocking {
+        val env = env(enabled = false)
+        assertInactive(env.bridge, "bash", buildJsonObject { put("command", "pwd") })
+        assertInactive(env.bridge, "fs.write", buildJsonObject {
+            put("path", "/root/workspace/file.txt")
+            put("content", "content")
+        })
+        coVerify(exactly = 0) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+        verify(exactly = 0) { env.fileAccess.writeFile(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun disablingAndUninstallingInvalidateExistingBridgeImmediately() = runBlocking {
+        val env = env()
+        val plugin = env.plugins.value.single()
+        env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(enabled = false)))
+        assertInactive(env.bridge, "bash", buildJsonObject { put("command", "pwd") })
+        verify(timeout = 5_000) { env.modelService.closeOrigin(any()) }
+        env.plugins.value = listOf(plugin)
+        assertInactive(env.bridge, "context", JsonObject(emptyMap()))
+
+        val another = env()
+        another.plugins.value = emptyList()
+        assertInactive(another.bridge, "fs.delete", buildJsonObject { put("path", "/root/workspace/file.txt") })
+        coVerify(exactly = 0) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+        verify(exactly = 0) { another.fileAccess.deleteRecursively(any()) }
+    }
+
+    @Test
+    fun rapidDisableAndEnableCannotRestoreTheOldBridge() = runBlocking {
+        val env = env()
+        val plugin = env.plugins.value.single()
+        env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(enabled = false)))
+        env.plugins.value = listOf(plugin)
+        assertInactive(env.bridge, "bash", buildJsonObject { put("command", "pwd") })
+        coVerify(exactly = 0) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
+    @Test
+    fun sameVersionReplacementCannotReuseOldBridge() = runBlocking {
+        val env = env()
+        val plugin = env.plugins.value.single()
+        env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(installedAt = 2L, archiveSha256 = "archive-2")))
+        assertInactive(env.bridge, "bash", buildJsonObject { put("command", "pwd") })
+        coVerify(exactly = 0) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
+    @Test
+    fun installationRevisionChangeInvalidatesTheBridgeWithoutTimestampOrArchiveChanges() = runBlocking {
+        val env = env()
+        val plugin = env.plugins.value.single()
+        env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(installRevision = "replacement")))
+        assertInactive(env.bridge, "bash", buildJsonObject { put("command", "pwd") })
+        coVerify(exactly = 0) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
+    @Test
+    fun dependencyStateUpdateKeepsTheCurrentBridgeAuthorized() = runBlocking {
+        val env = env()
+        val plugin = env.plugins.value.single()
+        env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(dependenciesReady = true, dependenciesHash = "deps")))
+        assertTrue(env.bridge.isActive)
+        env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") })
+        coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
+    @Test
+    fun cacheInvalidationDoesNotEvictAReplacementBridgeOrAcceptOldLoadCallbacks() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val first = WebView(context)
+        val second = WebView(context)
+        val firstBridge = mockk<PluginWebBridge>(relaxed = true)
+        val secondBridge = mockk<PluginWebBridge>(relaxed = true)
+        every { firstBridge.isActive } returns true
+        every { secondBridge.isActive } returns true
+        PluginWebViewCache.put("page", first)
+        PluginWebViewCache.putBridge("page", firstBridge)
+        PluginWebViewCache.put("page", second)
+        PluginWebViewCache.putBridge("page", secondBridge)
+        PluginWebViewCache.invalidateBridge(firstBridge)
+        PluginWebViewCache.markLoaded("page", "old-url", first)
+        assertFalse(PluginWebViewCache.isLoaded("page", "old-url"))
+        assertSame(second, PluginWebViewCache.take("page"))
+        PluginWebViewCache.markLoaded("page", "new-url", second)
+        assertTrue(PluginWebViewCache.isLoaded("page", "new-url"))
+        PluginWebViewCache.invalidateBridge(secondBridge)
+        assertNull(PluginWebViewCache.take("page"))
+        verify { secondBridge.close() }
+    }
+}

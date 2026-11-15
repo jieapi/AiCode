@@ -39,13 +39,23 @@ internal object PluginWebViewCache {
 
     val hasCachedWebView: Boolean get() = pages.isNotEmpty()
 
-    fun take(pageKey: String): WebView? = pages[pageKey]?.view
+    fun take(pageKey: String): WebView? {
+        val entry = pages[pageKey] ?: return null
+        val bridge = entry.bridge
+        if (bridge != null && !bridge.isActive) {
+            invalidateBridge(bridge)
+            return null
+        }
+        return entry.view
+    }
 
     fun takeBridge(pageKey: String): PluginWebBridge? = pages[pageKey]?.bridge
 
-    fun isLoaded(pageKey: String, url: String): Boolean = pages[pageKey]?.loadedUrl == url
+    fun isLoaded(pageKey: String, url: String): Boolean =
+        pages[pageKey]?.let { it.loadedUrl == url && it.bridge?.isActive != false } == true
 
-    fun isLoading(pageKey: String, url: String): Boolean = pages[pageKey]?.loadingUrl == url
+    fun isLoading(pageKey: String, url: String): Boolean =
+        pages[pageKey]?.let { it.loadingUrl == url && it.bridge?.isActive != false } == true
 
     fun markLoading(pageKey: String, url: String) {
         pages[pageKey]?.loadingUrl = url
@@ -75,10 +85,27 @@ internal object PluginWebViewCache {
         entry.bridge = value
     }
 
-    fun markLoaded(pageKey: String, url: String) {
-        pages[pageKey]?.let { entry ->
+    fun markLoaded(pageKey: String, url: String, view: WebView) {
+        pages[pageKey]?.takeIf { it.view === view }?.let { entry ->
             entry.loadedUrl = url
             entry.loadingUrl = null
+        }
+    }
+
+    fun invalidateBridge(bridge: PluginWebBridge) {
+        val invalidated = pages.entries.filter { it.value.bridge === bridge }
+            .map { it.key to it.value }
+        invalidated.forEach { (key, entry) ->
+            pages.remove(key)
+            entry.bridge?.close()
+            entry.view.stopLoading()
+            entry.view.loadUrl("about:blank")
+            retire(entry)
+        }
+        superseded.filter { it.bridge === bridge }.forEach { entry ->
+            entry.bridge?.close()
+            entry.view.stopLoading()
+            entry.view.loadUrl("about:blank")
         }
     }
 

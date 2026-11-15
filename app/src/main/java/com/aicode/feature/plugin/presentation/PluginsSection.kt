@@ -503,8 +503,8 @@ internal fun PluginDetailSection(
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
-    val hasConfigPage = configPage != null && bridgeFactory != null
-    var selectedTab by remember(plugin.id) { mutableIntStateOf(0) }
+    val hasConfigPage = plugin.isActive && configPage != null && bridgeFactory != null
+    var selectedTab by remember(plugin.id, plugin.isActive) { mutableIntStateOf(0) }
 
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -518,7 +518,7 @@ internal fun PluginDetailSection(
 
     // 详情页打开后预热专属配置页：切到「插件配置」时直接复用已加载页面，避免首次进入现建 WebView 的白屏。
     // WebView 尚未挂到窗口，先按屏幕尺寸布局再加载，否则页面会按 0×0 视口完成首次布局。
-    LaunchedEffect(plugin.id, hasConfigPage) {
+    LaunchedEffect(configPage?.cacheKey, plugin.record.installedAt, plugin.record.archiveSha256, hasConfigPage) {
         if (!hasConfigPage) return@LaunchedEffect
         val url = PluginWebViewFactory.pageUrl(configPage)
         delay(200)
@@ -531,7 +531,7 @@ internal fun PluginDetailSection(
                 backgroundColor = pageBackground,
                 themeVariables = { themeVariables },
                 onPageFinished = { view ->
-                    PluginWebViewCache.markLoaded(configPage.cacheKey, url)
+                    PluginWebViewCache.markLoaded(configPage.cacheKey, url, view)
                     view.evaluateJavascript(PluginThemeTokens.applyScript(themeVariables), null)
                 },
                 onMainFrameError = { PluginWebViewCache.clearLoading(configPage.cacheKey) }
