@@ -86,6 +86,7 @@
 | `agents` | 数组 | 子代理定义 |
 | `tools` | 数组 | AI 可调用工具 |
 | `hooks` | 数组 | 生命周期 hook |
+| `modelAccess` | 对象 | 声明调用使用者已配置的 AI 供应商 |
 | `mcp` | 数组 | MCP 服务器配置 |
 | `providers` | 数组 | OpenAI 兼容提供商 |
 | `workspaceTools` | 数组 | 右侧项目工具抽屉中的页面 |
@@ -157,6 +158,22 @@
 | `mode` | 否 | `observe`（默认）、`transform`、`review`；可写事件必须显式声明对应模式，声明错误将导致拒绝安装 |
 
 `backup.export.before` 与 `backup.import.finished` 会带出完整备份包或写入暂存区，必须同时声明 `contributes.backup` 并由使用者授权；若声明了这两个事件却没有 `contributes.backup`，安装会被拒绝。
+
+### modelAccess
+
+```json
+{
+  "modelAccess": {
+    "purpose": "在团队群聊中轮流调用多个模型"
+  }
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `purpose` | 是 | 用途说明，最多 200 字符；显示在安装预览与插件详情 |
+
+声明后插件可以使用进程 `host.model.*` 与页面 `aicode.model.*`。宿主直接使用使用者已配置的供应商与 Key 发起请求，请求会计入对应渠道的用量；插件拿不到 Key。未声明时调用返回 `MODEL_ACCESS_NOT_DECLARED`。完整接口见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
 ### mcp
 

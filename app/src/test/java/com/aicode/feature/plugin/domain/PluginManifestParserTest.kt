@@ -104,6 +104,52 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun modelAccessContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.team",
+              "name": "Team Chat",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/team",
+              "description": "Team chat demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "modelAccess": {"purpose": "在团队群聊中轮流调用多个模型"}
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals("在团队群聊中轮流调用多个模型", m.modelAccess?.purpose)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun modelAccessRejectsUnknownFields() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.team",
+              "name": "Team Chat",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/team",
+              "description": "Team chat demo",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "modelAccess": {"purpose": "团队群聊", "providers": ["openai"]}
+              }
+            }
+        """.trimIndent()
+
+        assertRejected(json, PluginErrorCode.UNSUPPORTED_FIELD, "contributes.modelAccess.providers")
+    }
+
+    @Test
     fun providerRejectsNonHttpBaseUrl() {
         val json = """
             {

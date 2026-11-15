@@ -153,6 +153,12 @@ data class PluginBackupDefinition(
     val purpose: String
 )
 
+/** 已解析的模型访问声明：插件可调用使用者已配置的供应商，Key 仍由宿主持有。 */
+data class PluginModelAccessDefinition(
+    val pluginId: String,
+    val purpose: String
+)
+
 /** 已校验存在性的宿主托管浮层页面。 */
 data class PluginOverlaySurface(
     val pluginId: String,
@@ -195,6 +201,7 @@ data class PluginContent(
     val shizuku: PluginShizukuDefinition? = null,
     val overlay: PluginOverlayDefinition? = null,
     val backup: PluginBackupDefinition? = null,
+    val modelAccess: PluginModelAccessDefinition? = null,
     val configPage: PluginPage? = null
 )
 
@@ -260,6 +267,12 @@ object PluginContentLoader {
                 purpose = it.purpose
             )
         }
+        val modelAccess = manifest.modelAccess?.let {
+            PluginModelAccessDefinition(
+                pluginId = manifest.id,
+                purpose = it.purpose
+            )
+        }
         val overlay = manifest.overlay?.let { declaration ->
             val surfaces = declaration.surfaces.mapNotNull { surface ->
                 loadOverlaySurface(dir, manifest.id, manifest.version.toString(), surface, errors)
@@ -290,6 +303,7 @@ object PluginContentLoader {
                     shizuku = shizuku,
                     overlay = overlay,
                     backup = backup,
+                    modelAccess = modelAccess,
                     configPage = configPage
                 )
             )

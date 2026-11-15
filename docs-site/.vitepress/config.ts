@@ -208,6 +208,7 @@ export default defineConfig({
                 { text: 'plugin.json 清单参考', link: '/advanced/plugin/manifest' },
                 { text: '技能、子代理与 MCP', link: '/advanced/plugin/skills-agents-mcp' },
                 { text: 'AI 工具与插件运行时', link: '/advanced/plugin/tools-runtime' },
+                { text: '模型句柄与流式调用', link: '/advanced/plugin/model-handles' },
                 { text: '生命周期 Hooks', link: '/advanced/plugin/hooks' },
                 { text: '插件页面与宿主接口', link: '/advanced/plugin/ui-pages' },
                 { text: '页面样式、组件与事件', link: '/advanced/plugin/ui-components' },

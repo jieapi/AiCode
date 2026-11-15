@@ -358,6 +358,65 @@
         });
       }
     },
+    // 模型句柄：直接调用已配置的供应商，不经过聊天页或 Agent 循环。
+    model: {
+      listProviders: function () {
+        return call('model.listProviders');
+      },
+      listModels: function (providerId) {
+        var id = providerId && typeof providerId === 'object' ? providerId.providerId : providerId;
+        return call('model.listModels', { providerId: String(id || '') });
+      },
+      create: function (options) {
+        return call('model.create', options || {});
+      },
+      close: function (handleId) {
+        var id = handleId && typeof handleId === 'object' ? handleId.handleId : handleId;
+        return call('model.close', { handleId: String(id || '') });
+      },
+      start: function (options) {
+        return call('model.start', options || {});
+      },
+      read: function (options) {
+        return call('model.read', options || {});
+      },
+      cancel: function (streamId) {
+        var id = streamId && typeof streamId === 'object' ? streamId.streamId : streamId;
+        return call('model.cancel', { streamId: String(id || '') });
+      },
+      // start + read 循环；onEvent 逐条收到 text / reasoning / retry / keySwitch，返回最终 read 结果。
+      stream: function (options, onEvent) {
+        var source = options || {};
+        var startParams = {};
+        Object.keys(source).forEach(function (key) {
+          if (key !== 'waitMs') startParams[key] = source[key];
+        });
+        var waitMs = source.waitMs == null ? 15000 : Number(source.waitMs);
+        return call('model.start', startParams).then(function (started) {
+          var cursor = 0;
+          function step() {
+            return call('model.read', {
+              streamId: started.streamId,
+              cursor: cursor,
+              waitMs: waitMs
+            }).then(function (result) {
+              cursor = result.cursor;
+              (result.events || []).forEach(function (event) {
+                if (typeof onEvent !== 'function') return;
+                try {
+                  onEvent(event);
+                } catch (e) {
+                  console.error('aicode: model event handler failed', e);
+                }
+              });
+              if (result.done) return result;
+              return step();
+            });
+          }
+          return step();
+        });
+      }
+    },
     // 文件路径是当前执行环境的真实绝对路径：本地为容器内路径（如 /root/workspace/a.txt），
     // SSH 为远端服务器路径。~ 展开到当前 home，裸相对路径挂到工作区根。
     // 插件自己的数据目录用稳定的 data:// 虚拟根（如 data://config.json），与插件 ID 和执行环境无关。

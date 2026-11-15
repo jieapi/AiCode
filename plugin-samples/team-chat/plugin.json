@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.team-chat",
+  "name": {
+    "default": "Team Chat",
+    "zh-CN": "团队群聊"
+  },
+  "version": "1.0.1",
+  "publisher": "demo",
+  "repository": "https://github.com/example/team-chat",
+  "description": {
+    "default": "A multi-model group chat built on model handles: each member has its own provider, model and prompt.",
+    "zh-CN": "用模型句柄实现的多模型群聊示例：每个成员可以配置自己的供应商、模型与提示词。"
+  },
+  "license": "MIT",
+  "icon": "users",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "contributes": {
+    "modelAccess": {
+      "purpose": "在团队群聊中轮流调用多个模型"
+    },
+    "uiEntries": [
+      {
+        "id": "team-chat",
+        "title": {
+          "default": "Team Chat",
+          "zh-CN": "团队群聊"
+        },
+        "slot": "settings.ai",
+        "page": "pages/team.html",
+        "icon": "users"
+      }
+    ]
+  }
+}

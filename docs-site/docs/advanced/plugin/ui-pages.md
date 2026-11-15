@@ -248,6 +248,23 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 
 页面还会收到 `chat.run.started` / `chat.run.finished` 事件（payload 带 `sessionId`、`status`、`error?`），不需要插件 runtime 就能判断轮次是否结束。
 
+### 模型句柄
+
+声明 `contributes.modelAccess` 后，页面可以直接调用已配置的供应商与模型，不经过聊天页或 Agent 循环。句柄只保存供应商、模型与默认提示词；对话历史由插件每次传入。
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.model.listProviders()` | 返回 `{providers}`；不含 Key、地址与自定义头 |
+| `aicode.model.listModels({providerId})` | 返回 `{providerId, models}`，含窗口、能力与单价元数据 |
+| `aicode.model.create({providerId, model, name?, systemPrompt?, params?})` | 返回 `{handle}`；每个插件最多 16 个 |
+| `aicode.model.close(handleId)` | 关闭句柄并取消它的流 |
+| `aicode.model.start({handleId, messages, systemPrompt?, params?})` | 返回 `{streamId}`；立即返回，事件由 `read` 拉取 |
+| `aicode.model.read({streamId, cursor?, maxEvents?, waitMs?})` | 返回 `{events, cursor, done, status?, final?, error?}` |
+| `aicode.model.cancel(streamId)` | 取消请求，保留已产生的事件 |
+| `aicode.model.stream(options, onEvent)` | `start` + `read` 循环，逐条回调事件并返回最终 read 结果 |
+
+完整事件格式、限额与团队群聊示例见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+
 ### 系统、密钥与网络
 
 | 方法 | 作用 |

@@ -2100,6 +2100,8 @@
     <string name="plugins_backup_permission_required">Enable “Backup &amp; restore events” in the plugin details first</string>
     <string name="plugins_shizuku_system_state">System status: %1$s</string>
     <string name="plugins_overlay_section">Overlay</string>
+    <string name="plugins_model_access_section">Model access</string>
+    <string name="plugins_model_access_desc">Can call your configured AI providers; requests count toward that provider&#8217;s usage</string>
     <string name="plugins_overlay_system_missing">Enable "Display over other apps" in Settings → App permissions first.</string>
     <string name="plugins_overlay_notification_title">Plugin overlays are running</string>
     <string name="plugins_overlay_notification_text">A plugin is displaying content above other apps</string>

@@ -56,6 +56,7 @@ object PluginManifestParser {
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val BACKUP_KEYS = setOf("purpose")
+    private val MODEL_ACCESS_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
     private val OVERLAY_SURFACE_KEYS = setOf("id", "page", "width", "height", "draggable", "snap")
 
@@ -77,6 +78,7 @@ object PluginManifestParser {
     private const val MAX_PROVIDER_URL = 2048
     private const val MAX_SHIZUKU_PURPOSE = 200
     private const val MAX_BACKUP_PURPOSE = 200
+    private const val MAX_MODEL_ACCESS_PURPOSE = 200
     private const val MAX_OVERLAY_PURPOSE = 200
     private const val MAX_WORKSPACE_TOOL_ICON = 32
     private const val MAX_WORKSPACE_TOOL_CATEGORY = 32
@@ -158,6 +160,7 @@ object PluginManifestParser {
                     shizuku = contributes.shizuku,
                     overlay = contributes.overlay,
                     backup = contributes.backup,
+                    modelAccess = contributes.modelAccess,
                     configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage"),
                     icon = icon
                 )
@@ -396,6 +399,7 @@ object PluginManifestParser {
             val shizuku: PluginShizukuRef?,
             val overlay: PluginOverlayRef?,
             val backup: PluginBackupRef?,
+            val modelAccess: PluginModelAccessRef?,
             val configPage: String?
         )
 
@@ -406,7 +410,8 @@ object PluginManifestParser {
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "uiEntries" &&
                     it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
-                    it != "shizuku" && it != "overlay" && it != "backup" && it != "configPage"
+                    it != "shizuku" && it != "overlay" && it != "backup" && it != "modelAccess" &&
+                    it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -438,6 +443,11 @@ object PluginManifestParser {
                     if (contributes["backup"] != null) ok = false
                     null
                 }
+            val modelAccess = readModelAccess(contributes["modelAccess"], "contributes.modelAccess")
+                ?: run {
+                    if (contributes["modelAccess"] != null) ok = false
+                    null
+                }
             if (hooks.any { it.event in PluginHookEvents.BACKUP } && backup == null) {
                 missing("contributes.backup")
                 ok = false
@@ -455,13 +465,14 @@ object PluginManifestParser {
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && uiEntries.isEmpty() &&
                 tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
-                shizuku == null && overlay == null && backup == null && configPage == null
+                shizuku == null && overlay == null && backup == null && modelAccess == null && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
             return if (ok) Contributes(
-                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers, shizuku, overlay, backup, configPage
+                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers,
+                shizuku, overlay, backup, modelAccess, configPage
             ) else null
         }
 
@@ -679,6 +690,21 @@ object PluginManifestParser {
                 return null
             }
             return PluginBackupRef(purpose)
+        }
+
+        /** 缺省表示不调用使用者供应商；声明只需给出用途，安装预览会展示。 */
+        private fun readModelAccess(raw: JsonElement?, path: String): PluginModelAccessRef? {
+            if (raw == null) return null
+            val obj = raw as? JsonObject ?: return null.also { invalid(path) }
+            obj.keys.filter { it !in MODEL_ACCESS_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.$it")
+            }
+            val purpose = obj["purpose"]?.stringOrNull()?.trim()
+            if (purpose.isNullOrEmpty() || purpose.length > MAX_MODEL_ACCESS_PURPOSE) {
+                invalid("$path.purpose")
+                return null
+            }
+            return PluginModelAccessRef(purpose)
         }
 
         private fun readOverlay(raw: JsonElement?, path: String): PluginOverlayRef? {

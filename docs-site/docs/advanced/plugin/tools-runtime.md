@@ -88,6 +88,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.tip` | `{title?, text, action?}` | 在对话中显示提示条 |
 | `host.shizuku.exec` | `{command, timeout?}` | 经 Shizuku 执行 Android 命令 |
 | `host.chat.*` | 同页面桥 | 会话、消息、运行状态与审批 |
+| `host.model.*` | 同页面桥 | 模型句柄、供应商/模型列表与流式补全（需 `contributes.modelAccess`） |
 | `host.clipboard.read` / `write`、`host.share.text`、`host.ui.openUrl` | 见下表 | 系统剪贴板、分享与打开链接 |
 | `host.app.info`、`host.log` | 见下表 | App 信息与宿主日志 |
 | `host.secrets.get` / `set` / `delete` / `list` | 见下表 | 插件私有加密键值存储 |
@@ -140,6 +141,13 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.chat.resolveToolApproval` | `{sessionId, requestId, choice}` | `once` / `always` / `reject` |
 | `host.chat.resolveQuestion` | `{sessionId, requestId, answers}` | 回答 `AskUserQuestion` |
 | `host.chat.resolvePlanApproval` | `{sessionId, requestId, choice}` | `approve` / `refine` |
+| `host.model.listProviders` | 无 | `{providers}`；不含 Key、地址与自定义头 |
+| `host.model.listModels` | `{providerId}` | `{providerId, models}`；读取供应商已添加的模型与元数据 |
+| `host.model.create` | `{providerId, model, name?, systemPrompt?, params?}` | `{handle}`；每个插件最多 16 个句柄 |
+| `host.model.close` | `{handleId}` | `{ok}`；同时取消该句柄的流 |
+| `host.model.start` | `{handleId, messages, systemPrompt?, params?}` | `{streamId}`；立即返回，事件由 `read` 拉取 |
+| `host.model.read` | `{streamId, cursor?, maxEvents?, waitMs?}` | `{events, cursor, done, status?, final?, error?}`；`waitMs` 0–20 秒 |
+| `host.model.cancel` | `{streamId}` | `{ok}`；保留已产生的事件 |
 | `host.clipboard.read` / `write` | `{}` / `{text}` | 剪贴板文本，上限 1 MiB |
 | `host.share.text` | `{text, title?}` | 拉起系统分享；文本最多 100000 字符 |
 | `host.ui.openUrl` | `{url}` | 仅 http/https，最长 4096 字符 |
@@ -169,6 +177,8 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
 
 `host.chat.sendMessage` 只表示请求已入队，不等待 AI 完成；可用 `host.chat.waitForRun`、页面事件 `chat.run.finished`、已有的 `agent.run.finished` hook 或 `host.chat.listMessages` 获取结果。`sendMessage` / `stop` / `openSession` / `deleteSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`。消息与手动输入走同一套授权、模式、hooks 与队列，不会绕过宿主审批。
+
+模型句柄使用供应商现有的 Key 和适配器，不走聊天页或 Agent 循环；请求会计入对应渠道的用量。调用前必须在清单声明 `contributes.modelAccess`，否则返回 `MODEL_ACCESS_NOT_DECLARED`。完整参数、事件格式与限额见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
 `host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
 

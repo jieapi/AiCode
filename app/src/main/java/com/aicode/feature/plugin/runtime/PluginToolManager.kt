@@ -29,6 +29,7 @@ class PluginToolManager @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val runtime: PluginRuntimeManager,
     private val terminalRunner: PluginTerminalRunner,
+    private val modelService: PluginModelService,
     private val overlayManager: PluginOverlayManager
 ) {
     private val started = AtomicBoolean(false)
@@ -85,6 +86,7 @@ class PluginToolManager @Inject constructor(
         (activePluginRevisions.keys - currentRevisions.keys).forEach { pluginId ->
             runtime.closePlugin(pluginId)
             terminalRunner.closePlugin(pluginId)
+            modelService.closePlugin(pluginId)
             overlayManager.closePlugin(pluginId)
         }
         currentRevisions.forEach { (pluginId, revision) ->
@@ -96,6 +98,7 @@ class PluginToolManager @Inject constructor(
                 } else {
                     runtime.closePlugin(pluginId)
                 }
+                modelService.closePlugin(pluginId)
                 overlayManager.reloadPlugin(pluginId)
             }
         }

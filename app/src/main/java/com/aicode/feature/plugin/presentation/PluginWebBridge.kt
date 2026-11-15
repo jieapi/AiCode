@@ -17,6 +17,7 @@ import com.aicode.feature.plugin.overlay.PluginOverlayException
 import com.aicode.feature.plugin.overlay.PluginOverlayManager
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginChatService
+import com.aicode.feature.plugin.runtime.PluginModelService
 import com.aicode.feature.plugin.runtime.PluginHttpService
 import com.aicode.feature.plugin.runtime.PluginIntrospectionService
 import com.aicode.feature.plugin.runtime.PluginProcessException
@@ -78,6 +79,7 @@ class PluginWebBridge(
     private val tipManager: PluginTipManager,
     private val overlayManager: PluginOverlayManager,
     private val chatService: PluginChatService,
+    private val modelService: PluginModelService,
     private val agentRunStateStore: AgentRunStateStore,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
@@ -183,6 +185,7 @@ class PluginWebBridge(
     fun close() {
         closed = true
         visible = false
+        modelService.closeOrigin("page:${page.cacheKey}")
         fileSubscriptions.close()
         updateOverlay(false, null)
         eventSubscription()
@@ -374,6 +377,13 @@ class PluginWebBridge(
         "chat.resolveToolApproval" -> chatService.resolveToolApproval(page.pluginId, params)
         "chat.resolveQuestion" -> chatService.resolveQuestion(page.pluginId, params)
         "chat.resolvePlanApproval" -> chatService.resolvePlanApproval(page.pluginId, params)
+        "model.listProviders" -> modelService.listProviders(page.pluginId)
+        "model.listModels" -> modelService.listModels(page.pluginId, params)
+        "model.create" -> modelService.create(page.pluginId, params)
+        "model.close" -> modelService.close(page.pluginId, params)
+        "model.start" -> modelService.start(page.pluginId, params, "page:${page.cacheKey}")
+        "model.read" -> modelService.read(page.pluginId, params)
+        "model.cancel" -> modelService.cancel(page.pluginId, params)
         "clipboard.read" -> systemService.clipboardRead(page.pluginId)
         "clipboard.write" -> systemService.clipboardWrite(
             page.pluginId,

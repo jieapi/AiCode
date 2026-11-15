@@ -251,6 +251,12 @@ data class PluginShizukuRef(val purpose: String)
  */
 data class PluginBackupRef(val purpose: String)
 
+/**
+ * `contributes.modelAccess` 声明插件会调用使用者已配置的 AI 供应商。
+ * 声明本身不授予 Key 读取权限；请求经宿主适配器发出，会计入对应渠道的用量。
+ */
+data class PluginModelAccessRef(val purpose: String)
+
 /** `contributes.overlay.surfaces[]` 声明的宿主托管浮层；页面由宿主 WebView 加载。 */
 data class PluginOverlaySurfaceRef(
     val id: String,
@@ -305,6 +311,7 @@ data class PluginManifest(
     val shizuku: PluginShizukuRef? = null,
     val overlay: PluginOverlayRef? = null,
     val backup: PluginBackupRef? = null,
+    val modelAccess: PluginModelAccessRef? = null,
     val configPage: String? = null,
     /** 内置图标名，或包内 `.png` / `.webp` 相对路径；缺省用宿主默认图标。 */
     val icon: String? = null
@@ -314,7 +321,7 @@ data class PluginManifest(
         get() = skills.size + agents.size + workspaceTools.size + uiEntries.size +
             tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
             (if (overlay != null) 1 + overlay.surfaces.size else 0) + (if (backup != null) 1 else 0) +
-            (if (configPage != null) 1 else 0)
+            (if (modelAccess != null) 1 else 0) + (if (configPage != null) 1 else 0)
 }
 
 /** 安装与加载过程中的失败原因。UI 按 [PluginErrorCode] 取本地化文案，[detail] 是语言无关的定位信息。 */

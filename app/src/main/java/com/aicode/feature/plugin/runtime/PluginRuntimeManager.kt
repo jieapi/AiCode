@@ -62,6 +62,7 @@ class PluginRuntimeManager @Inject constructor(
     private val tipManager: PluginTipManager,
     private val overlayManager: PluginOverlayManager,
     private val chatService: PluginChatService,
+    private val modelService: PluginModelService,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
@@ -306,6 +307,13 @@ class PluginRuntimeManager @Inject constructor(
             "host.chat.resolveToolApproval" -> hostCall { chatService.resolveToolApproval(pluginId, params) }
             "host.chat.resolveQuestion" -> hostCall { chatService.resolveQuestion(pluginId, params) }
             "host.chat.resolvePlanApproval" -> hostCall { chatService.resolvePlanApproval(pluginId, params) }
+            "host.model.listProviders" -> hostCall { modelService.listProviders(pluginId) }
+            "host.model.listModels" -> hostCall { modelService.listModels(pluginId, params) }
+            "host.model.create" -> hostCall { modelService.create(pluginId, params) }
+            "host.model.close" -> hostCall { modelService.close(pluginId, params) }
+            "host.model.start" -> hostCall { modelService.start(pluginId, params, PROCESS_ORIGIN) }
+            "host.model.read" -> hostCall { modelService.read(pluginId, params) }
+            "host.model.cancel" -> hostCall { modelService.cancel(pluginId, params) }
             "host.clipboard.read" -> hostCall { systemService.clipboardRead(pluginId) }
             "host.clipboard.write" -> hostCall {
                 systemService.clipboardWrite(pluginId, PluginHostPaths.requireString(params, "text"))
@@ -560,5 +568,6 @@ class PluginRuntimeManager @Inject constructor(
         const val MAX_TERMINAL_TITLE_CHARS = 120
         const val DEFAULT_SHIZUKU_TIMEOUT_SECONDS = 120L
         const val OVERLAY_MESSAGE_TIMEOUT_MS = 30_000L
+        const val PROCESS_ORIGIN = "process"
     }
 }

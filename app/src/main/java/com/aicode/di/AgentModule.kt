@@ -47,6 +47,7 @@ import com.aicode.feature.agent.domain.tool.subagent.TaskTool
 import com.aicode.feature.agent.domain.tool.subagent.MessageParentTool
 import com.aicode.feature.agent.domain.subagent.SubAgentEventBus
 import com.aicode.feature.agent.domain.prompt.SystemPromptProvider
+import com.aicode.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
 import com.aicode.feature.agent.domain.tool.ToolPermissionManager
 import com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine
@@ -99,8 +100,6 @@ import com.aicode.feature.agent.domain.workflow.ContextCompactor
 import com.aicode.feature.agent.domain.workflow.StatefulAgentWorkflow
 import com.aicode.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicode.feature.settings.data.repository.GeneralSettingsRepository
-import com.aicode.feature.settings.data.repository.ProviderKeyRotator
 import com.aicode.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aicode.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
@@ -418,9 +417,7 @@ object AgentModule {
     fun provideAgentWorkflow(
         toolRegistry: ToolRegistry,
         aiProviderRepository: AIProviderRepository,
-        openAIApi: OpenAIApi,
-        anthropicApi: AnthropicApi,
-        geminiApi: GeminiApi,
+        providerInstanceFactory: ProviderInstanceFactory,
         promptProvider: SystemPromptProvider,
         permissionManager: ToolPermissionManager,
         policyEngine: ToolPermissionPolicyEngine,
@@ -431,12 +428,10 @@ object AgentModule {
         compactionModelSettingsRepository: CompactionModelSettingsRepository,
         titleModelSettingsRepository: TitleModelSettingsRepository,
         defaultModelSettingsRepository: DefaultModelSettingsRepository,
-        generalSettingsRepository: GeneralSettingsRepository,
         sessionUseCase: SessionUseCase,
         messagePersistenceUseCase: MessagePersistenceUseCase,
         checkpointManager: CheckpointManager,
         llmCallRecordDao: LlmCallRecordDao,
-        keyRotator: ProviderKeyRotator,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
         fileAccess: FileAccessProvider,
@@ -446,9 +441,7 @@ object AgentModule {
         return StatefulAgentWorkflow(
             toolRegistry,
             aiProviderRepository,
-            openAIApi,
-            anthropicApi,
-            geminiApi,
+            providerInstanceFactory,
             promptProvider,
             permissionManager,
             policyEngine,
@@ -459,12 +452,10 @@ object AgentModule {
             compactionModelSettingsRepository,
             titleModelSettingsRepository,
             defaultModelSettingsRepository,
-            generalSettingsRepository,
             sessionUseCase,
             messagePersistenceUseCase,
             checkpointManager,
             llmCallRecordDao,
-            keyRotator,
             agentNotificationCenter,
             eventInjector,
             fileAccess,

@@ -2099,6 +2099,8 @@
     <string name="plugins_backup_permission_required">需先在插件详情开启「备份与还原事件」授权</string>
     <string name="plugins_shizuku_system_state">系统状态：%1$s</string>
     <string name="plugins_overlay_section">悬浮窗</string>
+    <string name="plugins_model_access_section">模型调用</string>
+    <string name="plugins_model_access_desc">可调用你配置的 AI 供应商，请求会计入对应渠道的用量</string>
     <string name="plugins_overlay_system_missing">请先在「设置 → 软件权限」中开启「显示在其他应用上层」</string>
     <string name="plugins_overlay_notification_title">插件悬浮窗运行中</string>
     <string name="plugins_overlay_notification_text">有插件正在其他应用上方显示内容</string>

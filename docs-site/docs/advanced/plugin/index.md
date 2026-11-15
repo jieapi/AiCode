@@ -24,6 +24,7 @@
 | 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 会话与消息 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 运行状态与审批 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 模型句柄 | `contributes.modelAccess` + 页面 `aicode.model.*` / 进程 `host.model.*` | 宿主直接调用已配置供应商 | 可无 | [模型句柄与流式调用](/advanced/plugin/model-handles) |
 | 系统、密钥与 HTTP | `aicode.clipboard/share/secrets/http` / `host.*` | 宿主 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 系统浮层 | `contributes.overlay` | 宿主托管的系统窗口 | 可无 | [系统浮层](/advanced/plugin/overlay) |
 | Shizuku 命令 | `contributes.shizuku` | Android 系统 | 否 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |

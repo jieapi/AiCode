@@ -18,6 +18,7 @@
 | `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读与可写 hook、配置页 | 综合入门 |
 | `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
 | `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 | 会话与消息 API |
+| `team-chat` | `demo.team-chat` | 设置页多模型群聊、`contributes.modelAccess`、`aicode.model.*` 流式轮流请求 | 模型句柄 |
 | `backup-helper` | `jieapi.backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包；`backup.data` 数据选项、备份与还原事件、独立授权 | 备份事件与授权 |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
 | `ui-gallery` | `demo.gallery` | 设置页、侧栏与顶栏槽位入口、配置页、宿主 Vue 组件库 | 页面组件 |
@@ -71,6 +72,15 @@
 ## chat-bridge
 
 演示给 AI 下达指令并读取回复的网页对话界面，可作为 QQ / 微信机器人接入的消息回路示例。
+
+## team-chat
+
+用模型句柄实现的多人多模型群聊：两个成员各自选择供应商、模型与提示词，在同一段群聊历史里轮流发言。
+
+- `contributes.modelAccess` 声明模型访问用途，安装预览会提示请求计入供应商用量；
+- 页面调用 `aicode.model.listProviders` / `listModels` 加载可选项，`create` 为每个成员建句柄；
+- 发送时按成员顺序调用 `aicode.model.stream`，把前一个成员的回复写回群聊历史，再交给下一个成员；
+- 页面关闭时宿主会自动取消该页面发起的流，句柄由插件停用或显式 `close` 释放。
 
 ## backup-helper
 

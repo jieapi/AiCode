@@ -37,6 +37,7 @@ import com.aicode.feature.plugin.runtime.PluginDependencyResult
 import com.aicode.feature.plugin.runtime.PluginChatService
 import com.aicode.feature.plugin.runtime.PluginHttpService
 import com.aicode.feature.plugin.runtime.PluginIntrospectionService
+import com.aicode.feature.plugin.runtime.PluginModelService
 import com.aicode.feature.plugin.runtime.PluginSecretStore
 import com.aicode.feature.plugin.runtime.PluginSystemService
 import com.aicode.feature.plugin.runtime.PluginEventBus
@@ -164,6 +165,7 @@ class PluginsViewModel @Inject constructor(
     private val storeSettingsRepository: PluginStoreSettingsRepository,
     private val pageEnvironment: PluginPageEnvironment,
     private val chatService: PluginChatService,
+    private val modelService: PluginModelService,
     private val agentRunStateStore: AgentRunStateStore,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
@@ -725,6 +727,7 @@ class PluginsViewModel @Inject constructor(
             tipManager = tipManager,
             overlayManager = overlayManager,
             chatService = chatService,
+            modelService = modelService,
             agentRunStateStore = agentRunStateStore,
             secretStore = secretStore,
             systemService = systemService,

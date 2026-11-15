@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>团队群聊</title>
+  <link rel="stylesheet" href="/__aicode/theme.css">
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--aicode-page-bg, var(--aicode-bg, #ffffff));
+      color: var(--aicode-on-surface, #1f2328);
+    }
+    .app {
+      max-width: 860px;
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+    }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 19px; }
+    .hint { margin: 0; color: var(--aicode-subtle-text, #59636e); font-size: 12px; }
+    .members { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 640px) { .members { grid-template-columns: 1fr; } }
+    .member {
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--aicode-surface, #f6f8fa);
+    }
+    .member-head { display: flex; align-items: center; gap: 8px; }
+    .member-head strong { flex-shrink: 0; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--aicode-subtle-text, #59636e); }
+    input, select, button {
+      font: inherit;
+      color: inherit;
+      background: var(--aicode-page-bg, #ffffff);
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 0;
+    }
+    button {
+      cursor: pointer;
+      background: var(--aicode-primary, #0969da);
+      border-color: transparent;
+      color: var(--aicode-on-primary, #ffffff);
+      font-weight: 600;
+    }
+    button:disabled { opacity: .55; cursor: default; }
+    .actions { display: flex; gap: 8px; }
+    .actions button:first-child {
+      background: var(--aicode-page-bg, #ffffff);
+      color: inherit;
+      border-color: var(--aicode-outline, #d0d7de);
+    }
+    .chat {
+      flex: 1;
+      min-height: 160px;
+      overflow: auto;
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--aicode-page-bg, #ffffff);
+    }
+    .bubble {
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--aicode-surface, #f6f8fa);
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.user { align-self: flex-end; background: var(--aicode-primary-container, #ddf4ff); }
+    .bubble.error { border-color: var(--aicode-error, #cf222e); }
+    .bubble-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--aicode-subtle-text, #59636e); margin-bottom: 3px; }
+    .bubble-body { font-size: 14px; line-height: 1.45; }
+    .composer { display: flex; gap: 8px; }
+    .composer input { flex: 1; }
+    .status { margin: 0; min-height: 18px; font-size: 12px; color: var(--aicode-subtle-text, #59636e); }
+    .status.error { color: var(--aicode-error, #cf222e); }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div>
+        <h1>团队群聊</h1>
+        <p class="hint">每个成员一个模型句柄；发送时依次请求，后发言的成员能看到前面的回复。</p>
+      </div>
+    </header>
+
+    <section class="members" id="members">
+      <article class="member" data-index="0">
+        <div class="member-head">
+          <strong>成员 A</strong>
+          <input id="name-0" value="产品经理" aria-label="成员 A 名称">
+        </div>
+        <label>供应商<select id="provider-0"></select></label>
+        <label>模型<select id="model-0"></select></label>
+        <label>提示词<input id="prompt-0" value="你是群聊里的产品经理，回答要简短，先给结论。"></label>
+      </article>
+      <article class="member" data-index="1">
+        <div class="member-head">
+          <strong>成员 B</strong>
+          <input id="name-1" value="架构师" aria-label="成员 B 名称">
+        </div>
+        <label>供应商<select id="provider-1"></select></label>
+        <label>模型<select id="model-1"></select></label>
+        <label>提示词<input id="prompt-1" value="你是群聊里的架构师，指出风险与取舍，回答要简短。"></label>
+      </article>
+    </section>
+
+    <div class="actions">
+      <button id="reload" type="button">重新加载供应商</button>
+      <button id="apply" type="button">创建 / 更新句柄</button>
+    </div>
+
+    <section class="chat" id="chat"></section>
+
+    <form class="composer" id="composer">
+      <input id="input" placeholder="输入群聊消息…" autocomplete="off">
+      <button id="send" type="submit">轮流发送</button>
+    </form>
+    <p class="status" id="status"></p>
+  </main>
+
+  <script src="/__aicode/aicode.js"></script>
+  <script>
+    (function () {
+      var handles = [null, null];
+      var history = [];
+      var busy = false;
+
+      function status(text, isError) {
+        var el = document.getElementById('status');
+        el.textContent = text || '';
+        el.className = 'status' + (isError ? ' error' : '');
+      }
+
+      function memberName(index) {
+        return document.getElementById('name-' + index).value.trim() || ('成员 ' + (index + 1));
+      }
+
+      function fillSelect(select, items, placeholder) {
+        select.textContent = '';
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = placeholder;
+        select.appendChild(empty);
+        items.forEach(function (item) {
+          var option = document.createElement('option');
+          option.value = item.value;
+          option.textContent = item.label;
+          select.appendChild(option);
+        });
+      }
+
+      async function loadModels(index) {
+        var providerId = document.getElementById('provider-' + index).value;
+        var modelSelect = document.getElementById('model-' + index);
+        if (!providerId) {
+          fillSelect(modelSelect, [], '先选择供应商');
+          return;
+        }
+        fillSelect(modelSelect, [], '加载中…');
+        try {
+          var result = await aicode.model.listModels({ providerId: providerId });
+          fillSelect(modelSelect, result.models.map(function (model) {
+            return { value: model.id, label: model.displayName + ' · ' + model.id };
+          }), result.models.length ? '选择模型' : '没有已添加的模型');
+          if (result.models.length === 1) modelSelect.selectedIndex = 1;
+        } catch (e) {
+          fillSelect(modelSelect, [], '加载失败');
+          status((e.code ? e.code + ': ' : '') + (e.message || String(e)), true);
+        }
+      }
+
+      async function loadProviders() {
+        status('加载供应商…');
+        try {
+          var result = await aicode.model.listProviders();
+          var usable = result.providers.filter(function (provider) {
+            return provider.enabled && provider.hasKey;
+          });
+          [0, 1].forEach(function (index) {
+            var select = document.getElementById('provider-' + index);
+            var previous = select.value;
+            fillSelect(select, usable.map(function (provider) {
+              return { value: provider.id, label: provider.name + (provider.isDefault ? '（默认）' : '') };
+            }), usable.length ? '选择供应商' : '没有可用供应商');
+            if (previous) select.value = previous;
+            if (!select.value && usable.length) select.selectedIndex = 0;
+            loadModels(index);
+          });
+          status(usable.length ? '' : '没有可用的供应商，请先在设置中添加并填写 Key。', !usable.length);
+        } catch (e) {
+          status(e.message || String(e), true);
+        }
+      }
+
+      async function applyMembers() {
+        document.getElementById('apply').disabled = true;
+        status('创建句柄…');
+        try {
+          for (var index = 0; index < 2; index++) {
+            if (handles[index]) {
+              try {
+                await aicode.model.close(handles[index]);
+              } catch (_) {
+                // 插件重载或页面重开后旧句柄可能已被宿主清理。
+              }
+              handles[index] = null;
+            }
+            var providerId = document.getElementById('provider-' + index).value;
+            var model = document.getElementById('model-' + index).value;
+            if (!providerId || !model) continue;
+            var created = await aicode.model.create({
+              providerId: providerId,
+              model: model,
+              name: memberName(index),
+              systemPrompt: document.getElementById('prompt-' + index).value
+            });
+            handles[index] = created.handle.id;
+          }
+          status(handles.some(Boolean) ? '句柄已就绪' : '至少为一个成员选择供应商和模型。', !handles.some(Boolean));
+        } catch (e) {
+          status(e.message || String(e), true);
+        } finally {
+          document.getElementById('apply').disabled = false;
+        }
+      }
+
+      function appendBubble(role, name, text) {
+        var chat = document.getElementById('chat');
+        var el = document.createElement('article');
+        el.className = 'bubble ' + role;
+        var head = document.createElement('div');
+        head.className = 'bubble-head';
+        var title = document.createElement('span');
+        title.textContent = name;
+        var meta = document.createElement('span');
+        meta.textContent = '';
+        head.appendChild(title);
+        head.appendChild(meta);
+        var body = document.createElement('div');
+        body.className = 'bubble-body';
+        body.textContent = text || '';
+        el.appendChild(head);
+        el.appendChild(body);
+        chat.appendChild(el);
+        chat.scrollTop = chat.scrollHeight;
+        return { el: el, meta: meta, body: body };
+      }
+
+      async function sendGroupMessage() {
+        var input = document.getElementById('input');
+        var text = input.value.trim();
+        if (!text || busy) return;
+        if (!handles.some(Boolean)) {
+          await applyMembers();
+          if (!handles.some(Boolean)) return;
+        }
+
+        busy = true;
+        document.getElementById('send').disabled = true;
+        input.value = '';
+        history.push({ role: 'user', content: text });
+        appendBubble('user', '你', text);
+
+        try {
+          for (var index = 0; index < 2; index++) {
+            if (!handles[index]) continue;
+            var name = memberName(index);
+            var bubble = appendBubble('assistant', name, '');
+            var streamed = '';
+            try {
+              var result = await aicode.model.stream({
+                handleId: handles[index],
+                messages: history,
+                systemPrompt: document.getElementById('prompt-' + index).value
+              }, function (event) {
+                if (event.type === 'text') {
+                  streamed += event.text;
+                  bubble.body.textContent = streamed;
+                  bubble.el.parentElement.scrollTop = bubble.el.parentElement.scrollHeight;
+                } else if (event.type === 'retry') {
+                  bubble.meta.textContent = '重试中…';
+                } else if (event.type === 'keySwitch') {
+                  bubble.meta.textContent = '切换 Key ' + event.index + '/' + event.total;
+                }
+              });
+
+              if (result.status === 'success') {
+                var finalText = (result.final && result.final.content) || streamed;
+                bubble.body.textContent = finalText;
+                var usage = result.final && result.final.usage;
+                bubble.meta.textContent = usage ? (usage.input + ' in / ' + usage.output + ' out') : '';
+                history.push({ role: 'assistant', content: name + ': ' + finalText });
+              } else if (result.status === 'cancelled') {
+                bubble.body.textContent = streamed || '已取消';
+              } else {
+                bubble.el.classList.add('error');
+                bubble.body.textContent = (result.error && result.error.message) || '请求失败';
+                bubble.meta.textContent = result.error ? result.error.code : '';
+              }
+            } catch (e) {
+              bubble.el.classList.add('error');
+              bubble.body.textContent = e.message || String(e);
+            }
+          }
+        } finally {
+          busy = false;
+          document.getElementById('send').disabled = false;
+          status('');
+        }
+      }
+
+      document.getElementById('reload').addEventListener('click', loadProviders);
+      document.getElementById('apply').addEventListener('click', applyMembers);
+      document.getElementById('composer').addEventListener('submit', function (event) {
+        event.preventDefault();
+        sendGroupMessage();
+      });
+      document.getElementById('members').addEventListener('change', function (event) {
+        if (!event.target.id || event.target.id.indexOf('provider-') !== 0) return;
+        loadModels(Number(event.target.id.split('-')[1]));
+      });
+
+      loadProviders();
+    })();
+  </script>
+</body>
+</html>

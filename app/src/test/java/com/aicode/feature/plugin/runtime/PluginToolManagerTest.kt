@@ -22,6 +22,7 @@ class PluginToolManagerTest {
 
     private val runtime = mockk<PluginRuntimeManager>(relaxed = true)
     private val terminalRunner = mockk<PluginTerminalRunner>(relaxed = true)
+    private val modelService = mockk<PluginModelService>(relaxed = true)
     private val overlayManager = mockk<PluginOverlayManager>(relaxed = true)
     private val manager = PluginToolManager(
         context = mockk<Context>(),
@@ -29,6 +30,7 @@ class PluginToolManagerTest {
         toolRegistry = ToolRegistry(),
         runtime = runtime,
         terminalRunner = terminalRunner,
+        modelService = modelService,
         overlayManager = overlayManager
     )
     private val syncMethod = PluginToolManager::class.java.getDeclaredMethod(
