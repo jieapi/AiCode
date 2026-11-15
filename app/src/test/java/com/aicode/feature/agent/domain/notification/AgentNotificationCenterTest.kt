@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.domain.notification
 
+import com.aicode.feature.agent.domain.model.AgentMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,6 +17,14 @@ class AgentNotificationCenterTest {
         title = "build $id",
         outcome = NotificationOutcome.COMPLETED,
         exitCode = 0
+    )
+
+    private fun modeChange(mode: AgentMode) = PendingNotification(
+        kind = AgentNotificationKind.MODE_CHANGE,
+        sourceId = "user",
+        title = mode.name,
+        outcome = NotificationOutcome.COMPLETED,
+        newMode = mode
     )
 
     @Test
@@ -78,5 +87,30 @@ class AgentNotificationCenterTest {
 
         assertEquals(0, center.pendingCount("s1"))
         assertEquals(0, center.pendingCount("s2"))
+    }
+
+    @Test
+    fun enqueue_modeChangeKeepsOnlyLatestMode() {
+        val center = AgentNotificationCenter()
+        center.enqueue("s1", modeChange(AgentMode.PLAN))
+        center.enqueue("s1", modeChange(AgentMode.AUTO))
+
+        val pending = center.peek("s1")
+
+        assertEquals(1, pending.size)
+        assertEquals(AgentMode.AUTO, pending.first().newMode)
+    }
+
+    @Test
+    fun enqueue_modeChangeKeepsOtherKinds() {
+        val center = AgentNotificationCenter()
+        center.enqueue("s1", task("term-1"))
+        center.enqueue("s1", modeChange(AgentMode.PLAN))
+        center.enqueue("s1", modeChange(AgentMode.AUTO))
+
+        val pending = center.peek("s1")
+
+        assertEquals(listOf(AgentNotificationKind.BACKGROUND_TASK, AgentNotificationKind.MODE_CHANGE), pending.map { it.kind })
+        assertEquals(AgentMode.AUTO, pending.last().newMode)
     }
 }

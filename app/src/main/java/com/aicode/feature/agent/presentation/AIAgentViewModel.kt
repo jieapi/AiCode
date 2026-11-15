@@ -1178,6 +1178,7 @@ class AIAgentViewModel @Inject constructor(
         viewModelScope.launch {
             sessionUseCase.updateMode(sid, mode.name)
             // 工作期间切换：把新模式作为系统事件投递给运行中的 agent，本轮即时生效（见 StatefulAgentWorkflow）。
+            // 连续切换时队列只保留最新一次，AI 只看到最终模式而非中间状态。
             // 空闲时无需投递——下一轮开轮会按新模式注入一次提醒。
             if (agentRunManager.isSessionRunning(sid)) {
                 agentNotificationCenter.enqueue(

@@ -55,6 +55,8 @@ data class PendingNotification(
  * 入队来自主线程（ViewModel 收 Flow 事件），peek/ack 来自工具执行的 IO 协程，故全部操作加锁。
  * [peek] 与 [ack] 分两段而非直接取走：通知只有在工具结果真正落库（ToolCallFinished 已发出）后才算送达，
  * 中途被取消时通知仍留在队列里，交给下一批工具或兜底路径。
+ *
+ * 模式切换是状态型事件：同会话里尚未送达的旧模式切换会被新的一次覆盖（见 [enqueue]）。
  */
 @Singleton
 class AgentNotificationCenter @Inject constructor() {
@@ -63,11 +65,21 @@ class AgentNotificationCenter @Inject constructor() {
     private val pending = mutableMapOf<String, MutableList<PendingNotification>>()
     private val seqGenerator = AtomicLong(0)
 
-    /** 入队一条通知，返回其分配到的序号。 */
+    /**
+     * 入队一条通知，返回其分配到的序号。
+     *
+     * [AgentNotificationKind.MODE_CHANGE] 语义上只关心最终生效的模式：工作期间连续切换
+     * （如 BUILD→PLAN→AUTO）时，尚未送达的旧模式切换被本次覆盖，AI 只看到最后一次，
+     * 不会在同一批工具结果里收到一串中间状态。
+     */
     fun enqueue(sessionId: String, item: PendingNotification): Long {
         val seq = seqGenerator.incrementAndGet()
         synchronized(lock) {
-            pending.getOrPut(sessionId) { mutableListOf() }.add(item.copy(seq = seq))
+            val list = pending.getOrPut(sessionId) { mutableListOf() }
+            if (item.kind == AgentNotificationKind.MODE_CHANGE) {
+                list.removeAll { it.kind == AgentNotificationKind.MODE_CHANGE }
+            }
+            list.add(item.copy(seq = seq))
         }
         return seq
     }
