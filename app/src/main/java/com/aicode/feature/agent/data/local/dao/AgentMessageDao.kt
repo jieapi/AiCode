@@ -19,6 +19,14 @@ interface AgentMessageDao {
     @Query("SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun getMessagesBySession(sessionId: String): Flow<List<AgentMessageEntity>>
 
+    /**
+     * 分页读取当前会话消息。
+     *
+     * 走只读事务执行：一页可能横跨多个 CursorWindow，框架游标在翻页时会重跑语句，
+     * 若此时同会话的消息被并发删除，窗口里的行数与首次计数的行数不再一致，
+     * getString 会抛 "Couldn't read row N, col 0 from CursorWindow"。
+     */
+    @Transaction
     @Query("SELECT * FROM (SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp DESC LIMIT :limit) ORDER BY timestamp ASC")
     fun getMessagesBySessionPaged(sessionId: String, limit: Int): Flow<List<AgentMessageEntity>>
 
