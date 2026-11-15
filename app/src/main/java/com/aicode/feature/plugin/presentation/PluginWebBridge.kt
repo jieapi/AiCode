@@ -58,8 +58,8 @@ import kotlinx.serialization.json.put
  * 再用 `window.__aicodeResolve(id, payloadJson)` 回传。路径解析与限制由
  * [PluginHostPaths] 统一提供，与插件进程的 host API 共用同一套规则。
  *
- * 桥只由宿主注入到已启用插件的页面；方法在 WebView 的 JavaBridge 线程调用，
- * 不能在这里直接操作 UI。
+ * 桥只由宿主注入到已启用插件的页面；消息可能来自 WebMessageListener 回调或兼容回退的
+ * JavaBridge 线程，处理统一切到 IO，不能在这里直接操作 UI。
  */
 class PluginWebBridge(
     private val context: Context,

@@ -5,6 +5,7 @@ import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginContent
 import com.aicode.feature.plugin.domain.PluginHook
 import com.aicode.feature.plugin.domain.PluginHookEvents
+import com.aicode.feature.plugin.domain.PluginHookModes
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginManifest
 import com.aicode.feature.plugin.domain.PluginRuntime
@@ -20,7 +21,10 @@ import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PluginHookDispatcherTest {
@@ -183,6 +187,51 @@ class PluginHookDispatcherTest {
             IllegalStateException("boom")
 
         dispatcher.dispatchPluginUninstalled(PLUGIN_ID)
+    }
+
+    @Test
+    fun transformHookOpensCircuitAfterThreeFailures() = runBlocking {
+        val guard = hook("guard-bash", PluginHookEvents.AGENT_TOOL_BEFORE)
+            .copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(guard))), listOf(guard))
+        coEvery { runtime.invoke(any(), any(), any(), any(), any(), any(), any()) } throws
+            IllegalStateException("boom")
+
+        repeat(3) {
+            dispatcher.beforeToolCall(
+                sessionId = "session",
+                runId = "run",
+                callId = "call-$it",
+                toolName = "bash",
+                mode = "BUILD",
+                scope = "main",
+                agentName = null,
+                arguments = JsonObject(emptyMap())
+            )
+        }
+
+        coVerify(exactly = 3) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+        val health = requireNotNull(dispatcher.hookHealth.value["$PLUGIN_ID/guard-bash"])
+        assertEquals(3, health.consecutiveFailures)
+        assertTrue(health.isOpen())
+        assertEquals("IllegalStateException", health.lastError)
+
+        dispatcher.beforeToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call-open",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            arguments = JsonObject(emptyMap())
+        )
+
+        coVerify(exactly = 3) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     private companion object {

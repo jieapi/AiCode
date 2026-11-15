@@ -109,6 +109,7 @@ import com.aicode.feature.plugin.presentation.PluginStoreItem
 import com.aicode.feature.plugin.presentation.PluginThemeTokens
 import com.aicode.feature.plugin.presentation.PluginPageHost
 import com.aicode.feature.plugin.presentation.pluginPageIcon
+import com.aicode.feature.plugin.presentation.PluginWebBridgeInstaller
 import com.aicode.feature.plugin.presentation.PluginWebViewCache
 import com.aicode.feature.plugin.presentation.PluginWebViewFactory
 import com.aicode.feature.plugin.presentation.PluginsSection
@@ -497,7 +498,9 @@ fun SettingsScreen(
                     runCatching { webView.evaluateJavascript(script, null) }
                 }
             )
-            webView.addJavascriptInterface(bridge, "__aicodeBridge")
+            PluginWebBridgeInstaller.install(webView, bridge) { message ->
+                bridge.postMessage(message)
+            }
             PluginWebViewCache.put(target.cacheKey, webView)
             PluginWebViewCache.putBridge(target.cacheKey, bridge)
         }.onFailure { e ->

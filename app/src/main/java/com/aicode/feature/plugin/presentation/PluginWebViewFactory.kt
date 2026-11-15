@@ -22,6 +22,9 @@ import java.io.File
  * 设置页面板与进入设置时的预热共用同一套配置，避免两处各写一份导致行为不一致。
  * 页面资源只经 [WebViewAssetLoader] 的虚拟域加载：`/plugin/` 映射插件安装目录，
  * `/__aicode/` 提供宿主的 `aicode.js` 与动态主题变量，不暴露本地文件系统。
+ *
+ * HTML 响应附带 CSP，禁止远程脚本、iframe 与 object；资源字节走进程内缓存减少重复读盘，
+ * 但响应头保持 `Cache-Control: no-store`，插件覆盖与 APK 更新后 WebView 不会继续用旧内容。
  */
 internal object PluginWebViewFactory {
 
@@ -125,8 +128,17 @@ internal object PluginWebViewFactory {
             val prefix = root.path + File.separator
             if (file != root && !file.path.startsWith(prefix)) return null
             if (!file.isFile) return null
-            val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+            val bytes = cachedBytes(file) ?: return null
             return webResource(mimeOf(path), bytes)
+        }
+
+        private fun cachedBytes(file: File): ByteArray? {
+            // 键含 canonical path + mtime + size：插件同版本覆盖文件会换键，不会读到旧字节。
+            val key = "plugin:${file.path}:${file.lastModified()}:${file.length()}"
+            ResourceCache.get(key)?.let { return it }
+            val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+            ResourceCache.put(key, bytes)
+            return bytes
         }
     }
 
@@ -136,27 +148,47 @@ internal object PluginWebViewFactory {
     ) : WebViewAssetLoader.PathHandler {
         override fun handle(path: String): WebResourceResponse? {
             if (path == "theme.css") {
+                // 跟随主题动态生成，不进程内缓存，也不让 WebView 复用旧副本。
                 val css = PluginThemeTokens.css(variables())
                 return WebResourceResponse(
                     "text/css",
                     "utf-8",
                     ByteArrayInputStream(css.toByteArray(Charsets.UTF_8))
-                )
+                ).apply {
+                    setResponseHeaders(mapOf("Cache-Control" to "no-store"))
+                }
             }
             if (path.isBlank() || path.startsWith("/") || path.split('/').any { it == ".." || it == "." }) {
                 return null
             }
+            val bytes = cachedBytes(path) ?: return null
+            return webResource(mimeOf(path), bytes)
+        }
+
+        private fun cachedBytes(path: String): ByteArray? {
+            // 宿主资源随 APK 固定，进程内不会变化，键只用路径。
+            val key = "host:$path"
+            ResourceCache.get(key)?.let { return it }
             val bytes = runCatching {
                 context.assets.open("plugin-ui/$path").use { it.readBytes() }
             }.getOrNull() ?: return null
-            return webResource(mimeOf(path), bytes)
+            ResourceCache.put(key, bytes)
+            return bytes
         }
     }
 
-    /** 插件页资源禁用缓存：APK 更新后 WebView 不能继续用旧版 aicode.js。 */
+    /**
+     * 插件页资源禁用浏览器缓存：APK 更新后 WebView 不能继续用旧版 aicode.js。
+     * 内存缓存只省掉重复读盘，不改变这条响应头。
+     */
     private fun webResource(mime: String, bytes: ByteArray): WebResourceResponse =
         WebResourceResponse(mime, "utf-8", ByteArrayInputStream(bytes)).apply {
-            setResponseHeaders(mapOf("Cache-Control" to "no-store"))
+            setResponseHeaders(
+                buildMap {
+                    put("Cache-Control", "no-store")
+                    contentSecurityPolicyForMime(mime)?.let { put("Content-Security-Policy", it) }
+                }
+            )
         }
 
     private fun mimeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
@@ -174,4 +206,55 @@ internal object PluginWebViewFactory {
         "ttf" -> "font/ttf"
         else -> "application/octet-stream"
     }
+
+    /**
+     * 进程内资源缓存，只用于避免每次 shouldInterceptRequest 都读磁盘。
+     *
+     * LRU 上限约 [MAX_ENTRIES] 项 / [MAX_BYTES] 字节：插件资源键含 mtime 与 size，
+     * 宿主资源键只用路径。`theme.css` 是动态生成内容，不经过这里。
+     */
+    private object ResourceCache {
+        private const val MAX_ENTRIES = 64
+        private const val MAX_BYTES = 8 * 1024 * 1024
+
+        private class Entry(val bytes: ByteArray)
+
+        private val entries = LinkedHashMap<String, Entry>(16, 0.75f, true)
+        private var totalBytes = 0
+
+        @Synchronized
+        fun get(key: String): ByteArray? = entries[key]?.bytes
+
+        @Synchronized
+        fun put(key: String, bytes: ByteArray) {
+            if (bytes.size > MAX_BYTES) return
+            entries.remove(key)?.let { totalBytes -= it.bytes.size }
+            entries[key] = Entry(bytes)
+            totalBytes += bytes.size
+            val iterator = entries.entries.iterator()
+            while ((entries.size > MAX_ENTRIES || totalBytes > MAX_BYTES) && iterator.hasNext()) {
+                val entry = iterator.next()
+                totalBytes -= entry.value.bytes.size
+                iterator.remove()
+            }
+        }
+    }
 }
+
+/** 插件页 HTML 的 CSP：脚本只允许包内与内联，远程脚本、iframe、object 全部阻断。 */
+internal const val HTML_CONTENT_SECURITY_POLICY: String =
+    "default-src 'self' appassets.androidplatform.net data: blob:; " +
+        "script-src 'self' appassets.androidplatform.net 'unsafe-inline' 'unsafe-eval'; " +
+        "style-src 'self' appassets.androidplatform.net 'unsafe-inline' https: data:; " +
+        "img-src 'self' appassets.androidplatform.net data: blob: https:; " +
+        "font-src 'self' appassets.androidplatform.net data: https:; " +
+        "media-src 'self' appassets.androidplatform.net data: blob: https:; " +
+        "connect-src 'self' appassets.androidplatform.net http: https:; " +
+        "frame-src 'none'; " +
+        "object-src 'none'; " +
+        "base-uri 'none'; " +
+        "frame-ancestors 'none'"
+
+/** 只有 HTML 需要 CSP；CSS/JS/图片等子资源不加，避免多余响应头。 */
+internal fun contentSecurityPolicyForMime(mime: String): String? =
+    if (mime == "text/html") HTML_CONTENT_SECURITY_POLICY else null

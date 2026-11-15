@@ -129,6 +129,14 @@
 
 页面文件最大 512 KiB。`uiEntries` 的 `page` 入口和 `workspaceTools` 的 `pageFile` 必须是包内 `.html`/`.htm`；`handler` 入口不涉及页面文件。
 
+## 安全边界与资源缓存
+
+插件页面运行在虚拟域 `https://appassets.androidplatform.net` 下，宿主对脚本来源与桥的可见范围做了限制：
+
+- 页面脚本应随插件包提供。HTML 响应带 `Content-Security-Policy`：`script-src` 只允许虚拟域与内联脚本，远程脚本、`<iframe>` 与 `<object>` 会被直接阻断；需要联网时使用 `fetch` / `XMLHttpRequest`（`connect-src` 允许 http/https）或 `aicode.http.request`。
+- 桥 `window.aicode` 只对虚拟域主 frame 生效。WebView 支持 WebMessageListener 时，宿主在回调里校验 `isMainFrame` 与来源的 scheme/host，子 frame 与其他来源的调用会被丢弃；系统不支持时回退 `addJavascriptInterface`，此时桥对所有 frame 可见，安全性依赖上述 CSP 只允许包内脚本执行。
+- 插件包资源与宿主 `/__aicode/` 资源在进程内缓存字节，避免每次拦截请求都读盘：插件资源按 canonical path + mtime + size 缓存，宿主资源按路径缓存，LRU 上限约 64 项 / 8 MiB。响应头仍为 `Cache-Control: no-store`，插件同版本覆盖与 APK 更新后不会命中旧浏览器缓存；`/__aicode/theme.css` 跟随主题动态生成，不缓存。
+
 ## 宿主接口
 
 所有方法均返回 Promise。失败时 reject 一个包含 `code` 与 `message` 的 Error。
@@ -389,7 +397,8 @@ const off = aicode.ui.onBack(() => {
 ## 限制
 
 - 页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截；
+- 页面脚本必须随包提供，远程脚本、iframe 与 object 会被 CSP 阻断；
+- 桥只对虚拟域主 frame 生效，子 frame 无法调用宿主接口；
 - 槽位入口在插件停用后消失，页面请求将被拒绝；
 - `uiEntries`、`workspaceTools`、`configPage` 的页面都必须是包内 HTML，单文件最大 512 KiB；
-- 页面不可绕过宿主桥直接读取容器文件；
-- 外部样式和脚本不会加载，资源须打包进插件。
+- 页面不可绕过宿主桥直接读取容器文件。

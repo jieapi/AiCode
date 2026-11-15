@@ -541,7 +541,9 @@ internal fun PluginDetailSection(
                     { script -> runCatching { webView.evaluateJavascript(script, null) } },
                     onClosePage
                 )
-                webView.addJavascriptInterface(bridge, "__aicodeBridge")
+                PluginWebBridgeInstaller.install(webView, bridge) { message ->
+                    bridge.postMessage(message)
+                }
                 PluginWebViewCache.putBridge(configPage.cacheKey, bridge)
             }
             PluginWebViewCache.markLoading(configPage.cacheKey, url)

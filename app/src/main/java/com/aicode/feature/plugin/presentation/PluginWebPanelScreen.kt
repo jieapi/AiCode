@@ -115,13 +115,15 @@ fun PluginWebPanelScreen(
     }
 
     val bridge = remember(webView, page.cacheKey) {
-        cachedBridge ?: bridgeFactory({ script ->
+        val bridge = cachedBridge ?: bridgeFactory({ script ->
             runCatching { webView.evaluateJavascript(script, null) }
         }, onClosePage).also { created ->
             PluginWebViewCache.putBridge(page.cacheKey, created)
-            // 注入对象只在页面下次加载时出现；这里先注入，LaunchedEffect 随后 loadUrl。
-            webView.addJavascriptInterface(created, "__aicodeBridge")
         }
+        // 注入对象只在页面下次加载时出现；这里先注册，LaunchedEffect 随后 loadUrl。
+        // 缓存复用时桥可能已经注册过，installer 按 WebView + 桥实例去重。
+        PluginWebBridgeInstaller.install(webView, bridge) { message -> bridge.postMessage(message) }
+        bridge
     }
 
     // 缓存复用时页面持有的是同一个桥实例，回调要换成当前组合的。

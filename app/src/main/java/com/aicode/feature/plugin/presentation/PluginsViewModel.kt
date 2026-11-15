@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicode.R
 import com.aicode.core.util.FileLogger
+import com.aicode.core.watch.FileChangeHub
+import com.aicode.core.watch.WatchFilter
 import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.shizuku.ShizukuManager
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
@@ -53,14 +55,15 @@ import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -141,6 +144,7 @@ class PluginsViewModel @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val pathHomeResolver: PathHomeResolver,
     private val workspaceRepository: WorkspaceRepository,
+    private val fileChangeHub: FileChangeHub,
     private val commandEngine: CommandEngine,
     private val eventBus: PluginEventBus,
     private val pluginRuntimeManager: PluginRuntimeManager,
@@ -532,30 +536,42 @@ class PluginsViewModel @Inject constructor(
             .sortedBy { it.dirName }
     }
 
-    /** 开发者模式开启期间轮询目录 mtime；已安装项目变化时自动重新打包替换。 */
+    /** 开发模式开启期间监听开发目录；事件批次合并后重扫，已安装项目变化时自动重新打包替换。 */
+    @OptIn(FlowPreview::class)
     private fun startDevWatcher() {
         if (devWatcherJob?.isActive == true) return
         devWatcherJob = viewModelScope.launch(Dispatchers.IO) {
-            while (isActive && _devMode.value) {
-                delay(DEV_POLL_MS)
-                if (!_devMode.value) break
-                val projects = scanDevProjects()
-                _devProjects.value = projects
-                projects.forEach { project ->
-                    if (project.error != null) return@forEach
-                    val baseline = devLastLoaded[project.dirName]
-                    val versionChanged = project.installedVersion != null &&
-                        project.installedVersion != project.version
-                    if (baseline == null && !versionChanged) {
-                        if (project.installedVersion != null) devLastLoaded[project.dirName] = project.lastModified
-                        return@forEach
-                    }
-                    if (project.installedVersion != null && (versionChanged || project.lastModified > (baseline ?: 0L))) {
-                        if (reloadDevProject(project)) {
-                            devLastLoaded[project.dirName] = project.lastModified
-                            FileLogger.i(TAG, "开发插件已重载: ${project.dirName}")
-                        }
-                    }
+            scanDevChanges()
+            fileChangeHub.watchHostDir(
+                hostDir = manager.devDir,
+                recursive = true,
+                filter = WatchFilter(ignoredNames = DEV_IGNORED_NAMES, followGitignore = false),
+                fallbackPoll = false
+            )
+                .debounce(DEV_RELOAD_DEBOUNCE_MS)
+                .collect { scanDevChanges() }
+        }
+    }
+
+    /** 重扫开发目录；已安装项目内容或版本有变化时重新打包替换。 */
+    private suspend fun scanDevChanges() {
+        val projects = scanDevProjects()
+        _devProjects.value = projects
+        projects.forEach { project ->
+            if (project.error != null) return@forEach
+            val baseline = devLastLoaded[project.dirName]
+            val versionChanged = project.installedVersion != null &&
+                project.installedVersion != project.version
+            if (baseline == null && !versionChanged) {
+                if (project.installedVersion != null) devLastLoaded[project.dirName] = project.lastModified
+                return@forEach
+            }
+            if (project.installedVersion != null &&
+                (versionChanged || project.lastModified > (baseline ?: 0L))
+            ) {
+                if (reloadDevProject(project)) {
+                    devLastLoaded[project.dirName] = project.lastModified
+                    FileLogger.i(TAG, "开发插件已重载: ${project.dirName}")
                 }
             }
         }
@@ -701,8 +717,11 @@ class PluginsViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "PluginsViewModel"
-        const val DEV_POLL_MS = 2_000L
+        const val DEV_RELOAD_DEBOUNCE_MS = 500L
         const val SETTINGS_SAVE_DEBOUNCE_MS = 500L
         const val ACTION_TIMEOUT_MS = 10_000L
+
+        /** 构建产物类目录不参与开发目录监听，避免一次编译触发整批重扫。 */
+        val DEV_IGNORED_NAMES = setOf(".git", "node_modules", ".venv", "__pycache__", ".idea")
     }
 }

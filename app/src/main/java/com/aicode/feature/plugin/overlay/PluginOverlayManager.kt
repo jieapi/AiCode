@@ -16,6 +16,7 @@ import com.aicode.feature.plugin.data.PluginOverlayPositionRepository
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.plugin.domain.PluginOverlaySurface
 import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.presentation.PluginWebBridgeInstaller
 import com.aicode.feature.plugin.presentation.PluginWebViewFactory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.ConcurrentHashMap
@@ -378,7 +379,7 @@ class PluginOverlayManager @Inject constructor(
             onPageMessage = { payload -> eventSink?.invoke(surface.pluginId, surface.key, payload) },
             onClose = { removeWindowById(surface.key) }
         )
-        webView.addJavascriptInterface(bridge, "__aicodeBridge")
+        PluginWebBridgeInstaller.install(webView, bridge) { message -> bridge.postMessage(message) }
         window.bindBridge(bridge)
         windowManager.addView(window, layoutParams)
         windows[surface.key] = window

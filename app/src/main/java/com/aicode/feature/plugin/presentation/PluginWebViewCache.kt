@@ -10,8 +10,8 @@ import android.webkit.WebView
  * 不重新加载；不同页面各自持有实例，打开新页面不会拆掉仍在显示的旧页面。
  * WebView 每次创建都要拉起 Chromium 进程，反复新建会有明显白屏。
  *
- * 桥必须跟着 WebView 一起缓存：注入的 Java 对象只在页面下次加载时才会出现在 JS 里，
- * 缓存复用时重新 addJavascriptInterface 不会生效，页面会一直拿着已取消的旧桥。
+ * 桥必须跟着 WebView 一起缓存：注入对象只在页面下次加载时才出现在 JS 里，
+ * 缓存复用时重新注入不会生效，页面会一直拿着已取消的旧桥。
  *
  * 淘汰只回收已经脱离容器的实例：还挂在容器里的实例可能正在显示，留到 [release] 后再销毁。
  * 缓存只活在一次宿主会话里，退出时 [clear] 统一销毁，避免 WebView 长期持有 Activity Context。

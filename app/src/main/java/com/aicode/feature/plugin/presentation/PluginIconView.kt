@@ -45,7 +45,8 @@ private const val PLUGIN_ICON_MAX_EDGE = 160
 
 /**
  * 插件图标槽的内容：包内位图解码成功时填满槽位，否则显示内置图标。
- * 读盘与解码放在 IO 线程，避免插件列表滚动时卡主线程。
+ * 读盘与解码放在 IO 线程，避免插件列表滚动时卡主线程；解码只随路径变化重启，
+ * 同一路径文件内容变化需等下次重组或版本变化才反映。
  */
 @Composable
 internal fun PluginIconContent(
@@ -55,9 +56,7 @@ internal fun PluginIconContent(
     shape: Shape
 ) {
     val path = icon?.file?.absolutePath
-    // 同一路径替换图片（插件更新）时 mtime / size 变化，据此重建解码状态
-    val stamp = icon?.file?.let { "${it.length()}:${it.lastModified()}" }
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, path, stamp) {
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, path) {
         value = if (path == null) {
             null
         } else {
