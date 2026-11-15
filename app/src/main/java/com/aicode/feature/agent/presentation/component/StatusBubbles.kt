@@ -1,6 +1,5 @@
 package com.aicode.feature.agent.presentation.component
 
-import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.expandVertically
@@ -31,15 +30,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -57,8 +59,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -74,12 +74,9 @@ import com.aicode.feature.agent.domain.provider.RetryErrorKind
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.AlertCircle
 import com.aicode.core.ui.ExpandableChevronIcon
-import compose.icons.feathericons.Check
 import compose.icons.feathericons.Clock
-import compose.icons.feathericons.Copy
 import compose.icons.feathericons.Key
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /** 涟漪高光一个来回的周期（ms）。 */
 private const val RIPPLE_PERIOD_MS = 1600
@@ -661,8 +658,10 @@ private val ReasoningWindowMaxHeight = 300.dp
 
 /**
  * 思考过程折叠行：左对齐、浅色弱化，与正式回复区分。默认展开态由 [defaultExpanded] 决定
- * （「偏好设置 → 思考自动展开」），点这一行随时展开/收起；行尾另给一个复制入口，
- * 一键把整段思考原文拷进剪贴板——展开态是懒渲染的 Markdown 列表，长按选区不可用。
+ * （「偏好设置 → 思考自动展开」），点这一行随时展开/收起。
+ *
+ * 展开态与其他正文一样可长按选中复制（外层 [SelectionContainer] 统一负责选区）；
+ * 内容仍用懒渲染，超长思考不会因展开而一次性组合全部块。
  *
  * 收起态只占一行：行首思考图标 + 一行内容预览（见 [reasoningPreviewLine]，超宽省略号截断）；
  * 展开态换成完整正文（Markdown 渲染）。两态之间没有「显示尾巴几行」的中间态。
@@ -698,16 +697,6 @@ internal fun ReasoningBubble(
         if (onExpandedChange != null) onExpandedChange(next) else localExpanded = next
     }
     val latestToggleExpanded by rememberUpdatedState(toggleExpanded)
-    // 复制按钮点完短暂变成勾号：与消息元信息行的复制按钮同一反馈。
-    var copied by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboard.current
-    val copyScope = rememberCoroutineScope()
-    if (copied) {
-        LaunchedEffect(copied) {
-            delay(1500)
-            copied = false
-        }
-    }
     // 存绝对起始时间戳而非累加
     // 毫秒数，切页返回或气泡滚出视口重挂载后显示的仍是真实时长；起始戳连同已见文本的长度与
     // 指纹一起进 saveable，恢复时文本若不是同一轮的延续（期间已换轮）则重新计时。
@@ -763,20 +752,9 @@ internal fun ReasoningBubble(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                overflow = TextOverflow.Ellipsis
             )
-            MessageActionIconButton(
-                icon = if (copied) FeatherIcons.Check else FeatherIcons.Copy,
-                contentDescription = if (copied) stringResource(R.string.chat_copied) else stringResource(R.string.chat_copy),
-                tint = Brand.IconGray,
-                onClick = {
-                    copyScope.launch {
-                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("reasoning", text)))
-                        copied = true
-                    }
-                }
-            )
+            Spacer(Modifier.width(Spacing.xs))
             ExpandableChevronIcon(
                 expanded = expanded,
                 contentDescription = if (expanded) stringResource(R.string.common_collapse) else stringResource(R.string.common_expand),
@@ -793,23 +771,34 @@ internal fun ReasoningBubble(
                 Spacer(Modifier.height(Spacing.sm))
                 // 展开态用懒渲染（LazyMarkdownSuccess）：超长思考只组合可见块，不再一次性
                 // 组合全部节点把 Compose ChangeList 撑爆（OOM 根因）。高度上限交给内层 LazyColumn 自行滚动。
-                MarkdownContent(
-                    text = renderText,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    cache = cache,
-                    compact = true,
-                    lazyScroll = true,
-                    lazyListState = scrollState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = ReasoningWindowMaxHeight)
-                        .nestedScroll(rememberBoundNestedScrollConnection())
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = { latestToggleExpanded(false) }
-                            )
-                        }
-                )
+                // 外层 SelectionContainer 负责长按选区：选中块会被 LazyColumn 钉住不回收，
+                // 复制只包含已组合的可见内容，与聊天正文的选区行为一致。
+                SelectionContainer {
+                    CompositionLocalProvider(
+                        LocalTextSelectionColors provides TextSelectionColors(
+                            handleColor = MaterialTheme.colorScheme.primary,
+                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
+                        )
+                    ) {
+                        MarkdownContent(
+                            text = renderText,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            cache = cache,
+                            compact = true,
+                            lazyScroll = true,
+                            lazyListState = scrollState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = ReasoningWindowMaxHeight)
+                                .nestedScroll(rememberBoundNestedScrollConnection())
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = { latestToggleExpanded(false) }
+                                    )
+                                }
+                        )
+                    }
+                }
             }
         }
     }

@@ -565,7 +565,7 @@ internal fun TurnCollapseHeader(
 }
 
 @Composable
-internal fun MessageActionIconButton(
+private fun MessageActionIconButton(
     icon: ImageVector,
     contentDescription: String,
     tint: Color,
