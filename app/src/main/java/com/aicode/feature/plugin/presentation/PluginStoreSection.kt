@@ -85,6 +85,7 @@ internal fun PluginStoreSection(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val languageTag = currentLanguageTag()
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(state.preview) {
@@ -104,16 +105,16 @@ internal fun PluginStoreSection(
         }
     }
 
-    val filteredItems = remember(state.items, searchQuery) {
+    val filteredItems = remember(state.items, searchQuery, languageTag) {
         val query = searchQuery.trim().lowercase()
         if (query.isEmpty()) {
             state.items
         } else {
             state.items.filter { item ->
-                item.plugin.name.lowercase().contains(query) ||
+                item.plugin.name.resolve(languageTag).lowercase().contains(query) ||
                     item.plugin.id.lowercase().contains(query) ||
                     item.plugin.author.lowercase().contains(query) ||
-                    item.plugin.description.lowercase().contains(query)
+                    item.plugin.description.resolve(languageTag).lowercase().contains(query)
             }
         }
     }
@@ -183,6 +184,7 @@ internal fun PluginStoreSection(
                             LazyGroupItem(index = index, lastIndex = filteredItems.lastIndex) {
                                 StorePluginRow(
                                     item = item,
+                                    languageTag = languageTag,
                                     onClick = { onOpenDetail(item) }
                                 )
                             }
@@ -200,7 +202,7 @@ private fun pluginVersionText(version: String?): String =
 
 /** 商店列表与已安装列表同版式：图标 + 名称 + 描述；商店不需要开关，点击进入独立详情页。 */
 @Composable
-private fun StorePluginRow(item: PluginStoreItem, onClick: () -> Unit) {
+private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -233,7 +235,7 @@ private fun StorePluginRow(item: PluginStoreItem, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.plugin.name,
+                    text = item.plugin.name.resolve(languageTag),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -251,7 +253,7 @@ private fun StorePluginRow(item: PluginStoreItem, onClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = item.plugin.description,
+                text = item.plugin.description.resolve(languageTag),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -282,6 +284,7 @@ internal fun PluginStoreDetailSection(
         it.source.id == item.source.id && it.plugin.id == item.plugin.id
     } ?: item
     val context = LocalContext.current
+    val languageTag = currentLanguageTag()
     val installing = state.installingPluginId == latest.plugin.id
 
     LaunchedEffect(state.preview) {
@@ -299,7 +302,7 @@ internal fun PluginStoreDetailSection(
             .padding(horizontal = Spacing.lg)
             .padding(top = Spacing.md, bottom = Spacing.xl)
     ) {
-        StoreHeaderCard(item = latest)
+        StoreHeaderCard(item = latest, languageTag = languageTag)
 
         SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
         SettingsGroup {
@@ -393,7 +396,7 @@ internal fun PluginStoreDetailSection(
 }
 
 @Composable
-private fun StoreHeaderCard(item: PluginStoreItem) {
+private fun StoreHeaderCard(item: PluginStoreItem, languageTag: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -427,7 +430,7 @@ private fun StoreHeaderCard(item: PluginStoreItem) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = item.plugin.name,
+                        text = item.plugin.name.resolve(languageTag),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -449,10 +452,11 @@ private fun StoreHeaderCard(item: PluginStoreItem) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (item.plugin.description.isNotBlank()) {
+                val description = item.plugin.description.resolve(languageTag)
+                if (description.isNotBlank()) {
                     Spacer(modifier = Modifier.height(Spacing.xs))
                     Text(
-                        text = item.plugin.description,
+                        text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,

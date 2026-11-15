@@ -876,7 +876,8 @@ fun SettingsScreen(
                         } else if (current == SettingsSection.PluginDetail) {
                             selectedPlugin?.displayName(pluginLanguageTag) ?: stringResource(current.titleRes)
                         } else if (current == SettingsSection.PluginStoreDetail) {
-                            selectedStoreItem?.plugin?.name ?: stringResource(current.titleRes)
+                            selectedStoreItem?.plugin?.name?.resolve(pluginLanguageTag)
+                                ?: stringResource(current.titleRes)
                         } else if (current == SettingsSection.PluginDevDetail) {
                             currentDevProject?.let { it.name?.resolve(pluginLanguageTag) ?: it.dirName }
                                 ?: stringResource(current.titleRes)
