@@ -118,9 +118,9 @@ class PluginHostPaths(
 
     /** 移动/重命名；源与目标在同一后端，不能是根，也不能把目录移进自身。 */
     fun rename(from: String, to: String): JsonElement {
-        val source = resolveWritable(from)
-        val destination = resolveWritable(to)
-        assertOutsideSource(source, destination, to)
+        val source = resolveWritable(from, followFinalLink = false)
+        val destination = resolveWritable(to, followFinalLink = false)
+        assertOutsideSource(source, destination, to, followSourceLink = false)
         mapIoError(to) { fileAccess.rename(source, destination) }
         return ok()
     }
@@ -128,8 +128,8 @@ class PluginHostPaths(
     /** 复制文件或目录；不能是根，也不能把目录复制进自身。 */
     fun copy(from: String, to: String, overwrite: Boolean): JsonElement {
         val source = resolve(from)
-        val destination = resolveWritable(to)
-        assertOutsideSource(source, destination, to)
+        val destination = resolveWritable(to, followFinalLink = false)
+        assertOutsideSource(source, destination, to, followSourceLink = true)
         mapIoError(to) { fileAccess.copy(source, destination, overwrite) }
         return ok()
     }
@@ -151,7 +151,7 @@ class PluginHostPaths(
     }
 
     fun delete(path: String): JsonElement {
-        val target = resolveWritable(path)
+        val target = resolveWritable(path, followFinalLink = false)
         mapIoError(path) { fileAccess.deleteRecursively(target) }
         return ok()
     }
@@ -182,11 +182,16 @@ class PluginHostPaths(
         return PluginWatchTarget.Remote(target)
     }
 
-    private fun resolveWritable(path: String): String {
+    private fun resolveWritable(path: String, followFinalLink: Boolean = true): String {
         val target = resolve(path)
-        if (isProtectedRoot(target)) throw PluginHostException("PATH_DENIED", "cannot modify a root: $path")
+        if (isProtectedRoot(target, followFinalLink)) {
+            throw PluginHostException("PATH_DENIED", "cannot modify a root: $path")
+        }
         return target
     }
+
+    private fun identity(path: String, followFinalLink: Boolean = true): String =
+        mapIoError(path) { fileAccess.resolvePath(path, followFinalLink) }.trimEnd('/').ifEmpty { "/" }
 
     /** `~` 展开到当前环境的 home；`data://` 映射到插件数据目录；裸相对路径挂到工作区根。 */
     private fun resolve(path: String): String {
@@ -227,11 +232,11 @@ class PluginHostPaths(
      * 这些根目录一旦被递归删除或整体覆盖，会丢掉工作区、AI 配置或全部插件，
      * 因此所有写操作（写入、移动、复制目标、删除）都必须拦住根本身，子路径不受影响。
      */
-    private fun isProtectedRoot(path: String): Boolean {
-        val trimmed = path.trimEnd('/')
-        if (trimmed.isEmpty()) return true
+    private fun isProtectedRoot(path: String, followFinalLink: Boolean): Boolean {
+        val target = identity(path, followFinalLink)
         val aicode = homeResolver.aicodeRoot().trimEnd('/')
         val protected = listOf(
+            "/",
             homeResolver.home(),
             aicode,
             workspaceRoot(),
@@ -242,32 +247,35 @@ class PluginHostPaths(
             "$aicode/plugins/data",
             "$aicode/plugin-dev"
         )
-        return protected.any { it.trimEnd('/') == trimmed }
+        return protected.any { identity(it) == target }
     }
 
     /**
      * 复制/移动不能自我嵌套：目标在源内部会无限递归，源在目标内部时覆盖式复制会先删掉源。
      * 只在源确实是目录时判定，源不存在交给后端报 NOT_FOUND。
      */
-    private fun assertOutsideSource(source: String, destination: String, to: String) {
-        val sourceDir = source.trimEnd('/')
-        val destinationDir = destination.trimEnd('/')
-        if (sourceDir.isEmpty() || destinationDir.isEmpty()) {
+    private fun assertOutsideSource(source: String, destination: String, to: String, followSourceLink: Boolean) {
+        val sourceDir = identity(source, followSourceLink)
+        val destinationDir = identity(destination, followFinalLink = false)
+        val root = identity("/")
+        if (sourceDir == root || destinationDir == root) {
             throw PluginHostException("PATH_DENIED", "cannot use a root: $to")
         }
         if (sourceDir == destinationDir) {
             throw PluginHostException("PATH_DENIED", "destination is the source: $to")
         }
-        if (fileAccess.isDirectory(source) && destinationDir.startsWith("$sourceDir/")) {
-            throw PluginHostException("PATH_DENIED", "destination is inside the source: $to")
+        if (fileAccess.isDirectory(source) && (followSourceLink || sourceDir == identity(source)) &&
+            (destinationDir.startsWith("$sourceDir/") || sourceDir.startsWith("$destinationDir/"))
+        ) {
+            throw PluginHostException("PATH_DENIED", "source and destination are nested: $to")
         }
     }
 
     private fun assertWatchScope(path: String, recursive: Boolean) {
-        val trimmed = path.trimEnd('/').ifEmpty { "/" }
-        val home = homeResolver.home().trimEnd('/').ifEmpty { "/" }
-        val aicode = homeResolver.aicodeRoot().trimEnd('/')
-        if (trimmed == "/" || trimmed == home || trimmed == aicode) {
+        val trimmed = identity(path)
+        val home = identity(homeResolver.home())
+        val aicode = identity(homeResolver.aicodeRoot())
+        if (trimmed == identity("/") || trimmed == home || trimmed == aicode) {
             throw PluginHostException("PATH_DENIED", "watch range is too broad: $path")
         }
         if (!recursive) return

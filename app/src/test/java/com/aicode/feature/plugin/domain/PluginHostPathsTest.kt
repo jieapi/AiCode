@@ -1,14 +1,22 @@
 package com.aicode.feature.plugin.domain
 
+import com.aicode.feature.agent.domain.container.ContainerInstaller
+import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
+import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
+import com.aicode.feature.workspace.domain.LocalFileAccess
+import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.domain.FileEntry
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.NoSuchFileException
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonArray
@@ -40,6 +48,9 @@ class PluginHostPathsTest {
                 path.startsWith("~/") -> HOME + path.removePrefix("~")
                 else -> path
             }
+        }
+        every { fileAccess.resolvePath(any(), any()) } answers {
+            File(firstArg<String>()).toPath().normalize().toString()
         }
         paths = PluginHostPaths(fileAccess, homeResolver, { WORKSPACE }, PLUGIN_ID)
     }
@@ -326,6 +337,89 @@ class PluginHostPathsTest {
         stubParent("$WORKSPACE/broken.txt", WORKSPACE)
         every { fileAccess.writeFile("$WORKSPACE/broken.txt", "x") } throws IOException("boom")
         assertCode("IO_ERROR") { paths.write("$WORKSPACE/broken.txt", "x") }
+    }
+
+    private fun useBackendPathResolution() {
+        val workspace = mockk<WorkspaceRepository>()
+        val installer = mockk<ContainerInstaller>()
+        val settings = mockk<ContainerSettingsRepository>()
+        every { workspace.currentPath() } returns File(tmp.root, "workspace").apply { mkdirs() }.path
+        every { installer.aicodeDir } returns File(tmp.root, "aicode").apply { mkdirs() }
+        every { installer.rootfsDirFor(any()) } returns File(tmp.root, "rootfs").apply { mkdirs() }
+        every { settings.activeProfileIdFlow } returns emptyFlow()
+        val access = LocalFileAccess(WorkspacePathMapper(workspace, installer, settings, homeResolver))
+        every { fileAccess.resolvePath(any(), any()) } answers {
+            access.resolvePath(firstArg(), secondArg())
+        }
+    }
+
+    @Test
+    fun mutation_rejectsBackendRootAliases() {
+        useBackendPathResolution()
+        val aliases = listOf(".", "./", "$AICODE/.", "/root//workspace", "$WORKSPACE/sub/..", "$WORKSPACE/../.aicode") +
+            PROTECTED_ROOTS.flatMap { listOf("$it/.", "$it/child/..") }
+        for (alias in aliases) {
+            assertCode("PATH_DENIED") { paths.delete(alias) }
+            assertCode("PATH_DENIED") { paths.write(alias, "x") }
+            assertCode("PATH_DENIED") { paths.rename(alias, "$WORKSPACE/moved") }
+            assertCode("PATH_DENIED") { paths.rename("$WORKSPACE/file", alias) }
+            assertCode("PATH_DENIED") { paths.copy("$WORKSPACE/file", alias, true) }
+        }
+        verify(exactly = 0) { fileAccess.deleteRecursively(any()) }
+        verify(exactly = 0) { fileAccess.rename(any(), any()) }
+    }
+
+    @Test
+    fun mutation_resolvesLinkBeforeParentAndPreservesFinalLinkOperations() {
+        useBackendPathResolution()
+        val workspace = File(tmp.root, "workspace")
+        File(tmp.root, "aicode/plugins").mkdirs()
+        Files.createSymbolicLink(File(workspace, "config").toPath(), File("$AICODE/plugins").toPath())
+        every { fileAccess.isDirectory("$WORKSPACE/config") } returns true
+        assertCode("PATH_DENIED") { paths.delete("config/..") }
+        assertCode("PATH_DENIED") { paths.delete("config/.") }
+        assertCode("PATH_DENIED") { paths.write("config", "x") }
+        assertOk(paths.delete("config"))
+        assertOk(paths.rename("config", "config-renamed"))
+        verify { fileAccess.deleteRecursively("$WORKSPACE/config") }
+        verify { fileAccess.rename("$WORKSPACE/config", "$WORKSPACE/config-renamed") }
+
+        Files.createSymbolicLink(File(workspace, "elsewhere").toPath(), File("/tmp/child").toPath())
+        assertOk(paths.delete("elsewhere/.."))
+        verify { fileAccess.deleteRecursively("$WORKSPACE/elsewhere/..") }
+    }
+
+    @Test
+    fun watch_rejectsAliasesAndLinksToBroadScopes() {
+        useBackendPathResolution()
+        val workspace = File(tmp.root, "workspace")
+        Files.createSymbolicLink(File(workspace, "home").toPath(), File(HOME).toPath())
+        Files.createSymbolicLink(File(workspace, "config").toPath(), File("$AICODE/plugins").toPath())
+        for (recursive in listOf(false, true)) {
+            for (alias in listOf("//", "$HOME/.", "$AICODE/.", "home", "config/..")) {
+                assertCode("PATH_DENIED") { paths.watchTarget(alias, { null }, recursive) }
+            }
+        }
+        assertEquals(
+            PluginWatchTarget.Remote("$WORKSPACE/config"),
+            paths.watchTarget("config", { null }, recursive = true)
+        )
+    }
+
+    @Test
+    fun copyAndRename_rejectBackendNestedAliases() {
+        useBackendPathResolution()
+        val workspace = File(tmp.root, "workspace")
+        File(workspace, "dir").mkdirs()
+        Files.createSymbolicLink(File(workspace, "alias").toPath(), File("$WORKSPACE/dir").toPath())
+        every { fileAccess.isDirectory("$WORKSPACE/dir") } returns true
+        every { fileAccess.isDirectory("$WORKSPACE/alias") } returns true
+        every { fileAccess.isDirectory("$WORKSPACE/alias/child") } returns true
+        assertCode("PATH_DENIED") { paths.copy("dir", "alias/child", true) }
+        assertCode("PATH_DENIED") { paths.rename("dir", "alias/child") }
+        assertCode("PATH_DENIED") { paths.copy("alias", "dir/child", true) }
+        assertCode("PATH_DENIED") { paths.copy("dir", "dir/../dir", true) }
+        assertCode("PATH_DENIED") { paths.copy("alias/child", "dir", true) }
     }
 
     private companion object {
