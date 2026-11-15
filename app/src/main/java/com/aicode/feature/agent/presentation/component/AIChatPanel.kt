@@ -829,6 +829,8 @@ fun AIChatPanel(
     // 思考卡片的展开态，同款快照。
     val reasoningExpansionOverrides = viewModel.reasoningExpansionOverrides
     val reasoningOverrideSnapshot = reasoningExpansionOverrides.toMap()
+    // 「思考自动展开」偏好：没有手动展开/收起记录的思考卡片默认展开。
+    val autoExpandReasoning by viewModel.autoExpandReasoning.collectAsStateWithLifecycle()
     // 正在执行的工具 id 集合：只让集合内容参与 remember key，避免实时输出逐字刷新导致整表重建。
     val runningToolIds by remember { derivedStateOf { runningTool.mapTo(HashSet()) { it.messageId } } }
     val scope = rememberCoroutineScope()
@@ -1499,6 +1501,7 @@ fun AIChatPanel(
                     cache = markdownCache,
                     durationMs = reasoningDurations[item.message.id],
                     expandedOverride = reasoningOverrideSnapshot[item.message.id],
+                    defaultExpanded = autoExpandReasoning,
                     onExpandedChange = {
                         viewModel.setReasoningExpanded(item.message.id, it)
                         onToolItemToggled()
@@ -1536,6 +1539,7 @@ fun AIChatPanel(
                     onToolExpandedChange = { isExpanded -> viewModel.setToolExpanded(message.id, isExpanded) },
                     onToolToggle = onToolItemToggled,
                     reasoningExpandedOverride = reasoningOverrideSnapshot[message.id],
+                    reasoningDefaultExpanded = autoExpandReasoning,
                     onReasoningExpandedChange = {
                         viewModel.setReasoningExpanded(message.id, it)
                         onToolItemToggled()
@@ -1671,6 +1675,7 @@ fun AIChatPanel(
                                         sessionKey = assistant.messageId,
                                         live = reasoningLive,
                                         expandedOverride = reasoningOverrideSnapshot[assistant.messageId],
+                                        defaultExpanded = autoExpandReasoning,
                                         onExpandedChange = { expanded ->
                                             viewModel.setReasoningExpanded(assistant.messageId, expanded)
                                             onToolItemToggled()

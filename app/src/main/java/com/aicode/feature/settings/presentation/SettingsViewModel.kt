@@ -594,6 +594,9 @@ class SettingsViewModel @Inject constructor(
     private val _enterToSend = MutableStateFlow(false)
     val enterToSend: StateFlow<Boolean> = _enterToSend.asStateFlow()
 
+    private val _autoExpandReasoning = MutableStateFlow(true)
+    val autoExpandReasoning: StateFlow<Boolean> = _autoExpandReasoning.asStateFlow()
+
     private val _compactionThresholdPercent = MutableStateFlow(85)
     val compactionThresholdPercent: StateFlow<Int> = _compactionThresholdPercent.asStateFlow()
 
@@ -1001,6 +1004,12 @@ class SettingsViewModel @Inject constructor(
             launch {
                 generalSettingsRepository.enterToSendFlow.collectLatest {
                     _enterToSend.value = it
+                }
+            }
+
+            launch {
+                generalSettingsRepository.autoExpandReasoningFlow.collectLatest {
+                    _autoExpandReasoning.value = it
                 }
             }
 
@@ -2154,6 +2163,13 @@ class SettingsViewModel @Inject constructor(
     fun setEnterToSend(enabled: Boolean) {
         viewModelScope.launch {
             generalSettingsRepository.setEnterToSend(enabled)
+        }
+    }
+
+    /** 思考卡片是否默认展开正文。 */
+    fun setAutoExpandReasoning(enabled: Boolean) {
+        viewModelScope.launch {
+            generalSettingsRepository.setAutoExpandReasoning(enabled)
         }
     }
 

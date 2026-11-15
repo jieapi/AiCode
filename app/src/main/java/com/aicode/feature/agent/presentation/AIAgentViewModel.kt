@@ -788,6 +788,10 @@ class AIAgentViewModel @Inject constructor(
         currentSessionState.map { it?.reasoningEffort ?: ReasoningEffort.MEDIUM }
             .stateIn(viewModelScope, SharingStarted.Eagerly, ReasoningEffort.MEDIUM)
 
+    /** 「思考自动展开」偏好：没有手动展开/收起记录的思考卡片默认是否展开正文。 */
+    val autoExpandReasoning: StateFlow<Boolean> = generalSettingsRepository.autoExpandReasoningFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     /** 当前会话绑定的 providerId/model（null 表示未绑定，回退全局 active provider）。 */
     val currentSessionProviderModel: StateFlow<Pair<String?, String?>> =
         currentSessionState.map { s -> (s?.providerId ?: "") to (s?.model ?: "") }

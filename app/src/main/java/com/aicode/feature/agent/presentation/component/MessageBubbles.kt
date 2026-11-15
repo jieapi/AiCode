@@ -212,6 +212,8 @@ internal fun AgentMessageItem(
     /** 工具行手动展开/收起时回传新状态，由上层持久化。 */
     onToolExpandedChange: ((Boolean) -> Unit)? = null,
     reasoningExpandedOverride: Boolean? = null,
+    /** 思考卡片没有手动展开/收起记录的初始展开态，取自「思考自动展开」偏好。 */
+    reasoningDefaultExpanded: Boolean = false,
     onReasoningExpandedChange: ((Boolean) -> Unit)? = null,
     /** 本 item 内容的外层内边距：工具调用分组展开时由 [AIChatPanel] 传入缩进，用于区分层级。 */
     contentPadding: PaddingValues = PaddingValues(0.dp),
@@ -312,6 +314,7 @@ internal fun AgentMessageItem(
                 cache = markdownCache,
                 durationMs = reasoningDurationMs,
                 expandedOverride = reasoningExpandedOverride,
+                defaultExpanded = reasoningDefaultExpanded,
                 onExpandedChange = onReasoningExpandedChange
             )
         }
@@ -562,7 +565,7 @@ internal fun TurnCollapseHeader(
 }
 
 @Composable
-private fun MessageActionIconButton(
+internal fun MessageActionIconButton(
     icon: ImageVector,
     contentDescription: String,
     tint: Color,

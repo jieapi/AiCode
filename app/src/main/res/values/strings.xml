@@ -88,6 +88,9 @@
     <string name="settings_startup_session_recent_desc">直接进入最近更新的会话</string>
     <string name="settings_delete_external_workspace_sessions">删除外部工作区聊天记录</string>
     <string name="settings_delete_external_workspace_sessions_desc">移除外部本地工作区时，一并删除该工作区的聊天记录</string>
+    <string name="settings_general_reply">回复</string>
+    <string name="settings_auto_expand_reasoning">思考自动展开</string>
+    <string name="settings_auto_expand_reasoning_desc">思考过程默认展开显示，关闭后保持收起、点击查看</string>
     <string name="settings_general_network">网络</string>
     <string name="settings_first_byte_timeout">首字节超时</string>
     <string name="settings_first_byte_timeout_desc">等待首个响应块的最长时间</string>

@@ -31,10 +31,10 @@ enum class StartupSessionMode {
 /**
  * 「偏好设置」里的用户偏好。
  *
- * 目前八项：拉取模型成功后是否自动移除远端已不存在的本地模型（默认开启）、
+ * 目前九项：拉取模型成功后是否自动移除远端已不存在的本地模型（默认开启）、
  * 启动时进入新会话还是最近会话（默认新开会话）、首字 / 数据块间隔超时（秒）、
- * 网络请求的最大重试次数（默认 6）、回车发送、自动压缩阈值、
- * sendFile 单个文件大小上限（默认 100MB），
+ * 网络请求的最大重试次数（默认 6）、回车发送、思考卡片是否默认展开（默认开启）、
+ * 自动压缩阈值、sendFile 单个文件大小上限（默认 100MB），
  * 以及移除外部本地工作区时是否一并删除其聊天记录（默认关闭）。
  * DataStore 用法与 [KeepaliveSettingsRepository] 一致。
  */
@@ -49,6 +49,7 @@ class GeneralSettingsRepository @Inject constructor(
         val STREAM_IDLE_TIMEOUT_SEC_KEY = intPreferencesKey("stream_idle_timeout_sec")
         val MAX_NETWORK_RETRIES_KEY = intPreferencesKey("max_network_retries")
         val ENTER_TO_SEND_KEY = booleanPreferencesKey("enter_to_send")
+        val AUTO_EXPAND_REASONING_KEY = booleanPreferencesKey("auto_expand_reasoning")
         val COMPACTION_THRESHOLD_PERCENT_KEY = intPreferencesKey("compaction_threshold_percent")
         val SENDFILE_MAX_SIZE_MB_KEY = intPreferencesKey("sendfile_max_size_mb")
         val GOAL_MAX_TURNS_KEY = intPreferencesKey("goal_max_turns")
@@ -174,6 +175,14 @@ class GeneralSettingsRepository @Inject constructor(
 
     suspend fun setEnterToSend(enabled: Boolean) {
         context.generalDataStore.edit { it[ENTER_TO_SEND_KEY] = enabled }
+    }
+
+    /** 思考卡片是否默认展开正文；默认开启。 */
+    val autoExpandReasoningFlow: Flow<Boolean> =
+        context.generalDataStore.data.map { it[AUTO_EXPAND_REASONING_KEY] ?: true }
+
+    suspend fun setAutoExpandReasoning(enabled: Boolean) {
+        context.generalDataStore.edit { it[AUTO_EXPAND_REASONING_KEY] = enabled }
     }
 
     /** 自动压缩触发阈值（上下文窗口的百分比）；默认 90，限定 1..100。 */
