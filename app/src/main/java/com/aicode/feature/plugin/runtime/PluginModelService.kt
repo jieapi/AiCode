@@ -36,6 +36,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -69,7 +70,7 @@ import kotlinx.serialization.json.put
  * 事件在宿主缓冲后由插件按 cursor 批量读取，避免逐 token 跨进程调用。
  */
 @Singleton
-class PluginModelService @Inject constructor(
+class PluginModelService internal constructor(
     private val pluginManager: PluginManager,
     private val providerRepository: AIProviderRepository,
     private val providerFactory: ProviderInstanceFactory,
@@ -79,18 +80,52 @@ class PluginModelService @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val homeResolver: PathHomeResolver,
     private val workspaceRepository: WorkspaceRepository,
-    private val executionModeHolder: ExecutionModeHolder
+    private val executionModeHolder: ExecutionModeHolder,
+    private val scope: CoroutineScope
 ) {
+    @Inject
+    constructor(
+        pluginManager: PluginManager,
+        providerRepository: AIProviderRepository,
+        providerFactory: ProviderInstanceFactory,
+        modelMetadataService: ModelMetadataService,
+        defaultModelSettingsRepository: DefaultModelSettingsRepository,
+        toolRegistry: ToolRegistry,
+        fileAccess: FileAccessProvider,
+        homeResolver: PathHomeResolver,
+        workspaceRepository: WorkspaceRepository,
+        executionModeHolder: ExecutionModeHolder
+    ) : this(
+        pluginManager = pluginManager,
+        providerRepository = providerRepository,
+        providerFactory = providerFactory,
+        modelMetadataService = modelMetadataService,
+        defaultModelSettingsRepository = defaultModelSettingsRepository,
+        toolRegistry = toolRegistry,
+        fileAccess = fileAccess,
+        homeResolver = homeResolver,
+        workspaceRepository = workspaceRepository,
+        executionModeHolder = executionModeHolder,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    )
+
     private data class ModelParams(
         val reasoningEffort: String? = null,
         val maxOutputTokens: Int? = null,
         val temperature: Float? = null
     )
 
+    private data class InstallRevision(
+        val version: String,
+        val installRevision: String?,
+        val installedAt: Long,
+        val archiveSha256: String
+    )
+
     private class Handle(
         val id: String,
         val pluginId: String,
-        val pluginVersion: String,
+        val pluginRevision: InstallRevision,
         val providerId: String,
         val model: String,
         val name: String?,
@@ -124,9 +159,10 @@ class PluginModelService @Inject constructor(
         @Volatile var job: Job? = null
     }
 
+    private val lifecycleLock = Any()
+    private val pluginCloseRevisions = mutableMapOf<String, Long>()
     private val handles = ConcurrentHashMap<String, Handle>()
     private val streams = ConcurrentHashMap<String, Stream>()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gson = Gson()
 
     init {
@@ -178,7 +214,9 @@ class PluginModelService @Inject constructor(
 
     /** 创建句柄；provider/model 在每次请求时重新校验，用户改配置后下一次生效。 */
     suspend fun create(pluginId: String, params: JsonObject): JsonElement {
-        val plugin = ensureAccess(pluginId)
+        val (plugin, closeRevision) = synchronized(lifecycleLock) {
+            ensureAccess(pluginId) to (pluginCloseRevisions[pluginId] ?: 0L)
+        }
         val providerId = PluginHostPaths.requireString(params, "providerId").trim()
         if (providerId.isEmpty()) throw paramInvalid("providerId is blank")
         if (PluginProviderIds.pluginIdOf(providerId) == pluginId) {
@@ -200,11 +238,10 @@ class PluginModelService @Inject constructor(
         val name = optionalString(params, "name")?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.also { if (it.length > MAX_HANDLE_NAME_CHARS) throw paramInvalid("name too long") }
-        enforceHandleLimit(pluginId)
         val handle = Handle(
             id = UUID.randomUUID().toString(),
             pluginId = pluginId,
-            pluginVersion = plugin.record.version,
+            pluginRevision = plugin.installRevision(),
             providerId = config.id,
             model = model,
             name = name,
@@ -212,7 +249,16 @@ class PluginModelService @Inject constructor(
             params = modelParams,
             createdAt = System.currentTimeMillis()
         )
-        handles[handle.id] = handle
+        synchronized(lifecycleLock) {
+            val currentPlugin = ensureAccess(pluginId)
+            if (currentPlugin.installRevision() != handle.pluginRevision ||
+                (pluginCloseRevisions[pluginId] ?: 0L) != closeRevision
+            ) {
+                throw PluginHostException("PLUGIN_INACTIVE", "plugin model access was closed or replaced")
+            }
+            enforceHandleLimit(pluginId)
+            handles[handle.id] = handle
+        }
         return buildJsonObject { put("handle", handleJson(handle)) }
     }
 
@@ -265,7 +311,6 @@ class PluginModelService @Inject constructor(
                 "estimated input $estimated tokens exceeds budget $budget"
             )
         }
-        enforceStreamLimit(pluginId)
         val scopeId = "plugin-$pluginId-${handle.id}"
         val provider = try {
             providerFactory.create(config.copy(selectedModel = model), scopeId)
@@ -284,17 +329,27 @@ class PluginModelService @Inject constructor(
             origin = origin,
             handleId = handle.id
         )
-        streams[stream.id] = stream
-        stream.job = scope.launch {
-            runStream(
-                stream = stream,
-                provider = provider,
-                systemPrompt = systemPrompt.orEmpty(),
-                messages = messages,
-                tools = tools,
-                params = modelParams,
-                secretValues = config.effectiveApiKeys.map { it.value }
-            )
+        synchronized(lifecycleLock) {
+            ensureAccess(pluginId)
+            if (handles[handle.id] !== handle) {
+                throw PluginHostException("HANDLE_NOT_FOUND", "model handle not found: $handleId")
+            }
+            enforceStreamLimit(pluginId)
+            // 先绑定可取消的惰性任务再发布流，关闭操作不会漏掉尚未赋值的 job。
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                runStream(
+                    stream = stream,
+                    provider = provider,
+                    systemPrompt = systemPrompt.orEmpty(),
+                    messages = messages,
+                    tools = tools,
+                    params = modelParams,
+                    secretValues = config.effectiveApiKeys.map { it.value }
+                )
+            }
+            stream.job = job
+            streams[stream.id] = stream
+            job.start()
         }
         return buildJsonObject { put("streamId", stream.id) }
     }
@@ -350,8 +405,13 @@ class PluginModelService @Inject constructor(
 
     /** 插件停用、卸载或版本替换时调用：关闭全部句柄并取消在途流。 */
     fun closePlugin(pluginId: String) {
-        handles.values.filter { it.pluginId == pluginId }.forEach(::closeHandle)
-        streams.values.filter { it.pluginId == pluginId }.forEach { cancelStream(it) }
+        val closing = synchronized(lifecycleLock) {
+            pluginCloseRevisions[pluginId] = (pluginCloseRevisions[pluginId] ?: 0L) + 1L
+            handles.values.filter { it.pluginId == pluginId }
+                .forEach { handles.remove(it.id, it) }
+            streams.values.filter { it.pluginId == pluginId }
+        }
+        closing.forEach(::cancelStream)
     }
 
     private suspend fun runStream(
@@ -505,11 +565,12 @@ class PluginModelService @Inject constructor(
         synchronized(stream.bufferLock) { readResultJson(stream, emptyList()) }
 
     private fun readResultJson(stream: Stream, events: List<JsonObject>): JsonObject = buildJsonObject {
+        val drained = stream.done && stream.events.isEmpty()
         put("streamId", stream.id)
         put("events", JsonArray(events))
         put("cursor", stream.delivered)
-        put("done", stream.done)
-        if (stream.done) {
+        put("done", drained)
+        if (drained) {
             put("status", stream.status)
             stream.final?.let { put("final", it) }
             stream.error?.let { put("error", it) }
@@ -576,8 +637,11 @@ class PluginModelService @Inject constructor(
     }
 
     private fun closeHandle(handle: Handle) {
-        handles.remove(handle.id, handle)
-        streams.values.filter { it.handleId == handle.id }.forEach { cancelStream(it) }
+        val closing = synchronized(lifecycleLock) {
+            handles.remove(handle.id, handle)
+            streams.values.filter { it.handleId == handle.id }
+        }
+        closing.forEach(::cancelStream)
     }
 
     private fun cleanupStale() {
@@ -598,11 +662,19 @@ class PluginModelService @Inject constructor(
                 "plugin did not declare contributes.modelAccess"
             )
         }
+        val revision = plugin.installRevision()
         handles.values
-            .filter { it.pluginId == pluginId && it.pluginVersion != plugin.record.version }
+            .filter { it.pluginId == pluginId && it.pluginRevision != revision }
             .forEach(::closeHandle)
         return plugin
     }
+
+    private fun InstalledPlugin.installRevision(): InstallRevision = InstallRevision(
+        version = record.version,
+        installRevision = record.installRevision,
+        installedAt = record.installedAt,
+        archiveSha256 = record.archiveSha256
+    )
 
     private suspend fun requireProvider(providerId: String): AIProviderConfig =
         providerRepository.getProviderById(providerId)

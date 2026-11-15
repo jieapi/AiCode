@@ -32,12 +32,23 @@ import com.aicode.feature.workspace.domain.PathHomeResolver
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import java.util.Base64
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -55,6 +66,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PluginModelServiceTest {
 
     private val pluginId = "demo.team"
@@ -98,15 +110,23 @@ class PluginModelServiceTest {
         selectedModel = modelId
     )
 
-    private fun installedPlugin(declared: Boolean = true): InstalledPlugin = InstalledPlugin(
+    private fun installedPlugin(
+        declared: Boolean = true,
+        enabled: Boolean = true,
+        version: String = "1.0.0",
+        installRevision: String? = null,
+        installedAt: Long = 1L,
+        archiveSha256: String = ""
+    ): InstalledPlugin = InstalledPlugin(
         record = PluginRecord(
             id = pluginId,
-            version = "1.0.0",
-            enabled = true,
-            installedAt = 1L,
+            version = version,
+            enabled = enabled,
+            installedAt = installedAt,
             origin = "local",
-            archiveSha256 = "",
-            manifestSha256 = ""
+            archiveSha256 = archiveSha256,
+            manifestSha256 = "",
+            installRevision = installRevision
         ),
         status = com.aicode.feature.plugin.domain.PluginStatus.OK,
         manifest = mockk<PluginManifest>(),
@@ -121,24 +141,30 @@ class PluginModelServiceTest {
         providerConfig: AIProviderConfig = config(),
         modelMetadata: ModelMetadata = metadata(),
         toolRegistry: ToolRegistry = ToolRegistry(),
-        fileAccess: FileAccessProvider = mockk(relaxed = true)
+        fileAccess: FileAccessProvider = mockk(relaxed = true),
+        plugins: MutableStateFlow<List<InstalledPlugin>> = MutableStateFlow(listOf(installedPlugin(declared))),
+        providerFactory: ProviderInstanceFactory? = null,
+        modelMetadataService: ModelMetadataService? = null,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     ): PluginModelService {
         val pluginManager = mockk<PluginManager>(relaxed = true)
-        every { pluginManager.plugins } returns MutableStateFlow(listOf(installedPlugin(declared)))
+        every { pluginManager.plugins } returns plugins
 
         val repository = mockk<AIProviderRepository>(relaxed = true)
         coEvery { repository.getProviderById(any()) } returns providerConfig
         every { repository.getAllProviders() } returns flowOf(listOf(providerConfig))
 
-        val metadataService = mockk<ModelMetadataService>(relaxed = true)
-        coEvery { metadataService.resolve(any(), any(), any()) } returns modelMetadata
-        coEvery { metadataService.resolveAll(any(), any(), any()) } answers {
-            val ids = thirdArg<List<String>>()
-            ids.associateWith { metadata(it) }
+        val metadataService = modelMetadataService ?: mockk<ModelMetadataService>(relaxed = true).also {
+            coEvery { it.resolve(any(), any(), any()) } returns modelMetadata
+            coEvery { it.resolveAll(any(), any(), any()) } answers {
+                val ids = thirdArg<List<String>>()
+                ids.associateWith { metadata(it) }
+            }
         }
 
-        val factory = mockk<ProviderInstanceFactory>(relaxed = true)
-        coEvery { factory.create(any(), any()) } returns provider
+        val factory = providerFactory ?: mockk<ProviderInstanceFactory>(relaxed = true).also {
+            coEvery { it.create(any(), any()) } returns provider
+        }
 
         val defaultModel = mockk<DefaultModelSettingsRepository>(relaxed = true)
         coEvery { defaultModel.getDefaultProviderId() } returns providerId
@@ -164,17 +190,18 @@ class PluginModelServiceTest {
             fileAccess = fileAccess,
             homeResolver = homeResolver,
             workspaceRepository = workspaceRepository,
-            executionModeHolder = executionModeHolder
+            executionModeHolder = executionModeHolder,
+            scope = scope
         )
     }
 
-    private fun createHandle(service: PluginModelService): String = runBlocking {
+    private suspend fun createHandle(service: PluginModelService): String {
         val created = service.create(pluginId, buildJsonObject {
             put("providerId", providerId)
             put("model", modelId)
             put("systemPrompt", "You are a team member")
         }).jsonObject
-        created.getValue("handle").jsonObject.getValue("id").jsonPrimitive.content
+        return created.getValue("handle").jsonObject.getValue("id").jsonPrimitive.content
     }
 
     private fun capturingProvider(
@@ -250,15 +277,32 @@ class PluginModelServiceTest {
         error("stream did not finish in time")
     }
 
-    private fun startStream(
+    private suspend fun startStream(
         service: PluginModelService,
         handleId: String,
         messages: JsonArray = JsonArray(listOf(userMessage("hi")))
-    ): String = runBlocking {
-        service.start(pluginId, buildJsonObject {
-            put("handleId", handleId)
-            put("messages", messages)
-        }, "process").jsonObject.getValue("streamId").jsonPrimitive.content
+    ): String = service.start(pluginId, buildJsonObject {
+        put("handleId", handleId)
+        put("messages", messages)
+    }, "process").jsonObject.getValue("streamId").jsonPrimitive.content
+
+    private suspend fun readBatch(
+        service: PluginModelService,
+        streamId: String,
+        cursor: Int,
+        maxEvents: Int = 500
+    ): JsonObject = service.read(pluginId, buildJsonObject {
+        put("streamId", streamId)
+        put("cursor", cursor)
+        put("maxEvents", maxEvents)
+        put("waitMs", 0)
+    }).jsonObject
+
+    private fun assertPendingBatch(result: JsonObject) {
+        assertFalse(result.getValue("done").jsonPrimitive.boolean)
+        assertFalse(result.containsKey("status"))
+        assertFalse(result.containsKey("final"))
+        assertFalse(result.containsKey("error"))
     }
 
     private fun userMessage(content: String = "hi", images: JsonArray? = null): JsonObject =
@@ -439,6 +483,321 @@ class PluginModelServiceTest {
         assertEquals("hello team", text)
         assertEquals("hello team", final?.getValue("content")?.jsonPrimitive?.content)
         assertEquals(12, final?.getValue("usage")?.jsonObject?.getValue("input")?.jsonPrimitive?.int)
+    }
+
+    @Test
+    fun streamDefersEveryTerminalStatusUntilAllEventBatchesAreDrained() = runTest {
+        for (status in listOf("success", "error", "cancelled")) {
+            val provider = mockk<AIProvider>(relaxed = true)
+            every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+                repeat(5) { emit(AIStreamChunk.ToolCallDeclared("tool-$it")) }
+                when (status) {
+                    "success" -> emit(AIStreamChunk.Final(AIResponse(content = "ok")))
+                    "error" -> throw IllegalStateException("failed")
+                    else -> throw kotlinx.coroutines.CancellationException("cancelled")
+                }
+            }
+            val service = service(provider = provider, scope = backgroundScope)
+            val streamId = startStream(service, createHandle(service))
+            val initial = readBatch(service, streamId, 0)
+            assertPendingBatch(initial)
+            assertTrue(initial.getValue("events").jsonArray.isEmpty())
+            testScheduler.runCurrent()
+
+            val names = mutableListOf<String>()
+            var cursor = 0
+            for (batch in 0..2) {
+                val result = readBatch(service, streamId, cursor, maxEvents = 2)
+                val events = result.getValue("events").jsonArray
+                names += events.map { it.jsonObject.getValue("name").jsonPrimitive.content }
+                cursor += events.size
+                assertEquals(cursor, result.getValue("cursor").jsonPrimitive.int)
+                if (batch < 2) {
+                    assertPendingBatch(result)
+                } else {
+                    assertTrue(result.getValue("done").jsonPrimitive.boolean)
+                    assertEquals(status, result.getValue("status").jsonPrimitive.content)
+                    assertEquals(status == "success", result.containsKey("final"))
+                    assertEquals(status == "error", result.containsKey("error"))
+                }
+                if (batch == 0) {
+                    for (invalidCursor in listOf(0, 6)) {
+                        val error = runCatching {
+                            readBatch(service, streamId, invalidCursor)
+                        }.exceptionOrNull()
+                        assertTrue(error is PluginHostException)
+                        assertEquals("CURSOR_INVALID", (error as PluginHostException).code)
+                    }
+                }
+            }
+            assertEquals((0..4).map { "tool-$it" }, names)
+            assertEquals(5, cursor)
+            val repeated = readBatch(service, streamId, cursor)
+            assertTrue(repeated.getValue("done").jsonPrimitive.boolean)
+            assertTrue(repeated.getValue("events").jsonArray.isEmpty())
+            assertEquals(cursor, repeated.getValue("cursor").jsonPrimitive.int)
+            assertEquals(status, repeated.getValue("status").jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun streamDefersDoneUntilSizeLimitedBatchesAreDrained() = runTest {
+        val text = "x".repeat(16 * 1024)
+        val provider = mockk<AIProvider>(relaxed = true)
+        every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+            repeat(32) { emit(AIStreamChunk.TextDelta(text)) }
+            emit(AIStreamChunk.Final(AIResponse(content = "ok")))
+        }
+        val service = service(provider = provider, scope = backgroundScope)
+        val streamId = startStream(service, createHandle(service))
+        testScheduler.runCurrent()
+
+        val received = StringBuilder()
+        var cursor = 0
+        for (batch in 0..2) {
+            val result = readBatch(service, streamId, cursor)
+            val events = result.getValue("events").jsonArray
+            assertTrue(events.isNotEmpty())
+            assertTrue(events.sumOf { it.toString().toByteArray(Charsets.UTF_8).size } <= 256 * 1024)
+            events.forEach { received.append(it.jsonObject.getValue("text").jsonPrimitive.content) }
+            cursor += events.size
+            assertEquals(cursor, result.getValue("cursor").jsonPrimitive.int)
+            if (batch < 2) {
+                assertPendingBatch(result)
+            } else {
+                assertTrue(result.getValue("done").jsonPrimitive.boolean)
+                assertEquals("success", result.getValue("status").jsonPrimitive.content)
+                assertEquals("ok", result.getValue("final").jsonObject.getValue("content").jsonPrimitive.content)
+            }
+        }
+        assertEquals(32, cursor)
+        assertEquals(text.repeat(32), received.toString())
+    }
+
+    @Test
+    fun createRejectsPluginClosedOrReplacedDuringMetadataPreflight() = runTest {
+        for (closePlugin in listOf(false, true)) {
+            val plugins = MutableStateFlow(listOf(installedPlugin()))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val metadataService = mockk<ModelMetadataService>()
+            coEvery { metadataService.resolve(any(), any(), any()) } coAnswers {
+                entered.complete(Unit)
+                release.await()
+                metadata()
+            }
+            val service = service(
+                plugins = plugins,
+                modelMetadataService = metadataService,
+                scope = backgroundScope
+            )
+            val creating = async { runCatching { createHandle(service) }.exceptionOrNull() }
+            testScheduler.runCurrent()
+            assertTrue(entered.isCompleted)
+
+            if (closePlugin) service.closePlugin(pluginId)
+            else plugins.value = listOf(installedPlugin(installRevision = "new-install"))
+            release.complete(Unit)
+            testScheduler.runCurrent()
+
+            val error = creating.await()
+            assertTrue(error is PluginHostException)
+            assertEquals("PLUGIN_INACTIVE", (error as PluginHostException).code)
+            assertTrue(createHandle(service).isNotBlank())
+        }
+    }
+
+    @Test
+    fun startRejectsHandleClosedDuringMetadataPreflight() = runTest {
+        val provider = mockk<AIProvider>(relaxed = true)
+        val metadataService = mockk<ModelMetadataService>(relaxed = true)
+        coEvery { metadataService.resolve(any(), any(), any()) } returns metadata()
+        val service = service(
+            provider = provider,
+            modelMetadataService = metadataService,
+            scope = backgroundScope
+        )
+        val handleId = createHandle(service)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        coEvery { metadataService.resolve(any(), any(), any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            metadata()
+        }
+        val starting = async {
+            startError(service, handleId, JsonArray(listOf(userMessage())))
+        }
+        testScheduler.runCurrent()
+        assertTrue(entered.isCompleted)
+
+        service.close(pluginId, buildJsonObject { put("handleId", handleId) })
+        release.complete(Unit)
+        testScheduler.runCurrent()
+
+        assertEquals("HANDLE_NOT_FOUND", starting.await()?.code)
+        verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun startRejectsPluginClosedDuringProviderPreflight() = runTest {
+        val provider = mockk<AIProvider>(relaxed = true)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val factory = mockk<ProviderInstanceFactory>()
+        coEvery { factory.create(any(), any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            provider
+        }
+        val service = service(providerFactory = factory, scope = backgroundScope)
+        val handleId = createHandle(service)
+        val starting = async {
+            startError(service, handleId, JsonArray(listOf(userMessage())))
+        }
+        testScheduler.runCurrent()
+        assertTrue(entered.isCompleted)
+
+        service.closePlugin(pluginId)
+        release.complete(Unit)
+        testScheduler.runCurrent()
+
+        assertEquals("HANDLE_NOT_FOUND", starting.await()?.code)
+        verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun startRechecksInactiveOrReplacedPluginAfterPreflight() = runTest {
+        for (replacement in listOf(
+            installedPlugin(enabled = false),
+            installedPlugin(version = "2.0.0"),
+            installedPlugin(installRevision = "new-install"),
+            installedPlugin(installedAt = 2L),
+            installedPlugin(archiveSha256 = "new-archive")
+        )) {
+            val plugins = MutableStateFlow(listOf(installedPlugin()))
+            val provider = mockk<AIProvider>(relaxed = true)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val factory = mockk<ProviderInstanceFactory>()
+            coEvery { factory.create(any(), any()) } coAnswers {
+                entered.complete(Unit)
+                release.await()
+                provider
+            }
+            val service = service(plugins = plugins, providerFactory = factory, scope = backgroundScope)
+            val handleId = createHandle(service)
+            val starting = async {
+                startError(service, handleId, JsonArray(listOf(userMessage())))
+            }
+            testScheduler.runCurrent()
+            assertTrue(entered.isCompleted)
+
+            plugins.value = listOf(replacement)
+            release.complete(Unit)
+            testScheduler.runCurrent()
+
+            val code = if (replacement.isActive) "HANDLE_NOT_FOUND" else "PLUGIN_INACTIVE"
+            assertEquals(code, starting.await()?.code)
+            verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun sameVersionReinstallInvalidatesExistingHandle() = runTest {
+        val plugins = MutableStateFlow(listOf(installedPlugin(installRevision = "old-install")))
+        val provider = mockk<AIProvider>(relaxed = true)
+        val service = service(provider = provider, plugins = plugins, scope = backgroundScope)
+        val handleId = createHandle(service)
+
+        plugins.value = listOf(installedPlugin(installRevision = "new-install"))
+
+        assertStartCode(service, handleId, JsonArray(listOf(userMessage())), "HANDLE_NOT_FOUND")
+        testScheduler.runCurrent()
+        verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun closeDuringStreamDispatchCannotMissJobCancellation() = runTest {
+        for (closePlugin in listOf(false, true)) {
+            var onDispatch: (() -> Unit)? = null
+            val delegate = StandardTestDispatcher(testScheduler)
+            val dispatcher = object : CoroutineDispatcher() {
+                override fun dispatch(context: CoroutineContext, block: Runnable) {
+                    val callback = onDispatch
+                    onDispatch = null
+                    callback?.invoke()
+                    delegate.dispatch(context, block)
+                }
+            }
+            val provider = mockk<AIProvider>(relaxed = true)
+            every { provider.completeStream(any(), any(), any(), any()) } returns
+                flowOf(AIStreamChunk.Final(AIResponse(content = "ok")))
+            val service = service(
+                provider = provider,
+                scope = CoroutineScope(backgroundScope.coroutineContext + dispatcher)
+            )
+            val handleId = createHandle(service)
+            var closed = false
+            onDispatch = {
+                if (closePlugin) service.closePlugin(pluginId)
+                else service.close(pluginId, buildJsonObject { put("handleId", handleId) })
+                closed = true
+            }
+            val streamId = startStream(service, handleId)
+            testScheduler.runCurrent()
+            assertTrue(closed)
+
+            val result = readBatch(service, streamId, 0)
+            assertTrue(result.getValue("done").jsonPrimitive.boolean)
+            assertEquals("cancelled", result.getValue("status").jsonPrimitive.content)
+            assertTrue(result.getValue("events").jsonArray.isEmpty())
+            verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun closingRunningStreamsCancelsProviderAndDrainsBufferedEvents() = runTest {
+        for (close in listOf("cancel", "handle", "plugin", "origin")) {
+            val entered = CompletableDeferred<Unit>()
+            val cancelled = CompletableDeferred<Unit>()
+            val provider = mockk<AIProvider>(relaxed = true)
+            every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+                try {
+                    repeat(3) { emit(AIStreamChunk.ToolCallDeclared("tool-$it")) }
+                    entered.complete(Unit)
+                    awaitCancellation()
+                } finally {
+                    cancelled.complete(Unit)
+                }
+            }
+            val service = service(provider = provider, scope = backgroundScope)
+            val handleId = createHandle(service)
+            val streamId = startStream(service, handleId)
+            testScheduler.runCurrent()
+            assertTrue(entered.isCompleted)
+
+            when (close) {
+                "cancel" -> service.cancel(pluginId, buildJsonObject { put("streamId", streamId) })
+                "handle" -> service.close(pluginId, buildJsonObject { put("handleId", handleId) })
+                "plugin" -> service.closePlugin(pluginId)
+                else -> service.closeOrigin("process")
+            }
+            testScheduler.runCurrent()
+            assertTrue(cancelled.isCompleted)
+
+            for (cursor in 0..2) {
+                val result = readBatch(service, streamId, cursor, maxEvents = 1)
+                val event = result.getValue("events").jsonArray.single().jsonObject
+                assertEquals("tool-$cursor", event.getValue("name").jsonPrimitive.content)
+                assertEquals(cursor + 1, result.getValue("cursor").jsonPrimitive.int)
+                if (cursor < 2) assertPendingBatch(result)
+                else {
+                    assertTrue(result.getValue("done").jsonPrimitive.boolean)
+                    assertEquals("cancelled", result.getValue("status").jsonPrimitive.content)
+                }
+            }
+        }
     }
 
     @Test

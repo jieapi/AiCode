@@ -466,3 +466,33 @@ test('extended host methods forward parameters', async () => {
 
   assert.deepEqual(harness.errors, []);
 });
+
+for (const status of ['success', 'error', 'cancelled']) {
+  test('model.stream consumes every buffered batch before the ' + status + ' result', async () => {
+    let index = 0;
+    const batches = [
+      { events: [{ type: 'text', text: 'first' }], cursor: 1, done: false },
+      { events: [{ type: 'text', text: 'second' }], cursor: 2, done: false },
+      { events: [{ type: 'text', text: 'last' }], cursor: 3, done: true, status }
+    ];
+    if (status === 'success') batches[2].final = { content: 'firstsecondlast' };
+    if (status === 'error') batches[2].error = { code: 'UPSTREAM_ERROR', message: 'failed' };
+    const harness = loadSdk((request, env) => {
+      if (request.method === 'model.start') env.resolve(request, { streamId: 'stream-1' });
+      else {
+        assert.equal(request.method, 'model.read');
+        assert.equal(request.params.cursor, index);
+        env.resolve(request, { streamId: 'stream-1', ...batches[index++] });
+      }
+    });
+    const received = [];
+    const result = await harness.sdk.model.stream({ handleId: 'handle-1', messages: [] }, event => {
+      received.push(event.text);
+    });
+    assert.equal(index, 3);
+    assert.deepEqual(received, ['first', 'second', 'last']);
+    assert.equal(result.done, true);
+    assert.equal(result.status, status);
+    assert.deepEqual(harness.errors, []);
+  });
+}

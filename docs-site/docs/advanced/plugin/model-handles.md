@@ -29,7 +29,7 @@
 | `listProviders()` | 列出已配置供应商，不返回 Key、地址、自定义头 |
 | `listModels({ providerId })` | 列出该供应商已添加的模型及窗口、能力、单价 |
 | `create({ providerId, model, name?, systemPrompt?, params? })` | 创建句柄 |
-| `close(handleId)` | 关闭句柄并取消它的流；进程侧为 `host.model.close({ handleId })` |
+| `close(handleId)` | 关闭句柄并取消它的流；尚在预检、未发出的请求也不能再用该句柄启动。进程侧为 `host.model.close({ handleId })` |
 | `start({ handleId, messages, tools?, systemPrompt?, params? })` | 发起一次流式补全，立即返回 `streamId` |
 | `read({ streamId, cursor?, maxEvents?, waitMs? })` | 按 cursor 读取一批事件 |
 | `cancel({ streamId })` | 取消请求，保留已产生的事件 |
@@ -267,6 +267,8 @@ if (result.final.images) {
 | `toolCall` | `name` | 模型开始产出工具调用；宿主不执行，完整调用在 `final.toolCalls` |
 | `retry` | `attempt`、`maxRetries`、`error.code`、`error.statusCode?` | 网络重试提示 |
 | `keySwitch` | `index`、`total` | 多 Key 自动切换提示 |
+
+只有上游请求已经结束、且缓冲事件已全部返回时，`read` 才返回 `done: true`。即使请求已成功、失败或取消，只要仍有事件未读，就应继续携带上一批的 `cursor` 读取；`aicode.model.stream` 会自动完成这个循环。
 
 `done: true` 时带 `status`：
 
