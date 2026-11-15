@@ -95,6 +95,7 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.tools.list` / `execute` / `pending` / `resolve`、`host.mcp.status` | 见下表 | 工具目录、代执行与审批，以及 MCP 状态 |
 | `host.http.request` | 见下表 | 宿主代理 HTTP 请求 |
 | `host.overlay.create` / `close` / `postMessage` / `update` | 同页面桥 | 管理系统浮层 |
+| `host.ports.forward` / `close` / `list` | 见下表 | 把服务器端口映射到手机 loopback |
 | `plugin.event` | `{name, payload}` | 通知，推送给同插件已打开的页面 |
 
 `host.*` 是普通 JSON-RPC 请求，需要插件自行生成 `id`，并将宿主响应与推送分开处理。最小 JavaScript 消息循环参见[快速开始](/advanced/plugin/quick-start)。
@@ -165,6 +166,9 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.overlay.update` | `{overlayId, width?, height?, visible?, visibilityPolicy?, dx?, dy?}` | 更新浮层 |
 | `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭浮层 |
 | `host.overlay.postMessage` | `{overlayId?, surface?, payload}` | 向浮层页面发送消息 |
+| `host.ports.forward` | `{port, host?, localPort?}` | `{id, localPort, remoteHost, remotePort, url, direct}`；`host` 默认 `127.0.0.1`，`localPort` 被占用时向后顺延，以返回值为准 |
+| `host.ports.close` | `{id}` | `{closed}`；只能关闭本插件建立的映射 |
+| `host.ports.list` | 无 | 本插件的映射数组 |
 
 文件路径是当前执行环境的真实绝对路径：本地模式为容器内路径，SSH 模式为远端服务器路径。`~` 展开到当前 home，裸相对路径挂到工作区根。插件数据目录有稳定的虚拟根 `data://`；进程侧同时会拿到 `AICODE_DATA_DIR` 与 `AICODE_WORKSPACE`。
 
@@ -186,6 +190,12 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 `host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
 
 `host.http.request` 只接受 http/https，不跟随重定向、不注入宿主凭据；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
+
+### 端口映射
+
+`host.ports.forward` 把远程服务器视角的 `host:port` 映射到手机 `127.0.0.1:localPort`，复用宿主已建立的 SSH 连接，插件不接触服务器凭据。仅绑定 `127.0.0.1`，不向局域网暴露；同一插件重复映射同一目标会复用原映射；每插件最多 8 条、全局 32 条。
+
+本地容器模式下容器与 App 处于同一网络命名空间，无需隧道：返回 `direct: true`，`url` 可直接访问。SSH 模式下建隧道前会先探测目标，目标未监听或服务器 `AllowTcpForwarding no` 时立即返回 `TARGET_UNREACHABLE`；连接断开或切换执行环境时宿主统一回收映射，不会跨连接残留。
 
 ### 工具目录与代执行
 
