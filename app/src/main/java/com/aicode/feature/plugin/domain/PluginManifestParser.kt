@@ -55,6 +55,7 @@ object PluginManifestParser {
     private val WORKSPACE_TOOL_KEYS = setOf("id", "title", "description", "icon", "category", "pageFile")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
+    private val BACKUP_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
     private val OVERLAY_SURFACE_KEYS = setOf("id", "page", "width", "height", "draggable", "snap")
 
@@ -75,6 +76,7 @@ object PluginManifestParser {
     private const val MAX_IDS_PER_TYPE = 64
     private const val MAX_PROVIDER_URL = 2048
     private const val MAX_SHIZUKU_PURPOSE = 200
+    private const val MAX_BACKUP_PURPOSE = 200
     private const val MAX_OVERLAY_PURPOSE = 200
     private const val MAX_WORKSPACE_TOOL_ICON = 32
     private const val MAX_WORKSPACE_TOOL_CATEGORY = 32
@@ -155,6 +157,7 @@ object PluginManifestParser {
                     providers = contributes.providers,
                     shizuku = contributes.shizuku,
                     overlay = contributes.overlay,
+                    backup = contributes.backup,
                     configPage = contributes.configPage ?: readConfigPage(obj["configPage"], "configPage"),
                     icon = icon
                 )
@@ -392,6 +395,7 @@ object PluginManifestParser {
             val providers: List<PluginProviderRef>,
             val shizuku: PluginShizukuRef?,
             val overlay: PluginOverlayRef?,
+            val backup: PluginBackupRef?,
             val configPage: String?
         )
 
@@ -402,7 +406,7 @@ object PluginManifestParser {
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "uiEntries" &&
                     it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
-                    it != "shizuku" && it != "overlay" && it != "configPage"
+                    it != "shizuku" && it != "overlay" && it != "backup" && it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
                 ok = false
@@ -429,16 +433,35 @@ object PluginManifestParser {
                     if (contributes["overlay"] != null) ok = false
                     null
                 }
+            val backup = readBackup(contributes["backup"], "contributes.backup")
+                ?: run {
+                    if (contributes["backup"] != null) ok = false
+                    null
+                }
+            if (hooks.any { it.event in PluginHookEvents.BACKUP } && backup == null) {
+                missing("contributes.backup")
+                ok = false
+            }
+            if (uiEntries.any { it.slot == PluginUiSlots.BACKUP_DATA }) {
+                if (backup == null) {
+                    missing("contributes.backup")
+                    ok = false
+                }
+                if (hooks.none { it.event == PluginHookEvents.BACKUP_EXPORT_BEFORE }) {
+                    missing("contributes.hooks")
+                    ok = false
+                }
+            }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && uiEntries.isEmpty() &&
                 tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
-                shizuku == null && overlay == null && configPage == null
+                shizuku == null && overlay == null && backup == null && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
             return if (ok) Contributes(
-                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers, shizuku, overlay, configPage
+                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers, shizuku, overlay, backup, configPage
             ) else null
         }
 
@@ -641,6 +664,21 @@ object PluginManifestParser {
                 return null
             }
             return PluginShizukuRef(purpose)
+        }
+
+        /** 缺省表示不接收备份事件；声明只需给出用途，展示在使用者授权界面。 */
+        private fun readBackup(raw: JsonElement?, path: String): PluginBackupRef? {
+            if (raw == null) return null
+            val obj = raw as? JsonObject ?: return null.also { invalid(path) }
+            obj.keys.filter { it !in BACKUP_KEYS }.forEach {
+                err(PluginErrorCode.UNSUPPORTED_FIELD, "$path.$it")
+            }
+            val purpose = obj["purpose"]?.stringOrNull()?.trim()
+            if (purpose.isNullOrEmpty() || purpose.length > MAX_BACKUP_PURPOSE) {
+                invalid("$path.purpose")
+                return null
+            }
+            return PluginBackupRef(purpose)
         }
 
         private fun readOverlay(raw: JsonElement?, path: String): PluginOverlayRef? {
@@ -864,23 +902,33 @@ object PluginManifestParser {
                 }
                 if (handlerRaw != null && handler == null) { invalid("$itemPath.handler"); ok = false }
                 if (confirmRaw != null && confirm == null) { invalid("$itemPath.confirm"); ok = false }
-                val kinds = listOfNotNull(page, handler)
-                if (kinds.size != 1) { invalid(itemPath); ok = false }
-                if (confirm == true && handler == null) { invalid("$itemPath.confirm"); ok = false }
-                if (slot != null && slot in PluginUiSlots.ACTION_ONLY && page != null) {
-                    invalid("$itemPath.page")
-                    ok = false
-                }
-                if (slot != null && PluginUiSlots.isSettingsSlot(slot) && handler != null) {
-                    invalid("$itemPath.slot")
-                    ok = false
+                if (slot != null) {
+                    if (slot in PluginUiSlots.DATA_ONLY) {
+                        // 数据选项由宿主渲染开关，不接受页面、动作或确认框。
+                        if (page != null) { invalid("$itemPath.page"); ok = false }
+                        if (handlerRaw != null) { invalid("$itemPath.handler"); ok = false }
+                        if (confirmRaw != null) { invalid("$itemPath.confirm"); ok = false }
+                        if (result.count { it.slot == slot } >= 1) { invalid("$itemPath.slot"); ok = false }
+                    } else {
+                        val kinds = listOfNotNull(page, handler)
+                        if (kinds.size != 1) { invalid(itemPath); ok = false }
+                        if (confirm == true && handler == null) { invalid("$itemPath.confirm"); ok = false }
+                        if (slot in PluginUiSlots.ACTION_ONLY && page != null) {
+                            invalid("$itemPath.page")
+                            ok = false
+                        }
+                        if (PluginUiSlots.isSettingsSlot(slot) && handler != null) {
+                            invalid("$itemPath.slot")
+                            ok = false
+                        }
+                        if (result.count { it.slot == slot } >= PluginUiSlots.MAX_ENTRIES_PER_PLUGIN) {
+                            invalid("$itemPath.slot")
+                            ok = false
+                        }
+                    }
                 }
                 if (icon.isEmpty() || icon.length > 32) {
                     invalid("$itemPath.icon")
-                    ok = false
-                }
-                if (slot != null && result.count { it.slot == slot } >= PluginUiSlots.MAX_ENTRIES_PER_PLUGIN) {
-                    invalid("$itemPath.slot")
                     ok = false
                 }
                 if (ok && id != null && title != null && slot != null) {

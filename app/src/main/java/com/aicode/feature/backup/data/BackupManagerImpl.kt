@@ -30,6 +30,7 @@ import com.aicode.feature.backup.domain.RestoreStats
 import com.aicode.feature.backup.domain.TodoItemDto
 import com.aicode.feature.backup.domain.WorkspaceBackupMeta
 import com.aicode.feature.backup.domain.toMetadata
+import com.aicode.feature.plugin.runtime.PluginBackupArchiveService
 import com.aicode.feature.settings.data.local.dao.AIProviderDao
 import com.aicode.feature.settings.data.local.entity.AIProviderEntity
 import com.aicode.feature.settings.data.repository.CompactionModelSettingsRepository
@@ -56,6 +57,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -94,7 +98,8 @@ class BackupManagerImpl @Inject constructor(
     private val visionModelSettingsRepository: VisionModelSettingsRepository,
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val syncSettingsRepository: SyncSettingsRepository,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val pluginArchive: PluginBackupArchiveService
 ) : BackupManager {
 
     private val json = Json {
@@ -109,21 +114,31 @@ class BackupManagerImpl @Inject constructor(
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
     }.getOrDefault("")
 
-    override suspend fun export(password: CharArray?, options: BackupOptions, output: OutputStream) {
+    override suspend fun export(
+        password: CharArray?,
+        options: BackupOptions,
+        output: OutputStream,
+        pluginIds: Set<String>
+    ) {
         withContext(Dispatchers.IO) {
             val pw = password?.takeIf { it.isNotEmpty() }
-            if (pw == null) {
-                writeTarGz(output, options)
-                return@withContext
-            }
-            val temp = createTempFile()
+            val sections = pluginArchive.prepareExport(pluginIds)
             try {
-                FileOutputStream(temp).buffered().use { writeTarGz(it, options) }
-                FileInputStream(temp).buffered().use { input ->
-                    BackupCrypto.encryptStream(input, output, pw)
+                if (pw == null) {
+                    writeTarGz(output, options, sections)
+                    return@withContext
+                }
+                val temp = createTempFile()
+                try {
+                    FileOutputStream(temp).buffered().use { writeTarGz(it, options, sections) }
+                    FileInputStream(temp).buffered().use { input ->
+                        BackupCrypto.encryptStream(input, output, pw)
+                    }
+                } finally {
+                    temp.delete()
                 }
             } finally {
-                temp.delete()
+                pluginArchive.cleanupExport(sections)
             }
         }
     }
@@ -281,7 +296,11 @@ class BackupManagerImpl @Inject constructor(
 
     // ── 导出辅助 ──────────────────────────────────────────────
 
-    private suspend fun writeTarGz(output: OutputStream, options: BackupOptions) {
+    private suspend fun writeTarGz(
+        output: OutputStream,
+        options: BackupOptions,
+        pluginSections: List<PluginBackupArchiveService.Section>
+    ) {
         val stream = object : FilterOutputStream(output) {
             override fun write(bytes: ByteArray, offset: Int, length: Int) {
                 out.write(bytes, offset, length)
@@ -334,6 +353,7 @@ class BackupManagerImpl @Inject constructor(
                             }
                         }
                     }
+                    writePluginSections(tar, pluginSections)
                 }
             }
         }
@@ -385,6 +405,31 @@ class BackupManagerImpl @Inject constructor(
         tar.putArchiveEntry(entry)
         tar.write(content)
         tar.closeArchiveEntry()
+    }
+
+    /** 把插件写入的暂存目录打包为 `plugins/<pluginId>/…` 区段。 */
+    private fun writePluginSections(
+        tar: TarArchiveOutputStream,
+        sections: List<PluginBackupArchiveService.Section>
+    ) {
+        sections.forEach { section ->
+            var total = 0L
+            for (relative in pluginArchive.listExportFiles(section)) {
+                if (!pluginArchive.isValidSectionPath(relative)) continue
+                val bytes = runCatching { pluginArchive.readExportFile(section, relative) }.getOrNull()
+                    ?: continue
+                if (bytes.size > MAX_PLUGIN_FILE_BYTES) {
+                    FileLogger.w(TAG, "跳过过大的插件文件: ${section.pluginId}/$relative (${bytes.size}B)")
+                    continue
+                }
+                if (total + bytes.size > MAX_PLUGIN_TOTAL_BYTES) {
+                    FileLogger.w(TAG, "插件区段超过上限，后续文件已跳过: ${section.pluginId}")
+                    break
+                }
+                writeTarEntry(tar, "$PLUGIN_PREFIX${section.pluginId}/$relative", bytes)
+                total += bytes.size
+            }
+        }
     }
 
     /**
@@ -483,63 +528,107 @@ class BackupManagerImpl @Inject constructor(
 
     private suspend fun restoreFromTar(tar: TarArchiveInputStream, selectedWorkspaces: Set<String>?): RestoreStats {
         val restoreMapping = mutableMapOf<String, Workspace>()
+        val importedPlugins = mutableSetOf<String>()
+        val pluginDirs = mutableMapOf<String, String?>()
+        val pluginBytes = mutableMapOf<String, Long>()
         var metadata: BackupMetadata? = null
         var stats = RestoreStats()
-        var entry = tar.nextEntry
-        while (entry != null) {
-            when (entry.name) {
-                FILE_LEGACY_SNAPSHOT -> {
-                    val plain = tar.readBytes()
-                    val snapshot = json.decodeFromString(BackupSnapshot.serializer(), String(plain, Charsets.UTF_8))
-                    checkVersion(snapshot.schemaVersion)
-                    return restoreLegacy(snapshot)
-                }
-                FILE_METADATA -> {
-                    val plain = tar.readBytes()
-                    metadata = json.decodeFromString(BackupMetadata.serializer(), String(plain, Charsets.UTF_8))
-                    checkVersion(metadata.schemaVersion)
-                }
-                FILE_SESSIONS -> {
-                    val count = restoreJsonl(tar, ChatSessionDto.serializer()) { dtos ->
-                        chatSessionDao.upsertAll(
-                            dtos.map { dto ->
-                                dto.copy(
-                                    workspacePath = resolveSessionWorkspace(dto.workspacePath, restoreMapping)
-                                ).toEntity()
-                            }
-                        )
+        try {
+            var entry = tar.nextEntry
+            while (entry != null) {
+                when (entry.name) {
+                    FILE_LEGACY_SNAPSHOT -> {
+                        val plain = tar.readBytes()
+                        val snapshot = json.decodeFromString(BackupSnapshot.serializer(), String(plain, Charsets.UTF_8))
+                        checkVersion(snapshot.schemaVersion)
+                        return restoreLegacy(snapshot)
                     }
-                    FileLogger.i(TAG, "恢复会话 $count 条")
-                    stats += RestoreStats(chatSessions = count)
-                }
-                FILE_MESSAGES -> {
-                    val count = restoreJsonl(tar, AgentMessageDto.serializer()) { dtos ->
-                        agentMessageDao.insertAll(dtos.map { it.toEntity() })
+                    FILE_METADATA -> {
+                        val plain = tar.readBytes()
+                        metadata = json.decodeFromString(BackupMetadata.serializer(), String(plain, Charsets.UTF_8))
+                        checkVersion(metadata.schemaVersion)
                     }
-                    FileLogger.i(TAG, "恢复消息 $count 条")
-                    stats += RestoreStats(agentMessages = count)
-                }
-                FILE_TODOS -> {
-                    val count = restoreJsonl(tar, TodoItemDto.serializer()) { dtos ->
-                        todoItemDao.upsertAll(dtos.map { it.toEntity() })
+                    FILE_SESSIONS -> {
+                        val count = restoreJsonl(tar, ChatSessionDto.serializer()) { dtos ->
+                            chatSessionDao.upsertAll(
+                                dtos.map { dto ->
+                                    dto.copy(
+                                        workspacePath = resolveSessionWorkspace(dto.workspacePath, restoreMapping)
+                                    ).toEntity()
+                                }
+                            )
+                        }
+                        FileLogger.i(TAG, "恢复会话 $count 条")
+                        stats += RestoreStats(chatSessions = count)
                     }
-                    FileLogger.i(TAG, "恢复待办 $count 条")
-                    stats += RestoreStats(todoItems = count)
-                }
-                else -> {
-                    if (entry.name.startsWith(WORKSPACE_PREFIX)) {
-                        stats += restoreWorkspaceEntry(tar, entry.name, selectedWorkspaces, restoreMapping)
+                    FILE_MESSAGES -> {
+                        val count = restoreJsonl(tar, AgentMessageDto.serializer()) { dtos ->
+                            agentMessageDao.insertAll(dtos.map { it.toEntity() })
+                        }
+                        FileLogger.i(TAG, "恢复消息 $count 条")
+                        stats += RestoreStats(agentMessages = count)
+                    }
+                    FILE_TODOS -> {
+                        val count = restoreJsonl(tar, TodoItemDto.serializer()) { dtos ->
+                            todoItemDao.upsertAll(dtos.map { it.toEntity() })
+                        }
+                        FileLogger.i(TAG, "恢复待办 $count 条")
+                        stats += RestoreStats(todoItems = count)
+                    }
+                    else -> {
+                        when {
+                            entry.name.startsWith(WORKSPACE_PREFIX) ->
+                                stats += restoreWorkspaceEntry(tar, entry.name, selectedWorkspaces, restoreMapping)
+                            entry.name.startsWith(PLUGIN_PREFIX) ->
+                                restorePluginEntry(tar, entry, importedPlugins, pluginDirs, pluginBytes)
+                        }
                     }
                 }
+                entry = tar.nextEntry
             }
-            entry = tar.nextEntry
+            val meta = metadata ?: run {
+                FileLogger.e(TAG, "导入失败：tar 中缺少 metadata.json")
+                error("不是有效的 AiCode 备份文件：缺少 metadata.json")
+            }
+            FileLogger.i(TAG, "tar 解析完成，开始还原元数据段")
+            val finalStats = stats + restoreMeta(meta)
+            pluginArchive.finishImport(importedPlugins, finalStats.toJson())
+            return finalStats
+        } finally {
+            pluginArchive.cleanupImport(importedPlugins)
         }
-        val meta = metadata ?: run {
-            FileLogger.e(TAG, "导入失败：tar 中缺少 metadata.json")
-            error("不是有效的 AiCode 备份文件：缺少 metadata.json")
-        }
-        FileLogger.i(TAG, "tar 解析完成，开始还原元数据段")
-        return stats + restoreMeta(meta)
+    }
+
+    /**
+     * 还原 `plugins/<pluginId>/<相对路径>` 区段：只写入选中的插件数据目录，
+     * 由插件在 `backup.import.finished` 中自行写回真实路径。
+     */
+    private suspend fun restorePluginEntry(
+        tar: TarArchiveInputStream,
+        entry: TarArchiveEntry,
+        imported: MutableSet<String>,
+        dirs: MutableMap<String, String?>,
+        bytesByPlugin: MutableMap<String, Long>
+    ) {
+        if (entry.isDirectory) return
+        val segments = entry.name.split("/", limit = 3)
+        if (segments.size != 3) return
+        val pluginId = segments[1]
+        val relative = segments[2]
+        if (!pluginArchive.isValidSectionPath(relative)) return
+        val dir = if (dirs.containsKey(pluginId)) {
+            dirs[pluginId]
+        } else {
+            pluginArchive.importTarget(pluginId).also { dirs[pluginId] = it }
+        } ?: return
+        val size = entry.size
+        if (size < 0 || size > MAX_PLUGIN_FILE_BYTES) return
+        val used = bytesByPlugin[pluginId] ?: 0L
+        if (used + size > MAX_PLUGIN_TOTAL_BYTES) return
+        val bytes = tar.readBytes()
+        pluginArchive.writeImportFile(dir, relative, bytes)
+        bytesByPlugin[pluginId] = used + bytes.size
+        imported += pluginId
     }
 
     /** 逐行解析 jsonl 条目，每 [PAGE_SIZE] 条回调一次批量插入；返回该文件的总条数。 */
@@ -884,6 +973,18 @@ class BackupManagerImpl @Inject constructor(
     private fun TodoItemEntity.toDto() = TodoItemDto(id, sessionId, subject, description, status, priority, order, createdAt, updatedAt)
     private fun TodoItemDto.toEntity() = TodoItemEntity(id, sessionId, subject, description, status, priority, order, createdAt, updatedAt)
 
+    private fun RestoreStats.toJson(): JsonObject = buildJsonObject {
+        put("providers", providers)
+        put("remoteConnections", remoteConnections)
+        put("remoteMounts", remoteMounts)
+        put("chatSessions", chatSessions)
+        put("agentMessages", agentMessages)
+        put("todoItems", todoItems)
+        put("mcpServers", mcpServers)
+        put("globalPermissionRules", globalPermissionRules)
+        put("workspaceFiles", workspaceFiles)
+    }
+
     private companion object {
         const val TAG = "BackupManager"
         const val PAGE_SIZE = 500
@@ -893,6 +994,9 @@ class BackupManagerImpl @Inject constructor(
         const val FILE_TODOS = "todoItems.jsonl"
         const val FILE_LEGACY_SNAPSHOT = "snapshot.json"
         const val WORKSPACE_PREFIX = "workspaces/"
+        const val PLUGIN_PREFIX = "plugins/"
+        const val MAX_PLUGIN_FILE_BYTES = 8L * 1024 * 1024
+        const val MAX_PLUGIN_TOTAL_BYTES = 64L * 1024 * 1024
     }
 }
 

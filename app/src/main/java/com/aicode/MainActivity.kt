@@ -658,6 +658,7 @@ fun AppNavigation(
         val entryContext = context
         when (entry.kind) {
             PluginUiEntryKind.PAGE -> openPluginEntryPage(entry, entryContext)
+            PluginUiEntryKind.DATA -> Unit
             PluginUiEntryKind.ACTION -> {
                 val actionContext = if (entryContext.sessionId == null) {
                     entryContext.copy(sessionId = agentViewModel.currentSessionId.value)

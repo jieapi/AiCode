@@ -28,10 +28,59 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 | `agent.tool.started` | 一次工具调用真正开始执行时 |
 | `agent.tool.finished` | 一次工具调用结束；成功或失败 |
 | `agent.compaction` | 上下文被压缩时 |
+| `backup.export.before` | 一次备份准备写入归档前；需声明 `contributes.backup` 并由使用者授权 |
+| `backup.import.finished` | 一次还原完成、插件区段已解到暂存目录后；需声明 `contributes.backup` 并由使用者授权 |
 
 只读事件的 payload 不包含消息正文、工具参数、工具结果和模型输出。
 
 `plugin.installed` 与 `plugin.enabled` 异步派发，不阻塞安装或启用。`plugin.uninstalled` 与 `plugin.disabled` 在状态变更前同步等待，给插件清理自己数据的机会；单次最多等待 10 秒，超时或失败后继续卸载/停用，插件不能阻止操作。这四个事件只派发给事件对应的插件，不广播给其他插件。
+
+### 备份与还原事件
+
+备份事件会带出完整备份文件，可能包含 API Key、SSH 凭据与会话记录，属于敏感数据：
+
+- 插件必须声明 `contributes.backup`（用途说明），并由使用者在插件详情的「权限」中单独开启「备份与还原事件」；未授权不会派发。
+- 插件还要在 `backup.data` 槽位声明一个数据选项（`id` / `title` / `icon`，不能写 `page` 或 `handler`）。宿主在备份页「选择导出数据」渲染开关；勾选后该插件参与本次导出与还原。
+- 导出前宿主调用 `backup.export.before`，payload 的 `dir` 是 `data://backup-export`；插件把额外数据写入其中（建议用 `global/…` 与 `project/…` 两个子目录）。宿主将其打包为归档内的 `plugins/<pluginId>/…` 区段。
+- 导入时宿主先把该区段解到 `data://backup-import`，还原完主数据后再调用 `backup.import.finished`；插件从 `dir` 把数据写回真实路径。
+- 暂存目录由宿主在操作结束后清理；如果宿主本次已经恢复了 MCP（`stats.mcpServers > 0`），插件应跳过自己区段里的 `mcp.json`，避免覆盖宿主版本。
+- 事件由宿主同步等待：导出前把数据写入暂存区，导入后再写回真实路径；失败或超时只写日志，不阻塞备份与还原。
+
+```json
+{
+  "contributes": {
+    "backup": {"purpose": "把额外数据随备份一起导出"},
+    "hooks": [
+      {"id": "before-export", "event": "backup.export.before", "handler": "hooks.onExportBefore"},
+      {"id": "after-import", "event": "backup.import.finished", "handler": "hooks.onImport"}
+    ],
+    "uiEntries": [
+      {"id": "extra-data", "title": "记忆 / 技能", "slot": "backup.data", "icon": "package"}
+    ]
+  }
+}
+```
+
+插件把数据写入 `dir`，宿主负责打包；导入时从 `dir` 读回。数据量较大时仍应控制在单文件 8 MiB、单插件 64 MiB 以内（宿主限制）。
+
+```js
+const handlers = {
+  'hooks.onExportBefore': async (payload) => {
+    await hostCall('host.fs.write', {
+      path: payload.dir + '/global/memory/note.md',
+      content: '...'
+    });
+    return {logs: ['extra data staged']};
+  },
+  'hooks.onImport': async (payload) => {
+    const file = await hostCall('host.fs.read', {path: payload.dir + '/global/memory/note.md'});
+    await hostCall('host.fs.write', {path: '~/.aicode/memory/note.md', content: file.content});
+    return {logs: [`restored ${payload.files} files`]};
+  }
+};
+```
+
+完整实现见[示例库](/advanced/plugin/examples)的 `backup-helper`：它把记忆、技能、MCP 配置与子代理写入宿主备份包，并在还原后写回。
 
 ## 可写事件
 
@@ -93,6 +142,8 @@ payload 仍包含完整请求体（可能含对话内容），仅应安装可信
 | `plugin.uninstalled` | `pluginId`、`version` |
 | `plugin.enabled` | `pluginId`、`version` |
 | `plugin.disabled` | `pluginId`、`version` |
+| `backup.export.before` | `dir`=`data://backup-export` |
+| `backup.import.finished` | `dir`=`data://backup-import`、`files`（区段文件数）、`stats`（宿主还原统计） |
 | `agent.tool.before` | `callId`、`toolName`、`arguments` |
 | `agent.tool.after` | `callId`、`toolName`、`status=success`、`data` |
 | `agent.http.before` | `url`、`method`、`headers`、`body` |

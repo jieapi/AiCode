@@ -2096,6 +2096,8 @@
 
     <string name="plugins_permissions_section">Permissions</string>
     <string name="plugins_shizuku_section">Shizuku</string>
+    <string name="plugins_backup_section">Backup &amp; restore events</string>
+    <string name="plugins_backup_permission_required">Enable “Backup &amp; restore events” in the plugin details first</string>
     <string name="plugins_shizuku_system_state">System status: %1$s</string>
     <string name="plugins_overlay_section">Overlay</string>
     <string name="plugins_overlay_system_missing">Enable "Display over other apps" in Settings → App permissions first.</string>

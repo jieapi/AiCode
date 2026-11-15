@@ -497,7 +497,9 @@ internal fun PluginDetailSection(
     shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
     onSetShizukuGranted: (Boolean) -> Unit = {},
     overlayGranted: Boolean = false,
-    onSetOverlayGranted: (Boolean) -> Unit = {}
+    onSetOverlayGranted: (Boolean) -> Unit = {},
+    backupGranted: Boolean = false,
+    onSetBackupGranted: (Boolean) -> Unit = {}
 ) {
     val languageTag = currentLanguageTag()
     val configPage = plugin.content.configPage
@@ -586,7 +588,9 @@ internal fun PluginDetailSection(
                 shizukuState = shizukuState,
                 onSetShizukuGranted = onSetShizukuGranted,
                 overlayGranted = overlayGranted,
-                onSetOverlayGranted = onSetOverlayGranted
+                onSetOverlayGranted = onSetOverlayGranted,
+                backupGranted = backupGranted,
+                onSetBackupGranted = onSetBackupGranted
             )
         } else {
             // Tab 1: 插件自己的专属 WebView 配置页面
@@ -615,7 +619,9 @@ private fun PluginNativeConfigContent(
     shizukuState: ShizukuState = ShizukuState.NOT_INSTALLED,
     onSetShizukuGranted: (Boolean) -> Unit = {},
     overlayGranted: Boolean = false,
-    onSetOverlayGranted: (Boolean) -> Unit = {}
+    onSetOverlayGranted: (Boolean) -> Unit = {},
+    backupGranted: Boolean = false,
+    onSetBackupGranted: (Boolean) -> Unit = {}
 ) {
     val manifest = plugin.manifest
     val context = LocalContext.current
@@ -671,7 +677,7 @@ private fun PluginNativeConfigContent(
             }
         }
 
-        if (plugin.content.shizuku != null || plugin.content.overlay != null) {
+        if (plugin.content.shizuku != null || plugin.content.overlay != null || plugin.content.backup != null) {
             SettingsGroupHeader(text = stringResource(R.string.plugins_permissions_section))
             SettingsGroup {
                 plugin.content.shizuku?.let { declaration ->
@@ -711,7 +717,7 @@ private fun PluginNativeConfigContent(
                     }
                 }
 
-                if (plugin.content.shizuku != null && plugin.content.overlay != null) {
+                if (plugin.content.shizuku != null && (plugin.content.overlay != null || plugin.content.backup != null)) {
                     SettingsDivider()
                 }
 
@@ -745,6 +751,37 @@ private fun PluginNativeConfigContent(
                             checked = overlayGranted,
                             onCheckedChange = onSetOverlayGranted,
                             enabled = plugin.isActive && canDrawOverlays
+                        )
+                    }
+                }
+
+                if (plugin.content.overlay != null && plugin.content.backup != null) {
+                    SettingsDivider()
+                }
+
+                plugin.content.backup?.let { declaration ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.plugins_backup_section),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = declaration.purpose,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        AppSwitch(
+                            checked = backupGranted,
+                            onCheckedChange = onSetBackupGranted,
+                            enabled = plugin.isActive
                         )
                     }
                 }

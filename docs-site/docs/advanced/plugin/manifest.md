@@ -92,6 +92,7 @@
 | `uiEntries` | 数组 | 挂载到宿主槽位的页面入口 |
 | `shizuku` | 对象 | 声明使用 Shizuku |
 | `overlay` | 对象 | 声明系统浮层 |
+| `backup` | 对象 | 声明接收备份与还原事件 |
 | `configPage` | 字符串 | 插件详情中的配置页 |
 
 ### skills / agents
@@ -154,6 +155,8 @@
 | `event` | 是 | 必须是宿主支持的事件，参见[生命周期 Hooks](/advanced/plugin/hooks) |
 | `handler` | 是 | 入口脚本 handler 表中的键 |
 | `mode` | 否 | `observe`（默认）、`transform`、`review`；可写事件必须显式声明对应模式，声明错误将导致拒绝安装 |
+
+`backup.export.before` 与 `backup.import.finished` 会带出完整备份包或写入暂存区，必须同时声明 `contributes.backup` 并由使用者授权；若声明了这两个事件却没有 `contributes.backup`，安装会被拒绝。
 
 ### mcp
 
@@ -254,7 +257,7 @@
 | `confirm` | 否 | 仅动作入口：执行前弹确认框 |
 | `icon` | 否 | 图标名，默认 `book`，最长 32 字符 |
 
-`page` 与 `handler` 必须且只能出现一个。`settings.*` 槽位只接受 `page`；`files.tree.menu` 与 `editor.selection.menu` 只接受 `handler`。动作返回 `{message}` 时宿主用 toast 显示；错误请用 JSON-RPC error 返回。
+`page` 与 `handler` 必须且只能出现一个。`settings.*` 槽位只接受 `page`；`files.tree.menu` 与 `editor.selection.menu` 只接受 `handler`；`backup.data` 只接受数据选项（不能写 `page` / `handler` / `confirm`）。动作返回 `{message}` 时宿主用 toast 显示；错误请用 JSON-RPC error 返回。
 
 | `slot` | 位置 |
 | --- | --- |
@@ -270,8 +273,9 @@
 | `chat.session.menu` | 会话长按菜单，删除项之前 |
 | `files.tree.menu` | 文件树文件/目录长按菜单，插件项在删除之前 |
 | `editor.selection.menu` | 代码编辑器选中文本后的浮动菜单 |
+| `backup.data` | 备份页「选择导出数据」组末尾，只接受数据选项 |
 
-同一插件在每个槽位最多声明 2 个入口；超出会在安装时拒绝。入口顺序由宿主决定：宿主自己的项始终在前，插件项按插件显示名与声明顺序排列，插件不能指定排序或插入位置。
+同一插件在每个槽位最多声明 2 个入口（`backup.data` 最多 1 个）；超出会在安装时拒绝。入口顺序由宿主决定：宿主自己的项始终在前，插件项按插件显示名与声明顺序排列，插件不能指定排序或插入位置。
 
 ### configPage
 
@@ -342,6 +346,36 @@
 | `snap` | 否 | 松手吸附轴：`none`、`x`、`y`、`both`，默认 `none` |
 
 浮层需要使用者单独授权，且 App 需获得「显示在其他应用上层」的系统权限。
+
+### backup
+
+```json
+{
+  "contributes": {
+    "backup": {"purpose": "把额外数据随备份一起导出"},
+    "hooks": [
+      {"id": "before-export", "event": "backup.export.before", "handler": "hooks.onExportBefore"},
+      {"id": "after-import", "event": "backup.import.finished", "handler": "hooks.onImport"}
+    ],
+    "uiEntries": [
+      {"id": "extra-data", "title": "记忆 / 技能", "slot": "backup.data", "icon": "package"}
+    ]
+  }
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `purpose` | 是 | 用途说明，最多 200 字符，展示在授权界面 |
+
+声明不会自动获得授权。使用者需在插件详情中单独开启「备份与还原事件」授权，停用期间不派发，重新启用后恢复；卸载插件会撤销授权。
+
+授权后，插件可在 `backup.data` 槽位声明一个数据选项（只写 `id` / `title` / `icon`，不写 `page` 或 `handler`），宿主会在「选择导出数据」里渲染开关。勾选后：
+
+- 导出前宿主调用 `backup.export.before`，插件把额外数据写入 payload 的 `dir`（`data://backup-export`）；宿主把该目录打包为归档内的 `plugins/<pluginId>/…` 区段。
+- 导入还原主数据后，宿主把该区段解到 `data://backup-import`，再调用 `backup.import.finished`，插件从 `dir` 写回真实路径。
+
+事件 payload 参见[生命周期 Hooks](/advanced/plugin/hooks)；真实示例见[示例库](/advanced/plugin/examples)的 `backup-helper`。
 
 ## 完整示例
 

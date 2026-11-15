@@ -68,7 +68,11 @@ data class PluginUiEntry(
     val key: String get() = pluginContributionName(pluginId, localId)
 
     val kind: PluginUiEntryKind
-        get() = if (page != null) PluginUiEntryKind.PAGE else PluginUiEntryKind.ACTION
+        get() = when {
+            slot == PluginUiSlots.BACKUP_DATA -> PluginUiEntryKind.DATA
+            page != null -> PluginUiEntryKind.PAGE
+            else -> PluginUiEntryKind.ACTION
+        }
 
     /** 仅页面入口有 WebView 缓存键。 */
     val cacheKey: String? get() = page?.cacheKey
@@ -143,6 +147,12 @@ data class PluginShizukuDefinition(
     val purpose: String
 )
 
+/** 已解析的备份事件声明：仅用途说明，授权后才能收到备份与还原文件。 */
+data class PluginBackupDefinition(
+    val pluginId: String,
+    val purpose: String
+)
+
 /** 已校验存在性的宿主托管浮层页面。 */
 data class PluginOverlaySurface(
     val pluginId: String,
@@ -184,6 +194,7 @@ data class PluginContent(
     val providers: List<PluginProviderDefinition> = emptyList(),
     val shizuku: PluginShizukuDefinition? = null,
     val overlay: PluginOverlayDefinition? = null,
+    val backup: PluginBackupDefinition? = null,
     val configPage: PluginPage? = null
 )
 
@@ -243,6 +254,12 @@ object PluginContentLoader {
                 purpose = it.purpose
             )
         }
+        val backup = manifest.backup?.let {
+            PluginBackupDefinition(
+                pluginId = manifest.id,
+                purpose = it.purpose
+            )
+        }
         val overlay = manifest.overlay?.let { declaration ->
             val surfaces = declaration.surfaces.mapNotNull { surface ->
                 loadOverlaySurface(dir, manifest.id, manifest.version.toString(), surface, errors)
@@ -272,6 +289,7 @@ object PluginContentLoader {
                     providers = providers,
                     shizuku = shizuku,
                     overlay = overlay,
+                    backup = backup,
                     configPage = configPage
                 )
             )

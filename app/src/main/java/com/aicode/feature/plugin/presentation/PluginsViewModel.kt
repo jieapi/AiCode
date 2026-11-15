@@ -12,6 +12,7 @@ import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.shizuku.ShizukuManager
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.agent.domain.session.AgentRunStateStore
+import com.aicode.feature.plugin.data.PluginBackupPermissionRepository
 import com.aicode.feature.plugin.data.PluginDevPackageBuilder
 import com.aicode.feature.plugin.data.PluginDevSettingsRepository
 import com.aicode.feature.plugin.data.PluginOverlayPermissionRepository
@@ -153,6 +154,7 @@ class PluginsViewModel @Inject constructor(
     private val pluginProviderRegistrar: PluginProviderRegistrar,
     private val shizukuPermissionRepository: PluginShizukuPermissionRepository,
     private val overlayPermissionRepository: PluginOverlayPermissionRepository,
+    private val backupPermissionRepository: PluginBackupPermissionRepository,
     private val overlayManager: PluginOverlayManager,
     private val shizukuManager: ShizukuManager,
     private val shizukuRunner: PluginShizukuRunner,
@@ -188,6 +190,14 @@ class PluginsViewModel @Inject constructor(
         combine(manager.plugins, overlayPermissionRepository.grants) { plugins, grants ->
             plugins.filter { plugin ->
                 plugin.isActive && plugin.content.overlay != null && grants.containsKey(plugin.id)
+            }.map { it.id }.toSet()
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** 已授权接收备份 / 还原事件的插件；停用、卸载或撤销后自动从集合中消失。 */
+    val backupGrantedPluginIds: StateFlow<Set<String>> =
+        combine(manager.plugins, backupPermissionRepository.grants) { plugins, grants ->
+            plugins.filter { plugin ->
+                plugin.isActive && plugin.content.backup != null && grants.containsKey(plugin.id)
             }.map { it.id }.toSet()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -450,6 +460,7 @@ class PluginsViewModel @Inject constructor(
                 removeProviders(id)
                 shizukuPermissionRepository.revoke(id)
                 overlayPermissionRepository.revoke(id)
+                backupPermissionRepository.revoke(id)
             }
             pluginTerminalRunner.closePlugin(id)
             tipManager.dismissPlugin(id)
@@ -478,6 +489,18 @@ class PluginsViewModel @Inject constructor(
             } else {
                 overlayPermissionRepository.revoke(plugin.id)
                 overlayManager.closePlugin(plugin.id)
+            }
+        }
+    }
+
+    /** 插件级备份事件授权；撤销后宿主不再向该插件下发备份与还原文件。 */
+    fun setBackupGranted(plugin: InstalledPlugin, granted: Boolean) {
+        if (plugin.content.backup == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (granted) {
+                backupPermissionRepository.grant(plugin.id)
+            } else {
+                backupPermissionRepository.revoke(plugin.id)
             }
         }
     }

@@ -97,6 +97,7 @@ import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.settings.presentation.SubAgentUiEntry
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.plugin.domain.PluginPage
+import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.domain.PluginUiSlots
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.plugin.presentation.PluginDetailSection
@@ -426,6 +427,7 @@ fun SettingsScreen(
     val pluginDependencyStates by pluginsViewModel.dependencyStates.collectAsStateWithLifecycle()
     val shizukuGrantedPluginIds by pluginsViewModel.shizukuGrantedPluginIds.collectAsStateWithLifecycle()
     val overlayGrantedPluginIds by pluginsViewModel.overlayGrantedPluginIds.collectAsStateWithLifecycle()
+    val backupGrantedPluginIds by pluginsViewModel.backupGrantedPluginIds.collectAsStateWithLifecycle()
     val shizukuState by pluginsViewModel.shizukuState.collectAsStateWithLifecycle()
     val pluginDevMode by pluginsViewModel.devMode.collectAsStateWithLifecycle()
     val pluginDevProjects by pluginsViewModel.devProjects.collectAsStateWithLifecycle()
@@ -449,6 +451,14 @@ fun SettingsScreen(
                 plugin.content.uiEntries.mapNotNull { entry ->
                     entry.page?.copy(pluginVersion = plugin.record.version)
                 }
+            }
+    }
+    // 备份页「选择导出数据」组末尾的插件数据选项。
+    val backupDataEntries: List<PluginUiEntry> = remember(plugins, pluginLanguageTag) {
+        plugins.filter { it.isActive }
+            .sortedBy { it.displayName(pluginLanguageTag) }
+            .flatMap { plugin ->
+                plugin.content.uiEntries.filter { it.slot == PluginUiSlots.BACKUP_DATA }
             }
     }
     var activePluginPage by remember { mutableStateOf<PluginPage?>(null) }
@@ -828,6 +838,9 @@ fun SettingsScreen(
             current == SettingsSection.Backup ->
                 BackupScreen(
                     viewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+                    pluginDataEntries = backupDataEntries,
+                    backupGrantedPluginIds = backupGrantedPluginIds,
+                    languageTag = pluginLanguageTag,
                     onNavigateBack = { section = SettingsSection.Menu }
                 )
 
@@ -1505,7 +1518,9 @@ fun SettingsScreen(
                         shizukuState = shizukuState,
                         onSetShizukuGranted = { pluginsViewModel.setShizukuGranted(plugin, it) },
                         overlayGranted = plugin.id in overlayGrantedPluginIds,
-                        onSetOverlayGranted = { pluginsViewModel.setOverlayGranted(plugin, it) }
+                        onSetOverlayGranted = { pluginsViewModel.setOverlayGranted(plugin, it) },
+                        backupGranted = plugin.id in backupGrantedPluginIds,
+                        onSetBackupGranted = { pluginsViewModel.setBackupGranted(plugin, it) }
                     )
                 }
                 SettingsSection.PluginStoreDetail -> selectedStoreItem?.let { item ->

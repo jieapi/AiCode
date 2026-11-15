@@ -82,11 +82,13 @@ demo-kit-1.0.0.zip
 | plugin.json 缺少 / 无效字段 | 提示中会写出具体路径，请按 [清单参考](/advanced/plugin/manifest) 对照 |
 | 此版本不支持的字段 / 内容类型 | 使用了当前版本未实现的能力；未知字段不会被忽略 |
 | hooks 或 uiEntries 声明了 handler 但未声明运行时 | 带 handler 的贡献均需要 `runtime`，请在清单中补充入口 |
-| `uiEntries` 的 `slot` 无效 | 仅可取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` / `drawer.footer` / `chat.header.menu` / `chat.welcome` / `chat.session.menu` / `files.tree.menu` / `editor.selection.menu` |
+| `uiEntries` 的 `slot` 无效 | 仅可取 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` / `drawer.footer` / `chat.header.menu` / `chat.welcome` / `chat.session.menu` / `files.tree.menu` / `editor.selection.menu` / `backup.data` |
 | `uiEntries` 的 `page` 不是 HTML | `page` 必须指向包内 `.html` 或 `.htm` |
 | `uiEntries` 同时声明或缺少入口类型 | `page`、`handler` 必须且只能出现一个 |
 | `uiEntries` 在设置页槽位使用 handler | `settings.*` 槽位只接受 `page` 入口 |
 | `uiEntries` 在文件树/选区槽位使用 page | `files.tree.menu`、`editor.selection.menu` 只接受 `handler` |
+| `backup.data` 写了 page / handler / confirm | `backup.data` 只接受数据选项，由宿主渲染开关 |
+| 声明了备份事件但未声明 `contributes.backup` | `backup.export.before` 与 `backup.import.finished` 需要同时声明 `contributes.backup`，否则安装会被拒绝 |
 | `uiEntries` 的 `confirm` 没有配 handler | `confirm` 只用于动作入口 |
 | `workspaceTools` 的 `pageFile` 不是 HTML | `pageFile` 必须指向包内 `.html` 或 `.htm` |
 | 内容无效 | 技能或子代理正文为空、子代理声明了 `provider` / `model`、AI 工具缺少运行时入口、schema 根不是 `type: object`、MCP 文件未包含有效 server |

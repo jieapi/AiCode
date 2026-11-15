@@ -2,6 +2,7 @@ package com.aicode.feature.plugin.domain
 
 import com.aicode.feature.plugin.PluginFixtures
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -656,6 +657,76 @@ class PluginManifestParserTest {
         }
     """.trimIndent()
 
+    private fun backupHooksManifest(
+        backupBlock: String = "\"backup\": {\"purpose\": \"把我自己的数据也备份一份\"},",
+        hooksBlock: String = """{"id": "exported", "event": "backup.export.before", "handler": "hooks.exported"}"""
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "community.backup-kit",
+          "name": "Backup Kit",
+          "version": "1.0.0",
+          "publisher": "community",
+          "repository": "https://example.com/community/backup-kit",
+          "description": "Backups",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          "runtime": {"type": "javascript", "entry": "dist/main.js"},
+          "contributes": {
+            $backupBlock
+            "hooks": [$hooksBlock]
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun backupHooks_areParsedWithDeclaration() {
+        val m = success(backupHooksManifest())
+        assertEquals(PluginBackupRef("把我自己的数据也备份一份"), m.backup)
+        assertEquals(
+            listOf(PluginHookRef("exported", "backup.export.before", "hooks.exported", PluginHookModes.OBSERVE)),
+            m.hooks
+        )
+    }
+
+    @Test
+    fun backupHooks_requireDeclaration() {
+        assertRejected(
+            backupHooksManifest(backupBlock = ""),
+            PluginErrorCode.FIELD_MISSING,
+            "contributes.backup"
+        )
+    }
+
+    @Test
+    fun backupHooks_requireObserveMode() {
+        assertRejected(
+            backupHooksManifest(
+                hooksBlock = """{"id": "exported", "event": "backup.export.before", "handler": "hooks.exported", "mode": "transform"}"""
+            ),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.hooks[0].mode"
+        )
+    }
+
+    @Test
+    fun backupDeclaration_requiresPurpose() {
+        assertRejected(
+            backupHooksManifest(backupBlock = "\"backup\": {\"purpose\": \"\"},"),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.backup.purpose"
+        )
+    }
+
+    @Test
+    fun backupDeclaration_rejectsUnknownField() {
+        assertRejected(
+            backupHooksManifest(backupBlock = "\"backup\": {\"purpose\": \"备份\", \"path\": \"x\"},"),
+            PluginErrorCode.UNSUPPORTED_FIELD,
+            "contributes.backup.path"
+        )
+    }
+
     private fun mcpManifest(): String = """
         {
           "manifestVersion": 1,
@@ -838,6 +909,82 @@ class PluginManifestParserTest {
             entriesManifest("""{"id":"p","title":"页","slot":"files.tree.menu","page":"p.html"}"""),
             PluginErrorCode.FIELD_INVALID,
             "contributes.uiEntries[0].page"
+        )
+    }
+
+    private fun backupDataManifest(
+        entry: String,
+        backupBlock: String = "\"backup\": {\"purpose\": \"额外备份\"},",
+        hooksBlock: String = """{"id": "export", "event": "backup.export.before", "handler": "hooks.exportBefore"}"""
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "demo.backup-data",
+          "name": "Backup Data",
+          "version": "1.0.0",
+          "publisher": "demo",
+          "repository": "https://example.com/demo/backup-data",
+          "description": "Backup data demo",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          "runtime": {"type": "javascript", "entry": "dist/main.js"},
+          "contributes": {
+            $backupBlock
+            "hooks": [$hooksBlock],
+            "uiEntries": [$entry]
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun uiEntries_acceptsBackupDataSlot() {
+        val m = success(
+            backupDataManifest(
+                """{"id":"extra","title":"记忆 / 技能","slot":"backup.data","icon":"package"}"""
+            )
+        )
+        val entry = m.uiEntries.single()
+        assertEquals(PluginUiSlots.BACKUP_DATA, entry.slot)
+        assertEquals(PluginUiEntryKind.DATA, entry.kind)
+        assertNull(entry.page)
+        assertNull(entry.handler)
+    }
+
+    @Test
+    fun uiEntries_rejectsPageInBackupDataSlot() {
+        assertRejected(
+            backupDataManifest("""{"id":"p","title":"页","slot":"backup.data","page":"p.html"}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0].page"
+        )
+    }
+
+    @Test
+    fun uiEntries_rejectsHandlerInBackupDataSlot() {
+        assertRejected(
+            backupDataManifest("""{"id":"a","title":"动作","slot":"backup.data","handler":"actions.backup"}"""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.uiEntries[0].handler"
+        )
+    }
+
+    @Test
+    fun backupData_requiresDeclarationAndExportHook() {
+        assertRejected(
+            backupDataManifest(
+                """{"id":"extra","title":"扩展数据","slot":"backup.data"}""",
+                backupBlock = ""
+            ),
+            PluginErrorCode.FIELD_MISSING,
+            "contributes.backup"
+        )
+        assertRejected(
+            backupDataManifest(
+                """{"id":"extra","title":"扩展数据","slot":"backup.data"}""",
+                hooksBlock = """{"id": "import", "event": "backup.import.finished", "handler": "hooks.onImport"}"""
+            ),
+            PluginErrorCode.FIELD_MISSING,
+            "contributes.hooks"
         )
     }
 

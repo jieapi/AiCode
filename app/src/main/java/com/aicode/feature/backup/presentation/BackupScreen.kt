@@ -67,6 +67,8 @@ import com.aicode.feature.backup.domain.RestoreStats
 import com.aicode.feature.backup.domain.WorkspaceBackupMeta
 import com.aicode.feature.backup.domain.remote.BackupTarget
 import com.aicode.feature.backup.domain.remote.BackupTargetType
+import com.aicode.feature.plugin.domain.PluginUiEntry
+import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.settings.presentation.component.SettingsDivider
 import com.aicode.feature.settings.presentation.component.SettingsEmptyState
 import com.aicode.feature.settings.presentation.component.SettingsGroup
@@ -96,11 +98,22 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun BackupScreen(
     viewModel: BackupViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    pluginDataEntries: List<PluginUiEntry> = emptyList(),
+    backupGrantedPluginIds: Set<String> = emptySet(),
+    languageTag: String = ""
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val disabledPluginDataKeys by viewModel.disabledPluginDataKeys.collectAsStateWithLifecycle()
+    val selectedPluginIds = remember(pluginDataEntries, backupGrantedPluginIds, disabledPluginDataKeys) {
+        pluginDataEntries
+            .filter { it.pluginId in backupGrantedPluginIds && it.key !in disabledPluginDataKeys }
+            .map { it.pluginId }
+            .toSet()
+    }
 
     val exportOptions by viewModel.exportOptions.collectAsStateWithLifecycle()
     val targets by viewModel.targets.collectAsStateWithLifecycle()
@@ -127,6 +140,7 @@ internal fun BackupScreen(
     var restoreTarget by remember { mutableStateOf<BackupTarget?>(null) }
     var restoreName by remember { mutableStateOf<String?>(null) }
     var restorePassword by remember { mutableStateOf("") }
+    var pendingExportPluginIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var networkWorkingTextRes by remember { mutableStateOf(R.string.backup_net_loading) }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -135,10 +149,11 @@ internal fun BackupScreen(
         if (uri != null) {
             val pw = pendingExportPassword
             val opts = pendingExportOptions
+            val pluginIds = pendingExportPluginIds
             scope.launch {
                 val os = withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri) }
                 if (os != null) {
-                    viewModel.export(pw, opts, os)
+                    viewModel.export(pw, opts, os, pluginIds)
                 } else {
                     Toast.makeText(context, context.getString(R.string.backup_write_failed, uri.toString()), Toast.LENGTH_LONG).show()
                     viewModel.reset()
@@ -201,7 +216,12 @@ internal fun BackupScreen(
                         onImport = {
                             pendingAction = PendingAction.Import
                             importLauncher.launch(arrayOf("application/octet-stream", "application/gzip", "*/*"))
-                        }
+                        },
+                        pluginDataEntries = pluginDataEntries,
+                        backupGrantedPluginIds = backupGrantedPluginIds,
+                        disabledPluginDataKeys = disabledPluginDataKeys,
+                        languageTag = languageTag,
+                        onTogglePluginData = viewModel::setPluginDataSelected
                     )
                 } else {
                     NetworkBackupTab(
@@ -249,6 +269,7 @@ internal fun BackupScreen(
             onConfirm = {
                 pendingExportPassword = password
                 pendingExportOptions = exportOptions
+                pendingExportPluginIds = selectedPluginIds
                 password = ""
                 pendingAction = null
                 exportLauncher.launch("aicode-backup-${System.currentTimeMillis()}.tar.gz")
@@ -327,7 +348,7 @@ internal fun BackupScreen(
                 uploadPassword = ""
                 if (t != null && pw.isNotEmpty()) {
                     networkWorkingTextRes = R.string.backup_net_uploading
-                    viewModel.uploadToTarget(t, pw)
+                    viewModel.uploadToTarget(t, pw, selectedPluginIds)
                 }
             },
             onDismiss = { uploadTarget = null; uploadPassword = "" },
@@ -452,7 +473,12 @@ private fun LocalBackupTab(
     onUpdateOptions: (BackupOptions) -> Unit,
     working: Boolean,
     onExport: () -> Unit,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    pluginDataEntries: List<PluginUiEntry>,
+    backupGrantedPluginIds: Set<String>,
+    disabledPluginDataKeys: Set<String>,
+    languageTag: String,
+    onTogglePluginData: (String, Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -532,6 +558,26 @@ private fun LocalBackupTab(
                     )
                 }
             )
+            pluginDataEntries.forEach { entry ->
+                SettingsDivider()
+                val authorized = entry.pluginId in backupGrantedPluginIds
+                SettingsRow(
+                    icon = pluginPageIcon(entry.icon),
+                    title = entry.title.resolve(languageTag),
+                    subtitle = if (authorized) {
+                        stringResource(R.string.plugins_ext_entry_subtitle, entry.pluginId)
+                    } else {
+                        stringResource(R.string.plugins_backup_permission_required)
+                    },
+                    trailing = {
+                        AppSwitch(
+                            checked = authorized && entry.key !in disabledPluginDataKeys,
+                            onCheckedChange = { onTogglePluginData(entry.key, it) },
+                            enabled = authorized
+                        )
+                    }
+                )
+            }
             WorkspaceBackupHint()
         }
 

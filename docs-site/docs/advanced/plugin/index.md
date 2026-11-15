@@ -18,7 +18,7 @@
 | AI 工具 | `contributes.tools` | 容器内的插件进程 | 是 | [AI 工具与插件运行时](/advanced/plugin/tools-runtime) |
 | 生命周期 hook | `contributes.hooks` | 容器内的插件进程 | 是 | [生命周期 Hooks](/advanced/plugin/hooks) |
 | 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉中的 WebView 页面 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按菜单、文件树长按、编辑器选区菜单 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按菜单、文件树长按、编辑器选区菜单、备份页 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 插件配置页 | `configPage` | 插件详情中的配置分段 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 插件事件 | 进程发送 `plugin.event` | 推送给同插件已打开的页面 | 是 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
 | 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
@@ -27,6 +27,7 @@
 | 系统、密钥与 HTTP | `aicode.clipboard/share/secrets/http` / `host.*` | 宿主 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
 | 系统浮层 | `contributes.overlay` | 宿主托管的系统窗口 | 可无 | [系统浮层](/advanced/plugin/overlay) |
 | Shizuku 命令 | `contributes.shizuku` | Android 系统 | 否 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
+| 备份与还原事件 | `contributes.backup` + `backup.export.before` / `backup.import.finished` | 容器内的插件进程 | 是 | [生命周期 Hooks](/advanced/plugin/hooks) |
 | OpenAI 兼容提供商 | `contributes.providers` | 插件自行启动的服务 | 通常需要 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
 
 一个插件可同时声明多类能力，无需按类型拆分为多个包。纯声明式插件可仅包含 Markdown、HTML 和配置；需要业务逻辑时再增加 `runtime`。

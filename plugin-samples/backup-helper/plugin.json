@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "id": "jieapi.backup-helper",
+  "name": {
+    "default": "Backup Helper",
+    "zh-CN": "备份助手"
+  },
+  "version": "1.0.0",
+  "publisher": "jieapi",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "default": "Adds memories, skills, MCP configs and subagents to the host backup archive, and restores them after an import. Requires the plugin-level backup event permission.",
+    "zh-CN": "把记忆、技能、MCP 配置与子代理写入宿主备份包，并在导入还原后写回。需要在插件详情中单独开启「备份与还原事件」授权。"
+  },
+  "license": "MIT",
+  "icon": "icons/icon.png",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "backup": {
+      "purpose": "备份记忆、技能、MCP 配置与子代理，并在还原后恢复这些数据"
+    },
+    "hooks": [
+      {
+        "id": "export-before",
+        "event": "backup.export.before",
+        "handler": "hooks.onExportBefore"
+      },
+      {
+        "id": "import-finished",
+        "event": "backup.import.finished",
+        "handler": "hooks.onImport"
+      }
+    ],
+    "uiEntries": [
+      {
+        "id": "extra-data",
+        "title": {
+          "default": "Memories, Skills, MCP & Subagents",
+          "zh-CN": "记忆 / 技能 / MCP / 子代理"
+        },
+        "slot": "backup.data",
+        "icon": "package"
+      }
+    ]
+  }
+}

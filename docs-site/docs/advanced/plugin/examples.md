@@ -18,6 +18,7 @@
 | `community.demo-kit` | `community.demo-kit` | 技能、子代理、AI 工具、工作区工具、只读与可写 hook、配置页 | 综合入门 |
 | `capability-demo` | `demo.capabilities` | 对话提示条、Shizuku 授权、会话/消息 API、配置页 | Shizuku、`host.tip` 与 `aicode.chat` |
 | `chat-bridge` | `demo.chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 | 会话与消息 API |
+| `backup-helper` | `jieapi.backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包；`backup.data` 数据选项、备份与还原事件、独立授权 | 备份事件与授权 |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
 | `ui-gallery` | `demo.gallery` | 设置页、侧栏与顶栏槽位入口、配置页、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
@@ -70,6 +71,17 @@
 ## chat-bridge
 
 演示给 AI 下达指令并读取回复的网页对话界面，可作为 QQ / 微信机器人接入的消息回路示例。
+
+## backup-helper
+
+真实备份扩展数据的插件：把全局与当前工作区的记忆、技能、MCP 配置、子代理写入**宿主备份包**，并在导入还原后写回。
+
+- `contributes.backup` 声明用途；使用者需在插件详情「权限」中开启「备份与还原事件」；
+- `backup.data` 数据选项出现在备份页「选择导出数据」组：打开后，导出宿主备份时插件会参与；
+- `backup.export.before` 时读取 `~/.aicode/{memory,skills,agents,mcp.json}` 与 `<workspace>/.aicode/{memory,skills,agents,mcp.json}`，写入 `data://backup-export`；宿主把该目录打包为归档内的 `plugins/jieapi.backup-helper/` 区段；
+- `backup.import.finished` 时从宿主解开的 `data://backup-import` 写回真实路径；若宿主本次已恢复 MCP（`stats.mcpServers > 0`），跳过区段里的 `mcp.json`，避免覆盖宿主备份；
+- 单文件超过 512 KiB、目录读取失败或超过 1500 个文件会跳过并记录在区段 manifest；
+- 导出/导入暂存目录由宿主在操作结束后清理。
 
 - 在设置 → AI 中打开「对话桥」设置页；首次打开创建会话，之后复用 `data://chat-bridge.json` 里的会话 id；
 - 页面调用 `aicode.chat.createSession`、`sendMessage`、`listMessages`、`stop`，并在当前工作区范围内读写消息；
