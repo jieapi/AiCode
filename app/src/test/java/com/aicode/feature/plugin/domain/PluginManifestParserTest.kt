@@ -565,6 +565,67 @@ class PluginManifestParserTest {
     }
 
     @Test
+    fun workspaceToolsContribution_isParsed() {
+        val tool = success(workspaceToolsManifest()).workspaceTools.single()
+        assertEquals("build-apk", tool.id)
+        assertEquals("构建 APK", tool.title.resolve("zh-CN"))
+        assertEquals("hammer", tool.icon)
+        assertEquals("构建", tool.category)
+        assertEquals("pages/build-apk.html", tool.pageFile)
+    }
+
+    @Test
+    fun workspaceToolLabels_useDefaultsAndTrim() {
+        val trimmed = success(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"icon\": \" hammer \", \"category\": \" 构建 \"")
+        ).workspaceTools.single()
+        assertEquals("hammer", trimmed.icon)
+        assertEquals("构建", trimmed.category)
+
+        val defaults = success(workspaceToolsManifest("\"title\": \"构建 APK\"")).workspaceTools.single()
+        assertEquals("play", defaults.icon)
+        assertEquals("通用", defaults.category)
+    }
+
+    @Test
+    fun workspaceToolUnknownField_isRejected() {
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"handler\": \"tools.build\""),
+            PluginErrorCode.UNSUPPORTED_FIELD,
+            "contributes.workspaceTools[0].handler"
+        )
+    }
+
+    @Test
+    fun workspaceToolLabels_rejectOversizeAndControlChars() {
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"icon\": \"${"x".repeat(33)}\""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.workspaceTools[0].icon"
+        )
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"category\": \"${"类".repeat(33)}\""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.workspaceTools[0].category"
+        )
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"icon\": \"ha\\u0001mmer\""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.workspaceTools[0].icon"
+        )
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"category\": \"构\\u0001建\""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.workspaceTools[0].category"
+        )
+        assertRejected(
+            workspaceToolsManifest("\"title\": \"构建 APK\", \"icon\": \"  \""),
+            PluginErrorCode.FIELD_INVALID,
+            "contributes.workspaceTools[0].icon"
+        )
+    }
+
+    @Test
     fun pathHelper_matchesSpec() {
         assertTrue(PluginManifestParser.isSafeRelativePath("skills/a/SKILL.md"))
         assertTrue(!PluginManifestParser.isSafeRelativePath(""))
@@ -609,6 +670,27 @@ class PluginManifestParserTest {
           "contributes": {
             "mcp": [
               {"id": "project-context", "file": "mcp/project-context.json"}
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun workspaceToolsManifest(
+        toolBody: String = "\"title\": \"构建 APK\", \"icon\": \"hammer\", \"category\": \"构建\""
+    ): String = """
+        {
+          "manifestVersion": 1,
+          "id": "community.workspace-kit",
+          "name": "Workspace Kit",
+          "version": "1.0.0",
+          "publisher": "community",
+          "repository": "https://example.com/community/workspace-kit",
+          "description": "Workspace tools",
+          "license": "MIT",
+          "engines": {"pluginApi": "^1.0.0"},
+          "contributes": {
+            "workspaceTools": [
+              {"id": "build-apk", $toolBody, "pageFile": "pages/build-apk.html"}
             ]
           }
         }

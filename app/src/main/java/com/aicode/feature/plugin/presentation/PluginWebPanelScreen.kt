@@ -209,9 +209,12 @@ fun PluginWebPanelScreen(
         }
     }
 
+    // 实例可能来自缓存：离开时只摘掉并暂停，内容和桥留给下一次打开复用。
     DisposableEffect(webView) {
+        webView.onResume()
         onDispose {
             PluginWebViewCache.release(webView)
+            webView.onPause()
         }
     }
 

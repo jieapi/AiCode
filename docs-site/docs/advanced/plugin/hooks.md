@@ -47,8 +47,10 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 
 `agent.http.before` 挂载在共享 HTTP 客户端上，覆盖对话、标题生成、上下文压缩、模型列表/测试与图片请求。每次实际发送都会执行；网络重试或更换 Key 会重复触发，handler 应保持幂等。
 
-::: warning 高权限能力
-`agent.http.before` 的 payload 包含明文 `Authorization` / `x-api-key` 等鉴权头和完整请求体（可能含对话内容）。启用这类插件等同于将这些信息交给插件，仅应安装可信来源。
+`agent.http.before` 的敏感请求头在 payload 中只以占位符 `{{Token}}` 出现：App 实际会添加的 `Authorization`（OpenAI/MCP）、`x-api-key`（Anthropic）与 `x-goog-api-key`（Gemini）；provider 自定义 header 中如果包含同一份密钥值，也会被替换为占位符。插件原样回传 `{{Token}}`，且请求仍发往原 origin 时，宿主才恢复真实值；插件无法读到真实鉴权头。
+
+::: warning 请求体可见
+payload 仍包含完整请求体（可能含对话内容），仅应安装可信来源的插件。
 :::
 
 ## 代审核事件
@@ -169,7 +171,7 @@ const handlers = {
 };
 ```
 
-`headers` 是完整替换表，而非增量合并；最多 64 项，值为字符串。`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Expect`、`Upgrade` 不允许改写。`body` 必须是合法 JSON 对象文本，最大 4 MiB；请求方法固定为 `POST`，插件不得修改。
+`headers` 是增量合并表：以原请求头为基底，返回的同名头覆盖原值，新头追加，未返回的头保持原值，插件不能借此删除原有头；最多 64 项，值为字符串。敏感头只有在最终 URL 与原 URL 的 scheme、host、port 完全一致，且回传值恰为 `{{Token}}` 时，才沿用真实值；返回其他值的敏感头被忽略。改写 URL 到其他 origin 时，原始敏感头会从最终请求中剥离，不会转发给第三方端点。`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Expect`、`Upgrade` 不允许改写。`body` 必须是合法 JSON 对象文本，最大 4 MiB；请求方法固定为 `POST`，插件不得修改。
 
 宿主仅校验 JSON 对象、大小与字段白名单，不校验 provider 语义。改写消息可能破坏工具调用配对或 Anthropic 签名；修改工具名可能与宿主工具注册表不一致；修改提示词不会同步更新 token 估算与压缩决策。插件需自行保证 body 与目标端点兼容。
 
@@ -209,6 +211,6 @@ handler 可返回 `{logs: ["..."]}`，宿主将每行写入应用日志，最多
 - 不得提权：可写 hook 仅可拒绝或缩小调用，不得批准工具、不得将宿主拒绝改为允许、不得绕过 PLAN 模式或权限策略；
 - 改写参数后必须重新执行完整权限判断；审批后不会静默改写参数；
 - `agent.tool.after` 仅处理成功结果；
-- `agent.http.before` 可读取并改写鉴权头，但不得修改请求方法，也不得将请求改为非 JSON；
+- `agent.http.before` 读取不到真实鉴权头（payload 中为 `{{Token}}`）；跨 origin 改写会剥离原始敏感头；不得修改请求方法，也不得将请求改为非 JSON；
 - 代审核可批准原本需要用户确认的调用，属于高权限能力；它不得修改参数、不得覆盖宿主 DENY/PLAN、不得写入永久允许规则，也不得代审自身提供的工具；
 - hook 与 AI 工具共用同一插件进程，进程拥有容器内的文件与命令能力。仅安装可信插件。

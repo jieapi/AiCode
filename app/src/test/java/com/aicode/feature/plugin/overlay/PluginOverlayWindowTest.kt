@@ -3,6 +3,7 @@ package com.aicode.feature.plugin.overlay
 import android.content.Context
 import android.os.Looper
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -33,7 +34,7 @@ import org.robolectric.shadows.ShadowChoreographer
 @LooperMode(LooperMode.Mode.PAUSED)
 class PluginOverlayWindowTest {
     private lateinit var window: PluginOverlayWindow
-    private lateinit var webView: WebView
+    private lateinit var webView: RecordingWebView
     private lateinit var windowManager: WindowManager
     private var anchorX = 0f
     private var anchorY = 0f
@@ -48,7 +49,12 @@ class PluginOverlayWindowTest {
         anchorY = position("y")
     }
 
-    private fun createWindow(snap: String): PluginOverlayWindow {
+    private fun createWindow(
+        snap: String,
+        policy: String = "background",
+        foreground: Boolean = false,
+        screenOn: Boolean = true
+    ): PluginOverlayWindow {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val metrics = context.resources.displayMetrics
         val size = (48 * metrics.density).toInt()
@@ -58,7 +64,7 @@ class PluginOverlayWindowTest {
             x = metrics.widthPixels - size
             y = metrics.heightPixels - size
         }
-        val localWebView = WebView(context)
+        val localWebView = RecordingWebView(context)
         webView = localWebView
         return PluginOverlayWindow(
             context = context,
@@ -69,8 +75,9 @@ class PluginOverlayWindowTest {
             webView = localWebView,
             draggable = true,
             snap = snap,
-            initialVisibilityPolicy = "background",
-            initialForeground = false,
+            initialVisibilityPolicy = policy,
+            initialForeground = foreground,
+            initialScreenOn = screenOn,
             onPositionChanged = { _, _ -> }
         )
     }
@@ -166,6 +173,38 @@ class PluginOverlayWindowTest {
     }
 
     @Test
+    fun screenOffHidesEvenAlwaysPolicyAndPausesTheWebView() {
+        window = createWindow(PluginOverlaySnap.NONE, policy = "always", foreground = true)
+        assertEquals(View.VISIBLE, window.visibility)
+        val pauses = webView.pauseCount
+        window.onScreenStateChanged(false)
+        assertEquals(View.GONE, window.visibility)
+        assertTrue(webView.pauseCount > pauses)
+        window.onScreenStateChanged(true)
+        assertEquals(View.VISIBLE, window.visibility)
+        assertTrue(webView.resumeCount > 0)
+    }
+
+    @Test
+    fun screenOnRestoresTheVisibilityPolicyInsteadOfForcingVisibility() {
+        window = createWindow(PluginOverlaySnap.NONE, policy = "foreground", foreground = false)
+        assertEquals(View.GONE, window.visibility)
+        window.onScreenStateChanged(false)
+        window.onScreenStateChanged(true)
+        assertEquals(View.GONE, window.visibility)
+        window.onAppForegroundChanged(true)
+        assertEquals(View.VISIBLE, window.visibility)
+    }
+
+    @Test
+    fun windowsCreatedWhileTheScreenIsOffStayHiddenUntilItTurnsOn() {
+        window = createWindow(PluginOverlaySnap.NONE, policy = "always", foreground = true, screenOn = false)
+        assertEquals(View.GONE, window.visibility)
+        window.onScreenStateChanged(true)
+        assertEquals(View.VISIBLE, window.visibility)
+    }
+
+    @Test
     fun dragReleaseSnapsToTheNearestHorizontalEdge() {
         window = createWindow(PluginOverlaySnap.X)
         ShadowChoreographer.setPaused(false)
@@ -258,6 +297,22 @@ class PluginOverlayWindowTest {
         ApplicationProvider.getApplicationContext<Context>().resources.displayMetrics.density
 
     private fun position(key: String): Float = window.selfInfo().getValue(key).jsonPrimitive.floatOrNull!!
+
+    /** 记录暂停/恢复调用，验证熄屏时页面确实停下来。 */
+    private class RecordingWebView(context: Context) : WebView(context) {
+        var pauseCount = 0
+        var resumeCount = 0
+
+        override fun onPause() {
+            pauseCount++
+            super.onPause()
+        }
+
+        override fun onResume() {
+            resumeCount++
+            super.onResume()
+        }
+    }
 
     private fun settle() {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))

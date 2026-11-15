@@ -159,6 +159,13 @@ private fun PluginPreviewSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (installSourceChanged(preview, state.origin)) {
+                Text(
+                    text = stringResource(R.string.plugins_install_source_changed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             Text(
                 text = manifest.description.resolve(languageTag),
                 style = MaterialTheme.typography.bodyMedium,

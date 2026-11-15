@@ -63,7 +63,11 @@ data class PluginPreview(
     val manifest: PluginManifest,
     val content: PluginContent,
     /** 已安装的同 ID 插件版本；非空表示这次导入会替换它。 */
-    val installedVersion: String?
+    val installedVersion: String?,
+    /** 被替换安装的来源信息；新装时为 null，供界面判断来源是否变化。 */
+    val installedSourceId: String? = null,
+    val installedRepository: String? = null,
+    val installedOfficial: Boolean? = null
 )
 
 sealed interface PluginPreviewResult {
@@ -321,13 +325,16 @@ class PluginManager internal constructor(
             is ContentLoadResult.Ok -> loadedContent.content
         }
         staged[token] = StagedPackage(pkg, manifest, content)
-        val existing = _plugins.value.firstOrNull { it.id == manifest.id }
+        val existing = _plugins.value.firstOrNull { it.id == manifest.id }?.record
         return PluginPreviewResult.Ready(
             PluginPreview(
                 token = token,
                 manifest = manifest,
                 content = content,
-                installedVersion = existing?.record?.version
+                installedVersion = existing?.version,
+                installedSourceId = existing?.sourceId,
+                installedRepository = existing?.repository,
+                installedOfficial = existing?.official
             )
         )
     }
@@ -350,7 +357,7 @@ class PluginManager internal constructor(
 
     /**
      * 安装暂存包。插件清单里的贡献随启用生效，安装不再逐项授权。
-     * 同 ID 已安装时整体替换。
+     * 同 ID 已安装时整体替换并沿用原启用状态，来源记录为本次安装的来源。
      */
     suspend fun install(
         token: String,
@@ -379,10 +386,11 @@ class PluginManager internal constructor(
         val backup = File(installedDir, "${manifest.id}$REPLACED_SUFFIX")
         backup.deleteRecursively()
 
+        val existing = _plugins.value.firstOrNull { it.id == manifest.id }
         val record = PluginRecord(
             id = manifest.id,
             version = manifest.version.toString(),
-            enabled = true,
+            enabled = existing?.record?.enabled ?: true,
             installedAt = clock(),
             origin = origin.kind,
             archiveSha256 = pending.pkg.archiveSha256,

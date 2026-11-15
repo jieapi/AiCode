@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
@@ -25,6 +26,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -57,6 +60,7 @@ class PluginOverlayManager @Inject constructor(
     private val windows = ConcurrentHashMap<String, PluginOverlayWindow>()
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val createMutex = Mutex()
 
     init {
         scope.launch {
@@ -77,6 +81,11 @@ class PluginOverlayManager @Inject constructor(
     @Volatile
     private var serviceStarted = false
 
+    /** 屏幕点亮状态；熄屏时隐藏并暂停所有浮层 WebView。 */
+    @Volatile
+    private var screenOn: Boolean =
+        context.getSystemService(PowerManager::class.java)?.isInteractive ?: true
+
     /** 浮层页面发给插件进程的消息；由 PluginRuntimeManager 在初始化时接入。 */
     @Volatile
     private var eventSink: ((pluginId: String, overlayId: String, payload: JsonElement) -> Unit)? = null
@@ -94,6 +103,15 @@ class PluginOverlayManager @Inject constructor(
         closeAllInternal()
     }
 
+    /** 由前台上报锁屏状态：熄屏立即隐藏并暂停浮层，亮屏后各窗口按自身策略恢复。 */
+    fun onScreenStateChanged(isOn: Boolean) {
+        if (screenOn == isOn) return
+        screenOn = isOn
+        scope.launch {
+            windows.values.forEach { window -> window.onScreenStateChanged(isOn) }
+        }
+    }
+
     fun hasOverlays(): Boolean = windows.isNotEmpty()
 
     fun isAppForeground(): Boolean = appForegroundMonitor.current()
@@ -102,7 +120,7 @@ class PluginOverlayManager @Inject constructor(
         pluginId: String,
         surfaceId: String?,
         params: JsonObject
-    ): JsonObject {
+    ): JsonObject = createMutex.withLock {
         pluginManager.ensureLoaded()
         val plugin = pluginManager.plugins.value.firstOrNull { it.id == pluginId && it.isActive }
             ?: throw PluginOverlayException("PLUGIN_INACTIVE", "plugin is not active: $pluginId")
@@ -126,7 +144,7 @@ class PluginOverlayManager @Inject constructor(
             if (existing.visibilityPolicy() != visibilityPolicy) {
                 mainHandler.post { existing.setVisibilityPolicy(visibilityPolicy) }
             }
-            return existing.describe()
+            return@withLock existing.describe()
         }
         val perPlugin = windows.values.count { it.pluginId == pluginId }
         if (perPlugin >= MAX_SURFACES_PER_PLUGIN) {
@@ -137,7 +155,14 @@ class PluginOverlayManager @Inject constructor(
         }
 
         ensureService()
-        return withContext(Dispatchers.Main.immediate) {
+        withContext(Dispatchers.Main.immediate) {
+            // ensureService 之后才回到主线程，其间可能有并发 create 抢先建好窗口，这里复查。
+            windows[surface.key]?.let { existing ->
+                if (existing.visibilityPolicy() != visibilityPolicy) {
+                    existing.setVisibilityPolicy(visibilityPolicy)
+                }
+                return@withContext existing.describe()
+            }
             createWindow(surface, params, widthDp, heightDp, visibilityPolicy, savedPosition)
         }
     }
@@ -337,6 +362,7 @@ class PluginOverlayManager @Inject constructor(
             snap = surface.snap,
             initialVisibilityPolicy = visibilityPolicy,
             initialForeground = appForegroundMonitor.current(),
+            initialScreenOn = screenOn,
             onPositionChanged = { x, y ->
                 scope.launch(Dispatchers.IO) {
                     positionRepository.save(surface.pluginId, surface.localId, x, y)

@@ -136,8 +136,8 @@
           self.detecting = true;
           self.output = '';
           Promise.all([
-            aicode.bash('test -f pubspec.yaml && echo flutter; test -f gradlew && echo android', { timeout: 15000 }),
-            aicode.bash(SIZES_COMMAND, { timeout: 30000 })
+            aicode.bash('test -f pubspec.yaml && echo flutter; test -f gradlew && echo android', { timeout: 15 }),
+            aicode.bash(SIZES_COMMAND, { timeout: 30 })
           ]).then(function (results) {
             var kind = (results[0] && results[0].output) || '';
             if (kind.indexOf('flutter') >= 0) {
@@ -161,7 +161,7 @@
           if (!self.cleanCommand || self.running) return;
           self.running = true;
           self.output = '$ ' + self.cleanCommand + '\n';
-          aicode.bash(self.cleanCommand, { timeout: 300000 })
+          aicode.bash(self.cleanCommand, { timeout: 300 })
             .then(function (res) {
               var text = (res && res.output) || '（无输出）';
               if (res && res.exitCode != null) {
@@ -171,7 +171,7 @@
                 text += '\n[输出已截断]';
               }
               self.output += text;
-              return aicode.bash(SIZES_COMMAND, { timeout: 30000 });
+              return aicode.bash(SIZES_COMMAND, { timeout: 30 });
             })
             .then(function (res) {
               self.sizes = (res && res.output) || '（缓存目录已清理）';

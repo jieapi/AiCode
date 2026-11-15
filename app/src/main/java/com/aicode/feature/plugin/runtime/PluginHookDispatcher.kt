@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,6 +47,49 @@ class PluginHookDispatcher @Inject constructor(
     private val appForegroundMonitor: AppForegroundMonitor
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var httpHookCache = HttpHookCache(emptyList(), false)
+
+    init {
+        scope.launch {
+            try {
+                pluginManager.plugins.collect { plugins -> httpHookCache = computeHttpHookCache(plugins) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "订阅插件集合失败: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /**
+     * 是否存在生效的 `agent.http.before` transform hook。拦截器据此在读取请求体之前决定
+     * 是否走 hook；缓存随 [PluginManager.plugins] 更新，未加载完时按当前快照补算。
+     */
+    fun hasHttpHooks(): Boolean {
+        try {
+            pluginManager.ensureLoaded()
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "读取插件失败: ${e.javaClass.simpleName}")
+            return httpHookCache.present
+        }
+        val plugins = pluginManager.plugins.value
+        val cached = httpHookCache
+        if (cached.plugins === plugins) return cached.present
+        return computeHttpHookCache(plugins).also { httpHookCache = it }.present
+    }
+
+    private fun computeHttpHookCache(plugins: List<InstalledPlugin>) = HttpHookCache(
+        plugins = plugins,
+        present = plugins.any { plugin ->
+            plugin.isActive && plugin.content.hooks.any { hook ->
+                hook.event == PluginHookEvents.AGENT_HTTP_BEFORE && hook.mode == PluginHookModes.TRANSFORM
+            }
+        }
+    )
+
+    private data class HttpHookCache(val plugins: List<InstalledPlugin>, val present: Boolean)
 
     /** App 进程启动完成；声明 `app.started` 的插件会在此拉起进程，resident 运行时不受空闲回收。 */
     fun dispatchAppStarted(appVersion: String) {
@@ -397,7 +441,10 @@ class PluginHookDispatcher @Inject constructor(
             val payload = buildJsonObject {
                 put("url", currentUrl)
                 put("method", method)
-                put("headers", JsonObject(currentHeaders.mapValues { JsonPrimitive(it.value) }))
+                put(
+                    "headers",
+                    JsonObject(PluginHttpHeaders.redact(currentHeaders).mapValues { JsonPrimitive(it.value) })
+                )
                 put("body", currentBody)
             }
             val result = invokeTransform(version, hook, payload, remaining) ?: continue
@@ -411,7 +458,12 @@ class PluginHookDispatcher @Inject constructor(
                 urlChanged = true
             }
             mutation.headers?.let {
-                currentHeaders = it
+                currentHeaders = PluginHttpHeaders.merge(
+                    originalUrl = url,
+                    originalHeaders = currentHeaders,
+                    returnedHeaders = it,
+                    finalUrl = currentUrl
+                )
                 headersChanged = true
             }
             mutation.body?.let {

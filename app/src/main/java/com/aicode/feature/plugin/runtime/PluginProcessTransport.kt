@@ -4,6 +4,8 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import java.io.BufferedWriter
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -138,14 +140,23 @@ class PluginProcessTransport(
     }
 
     private fun readLoop(p: Process) {
-        val reader = p.inputStream.bufferedReader()
+        val reader = BoundedLineReader(p.inputStream.buffered(), MAX_STDOUT_LINE_BYTES)
         try {
             while (true) {
-                val line = reader.readLine() ?: break
+                val read = reader.readLine()
+                if (read is BoundedLineReader.Line.Eof) break
+                if (read is BoundedLineReader.Line.Overlong) {
+                    FileLogger.w(
+                        TAG,
+                        "[$pluginId] stdout 单行超过 ${MAX_STDOUT_LINE_BYTES} 字节上限，已丢弃 ${read.bytes} 字节"
+                    )
+                    continue
+                }
+                val line = (read as BoundedLineReader.Line.Text).text
                 if (line.isBlank()) continue
                 val obj = runCatching { JSON.parseToJsonElement(line) as? JsonObject }.getOrNull()
                 if (obj == null) {
-                    FileLogger.i(TAG, "[$pluginId] 跳过非 JSON 行: $line")
+                    FileLogger.i(TAG, "[$pluginId] 跳过非 JSON 行: ${line.take(LOG_PREVIEW_CHARS)}")
                     continue
                 }
                 val method = (obj["method"] as? JsonPrimitive)?.contentOrNull
@@ -223,11 +234,35 @@ class PluginProcessTransport(
         deferred.complete(obj["result"] ?: JsonNull)
     }
 
+    /** stderr 只做诊断：单行有上限，日志按时间窗限流，避免插件刷屏拖垮日志 IO。 */
     private fun drainStderr(p: Process) {
-        runCatching {
-            p.errorStream.bufferedReader().forEachLine { line ->
-                if (line.isNotBlank()) FileLogger.i(TAG, "[$pluginId] stderr: $line")
+        val reader = BoundedLineReader(p.errorStream.buffered(), MAX_STDERR_LINE_BYTES)
+        var lastLogMs = Long.MIN_VALUE
+        var suppressed = 0
+        try {
+            while (true) {
+                val read = reader.readLine()
+                if (read is BoundedLineReader.Line.Eof) break
+                if (read is BoundedLineReader.Line.Overlong) {
+                    suppressed++
+                    continue
+                }
+                val line = (read as BoundedLineReader.Line.Text).text
+                if (line.isBlank()) continue
+                val now = System.nanoTime() / 1_000_000
+                if (lastLogMs != Long.MIN_VALUE && now - lastLogMs < STDERR_LOG_INTERVAL_MS) {
+                    suppressed++
+                    continue
+                }
+                lastLogMs = now
+                val omitted = if (suppressed > 0) "（省略 $suppressed 行）" else ""
+                FileLogger.i(TAG, "[$pluginId] stderr: ${line.take(LOG_PREVIEW_CHARS)}$omitted")
+                suppressed = 0
             }
+        } catch (e: Exception) {
+            // 进程退出时流会被关闭，属于正常结束路径
+        } finally {
+            if (suppressed > 0) FileLogger.i(TAG, "[$pluginId] stderr 省略了 $suppressed 行输出")
         }
     }
 
@@ -245,9 +280,64 @@ class PluginProcessTransport(
         }
     }
 
+    /**
+     * 按字节读一行并限制长度：正常行原样返回，超过 [maxBytes] 的行整行丢弃，
+     * 只回报丢弃的字节数，避免恶意或失控的插件输出占满堆与日志。
+     */
+    private class BoundedLineReader(private val input: InputStream, private val maxBytes: Int) {
+
+        sealed interface Line {
+            data class Text(val text: String) : Line
+            data class Overlong(val bytes: Long) : Line
+            data object Eof : Line
+        }
+
+        private val buffer = ByteArrayOutputStream(minOf(maxBytes, INITIAL_BUFFER_BYTES))
+
+        fun readLine(): Line {
+            buffer.reset()
+            while (true) {
+                val b = input.read()
+                if (b == -1) {
+                    return if (buffer.size() == 0) Line.Eof else Line.Text(decode())
+                }
+                if (b == '\n'.code) return Line.Text(decode())
+                if (buffer.size() >= maxBytes) {
+                    var discarded = buffer.size().toLong() + 1
+                    while (true) {
+                        val next = input.read()
+                        if (next == -1) return Line.Overlong(discarded)
+                        if (next == '\n'.code) return Line.Overlong(discarded)
+                        discarded++
+                    }
+                }
+                buffer.write(b)
+            }
+        }
+
+        private fun decode(): String = String(buffer.toByteArray(), Charsets.UTF_8).trimEnd('\r')
+
+        private companion object {
+            const val INITIAL_BUFFER_BYTES = 8 * 1024
+        }
+    }
+
     private companion object {
         const val TAG = "PluginProcess"
         const val EXIT_WAIT_MS = 2_000L
+
+        /** stdout 单行字节上限；正常 JSON-RPC 结果远小于该值。 */
+        const val MAX_STDOUT_LINE_BYTES = 4 * 1024 * 1024
+
+        /** stderr 单行字节上限；超长行整行丢弃并计入限流统计。 */
+        const val MAX_STDERR_LINE_BYTES = 64 * 1024
+
+        /** stderr 日志最短间隔：插件密集输出时最多每 200ms 记一条。 */
+        const val STDERR_LOG_INTERVAL_MS = 200L
+
+        /** 单条输出日志保留的字符数，避免非 JSON 行与 stderr 刷屏。 */
+        const val LOG_PREVIEW_CHARS = 300
+
         val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     }
 }

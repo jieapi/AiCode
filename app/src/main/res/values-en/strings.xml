@@ -2058,6 +2058,7 @@
     <string name="plugins_preview_contents">What it provides</string>
     <string name="plugins_install">Install</string>
     <string name="plugins_install_replace">Replace</string>
+    <string name="plugins_install_source_changed">The source has changed. Replacing the plugin revokes its existing Shizuku and overlay permissions and closes any open overlays.</string>
 
     <string name="plugins_store_install">Install</string>
     <string name="plugins_store_update">Update</string>

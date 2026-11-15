@@ -120,6 +120,20 @@ data class PluginDevProject(
     val publisher: String? = null
 )
 
+/**
+ * 同 ID 替换时来源是否变化：索引来源、源码仓库或官方标记任一不同，
+ * 以及本地导入与在线来源互换，都算换了来源。
+ */
+internal fun installSourceChanged(preview: PluginPreview, origin: PluginInstallOrigin): Boolean {
+    if (preview.installedVersion == null) return false
+    val installedFromIndex = preview.installedSourceId != null
+    val installFromIndex = origin.kind == PluginInstallOrigin.KIND_INDEX
+    return installedFromIndex != installFromIndex ||
+        preview.installedSourceId != origin.sourceId ||
+        preview.installedRepository != origin.repository ||
+        (preview.installedOfficial ?: false) != origin.official
+}
+
 @HiltViewModel
 class PluginsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
@@ -264,6 +278,12 @@ class PluginsViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = manager.install(state.preview.token, state.origin)) {
                 is PluginInstallResult.Installed -> {
+                    if (installSourceChanged(state.preview, state.origin)) {
+                        // 来源变了就不沿用旧包拿到的高危授权，启用状态保持原样
+                        shizukuPermissionRepository.revoke(result.pluginId)
+                        overlayPermissionRepository.revoke(result.pluginId)
+                        overlayManager.closePlugin(result.pluginId)
+                    }
                     syncProviders(result.pluginId)
                     pluginHookDispatcher.dispatchPluginInstalled(
                         result.pluginId,

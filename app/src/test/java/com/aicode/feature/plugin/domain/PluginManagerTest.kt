@@ -6,6 +6,7 @@ import java.io.File
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -79,6 +80,7 @@ class PluginManagerTest {
         val plugin = manager.plugins.value.single()
         assertEquals(PluginStatus.OK, plugin.status)
         assertTrue(plugin.isActive)
+        assertTrue("新装默认启用", plugin.record.enabled)
         assertTrue(manager.revision > before)
     }
 
@@ -168,6 +170,60 @@ class PluginManagerTest {
         assertTrue(plugin.isActive)
         assertTrue(manager.activeSkills().single().instructions.startsWith("Updated skill"))
         assertFalse("替换后不应遗留备份目录", File(root, "installed/community.demo-kit.replaced").exists())
+    }
+
+    @Test
+    fun replace_keepsDisabledStateAndRecordsNewOrigin() = runTest {
+        installValid()
+        manager.setEnabled("community.demo-kit", false)
+
+        val preview = previewOf(
+            PluginFixtures.validPackage(manifest = PluginFixtures.manifest(version = "1.1.0"))
+        )
+        val origin = PluginInstallOrigin(
+            kind = PluginInstallOrigin.KIND_INDEX,
+            sourceId = "community.demo-index",
+            sourceName = "Demo Index",
+            indexUrl = "https://example.com/plugins.json",
+            repository = "https://github.com/acme/demo-kit",
+            official = false
+        )
+        assertTrue(manager.install(preview.token, origin) is PluginInstallResult.Installed)
+
+        val plugin = manager.plugins.value.single()
+        assertEquals("1.1.0", plugin.record.version)
+        assertFalse("替换不能自动启用原本停用的插件", plugin.record.enabled)
+        assertTrue(manager.activeSkills().isEmpty())
+        assertEquals(PluginInstallOrigin.KIND_INDEX, plugin.record.origin)
+        assertEquals("community.demo-index", plugin.record.sourceId)
+        assertEquals("https://github.com/acme/demo-kit", plugin.record.repository)
+        assertFalse(plugin.record.official)
+    }
+
+    @Test
+    fun preview_exposesPreviousSourceForReplace() = runTest {
+        val first = previewOf()
+        assertNull(first.installedSourceId)
+        assertNull(first.installedRepository)
+        assertNull(first.installedOfficial)
+
+        val origin = PluginInstallOrigin(
+            kind = PluginInstallOrigin.KIND_INDEX,
+            sourceId = "community.demo-index",
+            sourceName = "Demo Index",
+            indexUrl = "https://example.com/plugins.json",
+            repository = "https://github.com/acme/demo-kit",
+            official = true
+        )
+        check(manager.install(first.token, origin) is PluginInstallResult.Installed)
+
+        val replace = previewOf(
+            PluginFixtures.validPackage(manifest = PluginFixtures.manifest(version = "1.1.0"))
+        )
+        assertEquals("1.0.0", replace.installedVersion)
+        assertEquals("community.demo-index", replace.installedSourceId)
+        assertEquals("https://github.com/acme/demo-kit", replace.installedRepository)
+        assertEquals(true, replace.installedOfficial)
     }
 
     @Test

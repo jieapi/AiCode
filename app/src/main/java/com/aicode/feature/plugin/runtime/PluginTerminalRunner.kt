@@ -3,6 +3,9 @@ package com.aicode.feature.plugin.runtime
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,6 +35,71 @@ data class PluginTerminalPoll(
 )
 
 /**
+ * 有状态的 UTF-8 流式解码。
+ *
+ * 终端按字节块回调，一个多字节字符可能被拆到相邻两块；[decode] 会把块尾不完整的序列留到
+ * 下一块补齐，[flush] 在输出流结束时把残留字节按替换字符吐出。只由单一线程按顺序调用。
+ */
+internal class Utf8StreamDecoder {
+    private val decoder = Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    private var pending = ByteArray(0)
+    private var finished = false
+
+    fun decode(bytes: ByteArray): String {
+        if (finished) return ""
+        val input = ByteBuffer.wrap(if (pending.isEmpty()) bytes else pending + bytes)
+        pending = ByteArray(0)
+        if (!input.hasRemaining()) return ""
+
+        val out = StringBuilder(input.remaining())
+        val chars = CharBuffer.allocate(CHARS_CHUNK)
+        while (true) {
+            val result = decoder.decode(input, chars, false)
+            chars.flip()
+            out.append(chars)
+            chars.clear()
+            if (result.isOverflow()) continue
+            if (input.hasRemaining()) {
+                pending = ByteArray(input.remaining()).also { input.get(it) }
+            }
+            return out.toString()
+        }
+    }
+
+    fun flush(): String {
+        if (finished) return ""
+        finished = true
+
+        val out = StringBuilder()
+        val chars = CharBuffer.allocate(CHARS_CHUNK)
+        val input = ByteBuffer.wrap(pending)
+        pending = ByteArray(0)
+        while (true) {
+            val result = decoder.decode(input, chars, true)
+            chars.flip()
+            out.append(chars)
+            chars.clear()
+            if (!result.isOverflow()) break
+        }
+        while (true) {
+            val result = decoder.flush(chars)
+            chars.flip()
+            out.append(chars)
+            chars.clear()
+            if (!result.isOverflow()) break
+        }
+        decoder.reset()
+        return out.toString()
+    }
+
+    private companion object {
+        const val CHARS_CHUNK = 1024
+    }
+}
+
+/**
  * 管理插件创建的共享终端标签。
  *
  * 标签归属创建它的插件，只能由该插件轮询、写入、列出、停止或关闭；[TerminalSessionProvider.listTabs]
@@ -55,8 +123,20 @@ class PluginTerminalRunner @Inject constructor(
         var cancelled = false
         var collector: Job? = null
 
+        /** 只在收集协程内调用，块与块之间保留不完整的 UTF-8 序列。 */
+        private val decoder = Utf8StreamDecoder()
+
         fun append(bytes: ByteArray) {
-            val text = bytes.toString(Charsets.UTF_8)
+            appendText(decoder.decode(bytes))
+        }
+
+        /** 输出流结束或关闭时调用，吐出解码器里残留的替换字符。 */
+        fun flush() {
+            appendText(decoder.flush())
+        }
+
+        private fun appendText(text: String) {
+            if (text.isEmpty()) return
             synchronized(this) {
                 buffer.append(text)
                 totalChars += text.length
@@ -83,7 +163,11 @@ class PluginTerminalRunner @Inject constructor(
         val run = Run(pluginId, tabId, title ?: tabId, command)
         runs[tabId] = run
         run.collector = scope.launch {
-            provider.tabOutput(tabId)?.collect { bytes -> run.append(bytes) }
+            try {
+                provider.tabOutput(tabId)?.collect { bytes -> run.append(bytes) }
+            } finally {
+                run.flush()
+            }
         }
         return tabId
     }

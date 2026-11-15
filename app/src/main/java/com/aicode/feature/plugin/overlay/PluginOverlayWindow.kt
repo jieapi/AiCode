@@ -43,6 +43,7 @@ internal class PluginOverlayWindow(
     private val snap: String,
     initialVisibilityPolicy: String,
     initialForeground: Boolean,
+    initialScreenOn: Boolean,
     private val onPositionChanged: (Int, Int) -> Unit
 ) : FrameLayout(context) {
 
@@ -55,6 +56,7 @@ internal class PluginOverlayWindow(
     private var dragRegionCss = RectF(0f, 0f, layoutParams.width / density, layoutParams.height / density)
     private var visibilityPolicy = initialVisibilityPolicy
     private var appForeground = initialForeground
+    private var screenOn = initialScreenOn
     private var requestedVisible = true
     private var resizeAnimator: ValueAnimator? = null
     private var snapAnimator: ValueAnimator? = null
@@ -135,6 +137,12 @@ internal class PluginOverlayWindow(
 
     fun onAppForegroundChanged(foreground: Boolean) {
         appForeground = foreground
+        applyVisibility()
+    }
+
+    /** 熄屏时无论策略如何都隐藏并暂停页面，亮屏后回到策略决定的状态。 */
+    fun onScreenStateChanged(screenOn: Boolean) {
+        this.screenOn = screenOn
         applyVisibility()
     }
 
@@ -294,7 +302,7 @@ internal class PluginOverlayWindow(
     }
 
     private fun applyVisibility() {
-        val visible = requestedVisible && when (visibilityPolicy) {
+        val visible = screenOn && requestedVisible && when (visibilityPolicy) {
             "foreground" -> appForeground
             "background" -> !appForeground
             else -> true

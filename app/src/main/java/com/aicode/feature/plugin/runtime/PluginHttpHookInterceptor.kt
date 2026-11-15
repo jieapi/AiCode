@@ -18,6 +18,9 @@ import okio.Buffer
  * 该拦截器挂在 AgentModule 的共享 OkHttpClient 上，因此覆盖对话、标题生成、压缩、
  * 模型列表/测试与图片请求。hook 在 OkHttp 线程上通过 [runBlocking] 等待，超时与错误
  * 由 [PluginHookDispatcher.beforeHttpRequest] 内部兜底，最坏情况保持原请求继续。
+ *
+ * payload 中的敏感头由 dispatcher 换成占位符；插件回传后在这里按“原请求头 + 返回值”重建，
+ * 只有最终 URL 与原 URL 同 origin 时才可能携带真实敏感头，跨 origin 一律剥离。
  */
 @Singleton
 class PluginHttpHookInterceptor @Inject constructor(
@@ -27,6 +30,7 @@ class PluginHttpHookInterceptor @Inject constructor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         if (request.method != "POST") return chain.proceed(request)
+        if (!dispatcher.hasHttpHooks()) return chain.proceed(request)
         val originalBody = request.body ?: return chain.proceed(request)
         val declaredLength = originalBody.contentLength()
         if (declaredLength > PluginHookTransform.MAX_HTTP_BODY_BYTES) return chain.proceed(request)
@@ -43,12 +47,13 @@ class PluginHttpHookInterceptor @Inject constructor(
         if (!bodyText.trimStart().startsWith("{")) return chain.proceed(request)
         if (chain.call().isCanceled()) return chain.proceed(request)
 
+        val originalUrl = request.url
         val headers = request.headers.toMultimap()
             .mapValues { (_, values) -> values.joinToString(", ") }
         val result = try {
             runBlocking {
                 dispatcher.beforeHttpRequest(
-                    url = request.url.toString(),
+                    url = originalUrl.toString(),
                     method = request.method,
                     headers = headers,
                     body = bodyText
@@ -62,13 +67,19 @@ class PluginHttpHookInterceptor @Inject constructor(
             return chain.proceed(request)
         }
 
+        val targetUrl = result.url?.toHttpUrlOrNull()
+            ?.takeIf { it.scheme == "http" || it.scheme == "https" }
         val builder = request.newBuilder()
-        result.url?.toHttpUrlOrNull()?.let { url ->
-            if (url.scheme == "http" || url.scheme == "https") builder.url(url)
-        }
-        result.headers?.let { replacement ->
+        targetUrl?.let { builder.url(it) }
+        if (result.headers != null || (targetUrl != null && targetUrl != originalUrl)) {
+            val merged = PluginHttpHeaders.merge(
+                originalUrl = originalUrl.toString(),
+                originalHeaders = headers,
+                returnedHeaders = result.headers ?: emptyMap(),
+                finalUrl = (targetUrl ?: originalUrl).toString()
+            )
             val headersBuilder = Headers.Builder()
-            replacement.forEach { (name, value) -> headersBuilder.add(name, value) }
+            merged.forEach { (name, value) -> headersBuilder.add(name, value) }
             builder.headers(headersBuilder.build())
         }
         val finalBody = result.body ?: bodyText
@@ -76,8 +87,8 @@ class PluginHttpHookInterceptor @Inject constructor(
         builder.method(request.method, finalBody.toRequestBody(contentType))
         FileLogger.d(
             TAG,
-            "HTTP hook 已改写请求 host=${request.url.host} " +
-                "url=${result.url != null} headers=${result.headers != null} body=${result.body != null}"
+            "HTTP hook 已改写请求 host=${originalUrl.host} " +
+                "url=${targetUrl != null} headers=${result.headers != null} body=${result.body != null}"
         )
         return chain.proceed(builder.build())
     }

@@ -52,6 +52,7 @@ object PluginManifestParser {
     private val TOOL_KEYS = setOf("id", "title", "description", "inputSchema", "handler")
     private val HOOK_KEYS = setOf("id", "event", "handler", "mode")
     private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "handler", "confirm", "icon")
+    private val WORKSPACE_TOOL_KEYS = setOf("id", "title", "description", "icon", "category", "pageFile")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val OVERLAY_KEYS = setOf("purpose", "surfaces")
@@ -75,6 +76,8 @@ object PluginManifestParser {
     private const val MAX_PROVIDER_URL = 2048
     private const val MAX_SHIZUKU_PURPOSE = 200
     private const val MAX_OVERLAY_PURPOSE = 200
+    private const val MAX_WORKSPACE_TOOL_ICON = 32
+    private const val MAX_WORKSPACE_TOOL_CATEGORY = 32
     private const val MAX_OVERLAY_SURFACES = 3
     private const val MIN_OVERLAY_EDGE = 48
     private const val MAX_OVERLAY_WIDTH = 720
@@ -752,13 +755,35 @@ object PluginManifestParser {
                     ok = false
                     return@forEachIndexed
                 }
+                item.keys.filter { it !in WORKSPACE_TOOL_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                    ok = false
+                }
                 val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
                 val titleRaw = item["title"]
                 val title = if (titleRaw != null) parseLocalized(titleRaw, "$itemPath.title", MAX_NAME) else null
                 val descRaw = item["description"]
                 val description = if (descRaw != null) parseLocalized(descRaw, "$itemPath.description", MAX_DESCRIPTION) ?: LocalizedText.single("") else LocalizedText.single("")
-                val icon = item["icon"]?.stringOrNull() ?: "play"
-                val category = item["category"]?.stringOrNull() ?: "通用"
+                var icon = "play"
+                val iconRaw = item["icon"]
+                if (iconRaw != null) {
+                    val text = readWorkspaceToolLabel(iconRaw, "$itemPath.icon", MAX_WORKSPACE_TOOL_ICON)
+                    if (text == null) {
+                        ok = false
+                    } else {
+                        icon = text
+                    }
+                }
+                var category = "通用"
+                val categoryRaw = item["category"]
+                if (categoryRaw != null) {
+                    val text = readWorkspaceToolLabel(categoryRaw, "$itemPath.category", MAX_WORKSPACE_TOOL_CATEGORY)
+                    if (text == null) {
+                        ok = false
+                    } else {
+                        category = text
+                    }
+                }
                 val pageFile = item["pageFile"]?.stringOrNull()
                 val isHtmlPage = pageFile != null && (
                     pageFile.endsWith(".html", ignoreCase = true) ||
@@ -787,6 +812,16 @@ object PluginManifestParser {
                 }
             }
             return if (ok) result else null
+        }
+
+        /** workspaceTools 的 icon/category 是短标签：非空、有长度上限、不含控制字符。 */
+        private fun readWorkspaceToolLabel(raw: JsonElement, path: String, maxLength: Int): String? {
+            val text = raw.stringOrNull()?.trim()
+            if (text.isNullOrEmpty() || text.length > maxLength || hasControlChars(text)) {
+                invalid(path)
+                return null
+            }
+            return text
         }
 
         /** 缺省视为空列表；每项必须有局部 ID、标题、已知槽位，以及 page / handler 二者之一。 */

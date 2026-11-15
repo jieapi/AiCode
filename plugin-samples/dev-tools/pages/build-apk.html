@@ -77,6 +77,7 @@
       <div class="field">
         <div class="field-title">构建任务</div>
         <aicode-select v-model="task" :options="tasks" :disabled="!ready || running"></aicode-select>
+        <div class="hint">单次构建最长 5 分钟，超时会中断；更长的构建请在终端中执行。</div>
       </div>
     </aicode-group>
 
@@ -146,7 +147,7 @@
           var self = this;
           self.detecting = true;
           self.output = '';
-          aicode.bash('test -f pubspec.yaml && echo flutter; test -f gradlew && echo android', { timeout: 15000 })
+          aicode.bash('test -f pubspec.yaml && echo flutter; test -f gradlew && echo android', { timeout: 15 })
             .then(function (res) {
               var out = (res && res.output) || '';
               if (out.indexOf('flutter') >= 0) {
@@ -172,7 +173,7 @@
           if (!self.ready || self.running) return;
           self.running = true;
           self.output = '$ ' + self.task + '\n';
-          aicode.bash(self.task, { timeout: 600000 })
+          aicode.bash(self.task, { timeout: 300 })
             .then(function (res) {
               var text = (res && res.output) || '（无输出）';
               if (res && res.exitCode != null) {

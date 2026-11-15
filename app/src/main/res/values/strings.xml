@@ -2057,6 +2057,7 @@
     <string name="plugins_preview_contents">将提供的内容</string>
     <string name="plugins_install">安装</string>
     <string name="plugins_install_replace">替换安装</string>
+    <string name="plugins_install_source_changed">来源已变化。替换安装会撤销该插件已有的 Shizuku 与悬浮窗授权，并关闭已打开的悬浮窗。</string>
 
     <string name="plugins_store_install">安装</string>
     <string name="plugins_store_update">更新</string>
