@@ -258,7 +258,7 @@ test('the next request updates in place and a dragged card keeps the ball with i
   assert.equal(env.element('allow').disabled, false);
   env.info.x -= 30;
   env.info.y -= 40;
-  env.receive({ type: 'dragEnd', x: env.info.x * 2, y: env.info.y * 2 });
+  env.receive({ type: 'dragEnd', x: env.info.x, y: env.info.y });
   env.state(null);
   await flush();
   env.finish();

@@ -11,8 +11,8 @@ const html = fs.readFileSync(path.join(root, 'plugin-samples/memory-manager/page
 const source = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
   .map((match) => match[1]).find((text) => text.includes('Vue.createApp'));
 const script = new vm.Script(source, { filename: 'memory.html' });
-const GLOBAL = 'aicode://memory';
-const PROJECT = 'workspace://.aicode/memory';
+const GLOBAL = '/root/.aicode/memory';
+const PROJECT = '/root/workspace/.aicode/memory';
 
 function memory(name, description, content) {
   return `---\nname: "${name}"\ndescription: "${description}"\n---\n${content}`;
@@ -57,7 +57,7 @@ function createPage(t, initial = {}, setup = () => {}) {
   const sdk = {
     async context() {
       log('context');
-      const value = { contextKey: env.contextKey };
+      const value = { contextKey: env.contextKey, home: '/root', workspace: '/root/workspace' };
       return env.hooks.context ? env.hooks.context(value) : value;
     },
     async toast(message) {
@@ -183,7 +183,7 @@ const initial = () => ({
   [PROJECT_NOTE]: memory('project', '项目摘要', '项目正文')
 });
 
-test('版本为 1.0.1，保留原文件根与 pluginApi', async (t) => {
+test('版本为 1.0.1，使用上下文中的文件根与 pluginApi', async (t) => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugin-samples/memory-manager/plugin.json'), 'utf8'));
   assert.equal(manifest.version, '1.0.1');
   assert.equal(manifest.engines.pluginApi, '^1.0.0');
