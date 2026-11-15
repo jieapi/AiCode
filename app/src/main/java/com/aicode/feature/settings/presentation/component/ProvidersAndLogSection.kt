@@ -49,6 +49,7 @@ import com.aicode.core.ui.SelectionActionBar
 import com.aicode.core.ui.SelectionActionButton
 import com.aicode.core.ui.SelectionActionIconButton
 import com.aicode.core.ui.SwipeToDeleteRow
+import com.aicode.feature.plugin.runtime.PluginProviderIds
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
@@ -170,6 +171,7 @@ internal fun ProvidersSection(
                             provider = provider,
                             onEdit = { onEdit(provider) },
                             onDelete = { onDelete(provider) },
+                            deleteEnabled = true,
                             selectionMode = selection.isActive,
                             selected = selection.isSelected(provider.id),
                             onToggleSelect = { selection.toggle(provider.id) },
@@ -234,6 +236,7 @@ fun ProviderItem(
     provider: AIProviderConfig,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    deleteEnabled: Boolean = true,
     dragModifier: Modifier = Modifier,
     selectionMode: Boolean = false,
     selected: Boolean = false,
@@ -246,6 +249,7 @@ fun ProviderItem(
     SwipeToDeleteRow(
         onDelete = onDelete,
         onClick = onEdit,
+        deleteEnabled = deleteEnabled,
         selectionMode = selectionMode,
         selected = selected,
         onToggleSelect = onToggleSelect
@@ -311,6 +315,13 @@ fun ProviderItem(
                             backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (PluginProviderIds.isPluginId(provider.id)) {
+                            McpPill(
+                                text = stringResource(R.string.provider_source_plugin),
+                                textColor = MaterialTheme.colorScheme.primary,
+                                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            )
+                        }
                     }
                 }
             }

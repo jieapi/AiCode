@@ -15,8 +15,15 @@ interface BackupManager {
     /**
      * 流式生成备份写入 [output]（调用方负责打开与关闭输出流）。
      * password 为 null 或空时不加密，输出明文 tar.gz。
+     * [pluginIds] 是使用者在「选择导出数据」里勾选的插件；宿主会让这些插件写入
+     * `plugins/<id>/` 区段，一并打包进归档。
      */
-    suspend fun export(password: CharArray?, options: BackupOptions, output: OutputStream)
+    suspend fun export(
+        password: CharArray?,
+        options: BackupOptions,
+        output: OutputStream,
+        pluginIds: Set<String> = emptySet()
+    )
 
     /**
      * 导出单个会话（无密码 tar.gz）：只含该会话 + 关联消息 + todo，可由 [import] 直接还原。

@@ -70,13 +70,20 @@ internal fun SkillsSection(
     onBatchDelete: (List<SkillUiEntry>) -> Unit,
     onBatchSetEnabled: (List<SkillUiEntry>, Boolean) -> Unit
 ) {
-    // 只在数据变化时分组，避免每次重组都产生两份新 List。
-    val (projectSkills, globalSkills) = remember(entries) {
-        entries.filter { it.scope == SkillScope.PROJECT } to entries.filter { it.scope == SkillScope.GLOBAL }
+    // 只在数据变化时分组，避免每次重组都产生新 List。
+    val (projectSkills, globalSkills, pluginSkills) = remember(entries) {
+        Triple(
+            entries.filter { it.scope == SkillScope.PROJECT },
+            entries.filter { it.scope == SkillScope.GLOBAL },
+            entries.filter { it.scope == SkillScope.PLUGIN }
+        )
     }
 
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
-    val allKeys = remember(entries) { entries.map { skillSelectionKey(it) } }
+    // 插件技能只读、不可通过技能页批量删除，剔除出全选键集
+    val allKeys = remember(entries) {
+        entries.filter { it.scope != SkillScope.PLUGIN }.map { skillSelectionKey(it) }
+    }
     val keyToEntry = remember(entries) { entries.associateBy { skillSelectionKey(it) } }
 
     // 列表刷新后剔除已消失的选中项；全空了就退出多选。
@@ -127,6 +134,7 @@ internal fun SkillsSection(
 
     var projectExpanded by rememberSaveable { mutableStateOf(true) }
     var globalExpanded by rememberSaveable { mutableStateOf(true) }
+    var pluginExpanded by rememberSaveable { mutableStateOf(true) }
     val allSelected = selection.selectedCount > 0 && selection.selectedCount == allKeys.size
     val selectedEntries: List<SkillUiEntry> = selection.selectedKeys.mapNotNull { keyToEntry[it] }
 
@@ -245,6 +253,34 @@ internal fun SkillsSection(
                     }
                 }
             }
+
+            if (pluginSkills.isNotEmpty()) {
+                item(key = "plugin-header", contentType = "header") {
+                    CollapsibleGroupHeader(
+                        text = stringResource(R.string.skills_group_plugin),
+                        expanded = pluginExpanded,
+                        onToggle = { pluginExpanded = !pluginExpanded }
+                    )
+                }
+                if (pluginExpanded) {
+                    itemsIndexed(
+                        items = pluginSkills,
+                        key = { _, entry -> "plugin:${entry.name}" },
+                        contentType = { _, _ -> "skill-row" }
+                    ) { index, entry ->
+                        LazyGroupItem(index = index, lastIndex = pluginSkills.lastIndex) {
+                            SkillRow(
+                                entry = entry,
+                                onDelete = {},
+                                onClick = { onOpenDetail(entry) },
+                                selectionMode = selection.isActive,
+                                selected = false,
+                                onToggleSelect = {}
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -275,10 +311,13 @@ private fun SkillRow(
     selected: Boolean = false,
     onToggleSelect: () -> Unit = {}
 ) {
+    val isPlugin = entry.scope == SkillScope.PLUGIN
     // 行背景由 SwipeToDeleteRow 提供，这里不再重复画一层，省一次整行绘制。
     SwipeToDeleteRow(
         onDelete = onDelete,
         onClick = onClick,
+        deleteEnabled = !isPlugin,
+        selectable = !isPlugin,
         selectionMode = selectionMode,
         selected = selected,
         onToggleSelect = onToggleSelect
@@ -321,6 +360,13 @@ private fun SkillRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (isPlugin) {
+                        McpPill(
+                            text = stringResource(R.string.plugins_scope_badge),
+                            textColor = MaterialTheme.colorScheme.primary,
+                            backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        )
+                    }
                     McpPill(
                         text = stringResource(if (entry.disabled) R.string.common_disabled else R.string.common_enabled),
                         textColor = if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary,

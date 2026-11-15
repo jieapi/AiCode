@@ -125,7 +125,19 @@ class ToolPermissionPolicyEngine @Inject constructor(
         val askTitle: String? = null
     )
 
-    suspend fun evaluate(tool: AgentTool?, toolName: String, args: Map<String, JsonElement>, mode: com.aicode.feature.agent.domain.model.AgentMode): EvalResult {
+    fun captureProject(workspacePath: String): PermissionRulesRepository.ProjectContext =
+        rulesRepo.captureProject(workspacePath)
+
+    suspend fun evaluate(tool: AgentTool?, toolName: String, args: Map<String, JsonElement>, mode: com.aicode.feature.agent.domain.model.AgentMode): EvalResult =
+        evaluate(tool, toolName, args, mode, null)
+
+    suspend fun evaluate(
+        tool: AgentTool?,
+        toolName: String,
+        args: Map<String, JsonElement>,
+        mode: com.aicode.feature.agent.domain.model.AgentMode,
+        project: PermissionRulesRepository.ProjectContext?
+    ): EvalResult {
         val capabilities = tool?.effectiveCapabilities(args).orEmpty()
         if (mode == com.aicode.feature.agent.domain.model.AgentMode.PLAN && isDangerousTool(toolName, args, capabilities)) {
             return EvalResult(Verdict.DENY, emptyList(), denyReason = appContext.getString(R.string.tool_plan_mode_denied))
@@ -162,7 +174,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
             val action = (args["action"] as? JsonPrimitive)?.content?.trim()?.lowercase() ?: "create"
             // 只读与发消息动作（read/list/send）：不放行 DENY 规则，其余直接自动放行（不弹窗）。
             if (action in TASK_AUTO_ACTIONS) {
-                val rules = rulesRepo.loadEffectiveForCurrentProject().filter { it.toolName == toolName }
+                val rules = loadRules(project).filter { it.toolName == toolName }
                 if (rules.any { it.pattern == PermissionRule.WHOLE_TOOL && it.decision == PermissionDecision.DENY }) {
                     return EvalResult(Verdict.DENY, emptyList(), denyReason = appContext.getString(R.string.tool_permission_rule_denied))
                 }
@@ -171,7 +183,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
             if (action == TASK_DELETE_ACTION) {
                 // 删除子会话及其全部消息不可逆：尊重显式 DENY，其余一律单次确认，不提供
                 // 「始终允许」——create/stop 落下的 ALWAYS 记忆不得连带放行删除。
-                val rules = rulesRepo.loadEffectiveForCurrentProject().filter { it.toolName == toolName }
+                val rules = loadRules(project).filter { it.toolName == toolName }
                 if (rules.any { it.pattern == PermissionRule.WHOLE_TOOL && it.decision == PermissionDecision.DENY }) {
                     return EvalResult(Verdict.DENY, emptyList(), denyReason = appContext.getString(R.string.tool_permission_rule_denied))
                 }
@@ -183,13 +195,17 @@ class ToolPermissionPolicyEngine @Inject constructor(
             }
         }
 
-        val rules = rulesRepo.loadEffectiveForCurrentProject().filter { it.toolName == toolName }
+        val rules = loadRules(project).filter { it.toolName == toolName }
         return if (isShellTool(toolName, args)) {
             evaluateShell(rules, args, forceAsk = toolName == SHIZUKU_TOOL)
         } else {
             evaluateGeneric(rules, capabilities)
         }
     }
+
+    private suspend fun loadRules(project: PermissionRulesRepository.ProjectContext?): List<PermissionRule> =
+        if (project == null) rulesRepo.loadEffectiveForCurrentProject()
+        else rulesRepo.loadEffectiveForProject(project)
 
     private fun isDangerousTool(toolName: String, args: Map<String, JsonElement>, capabilities: Set<ToolCapability>): Boolean {
         val dangerousCapabilities = setOf(
@@ -277,6 +293,12 @@ class ToolPermissionPolicyEngine @Inject constructor(
     suspend fun remember(toolName: String, patterns: List<String>, scope: PermissionScope) {
         patterns.distinct().forEach { pattern ->
             rulesRepo.add(scope, PermissionRule(toolName, pattern, PermissionDecision.ALLOW))
+        }
+    }
+
+    suspend fun remember(toolName: String, patterns: List<String>, project: PermissionRulesRepository.ProjectContext) {
+        patterns.distinct().forEach { pattern ->
+            rulesRepo.addToProject(project, PermissionRule(toolName, pattern, PermissionDecision.ALLOW))
         }
     }
 

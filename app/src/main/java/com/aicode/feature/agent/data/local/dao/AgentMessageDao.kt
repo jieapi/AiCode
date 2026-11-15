@@ -26,6 +26,27 @@ interface AgentMessageDao {
     @Query("SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     suspend fun getMessagesBySessionOnce(sessionId: String): List<AgentMessageEntity>
 
+    /**
+     * 按时间倒序读取一页消息，供插件只读会话内容。
+     * [before] / [after] 为空表示不设该边界；返回按 timestamp 倒序，调用方需要时可再反转。
+     */
+    @Query(
+        """
+        SELECT * FROM agent_messages
+        WHERE sessionId = :sessionId
+          AND (:before IS NULL OR timestamp < :before)
+          AND (:after IS NULL OR timestamp > :after)
+        ORDER BY timestamp DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getMessagesPageDescending(
+        sessionId: String,
+        before: Long?,
+        after: Long?,
+        limit: Int
+    ): List<AgentMessageEntity>
+
     @Query("DELETE FROM agent_messages WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
 

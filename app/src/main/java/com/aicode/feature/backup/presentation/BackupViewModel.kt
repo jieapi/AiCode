@@ -90,6 +90,18 @@ class BackupViewModel @Inject constructor(
 
     private val prefs = context.getSharedPreferences("backup_options", Context.MODE_PRIVATE)
 
+    /** 「选择导出数据」中插件数据项被关闭的键；缺省包含。 */
+    private val _disabledPluginDataKeys = MutableStateFlow(
+        prefs.getStringSet(KEY_PLUGIN_DISABLED, emptySet())?.toSet() ?: emptySet()
+    )
+    val disabledPluginDataKeys: StateFlow<Set<String>> = _disabledPluginDataKeys.asStateFlow()
+
+    fun setPluginDataSelected(key: String, selected: Boolean) {
+        val next = if (selected) _disabledPluginDataKeys.value - key else _disabledPluginDataKeys.value + key
+        _disabledPluginDataKeys.value = next
+        prefs.edit().putStringSet(KEY_PLUGIN_DISABLED, next).apply()
+    }
+
     private val _exportOptions = MutableStateFlow(loadExportOptions())
     val exportOptions: StateFlow<BackupOptions> = _exportOptions.asStateFlow()
 
@@ -117,17 +129,20 @@ class BackupViewModel @Inject constructor(
         workspaceFiles = prefs.getBoolean(KEY_WORKSPACE_FILES, false)
     )
 
-    /** 流式导出到 [output]（调用方打开，本方法负责关闭）。 */
-    fun export(password: String, options: BackupOptions, output: OutputStream) {
+    /** 流式导出到 [output]（调用方打开，本方法负责关闭）。[pluginIds] 是勾选的插件数据区段。 */
+    fun export(password: String, options: BackupOptions, output: OutputStream, pluginIds: Set<String>) {
         _state.value = BackupState.Working
         viewModelScope.launch {
             val pw = password.toCharArray().takeIf { it.isNotEmpty() }
             try {
-                backupManager.export(pw, options, output)
+                withContext(Dispatchers.IO) {
+                    backupManager.export(pw, options, output, pluginIds)
+                }
                 _state.value = BackupState.ExportDone
             } catch (e: Exception) {
                 _state.value = BackupState.Error(e.message ?: context.getString(R.string.backup_export_failed))
             } finally {
+                pw?.fill('\u0000')
                 runCatching { output.close() }
             }
         }
@@ -156,7 +171,7 @@ class BackupViewModel @Inject constructor(
     }
 
     /** 导出当前备份并上传到 [target]。备份默认含解密后的 API Key / SSH 凭据，禁止明文上传远端。 */
-    fun uploadToTarget(target: BackupTarget, password: String) {
+    fun uploadToTarget(target: BackupTarget, password: String, pluginIds: Set<String>) {
         if (password.isEmpty()) {
             _networkState.value = NetworkBackupState.Error(
                 context.getString(R.string.backup_net_upload_password_required)
@@ -173,7 +188,7 @@ class BackupViewModel @Inject constructor(
                 }
                 val file = temp
                 withContext(Dispatchers.IO) {
-                    file.outputStream().buffered().use { backupManager.export(pw, _exportOptions.value, it) }
+                    file.outputStream().buffered().use { backupManager.export(pw, _exportOptions.value, it, pluginIds) }
                 }
                 val name = "aicode-backup-${fileTimestamp()}.tar.gz"
                 val result = withContext(Dispatchers.IO) {
@@ -442,5 +457,6 @@ class BackupViewModel @Inject constructor(
         private const val KEY_PERMISSION_RULES = "permission_rules"
         private const val KEY_APP_SETTINGS = "app_settings"
         private const val KEY_WORKSPACE_FILES = "workspace_files"
+        private const val KEY_PLUGIN_DISABLED = "plugin_disabled"
     }
 }

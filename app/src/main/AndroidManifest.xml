@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 16 实时通知（Live Updates）：声明后通知才可能被系统提升到状态栏/锁屏。API 36 引入，低版本忽略。 -->
@@ -71,6 +72,12 @@
 
         <service
             android:name=".feature.terminal.domain.TerminalKeepaliveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".feature.plugin.overlay.PluginOverlayService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

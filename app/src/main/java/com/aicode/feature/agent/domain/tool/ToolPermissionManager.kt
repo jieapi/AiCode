@@ -53,10 +53,17 @@ class ToolPermissionManager @Inject constructor() {
     fun pendingForSession(sessionId: String): PendingToolPermission? =
         synchronized(lock) { pending.values.firstOrNull { it.request.sessionId == sessionId }?.request }
 
-    /** 在持锁区内调用：把内部表投影到两个对外 StateFlow。 */
+    /**
+     * 在持锁区内调用：把内部表投影到两个对外 StateFlow。
+     * 插件发起的授权（[PendingToolPermission.ORIGIN_PLUGIN]）只通过 [pendingForSession] 交给
+     * 插件侧处理，不占用聊天页弹窗与侧边栏等待指示。
+     */
     private fun publish() {
-        _pendingRequest.value = pending.values.firstOrNull()?.request
-        _awaitingSessionIds.value = pending.values.mapNotNull { it.request.sessionId.ifBlank { null } }.toSet()
+        val chatRequests = pending.values
+            .map { it.request }
+            .filter { it.origin != PendingToolPermission.ORIGIN_PLUGIN }
+        _pendingRequest.value = chatRequests.firstOrNull()
+        _awaitingSessionIds.value = chatRequests.mapNotNull { it.sessionId.ifBlank { null } }.toSet()
     }
 
     private class Entry(

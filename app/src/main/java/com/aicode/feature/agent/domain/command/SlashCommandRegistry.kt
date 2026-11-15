@@ -1,15 +1,21 @@
 package com.aicode.feature.agent.domain.command
 
 import android.content.Context
+import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.skill.SkillRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.aicode.feature.plugin.domain.PluginManager
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -24,8 +30,16 @@ import kotlinx.coroutines.withContext
 class SlashCommandRegistry @Inject constructor(
     actionHandlers: Set<@JvmSuppressWildcards ActionCommandHandler>,
     private val skillRepository: SkillRepository,
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val pluginManager: PluginManager? = null
 ) {
+    /** 供单测等不注入插件管理器的场景使用。 */
+    constructor(
+        actionHandlers: Set<ActionCommandHandler>,
+        skillRepository: SkillRepository,
+        context: Context
+    ) : this(actionHandlers, skillRepository, context, null)
+
     private val actions: List<ActionCommandHandler> = actionHandlers.sortedBy { it.name.lowercase() }
     private val actionsByName: Map<String, ActionCommandHandler> =
         actions.associateBy { it.name.lowercase() }
@@ -38,6 +52,22 @@ class SlashCommandRegistry @Inject constructor(
 
     /** `/` 菜单展示的命令列表。 */
     val commands: StateFlow<List<SlashCommand>> = _commands.asStateFlow()
+
+    private val refreshScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            CoroutineExceptionHandler { _, e ->
+                FileLogger.w(TAG, "斜杠命令刷新失败: ${e.javaClass.simpleName}")
+            }
+    )
+
+    init {
+        refreshScope.launch { refresh() }
+        pluginManager?.let { pm ->
+            refreshScope.launch {
+                pm.plugins.collect { refresh() }
+            }
+        }
+    }
 
     /** 重新扫描技能并重建菜单。涉及文件 IO，调用方应在 IO 上下文调用。 */
     suspend fun refresh() = withContext(Dispatchers.IO) {
@@ -105,6 +135,8 @@ class SlashCommandRegistry @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "SlashCommandRegistry"
+
         /**
          * 构造技能本轮指令：把技能正文里的 `$ARGUMENTS` 替换为 [args]；
          * 无占位且 [args] 非空时追加一行，保证用户输入不丢失。

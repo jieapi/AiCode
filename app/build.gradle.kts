@@ -401,6 +401,8 @@ dependencies {
     // Core Android（1.17.0 起提供 NotificationCompat 的实时通知推广接口 setRequestPromotedOngoing）
     implementation("androidx.core:core:1.17.0")
 
+    // 插件运行时在容器内以子进程执行，不再依赖设备 WebView 的 JS 沙箱。
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     // 迁移测试：MigrationTestHelper + Robolectric（在 JVM 上跑 Room 迁移，需真实 resources）

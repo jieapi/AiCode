@@ -71,7 +71,7 @@ data class AIProviderConfig(
             listOf(ProviderKey(apiKey)).filter { it.value.isNotBlank() }
         }
 
-    /** 是否已配置至少一个可用 Key。 */
+    /** 是否已配置至少一个可用 Key。插件提供商默认带占位 Key，使用者可改成服务要求的凭据。 */
     val hasUsableApiKey: Boolean get() = effectiveApiKeys.isNotEmpty()
 
     /** 实际生效的切换状态码：留空回退默认集合。 */

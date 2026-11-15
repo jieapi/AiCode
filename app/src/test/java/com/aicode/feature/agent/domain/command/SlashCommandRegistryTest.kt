@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -19,6 +20,21 @@ class SlashCommandRegistryTest {
 
     private val context = mockk<Context>()
     private val skillRepository = mockk<SkillRepository>()
+
+    @Volatile
+    private var skillsForTest: List<Skill> = emptyList()
+
+    /**
+     * 构造时 init 会在后台 refresh。所有 stub 必须在任何 registry 实例创建前完成，
+     * 否则后台协程调用 mock 会打断 prepare 里的 every 记录。
+     */
+    @Before
+    fun setUp() {
+        every { skillRepository.listSkills() } answers { skillsForTest }
+        every { context.getString(R.string.slash_command_usage_desc) } returns "用量"
+        every { context.getString(R.string.slash_command_compress_desc) } returns "压缩上下文"
+        every { context.getString(R.string.slash_command_init_desc) } returns "初始化项目"
+    }
 
     private fun action(cmdName: String, descRes: Int, takesArgs: Boolean = false) =
         object : ActionCommandHandler {
@@ -39,10 +55,7 @@ class SlashCommandRegistryTest {
         SlashCommandRegistry(handlers.toSet(), skillRepository, context)
 
     private fun prepare(registry: SlashCommandRegistry, skills: List<Skill>) {
-        every { context.getString(R.string.slash_command_usage_desc) } returns "用量"
-        every { context.getString(R.string.slash_command_compress_desc) } returns "压缩上下文"
-        every { context.getString(R.string.slash_command_init_desc) } returns "初始化项目"
-        every { skillRepository.listSkills() } returns skills
+        skillsForTest = skills
         runBlocking { registry.refresh() }
     }
 

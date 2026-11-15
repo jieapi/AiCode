@@ -2,6 +2,8 @@ package com.aicode.testutil
 
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.FileEntry
+import com.aicode.feature.workspace.domain.FileReadTooLargeException
+import com.aicode.feature.workspace.domain.readBytesBounded
 import com.aicode.feature.workspace.domain.sha256Fingerprint
 import java.io.File
 import java.io.FileOutputStream
@@ -9,6 +11,9 @@ import java.io.InputStream
 import java.nio.charset.Charset
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.NoSuchFileException
+import java.nio.file.FileSystemLoopException
+import java.nio.file.Files
+import java.util.ArrayDeque
 
 /**
  * 测试用的 [FileAccessProvider]：把传入路径直接当本地文件系统路径处理。
@@ -75,6 +80,38 @@ class TestFileAccessProvider : FileAccessProvider {
     }
 
     override fun readBytes(path: String): ByteArray = File(path).readBytes()
+
+    override fun readBytes(path: String, maxBytes: Long): ByteArray {
+        val file = File(path)
+        if (file.length() > maxBytes) throw FileReadTooLargeException(maxBytes)
+        return file.inputStream().use { it.readBytesBounded(maxBytes) }
+    }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String {
+        val pending = ArrayDeque(File(path).absolutePath.split('/').filter { it.isNotEmpty() })
+        var current = File("/")
+        var links = 0
+        while (pending.isNotEmpty()) {
+            val part = pending.removeFirst()
+            when (part) {
+                "." -> continue
+                ".." -> {
+                    current = current.parentFile ?: current
+                    continue
+                }
+            }
+            val candidate = File(current, part)
+            if ((followFinalLink || pending.isNotEmpty()) && Files.isSymbolicLink(candidate.toPath())) {
+                if (++links > 40) throw FileSystemLoopException(path)
+                val target = Files.readSymbolicLink(candidate.toPath()).toString()
+                if (target.startsWith('/')) current = File("/")
+                target.split('/').filter { it.isNotEmpty() }.asReversed().forEach(pending::addFirst)
+            } else {
+                current = candidate
+            }
+        }
+        return current.path
+    }
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val file = File(path)

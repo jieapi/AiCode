@@ -16,6 +16,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.InputStream
+import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import java.nio.file.FileSystemLoopException
 import java.nio.file.Files
@@ -339,6 +341,46 @@ class LocalFileAccessTest {
         assertThrows(FileAlreadyExistsException::class.java) {
             access.writeBytes("bin.dat", byteArrayOf(2), overwrite = false)
         }
+    }
+
+    @Test
+    fun boundedRead_acceptsExactLimitAndRejectsSparseOversizedFile() {
+        val access = newAccess()
+        tmp.newFile("small.bin").writeBytes(byteArrayOf(1, 2, 3))
+        assertTrue(byteArrayOf(1, 2, 3).contentEquals(access.readBytes("small.bin", 3)))
+        tmp.newFile("empty.bin")
+        assertEquals(0, access.readBytes("empty.bin", 0).size)
+        val large = tmp.newFile("large.bin")
+        RandomAccessFile(large, "rw").use { it.setLength(256L * 1024 * 1024) }
+        assertThrows(FileReadTooLargeException::class.java) {
+            access.readBytes("large.bin", 8L * 1024 * 1024)
+        }
+    }
+
+    @Test
+    fun boundedStreamRead_stopsAfterLimitPlusOneEvenWhenSourceKeepsGrowing() {
+        var readBytes = 0L
+        val stream = object : InputStream() {
+            override fun read(): Int = error("expected buffered read")
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                readBytes += length
+                return length
+            }
+        }
+        assertThrows(FileReadTooLargeException::class.java) { stream.readBytesBounded(8192) }
+        assertEquals(8193L, readBytes)
+    }
+
+    @Test
+    fun resolvePath_matchesBackendLinkAndParentSemantics() {
+        val access = linkedAccess()
+        tmp.newFolder("target", "nested")
+        Files.createSymbolicLink(File(tmp.root, "link").toPath(), File("target/nested").toPath())
+        assertEquals(File(tmp.root, "target").path, access.resolvePath("link/.."))
+        assertEquals(File(tmp.root, "link").path, access.resolvePath("link", followFinalLink = false))
+        assertEquals(File(tmp.root, "target/nested").path, access.resolvePath("link/.", followFinalLink = false))
+        assertEquals(tmp.root.path, access.resolvePath("/root//workspace/."))
+        assertEquals(File(tmp.root, "target/new/file").path, access.resolvePath("link/../new/file"))
     }
 
     // ---------- fingerprint ----------

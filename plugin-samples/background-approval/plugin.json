@@ -1,0 +1,51 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.background-approval",
+  "name": {
+    "default": "Background Approval",
+    "zh-CN": "后台审批"
+  },
+  "version": "1.1.2",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "default": "Shows a floating ball while AiCode is in the background and expands it into an approval panel when the AI needs permission. Foreground requests are passed straight back to the in-app dialog.",
+    "zh-CN": "AiCode 在后台时显示悬浮球；AI 需要授权时展开审批面板。App 在前台时直接交回应用内确认框，不阻塞审批。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js",
+    "resident": true
+  },
+  "contributes": {
+    "overlay": {
+      "purpose": "在 App 处于后台时显示审批悬浮球与同意/拒绝面板",
+      "surfaces": [
+        {
+          "id": "ball",
+          "page": "pages/ball.html",
+          "width": 48,
+          "height": 48,
+          "draggable": true
+        }
+      ]
+    },
+    "hooks": [
+      {
+        "id": "boot",
+        "event": "app.started",
+        "handler": "hooks.boot"
+      },
+      {
+        "id": "review",
+        "event": "agent.permission.review",
+        "handler": "hooks.reviewPermission",
+        "mode": "review"
+      }
+    ]
+  }
+}

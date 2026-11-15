@@ -558,6 +558,42 @@ class ToolPermissionPolicyEngineTest {
         assertEquals(listOf("命令替换 \$(...)"), formatArgs)
     }
 
+    @Test
+    fun explicitProjectEvaluation_readsCapturedProjectInsteadOfCurrentProject() = runTest {
+        val repo = mockk<PermissionRulesRepository>(relaxed = true)
+        val project = mockk<PermissionRulesRepository.ProjectContext>()
+        every { repo.captureProject("/project-a") } returns project
+        coEvery { repo.loadEffectiveForProject(project) } returns listOf(
+            PermissionRule("writeFile", "*", PermissionDecision.DENY),
+            PermissionRule("Bash", "git pull")
+        )
+        coEvery { repo.loadEffectiveForCurrentProject() } returns listOf(PermissionRule("writeFile", "*"))
+        val e = ToolPermissionPolicyEngine(repo, mockk(relaxed = true), appContext())
+        val captured = e.captureProject("/project-a")
+
+        val write = e.evaluate(tool(ToolCapability.WRITE_WORKSPACE), "writeFile", emptyMap(), AgentMode.BUILD, captured)
+        val shell = e.evaluate(tool(ToolCapability.EXECUTE_COMMANDS), "Bash", bash("git pull"), AgentMode.BUILD, captured)
+
+        assertEquals(ToolPermissionPolicyEngine.Verdict.DENY, write.verdict)
+        assertEquals(ToolPermissionPolicyEngine.Verdict.ALLOW, shell.verdict)
+        coVerify(exactly = 2) { repo.loadEffectiveForProject(project) }
+        coVerify(exactly = 0) { repo.loadEffectiveForCurrentProject() }
+    }
+
+    @Test
+    fun explicitProjectRemember_dedupesAndWritesOnlyCapturedProject() = runTest {
+        val repo = mockk<PermissionRulesRepository>(relaxed = true)
+        val project = mockk<PermissionRulesRepository.ProjectContext>()
+        val e = ToolPermissionPolicyEngine(repo, mockk(relaxed = true), appContext())
+
+        e.remember("Bash", listOf("git pull", "git pull", "ls"), project)
+
+        coVerify(exactly = 2) { repo.addToProject(project, any()) }
+        coVerify { repo.addToProject(project, PermissionRule("Bash", "git pull", PermissionDecision.ALLOW)) }
+        coVerify { repo.addToProject(project, PermissionRule("Bash", "ls", PermissionDecision.ALLOW)) }
+        coVerify(exactly = 0) { repo.add(any(), any()) }
+    }
+
     // ── remember：去重后逐条落库 ────────────────────────────────────
 
     @Test

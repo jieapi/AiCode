@@ -105,6 +105,8 @@ import com.aicode.feature.agent.presentation.BrowseClipboard
 import com.aicode.feature.agent.presentation.FileBrowseState
 import com.aicode.feature.agent.presentation.FileTreeNode
 import com.aicode.feature.agent.presentation.FileTreeRoot
+import com.aicode.feature.plugin.domain.PluginUiEntry
+import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.workspace.domain.isValidFileEntryName
 import com.aicode.core.ui.ChevronRotationStyle
 import com.aicode.core.ui.ExpandableChevronIcon
@@ -142,6 +144,7 @@ import kotlinx.coroutines.delay
  * 侧边栏内容：顶部 Tab 切换「会话」/「文件」，底部「设置」入口卡片。
  * Tab0 为根会话列表，带子代理的会话行可就地展开；Tab1 为当前工作区的文件树。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDrawerContent(
     sessions: List<ChatSession>,
@@ -176,6 +179,13 @@ fun ChatDrawerContent(
     onClearClipboard: () -> Unit,
     onNavigateToBrowser: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onPluginEntry: (PluginUiEntry) -> Unit = {},
+    sessionPluginEntries: List<PluginUiEntry> = emptyList(),
+    onSessionPluginEntry: (ChatSession, PluginUiEntry) -> Unit = { _, _ -> },
+    filePluginEntries: List<PluginUiEntry> = emptyList(),
+    onFilePluginEntry: (FileTreeNode, PluginUiEntry) -> Unit = { _, _ -> },
     searchQuery: String,
     searchState: ChatSearchState,
     onSearchQueryChange: (String) -> Unit,
@@ -192,6 +202,7 @@ fun ChatDrawerContent(
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
     var pendingRename by remember { mutableStateOf<ChatSession?>(null) }
     var menuSession by remember { mutableStateOf<ChatSession?>(null) }
+    var showAllPlugins by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     BackHandler(enabled = isSelectionMode) {
@@ -363,8 +374,34 @@ fun ChatDrawerContent(
                     onCopyEntry = onCopyEntry,
                     onCutEntry = onCutEntry,
                     onPasteEntry = onPasteEntry,
-                    onClearClipboard = onClearClipboard
+                    onClearClipboard = onClearClipboard,
+                    filePluginEntries = filePluginEntries,
+                    pluginLanguageTag = pluginLanguageTag,
+                    onFilePluginEntry = onFilePluginEntry
                 )
+            }
+        }
+
+        if (pluginEntries.isNotEmpty()) {
+            SettingsGroupHeader(text = stringResource(R.string.settings_plugins))
+            SettingsGroup {
+                pluginEntries.take(3).forEachIndexed { index, entry ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(
+                        icon = pluginPageIcon(entry.icon),
+                        title = entry.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, entry.pluginId),
+                        onClick = { onPluginEntry(entry) }
+                    )
+                }
+                if (pluginEntries.size > 3) {
+                    SettingsDivider()
+                    SettingsRow(
+                        icon = FeatherIcons.ChevronRight,
+                        title = stringResource(R.string.plugins_more_in_drawer),
+                        onClick = { showAllPlugins = true }
+                    )
+                }
             }
         }
 
@@ -383,6 +420,32 @@ fun ChatDrawerContent(
                 onClick = onNavigateToSettings,
                 modifier = Modifier.onboardingTarget(OnboardingStep.ENTER_SETTINGS)
             )
+        }
+    }
+
+    if (showAllPlugins && pluginEntries.isNotEmpty()) {
+        AdaptiveModalBottomSheet(onDismissRequest = { showAllPlugins = false }) {
+            Text(
+                text = stringResource(R.string.settings_plugins),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+            )
+            Column(modifier = Modifier.padding(bottom = Spacing.xl)) {
+                pluginEntries.forEachIndexed { index, entry ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(
+                        icon = pluginPageIcon(entry.icon),
+                        title = entry.title.resolve(pluginLanguageTag),
+                        subtitle = stringResource(R.string.plugins_ext_entry_subtitle, entry.pluginId),
+                        onClick = {
+                            showAllPlugins = false
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -449,6 +512,9 @@ fun ChatDrawerContent(
                 menuSession = null
                 pendingDelete = session
             },
+            pluginEntries = sessionPluginEntries,
+            pluginLanguageTag = pluginLanguageTag,
+            onPluginEntry = { entry -> onSessionPluginEntry(session, entry) },
             onDismiss = { menuSession = null }
         )
     }
@@ -881,7 +947,10 @@ private fun FileBrowserTab(
     onCopyEntry: (String, String) -> Unit,
     onCutEntry: (String, String) -> Unit,
     onPasteEntry: (String, (Boolean) -> Unit) -> Unit,
-    onClearClipboard: () -> Unit
+    onClearClipboard: () -> Unit,
+    filePluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onFilePluginEntry: (FileTreeNode, PluginUiEntry) -> Unit = { _, _ -> }
 ) {
     var creating by remember { mutableStateOf<CreateTarget?>(null) }
     var menuNode by remember { mutableStateOf<FileTreeNode?>(null) }
@@ -1048,6 +1117,9 @@ private fun FileBrowserTab(
                 menuNode = null
                 onPasteEntry(target) { /* 结果由调用方决定是否提示，这里保持静默 */ }
             },
+            pluginEntries = filePluginEntries,
+            pluginLanguageTag = pluginLanguageTag,
+            onPluginEntry = { entry -> onFilePluginEntry(node, entry) },
             onDismiss = { menuNode = null }
         )
     }
@@ -1172,6 +1244,9 @@ private fun FileTreeActionSheet(
     onCopy: () -> Unit,
     onCut: () -> Unit,
     onPasteHere: () -> Unit,
+    pluginEntries: List<PluginUiEntry>,
+    pluginLanguageTag: String,
+    onPluginEntry: (PluginUiEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
     AdaptiveModalBottomSheet(
@@ -1236,6 +1311,27 @@ private fun FileTreeActionSheet(
                     tint = MaterialTheme.colorScheme.onSurface,
                     onClick = onRename
                 )
+            }
+            if (pluginEntries.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_plugins),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+                pluginEntries.forEach { entry ->
+                    SheetActionRow(
+                        icon = pluginPageIcon(entry.icon),
+                        label = entry.title.resolve(pluginLanguageTag),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            onDismiss()
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
+            if (node.root == null) {
                 SheetActionRow(
                     icon = FeatherIcons.Trash2,
                     label = stringResource(R.string.common_delete),
@@ -1392,6 +1488,9 @@ private fun SessionActionSheet(
     onExport: () -> Unit,
     onBatchSelect: () -> Unit,
     onDelete: () -> Unit,
+    pluginEntries: List<PluginUiEntry>,
+    pluginLanguageTag: String,
+    onPluginEntry: (PluginUiEntry) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -1451,6 +1550,25 @@ private fun SessionActionSheet(
                     onBatchSelect()
                 }
             )
+            if (pluginEntries.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_plugins),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+                pluginEntries.forEach { entry ->
+                    SheetActionRow(
+                        icon = pluginPageIcon(entry.icon),
+                        label = entry.title.resolve(pluginLanguageTag),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        onClick = {
+                            onDismiss()
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
             SheetActionRow(
                 icon = FeatherIcons.Trash2,
                 label = stringResource(R.string.common_delete),

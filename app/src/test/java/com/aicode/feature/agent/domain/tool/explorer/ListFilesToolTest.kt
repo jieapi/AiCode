@@ -50,6 +50,8 @@ class ListFilesToolTest {
         override fun fingerprint(path: String): String? = throw UnsupportedOperationException()
         override fun permissions(path: String): String = throw UnsupportedOperationException()
         override fun readBytes(path: String): ByteArray = throw UnsupportedOperationException()
+        override fun readBytes(path: String, maxBytes: Long): ByteArray = throw UnsupportedOperationException()
+        override fun resolvePath(path: String, followFinalLink: Boolean): String = throw UnsupportedOperationException()
         override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) = throw UnsupportedOperationException()
         override fun writeStream(path: String, input: InputStream, overwrite: Boolean): Long = throw UnsupportedOperationException()
         override fun listFilesRecursive(path: String, maxDepth: Int): List<String> = emptyList()

@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
@@ -52,6 +53,11 @@ class DelegatingTerminalSessionProvider @Inject constructor(
         sourceSessionId: String?
     ): String = delegate().startBackgroundCommand(command, title, notify, sourceSessionId)
 
+    override suspend fun startPluginCommand(command: String, title: String?, pluginId: String): String =
+        delegate().startPluginCommand(command, title, pluginId)
+
+    override fun tabStatus(id: String): TerminalTabStatus? = delegate().tabStatus(id)
+
     override fun sendInput(id: String, input: String, appendNewline: Boolean): Boolean =
         delegate().sendInput(id, input, appendNewline)
 
@@ -62,6 +68,8 @@ class DelegatingTerminalSessionProvider @Inject constructor(
         delegate().writeBytesToTab(id, *bytes)
 
     override fun getTabOutput(id: String): String? = delegate().getTabOutput(id)
+
+    override fun tabOutput(id: String): Flow<ByteArray>? = delegate().tabOutput(id)
 
     override fun listTabs(): List<TabInfo> = delegate().listTabs()
 

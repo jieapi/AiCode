@@ -131,6 +131,16 @@ class LocalFileAccess @Inject constructor(
         return file.readBytes()
     }
 
+    override fun readBytes(path: String, maxBytes: Long): ByteArray {
+        val file = resolve(path)
+        if (!file.exists()) throw NoSuchFileException(file)
+        if (file.length() > maxBytes) throw FileReadTooLargeException(maxBytes)
+        return file.inputStream().use { it.readBytesBounded(maxBytes) }
+    }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        resolve(path, followFinalLink).absolutePath
+
     override fun listFilesRecursive(path: String, maxDepth: Int): List<String> {
         val dir = resolve(path)
         if (!dir.isDirectory) return emptyList()

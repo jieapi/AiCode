@@ -1,5 +1,6 @@
 package com.aicode.feature.terminal.domain
 
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 
 /**
@@ -23,6 +24,19 @@ interface TerminalSessionProvider {
         sourceSessionId: String? = null
     ): String
 
+    /**
+     * 为插件创建命令标签：命令结束后关闭 shell，标签保留为已结束状态，由插件决定何时关闭。
+     * 标签带插件归属，不会成为当前标签，也不进入面向 AI 的 [listTabs]。
+     */
+    suspend fun startPluginCommand(
+        command: String,
+        title: String?,
+        pluginId: String
+    ): String
+
+    /** 读取标签状态；null 表示标签不存在。 */
+    fun tabStatus(id: String): TerminalTabStatus?
+
     /** 按 id 向标签发送输入并回车执行。返回是否命中标签且仍活跃。 */
     fun sendInput(id: String, input: String, appendNewline: Boolean = true): Boolean
 
@@ -34,6 +48,9 @@ interface TerminalSessionProvider {
 
     /** 按 id 读取终端内容（emulator 屏幕缓冲）。返回 null 表示无此标签。 */
     fun getTabOutput(id: String): String?
+
+    /** 订阅标签的原始输出；标签关闭或会话结束时流完成。返回 null 表示无此标签。 */
+    fun tabOutput(id: String): Flow<ByteArray>?
 
     /** 列出全部标签的摘要。 */
     fun listTabs(): List<TabInfo>

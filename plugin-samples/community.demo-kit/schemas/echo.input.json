@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "要回显的文本"
+    }
+  },
+  "required": ["text"]
+}

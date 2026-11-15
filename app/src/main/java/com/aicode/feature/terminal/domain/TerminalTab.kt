@@ -50,6 +50,8 @@ class TerminalTab(
     val notifyOnExit: Boolean = false,
     /** 发起该后台命令的会话 id；交互标签为 null。回调据此路由回原会话。 */
     val sourceSessionId: String? = null,
+    /** 创建该标签的插件；用户交互标签与 AI 后台命令为 null。 */
+    val ownerPluginId: String? = null,
     val client: com.termux.terminal.TerminalSessionClient? = null,
     runState: RunState
 ) {
@@ -78,5 +80,12 @@ data class TabInfo(
     val title: String,
     val isBackground: Boolean,
     val running: Boolean,
-    val command: String?
+    val command: String?,
+    val ownerPluginId: String? = null
+)
+
+/** 标签的运行状态快照；[exitCode] 仅在已结束时非空。 */
+data class TerminalTabStatus(
+    val running: Boolean,
+    val exitCode: Int?
 )

@@ -1,0 +1,8 @@
+{
+  "name": "aicode-plugin-demo-ssh-manager",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "ssh2": "^1.15.0"
+  }
+}

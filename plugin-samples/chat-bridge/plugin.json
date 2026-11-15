@@ -1,0 +1,56 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.chat-bridge",
+  "name": {
+    "default": "Chat Bridge",
+    "zh-CN": "对话桥"
+  },
+  "version": "1.2.0",
+  "publisher": "demo",
+  "repository": "https://github.com/example/chat-bridge",
+  "description": {
+    "default": "A demo chat page for sending instructions to the AI and receiving replies. It shows the message loop and permission approval flow used by QQ/WeChat bot bridges.",
+    "zh-CN": "演示给 AI 下达指令、接收回复并在网页内处理工具授权的对话界面，可作为 QQ / 微信机器人接入的消息回路示例。"
+  },
+  "license": "MIT",
+  "icon": "users",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "uiEntries": [
+      {
+        "id": "chat",
+        "title": {
+          "default": "Chat Bridge",
+          "zh-CN": "对话桥"
+        },
+        "slot": "settings.ai",
+        "page": "pages/chat.html",
+        "icon": "users"
+      },
+      {
+        "id": "session-action",
+        "title": {
+          "zh-CN": "会话动作示例",
+          "en": "Session Action Demo"
+        },
+        "slot": "chat.session.menu",
+        "icon": "zap",
+        "handler": "actions.notifySession"
+      }
+    ],
+    "hooks": [
+      {
+        "id": "permission-review",
+        "event": "agent.permission.review",
+        "handler": "hooks.reviewPermission",
+        "mode": "review"
+      }
+    ]
+  }
+}

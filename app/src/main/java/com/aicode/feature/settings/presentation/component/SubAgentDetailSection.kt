@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.ui.AppSwitch
+import com.aicode.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aicode.feature.agent.domain.subagent.InjectPart
 import com.aicode.feature.agent.presentation.component.MarkdownContent
 import com.aicode.feature.agent.presentation.component.MarkdownRenderCache
@@ -46,6 +47,20 @@ internal fun SubAgentDetailSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        if (entry.scope == AgentDefinitionScope.PLUGIN) {
+            val pluginId = entry.name.substringBefore(':', "")
+            SettingsGroup {
+                Text(
+                    text = stringResource(R.string.plugins_item_readonly_hint, pluginId),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = 12.dp)
+                )
+            }
+        }
+
         SettingsGroup {
             Row(
                 modifier = Modifier

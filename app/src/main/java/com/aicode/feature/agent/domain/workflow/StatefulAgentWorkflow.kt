@@ -8,10 +8,9 @@ import com.aicode.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicode.feature.agent.data.local.entity.LlmCallRecordEntity
-import com.aicode.feature.agent.data.remote.anthropic.AnthropicApi
-import com.aicode.feature.agent.data.remote.gemini.GeminiApi
-import com.aicode.feature.agent.data.remote.openai.OpenAIApi
 import com.aicode.feature.agent.domain.model.AgentContext
+import com.aicode.feature.plugin.runtime.PermissionReviewDecision
+import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
@@ -46,24 +45,19 @@ import com.aicode.feature.agent.presentation.AgentAttachment
 import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicode.feature.settings.data.repository.GeneralSettingsRepository
-import com.aicode.feature.settings.data.repository.ProviderKeyRotator
 import com.aicode.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.agent.domain.provider.AnthropicAdapter
-import com.aicode.feature.agent.domain.provider.fixedTemperature
 import com.aicode.feature.agent.domain.provider.GeminiAdapter
-import com.aicode.feature.agent.domain.provider.AllKeysFailedException
-import com.aicode.feature.agent.domain.provider.KeySwitchOutcome
-import com.aicode.feature.agent.domain.provider.isKeySwitchFailure
-import com.aicode.feature.agent.domain.provider.OpenAIAdapter
-import com.aicode.feature.settings.domain.model.ProviderType
-import com.aicode.feature.settings.domain.model.ModelContextPolicy
+import com.aicode.feature.agent.domain.provider.ProviderInstanceFactory
 import com.aicode.feature.agent.domain.provider.StreamApiException
 import com.aicode.feature.agent.domain.provider.clampedFrom
 import com.aicode.feature.agent.domain.provider.reasoningPlanFor
 import com.aicode.feature.agent.domain.provider.toReasoningCapability
 import com.aicode.feature.agent.domain.provider.wireSummary
+import com.aicode.feature.plugin.runtime.PluginProviderIds
+import com.aicode.feature.settings.domain.model.ProviderType
+import com.aicode.feature.settings.domain.model.ModelContextPolicy
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import kotlinx.coroutines.CancellationException
@@ -76,6 +70,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -99,9 +94,7 @@ import javax.inject.Inject
 class StatefulAgentWorkflow @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val aiProviderRepository: AIProviderRepository,
-    private val openAIApi: OpenAIApi,
-    private val anthropicApi: AnthropicApi,
-    private val geminiApi: GeminiApi,
+    private val providerFactory: ProviderInstanceFactory,
     private val promptProvider: SystemPromptProvider,
     private val permissionManager: ToolPermissionManager,
     private val policyEngine: ToolPermissionPolicyEngine,
@@ -112,15 +105,14 @@ class StatefulAgentWorkflow @Inject constructor(
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val titleModelSettingsRepository: TitleModelSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
-    private val generalSettingsRepository: GeneralSettingsRepository,
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
     private val llmCallRecordDao: LlmCallRecordDao,
-    private val keyRotator: ProviderKeyRotator,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val fileAccess: FileAccessProvider,
+    private val pluginHookDispatcher: PluginHookDispatcher,
     @param:ApplicationContext private val appContext: Context
 ) : AgentWorkflow {
 
@@ -129,6 +121,8 @@ class StatefulAgentWorkflow @Inject constructor(
         const val LIVE_TAIL_CHARS = 4_000
         const val PROGRESS_INTERVAL_MS = 250L
         const val USER_REJECTED_CODE = "USER_REJECTED"
+        const val PLUGIN_HOOK_DENIED = "PLUGIN_HOOK_DENIED"
+        const val PLUGIN_REVIEW_DENIED = "PLUGIN_REVIEW_DENIED"
         const val TITLE_GENERATOR_FILE = "agent/title-generator.md"
         const val TITLE_MAX_CHARS = 50
         const val COMMIT_GENERATOR_FILE = "agent/commit-generator.md"
@@ -237,7 +231,10 @@ class StatefulAgentWorkflow @Inject constructor(
             val boundProviderId = session?.providerId
             val boundModel = session?.model
             if (!boundProviderId.isNullOrBlank()) {
-                val config = aiProviderRepository.getProviderById(boundProviderId)
+                val config = findProviderConfig(boundProviderId)
+                if (config == null && PluginProviderIds.isPluginId(boundProviderId)) {
+                    throw IllegalStateException("插件提供商已被删除，或提供它的插件已停用/卸载，请重新选择模型")
+                }
                 if (config != null && config.isEnabled && config.hasUsableApiKey) {
                     // 绑定的模型可能已被移出该 provider 的模型列表，此时绑定失效、继续往下回退默认模型
                     if (boundModel.isNullOrBlank()) return config
@@ -249,7 +246,10 @@ class StatefulAgentWorkflow @Inject constructor(
         val defaultProviderId = defaultModelSettingsRepository.getDefaultProviderId()
         val defaultModel = defaultModelSettingsRepository.getDefaultModel()
         if (defaultProviderId.isNotBlank() && defaultModel.isNotBlank()) {
-            val config = aiProviderRepository.getProviderById(defaultProviderId)
+            val config = findProviderConfig(defaultProviderId)
+            if (config == null && PluginProviderIds.isPluginId(defaultProviderId)) {
+                throw IllegalStateException("默认插件提供商已被删除，或提供它的插件已停用/卸载，请重新选择模型")
+            }
             if (config != null && config.isEnabled && config.hasUsableApiKey && defaultModel in config.models) {
                 return config.copy(selectedModel = defaultModel)
             }
@@ -272,64 +272,16 @@ class StatefulAgentWorkflow @Inject constructor(
         return result.compacted
     }
 
+    /** 插件提供商注册后就是普通提供商记录，直接查仓库即可。 */
+    private suspend fun findProviderConfig(id: String): AIProviderConfig? =
+        aiProviderRepository.getProviderById(id)
+
     /**
      * 根据 [config] 创建一个全新的、独立的 [AIProvider] 实例。
-     * 用于上下文压缩等独立请求场景，完全不占用或修改主对话所用的 Provider 单例。
-     * 同时把提供商级 LLM 缓存开关（Anthropic 断点 / OpenAI cache key）应用到实例。
+     * [scopeId] 用于 Key 粘性与 AI 日志：主会话传会话 id，压缩等旁路请求沿用调用方作用域。
      */
-    private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider {
-        val provider: AIProvider = when (config.type) {
-            ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
-                it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
-            }
-            ProviderType.GEMINI -> GeminiAdapter(geminiApi)
-            else -> OpenAIAdapter(openAIApi).also {
-                it.chatCacheKeyEnabled = config.openaiChatCacheKey
-            }
-        }
-        // 多 Key 模式下由轮换器决定本次用哪个 Key（会话内粘住，Key 不可用时切下一个并重发）。
-        val activeKeys = config.effectiveApiKeys
-        provider.apiKey = keyRotator.activeKey(config, sessionId)
-            ?: throw IllegalStateException("「${config.name}」的 Key 均在冷却中，请稍后重试")
-        // 只有真正的多 Key 才需要自动切换：单 Key 冷却后没有可切换目标，只会把用户锁死一段时间。
-        val keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? =
-            if (activeKeys.size > 1) {
-                { error, failedKey, triedKeys ->
-                    if (!error.isKeySwitchFailure(config.effectiveKeySwitchStatusCodes)) {
-                        null
-                    } else {
-                        val switched = keyRotator.reportFailure(config.id, sessionId, failedKey, triedKeys)
-                        if (switched == null) {
-                            throw AllKeysFailedException(
-                                "「${config.name}」的 ${activeKeys.size} 个 Key 均失败：${error.message ?: error.javaClass.simpleName}",
-                                error
-                            )
-                        }
-                        KeySwitchOutcome(switched.newKey, switched.newIndex, switched.total)
-                    }
-                }
-            } else {
-                null
-            }
-        provider.keySwitcher = keySwitcher
-        provider.baseUrl = config.baseUrl
-        provider.model = config.effectiveModel
-        provider.useFullUrl = config.useFullUrl
-        provider.useResponseApi = config.useResponseApi
-        provider.providerId = config.id
-        provider.logSessionId = sessionId
-        provider.customHeaders = config.customHeaders
-        val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)
-        // 模型元数据的输出上限（models.dev limit.output）：不传时 Anthropic 会把输出卡在 adapter 兜底值上。
-        provider.maxOutputTokens = metadata.outputTokens
-        provider.reasoningCapability = metadata.toReasoningCapability()
-        // 元数据说不接受自定义温度就不发该字段（kimi-k3、gpt-5 系带了直接 400）；允许的只发官方固定值。
-        provider.temperature = if (metadata.supportsCustomTemperature) fixedTemperature(config.effectiveModel) else null
-        provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
-        provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
-        provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
-    }
+    private suspend fun createStandaloneProvider(config: AIProviderConfig, scopeId: String?): AIProvider =
+        providerFactory.create(config, scopeId)
 
     /** 核心 Reducer，接收旧状态与 Action，返回新状态以及触发的副作用列表 (纯函数) */
     private fun reduce(
@@ -492,7 +444,30 @@ class StatefulAgentWorkflow @Inject constructor(
         userRequest: String,
         context: AgentContext,
         tools: List<AgentTool>
-    ): Flow<AgentEvent> = channelFlow {
+    ): Flow<AgentEvent> {
+        val hookSessionId = context.sessionId
+        var hookRunId = ""
+        var hookStarted = false
+        var hookCompleted = false
+        var hookTerminalError = false
+        var hookErrorCode: String? = null
+        var hookToolCalls = 0
+        var hookMode = context.mode.name
+        val hookScope = if (context.agentDefinition != null) "subagent" else "main"
+        val hookAgentName = context.agentDefinition?.name
+
+        return channelFlow {
+            if (hookSessionId != null) {
+                hookRunId = UUID.randomUUID().toString()
+                hookStarted = true
+                pluginHookDispatcher.dispatchRunStarted(
+                    sessionId = hookSessionId,
+                    runId = hookRunId,
+                    mode = hookMode,
+                    scope = hookScope,
+                    agentName = hookAgentName
+                )
+            }
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
@@ -587,6 +562,14 @@ class StatefulAgentWorkflow @Inject constructor(
                                 state = state.copy(messages = compaction.messages)
                                 baselineUsage = 0
                                 baselineEstimate = 0
+                                pluginHookDispatcher.dispatchCompaction(
+                                    sessionId = hookSessionId,
+                                    runId = hookRunId,
+                                    mode = currentContext.mode.name,
+                                    scope = hookScope,
+                                    agentName = hookAgentName,
+                                    estimatedInputTokens = predictedInput
+                                )
                             }
                         }
                         val requestEstimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -598,6 +581,19 @@ class StatefulAgentWorkflow @Inject constructor(
                             actionQueue.addLast(AgentAction.LlmError("", "input_budget_exceeded"))
                             continue
                         }
+
+                        val hookRequestId = UUID.randomUUID().toString()
+                        pluginHookDispatcher.dispatchRequestStarted(
+                            sessionId = hookSessionId,
+                            runId = hookRunId,
+                            requestId = hookRequestId,
+                            mode = currentContext.mode.name,
+                            scope = hookScope,
+                            agentName = hookAgentName,
+                            messageCount = compactedMessages.size,
+                            toolCount = currentTools.size,
+                            estimatedInputTokens = predictedInput
+                        )
 
                         // 调用统计埋点：记录请求发出/首字/结束时刻与 usage，失败与取消同样留痕。
                         val callStartElapsed = SystemClock.elapsedRealtime()
@@ -616,6 +612,7 @@ class StatefulAgentWorkflow @Inject constructor(
                             // 节流窗口内可能还压着最新累积文本：补发，保证 UI 尾巴拿到完整文本再交接落库。
                             stream.flush()
                             val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
+                            hookToolCalls += aiResponse.toolCalls.size
                             // 模型直出图片（Gemini 图像模型）不随流式增量到达，整块在 Final 里：
                             // 先把 base64 落盘到 ~/.aicode/generated-images/ 并构造 UI 附件（只存路径不存 base64），
                             // 再随 LlmResponse 把带 path 的 images 交 reduce 挂上 AssistantMessage 供下一回放。
@@ -705,6 +702,25 @@ class StatefulAgentWorkflow @Inject constructor(
                         } finally {
                             val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
                             val usage = stream.finalResponse
+                            pluginHookDispatcher.dispatchRequestFinished(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                requestId = hookRequestId,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                status = when {
+                                    callCompleted -> "success"
+                                    callError != null -> "error"
+                                    else -> "cancelled"
+                                },
+                                inputTokens = usage?.inputTokens ?: 0,
+                                outputTokens = usage?.outputTokens ?: 0,
+                                toolCalls = usage?.toolCalls?.size ?: 0,
+                                durationMs = durationMillis,
+                                stopReason = usage?.stopReason,
+                                errorCode = callError
+                            )
                             runCatching {
                                 // 与适配器同源算一次「实际会发什么」：落库后能在统计页分辨
                                 // 「选了但没生效」「被降级」这些静默问题。
@@ -740,16 +756,55 @@ class StatefulAgentWorkflow @Inject constructor(
                     }
                     is AgentSideEffect.RequestPermission -> {
                         val tool = toolRegistry.getTool(effect.toolCall.name)
-                        val argsPreview = JsonObject(effect.toolCall.arguments).toString().take(500)
-                        val checkResult = requestPermissionIfNeeded(tool, effect.toolCall.id, effect.toolCall.arguments, argsPreview, currentContext.permissionMode, currentContext.sessionId)
+                        var toolCall = effect.toolCall
+                        val hookDecision = if (tool != null && hookSessionId != null) {
+                            pluginHookDispatcher.beforeToolCall(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                callId = toolCall.id,
+                                toolName = toolCall.name,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                arguments = JsonObject(toolCall.arguments)
+                            )
+                        } else {
+                            null
+                        }
+                        if (hookDecision != null) {
+                            toolCall = toolCall.copy(
+                                arguments = hookDecision.arguments ?: JsonObject(toolCall.arguments)
+                            )
+                        }
+                        val argsPreview = JsonObject(toolCall.arguments).toString().take(500)
+                        // 参数可能已被插件改写：必须按最终参数重新走完整权限判断，原批准不沿用。
+                        val checkResult = if (hookDecision?.denied == true) {
+                            PermissionCheckResult(
+                                approved = false,
+                                denyReason = hookDecision.denyReason ?: "插件阻止了该工具调用",
+                                errorCode = PLUGIN_HOOK_DENIED
+                            )
+                        } else {
+                            requestPermissionIfNeeded(
+                                tool = tool,
+                                callId = toolCall.id,
+                                arguments = toolCall.arguments,
+                                argsPreview = argsPreview,
+                                mode = currentContext.permissionMode,
+                                sessionId = currentContext.sessionId,
+                                runId = hookRunId,
+                                scope = hookScope,
+                                agentName = hookAgentName
+                            )
+                        }
 
                         if (!checkResult.approved) {
                             val rawResult = ToolResult.Error(checkResult.denyReason, checkResult.errorCode).toTransportString()
-                            send(AgentEvent.ToolCallFinished(effect.toolCall.id, effect.toolCall.name, rawResult, true, argsPreview))
+                            send(AgentEvent.ToolCallFinished(toolCall.id, toolCall.name, rawResult, true, argsPreview))
                         } else {
-                            send(AgentEvent.ToolCallStarted(effect.toolCall.id, effect.toolCall.name, argsPreview))
+                            send(AgentEvent.ToolCallStarted(toolCall.id, toolCall.name, argsPreview))
                         }
-                        actionQueue.addLast(AgentAction.PermissionEvaluated(effect.toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
+                        actionQueue.addLast(AgentAction.PermissionEvaluated(toolCall, checkResult.approved, argsPreview, checkResult.denyReason, checkResult.errorCode))
                     }
                     is AgentSideEffect.CancelToolBatch -> {
                         // 整批取消：已批准未执行的工具补发完成事件（内容为未执行），
@@ -772,6 +827,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 并行执行本批已批准的工具。先统一记录 checkpoint（editFile/writeFile 修改前快照），
                         // 再并行执行；mode 切换检查在结果收集后于主协程串行处理（planApproval 单例）。
                         val toolCalls = effect.toolCalls
+                        val toolStartedAt = ConcurrentHashMap<String, Long>()
                         toolCalls.forEach { toolCall ->
                             if (toolCall.name == "editFile" || toolCall.name == "writeFile") {
                                 (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
@@ -789,6 +845,16 @@ class StatefulAgentWorkflow @Inject constructor(
                                 val pathLocks = ConcurrentHashMap<String, Mutex>()
                                 toolCalls.map { toolCall ->
                                     async {
+                                        toolStartedAt[toolCall.id] = SystemClock.elapsedRealtime()
+                                        pluginHookDispatcher.dispatchToolStarted(
+                                            sessionId = hookSessionId,
+                                            runId = hookRunId,
+                                            callId = toolCall.id,
+                                            toolName = toolCall.name,
+                                            mode = currentContext.mode.name,
+                                            scope = hookScope,
+                                            agentName = hookAgentName
+                                        )
                                         val run: suspend () -> ToolRunResult = {
                                             val tool = toolRegistry.getTool(toolCall.name)
                                             if (tool is StreamingAgentTool) {
@@ -843,7 +909,38 @@ class StatefulAgentWorkflow @Inject constructor(
                                     rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newCtx.mode))
                                 }
                             }
+                            if (!isError && hookSessionId != null) {
+                                toolResultSuccessData(rawResult)?.let { data ->
+                                    val transform = pluginHookDispatcher.afterToolCall(
+                                        sessionId = hookSessionId,
+                                        runId = hookRunId,
+                                        callId = toolCall.id,
+                                        toolName = toolCall.name,
+                                        mode = currentContext.mode.name,
+                                        scope = hookScope,
+                                        agentName = hookAgentName,
+                                        data = data
+                                    )
+                                    transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
+                                }
+                            }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
+                        }
+
+                        batchResults.forEach { result ->
+                            val startedAt = toolStartedAt.remove(result.id)
+                            val duration = startedAt?.let { (SystemClock.elapsedRealtime() - it).toInt() } ?: 0
+                            pluginHookDispatcher.dispatchToolFinished(
+                                sessionId = hookSessionId,
+                                runId = hookRunId,
+                                callId = result.id,
+                                toolName = result.toolName,
+                                mode = currentContext.mode.name,
+                                scope = hookScope,
+                                agentName = hookAgentName,
+                                status = if (result.isError) "error" else "success",
+                                durationMs = duration
+                            )
                         }
 
                         // 本轮内到达的后台任务/子代理完成通知：搭在本批最后一条工具结果上立即送达，
@@ -902,8 +999,39 @@ class StatefulAgentWorkflow @Inject constructor(
             }
         }
         
-        state.error?.let { send(AgentEvent.Failed(it, state.errorCode)) }
+        state.error?.let {
+            hookTerminalError = true
+            hookErrorCode = state.errorCode
+            send(AgentEvent.Failed(it, state.errorCode))
+        }
+        hookMode = currentContext.mode.name
         send(AgentEvent.Completed)
+        hookCompleted = true
+    }.onCompletion { cause ->
+        if (!hookStarted || hookSessionId == null) return@onCompletion
+        val status = when {
+            hookCompleted -> if (hookTerminalError) "error" else "success"
+            cause is CancellationException -> "cancelled"
+            cause != null -> "error"
+            hookTerminalError -> "error"
+            else -> "success"
+        }
+        val code = if (status == "error" && hookErrorCode == null) {
+            cause?.javaClass?.simpleName
+        } else {
+            hookErrorCode
+        }
+        pluginHookDispatcher.dispatchRunFinished(
+            sessionId = hookSessionId,
+            runId = hookRunId,
+            mode = hookMode,
+            scope = hookScope,
+            agentName = hookAgentName,
+            status = status,
+            toolCalls = hookToolCalls,
+            errorCode = code
+        )
+    }
     }
 
     /**
@@ -1352,6 +1480,17 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /** 从回传给模型的 sendFile 结果中剥离宿主本地路径（模型只应看到容器路径）。 */
+    private fun toolResultSuccessData(raw: String): JsonElement? {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return null
+        if ((obj["status"] as? JsonPrimitive)?.contentOrNull != "success") return null
+        return obj["data"]
+    }
+
+    private fun replaceToolResultData(raw: String, data: JsonElement): String {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull() ?: return raw
+        return JsonObject(obj.toMutableMap().apply { this["data"] = data }).toString()
+    }
+
     private fun stripAttachments(result: ToolResult): ToolResult {
         val success = result as? ToolResult.Success ?: return result
         val data = success.data as? JsonObject ?: return result
@@ -1372,7 +1511,10 @@ class StatefulAgentWorkflow @Inject constructor(
         arguments: Map<String, JsonElement>,
         argsPreview: String,
         mode: AgentMode,
-        sessionId: String?
+        sessionId: String?,
+        runId: String,
+        scope: String,
+        agentName: String?
     ): PermissionCheckResult {
         if (tool == null) {
             return PermissionCheckResult(true)
@@ -1402,6 +1544,29 @@ class StatefulAgentWorkflow @Inject constructor(
             ToolPermissionPolicyEngine.Verdict.ALLOW -> PermissionCheckResult(true)
             ToolPermissionPolicyEngine.Verdict.DENY -> PermissionCheckResult(false)
             ToolPermissionPolicyEngine.Verdict.ASK -> {
+                // 模式切换仍由本人确认；高危 ASK（Shizuku、elevate、配置修改、
+                // 删除子代理、危险 rm）同样进入代审核链。
+                if (tool.name != "planMode") {
+                    val review = pluginHookDispatcher.reviewPermission(
+                        runId = runId,
+                        sessionId = sessionId,
+                        mode = mode.name,
+                        scope = scope,
+                        agentName = agentName,
+                        callId = callId,
+                        toolName = tool.name,
+                        arguments = JsonObject(arguments)
+                    )
+                    when (review.decision) {
+                        PermissionReviewDecision.ALLOW -> return PermissionCheckResult(true)
+                        PermissionReviewDecision.DENY -> return PermissionCheckResult(
+                            approved = false,
+                            denyReason = review.reason ?: "插件代审核拒绝了该工具调用",
+                            errorCode = PLUGIN_REVIEW_DENIED
+                        )
+                        PermissionReviewDecision.PASS -> Unit
+                    }
+                }
                 val base = tool.buildPermissionRequest(callId, arguments, argsPreview)
                 val request = base.copy(
                     title = eval.askTitle ?: base.title,

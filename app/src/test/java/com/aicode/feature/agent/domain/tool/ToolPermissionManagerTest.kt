@@ -95,6 +95,35 @@ class ToolPermissionManagerTest {
     }
 
     @Test
+    fun pluginOriginRequestStaysOutOfChatPopup() = runTest {
+        val mgr = ToolPermissionManager()
+        val pluginRequest = req("plugin-id", "plugin:demo")
+            .copy(origin = PendingToolPermission.ORIGIN_PLUGIN)
+        val plugin = async { mgr.awaitApproval(pluginRequest) }
+        runCurrent()
+
+        // 插件请求不占聊天页弹窗与侧边栏指示，但仍可按会话查询
+        assertNull(mgr.pendingRequest.value)
+        assertTrue(mgr.awaitingSessionIds.value.isEmpty())
+        assertEquals("plugin-id", mgr.pendingForSession("plugin:demo")?.id)
+
+        val chatRequest = req("chat-id", "s1")
+        val chat = async { mgr.awaitApproval(chatRequest) }
+        runCurrent()
+        assertEquals("chat-id", mgr.pendingRequest.value?.id)
+        assertEquals(setOf("s1"), mgr.awaitingSessionIds.value)
+
+        mgr.resolve("plugin-id", PermissionChoice.ONCE)
+        assertEquals(PermissionChoice.ONCE, plugin.await())
+        assertEquals("chat-id", mgr.pendingRequest.value?.id)
+
+        mgr.resolve("chat-id", PermissionChoice.REJECT)
+        assertEquals(PermissionChoice.REJECT, chat.await())
+        assertNull(mgr.pendingRequest.value)
+        assertTrue(mgr.awaitingSessionIds.value.isEmpty())
+    }
+
+    @Test
     fun resolveUnknownId_isNoop() = runBlocking {
         val mgr = ToolPermissionManager()
         val d1 = async { mgr.awaitApproval(req("id1", "s1")) }

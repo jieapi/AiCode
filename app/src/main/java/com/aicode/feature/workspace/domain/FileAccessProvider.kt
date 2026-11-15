@@ -1,6 +1,8 @@
 package com.aicode.feature.workspace.domain
 
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.Charset
 
@@ -106,6 +108,17 @@ interface FileAccessProvider {
      */
     fun readBytes(path: String): ByteArray
 
+    /** 读取前及读取过程中都限制大小；超出 [maxBytes] 抛 [FileReadTooLargeException]。 */
+    fun readBytes(path: String, maxBytes: Long): ByteArray
+
+    /**
+     * 按后端文件系统语义逐段解析路径，返回可用于相等/祖先比较的绝对身份路径。
+     * 允许不存在的末级路径；不得先词法消除 `..`，以免改变 `link/..` 的含义。
+     * [followFinalLink] 为 false 时保留末级符号链接本身，父路径仍解析链接。
+     * 返回值只用于比较，不应作为后端操作的输入（本地可能返回宿主路径）。
+     */
+    fun resolvePath(path: String, followFinalLink: Boolean = true): String
+
     /**
      * 写入文件原始字节。父目录不存在则自动创建。[overwrite] 为 false 且文件已存在时抛 [FileAlreadyExistsException]。
      * 供 [GenerateImageTool] 等需要落盘二进制数据（图片等）的工具使用，也用于上传附件等二进制写入；
@@ -182,6 +195,25 @@ internal fun sha256Fingerprint(bytes: ByteArray): String {
             append(HEX_CHARS[v and 0x0F])
         }
     }
+}
+
+class FileReadTooLargeException(val maxBytes: Long) : IOException("file exceeds $maxBytes bytes")
+
+internal fun InputStream.readBytesBounded(maxBytes: Long): ByteArray {
+    require(maxBytes in 0..Int.MAX_VALUE.toLong())
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val length = minOf(buffer.size.toLong(), maxBytes - total + 1).toInt()
+        val count = read(buffer, 0, length)
+        if (count < 0) break
+        if (count == 0) continue
+        total += count
+        if (total > maxBytes) throw FileReadTooLargeException(maxBytes)
+        out.write(buffer, 0, count)
+    }
+    return out.toByteArray()
 }
 
 private const val HEX_CHARS = "0123456789abcdef"

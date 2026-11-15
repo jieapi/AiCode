@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "id": "community.dev-tools",
+  "name": {
+    "default": "Dev Tools",
+    "zh-CN": "开发工具"
+  },
+  "version": "1.1.1",
+  "publisher": "community",
+  "repository": "https://github.com/community/dev-tools",
+  "description": {
+    "default": "Build and clean the current Flutter or Android project.",
+    "zh-CN": "为当前 Flutter / Android 项目提供构建与清理工具。"
+  },
+  "license": "MIT",
+  "icon": "icons/icon.png",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "contributes": {
+    "workspaceTools": [
+      {
+        "id": "build-apk",
+        "title": {
+          "default": "Build APK",
+          "zh-CN": "构建 APK"
+        },
+        "description": {
+          "default": "Detect the project type and build a debug or release package.",
+          "zh-CN": "自动识别 Flutter 或 Android 项目，构建 Debug / Release 安装包。"
+        },
+        "icon": "hammer",
+        "category": "构建",
+        "pageFile": "pages/build-apk.html"
+      },
+      {
+        "id": "clean-cache",
+        "title": {
+          "default": "Clean Cache",
+          "zh-CN": "清理缓存"
+        },
+        "description": {
+          "default": "Inspect build cache size and clean it with the project's own task.",
+          "zh-CN": "查看构建缓存占用，并用项目自身的清理任务清空。"
+        },
+        "icon": "trash",
+        "category": "构建",
+        "pageFile": "pages/clean-cache.html"
+      }
+    ]
+  }
+}

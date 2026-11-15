@@ -440,6 +440,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { terminalSettingsRepository.setFontPath(path) }
     }
 
+    fun setTerminalShowPluginTabs(enabled: Boolean) {
+        viewModelScope.launch { terminalSettingsRepository.setShowPluginTabs(enabled) }
+    }
+
     // ── 全局代理 ──
 
     /** 全局代理配置快照（SharedPreferences 即时读写，改即对新连接生效）。 */
@@ -865,9 +869,8 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             launch {
-                repository.getAllProviders().collectLatest {
-                    _providers.value = it
-                }
+                repository.getAllProviders()
+                    .collectLatest { _providers.value = it }
             }
 
             launch {
@@ -2747,7 +2750,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** 批量删除提供商（列表多选批量操作）。Room 单事务提交，删完 Flow 自动刷新列表。 */
+    /** 批量删除提供商（列表多选批量操作）。 */
     fun deleteProviders(ids: Collection<String>) {
         if (ids.isEmpty()) return
         viewModelScope.launch {

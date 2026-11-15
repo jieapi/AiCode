@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,9 +20,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +34,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,11 +51,15 @@ import com.aicode.core.theme.Spacing
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.onboarding.presentation.onboardingTarget
+import com.aicode.feature.plugin.domain.PluginUiEntry
+import com.aicode.feature.plugin.domain.PluginUiEntryKind
+import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.settings.presentation.component.ModelLogoIcon
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.Check
 import compose.icons.feathericons.GitBranch
-import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Menu
+import compose.icons.feathericons.MoreVertical
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Terminal
 
@@ -61,14 +73,15 @@ internal fun ChatHeader(
     onNewChat: () -> Unit,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
-    onNavigateToBrowser: () -> Unit = {},
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
     connectionState: com.aicode.feature.agent.domain.container.ConnectionState? = null,
     showMenuButton: Boolean = true,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
-    browserActive: Boolean = false
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    pluginLanguageTag: String = "zh-CN",
+    onPluginEntry: (PluginUiEntry) -> Unit = {}
 ) {
     Surface(
         color = MaterialTheme.colorScheme.background
@@ -128,17 +141,14 @@ internal fun ChatHeader(
                         contentDescription = stringResource(R.string.chat_new_session),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                WorkbenchIconButton(
-                    icon = FeatherIcons.GitBranch,
-                    contentDescription = stringResource(R.string.chat_open_git),
-                    active = gitActive,
-                    onClick = onNavigateToGit
-                )
-                WorkbenchIconButton(
-                    icon = FeatherIcons.Terminal,
-                    contentDescription = stringResource(R.string.chat_open_terminal),
-                    active = terminalActive,
-                    onClick = onNavigateToTerminal
+                WorkbenchMenuButton(
+                    terminalActive = terminalActive,
+                    gitActive = gitActive,
+                    onNavigateToTerminal = onNavigateToTerminal,
+                    onNavigateToGit = onNavigateToGit,
+                    pluginEntries = pluginEntries,
+                    pluginLanguageTag = pluginLanguageTag,
+                    onPluginEntry = onPluginEntry
                 )
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计
@@ -161,40 +171,105 @@ internal fun ChatHeader(
     }
 }
 
-/** 顶栏工作台入口按钮：大屏右栏开着对应内容时高亮，否则看不出点一下是开还是关。 */
+/** 顶栏工作台菜单：终端 / Git 与插件槽位共用同一个溢出入口，避免顶栏继续挤图标。 */
 @Composable
-private fun WorkbenchIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    active: Boolean,
-    onClick: () -> Unit
+private fun WorkbenchMenuButton(
+    terminalActive: Boolean,
+    gitActive: Boolean,
+    onNavigateToTerminal: () -> Unit,
+    onNavigateToGit: () -> Unit,
+    pluginEntries: List<PluginUiEntry>,
+    pluginLanguageTag: String,
+    onPluginEntry: (PluginUiEntry) -> Unit
 ) {
-    IconButton(onClick = onClick) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .then(
-                    if (active) {
-                        Modifier
-                            .clip(RoundedCornerShape(Radius.sm))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                    } else {
-                        Modifier
-                    }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
             Icon(
-                icon,
-                contentDescription = contentDescription,
-                tint = if (active) {
+                FeatherIcons.MoreVertical,
+                contentDescription = stringResource(R.string.common_more),
+                tint = if (terminalActive || gitActive) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
         }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            WorkbenchMenuItem(
+                icon = FeatherIcons.Terminal,
+                label = stringResource(R.string.terminal_title),
+                active = terminalActive,
+                onClick = {
+                    expanded = false
+                    onNavigateToTerminal()
+                }
+            )
+            WorkbenchMenuItem(
+                icon = FeatherIcons.GitBranch,
+                label = stringResource(R.string.git_title),
+                active = gitActive,
+                onClick = {
+                    expanded = false
+                    onNavigateToGit()
+                }
+            )
+            if (pluginEntries.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.xs))
+                pluginEntries.forEach { entry ->
+                    DropdownMenuItem(
+                        text = { Text(entry.title.resolve(pluginLanguageTag)) },
+                        leadingIcon = {
+                            Icon(
+                                pluginPageIcon(entry.icon),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        onClick = {
+                            expanded = false
+                            onPluginEntry(entry)
+                        }
+                    )
+                }
+            }
+        }
     }
+}
+
+/** 菜单项尾部用勾表示右栏已打开，替代原先顶栏按钮的高亮。 */
+@Composable
+private fun WorkbenchMenuItem(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        trailingIcon = if (active) {
+            {
+                Icon(
+                    FeatherIcons.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        } else {
+            null
+        },
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -277,7 +352,13 @@ internal fun RemoteConnectingPlaceholder(
 }
 
 @Composable
-internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
+internal fun WelcomeState(
+    bottomReserve: Dp,
+    pluginEntries: List<PluginUiEntry> = emptyList(),
+    languageTag: String = "zh-CN",
+    onPluginEntry: (PluginUiEntry) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     BoxWithConstraints(
         modifier = modifier.padding(Spacing.xl),
         contentAlignment = Alignment.Center
@@ -304,6 +385,47 @@ internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (pluginEntries.isNotEmpty()) {
+                Spacer(Modifier.height(Spacing.lg))
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    pluginEntries.take(3).forEach { entry ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(Radius.sm),
+                            modifier = Modifier.widthIn(max = 360.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .clickable { onPluginEntry(entry) }
+                                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            ) {
+                                Icon(
+                                    pluginPageIcon(entry.icon),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = entry.title.resolve(languageTag),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (entry.kind == PluginUiEntryKind.ACTION) {
+                                    Text(
+                                        text = stringResource(R.string.plugins_entry_action),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
