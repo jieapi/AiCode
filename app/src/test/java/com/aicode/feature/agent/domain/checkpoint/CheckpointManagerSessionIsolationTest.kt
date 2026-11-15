@@ -304,6 +304,8 @@ class CheckpointManagerSessionIsolationTest {
         override fun permissions(path: String): String = throw UnsupportedOperationException()
         override fun listFiles(path: String): List<FileEntry> = throw UnsupportedOperationException()
         override fun readBytes(path: String): ByteArray = throw UnsupportedOperationException()
+        override fun readBytes(path: String, maxBytes: Long): ByteArray = throw UnsupportedOperationException()
+        override fun resolvePath(path: String, followFinalLink: Boolean): String = throw UnsupportedOperationException()
         override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
             File(path).parentFile?.mkdirs()
             File(path).writeBytes(bytes)

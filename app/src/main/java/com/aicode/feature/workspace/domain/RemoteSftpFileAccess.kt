@@ -10,9 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.RemoteFile
+import net.schmizz.sshj.sftp.Response.StatusCode
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.SFTPException
 import net.schmizz.sshj.xfer.FilePermission
@@ -22,9 +24,11 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.nio.charset.Charset
+import java.nio.file.FileSystemLoopException
 import java.nio.file.Paths
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.NoSuchFileException
+import java.util.ArrayDeque
 import java.util.EnumSet
 import javax.inject.Inject
 
@@ -101,7 +105,9 @@ class RemoteSftpFileAccess @Inject constructor(
     private suspend fun <T> guarded(block: () -> T): T = try {
         block()
     } catch (e: Exception) {
-        if (e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException) {
+        if (e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException &&
+            e !is FileReadTooLargeException && e !is FileSystemLoopException
+        ) {
             runCatching { connection.invalidateSftp() }
         }
         throw e
@@ -214,6 +220,64 @@ class RemoteSftpFileAccess @Inject constructor(
 
     override fun readBytes(path: String): ByteArray = readAll(toRemotePath(path))
 
+    override fun readBytes(path: String, maxBytes: Long): ByteArray = withSftp { sftp ->
+        val remote = toRemotePath(path)
+        val attrs = sftp.statExistence(remote) ?: throw NoSuchFileException(File(remote))
+        if (attrs.type == FileMode.Type.DIRECTORY) throw IOException("not a file: $remote")
+        if (attrs.size > maxBytes) throw FileReadTooLargeException(maxBytes)
+        RemoteFileInputStream(sftp.open(remote)).use { it.readBytesBounded(maxBytes) }
+    }
+
+    override fun resolvePath(path: String, followFinalLink: Boolean): String =
+        withSftp { resolveRemotePath(it, toRemotePath(path), followFinalLink) }
+
+    private fun resolveRemotePath(sftp: SFTPClient, path: String, followFinalLink: Boolean): String {
+        val trimmed = path.trimEnd('/').ifEmpty { "/" }
+        val leaf = trimmed.substringAfterLast('/')
+        val preserveLeaf = !followFinalLink && leaf.isNotEmpty() && leaf != "." && leaf != ".."
+        val parent = trimmed.substringBeforeLast('/', "").ifEmpty { "/" }
+        try {
+            val canonical = sftp.canonicalize(if (preserveLeaf) parent else path)
+            return if (preserveLeaf) canonical.trimEnd('/') + "/" + leaf else canonical
+        } catch (e: SFTPException) {
+            if (e.statusCode != StatusCode.NO_SUCH_FILE && e.statusCode != StatusCode.NO_SUCH_PATH &&
+                e.statusCode != StatusCode.OP_UNSUPPORTED
+            ) throw e
+        }
+        val pending = ArrayDeque(path.split('/').filter { it.isNotEmpty() })
+        var current = "/"
+        var links = 0
+        while (pending.isNotEmpty()) {
+            val part = pending.removeFirst()
+            when (part) {
+                "." -> continue
+                ".." -> {
+                    current = current.substringBeforeLast('/', "").ifEmpty { "/" }
+                    continue
+                }
+            }
+            val candidate = current.trimEnd('/') + "/" + part
+            if ((followFinalLink || pending.isNotEmpty()) &&
+                lstatOrNull(sftp, candidate)?.type == FileMode.Type.SYMLINK
+            ) {
+                if (++links > 40) throw FileSystemLoopException(path)
+                val target = sftp.readlink(candidate)
+                if (target.startsWith('/')) current = "/"
+                target.split('/').filter { it.isNotEmpty() }.asReversed().forEach(pending::addFirst)
+            } else {
+                current = candidate
+            }
+        }
+        return current
+    }
+
+    private fun lstatOrNull(sftp: SFTPClient, path: String): FileAttributes? = try {
+        sftp.lstat(path)
+    } catch (e: SFTPException) {
+        if (e.statusCode != StatusCode.NO_SUCH_FILE && e.statusCode != StatusCode.NO_SUCH_PATH) throw e
+        null
+    }
+
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val remote = toRemotePath(path)
         // 与 writeStream 同构：先写 .aicode-part 再改名，避免原地 TRUNC 让并发读者看到半截内容，
@@ -299,38 +363,40 @@ class RemoteSftpFileAccess @Inject constructor(
     }
 
     override fun delete(path: String) {
-        val remote = toRemotePath(path)
         // 接口约定 delete 只删文件或空目录：目录非空时 rmdir 失败 → 抛异常（与本地 File.delete() 对齐）。
         withSftp { sftp ->
-            val attrs = sftp.statExistence(remote) ?: return@withSftp
+            val remote = resolveRemotePath(sftp, toRemotePath(path), followFinalLink = false)
+            val attrs = lstatOrNull(sftp, remote) ?: return@withSftp
             if (attrs.type == FileMode.Type.DIRECTORY) sftp.rmdir(remote) else sftp.rm(remote)
         }
     }
 
     override fun deleteRecursively(path: String) {
-        val remote = toRemotePath(path)
-        withSftp { sftp -> deleteRecursive(sftp, remote) }
+        withSftp { sftp ->
+            val remote = resolveRemotePath(sftp, toRemotePath(path), followFinalLink = false)
+            deleteRecursive(sftp, remote)
+        }
     }
 
     override fun rename(path: String, newPath: String) {
-        val from = toRemotePath(path)
-        val to = toRemotePath(newPath)
         withSftp { sftp ->
-            if (sftp.statExistence(from) == null) throw NoSuchFileException(File(from))
-            if (sftp.statExistence(to) != null) throw FileAlreadyExistsException(File(to))
+            val from = resolveRemotePath(sftp, toRemotePath(path), followFinalLink = false)
+            val to = resolveRemotePath(sftp, toRemotePath(newPath), followFinalLink = false)
+            if (lstatOrNull(sftp, from) == null) throw NoSuchFileException(File(from))
+            if (lstatOrNull(sftp, to) != null) throw FileAlreadyExistsException(File(to))
             sftp.rename(from, to)
         }
     }
 
     override fun copy(path: String, newPath: String, overwrite: Boolean) {
-        val from = Paths.get(toRemotePath(path)).normalize().toString()
-        val to = Paths.get(toRemotePath(newPath)).normalize().toString()
         withSftp { sftp ->
+            val from = resolveRemotePath(sftp, toRemotePath(path), followFinalLink = true)
+            val to = resolveRemotePath(sftp, toRemotePath(newPath), followFinalLink = false)
             val source = sftp.statExistence(from) ?: throw NoSuchFileException(File(from))
-            if (to == from || (source.type == FileMode.Type.DIRECTORY && Paths.get(to).startsWith(Paths.get(from)))) {
+            if (to == from || (source.type == FileMode.Type.DIRECTORY && to.startsWith("${from.trimEnd('/')}/"))) {
                 throw IOException("destination is the source or its descendant: $newPath")
             }
-            if (sftp.statExistence(to) != null) {
+            if (lstatOrNull(sftp, to) != null) {
                 if (!overwrite) throw FileAlreadyExistsException(File(to))
                 deleteRecursive(sftp, to)
             }
@@ -404,7 +470,7 @@ class RemoteSftpFileAccess @Inject constructor(
 
     /** 递归删除（SFTP 无递归删除原语）：后序遍历，目录在子项删完后 rmdir。 */
     private fun deleteRecursive(sftp: SFTPClient, remote: String) {
-        val attrs = sftp.statExistence(remote) ?: return
+        val attrs = lstatOrNull(sftp, remote) ?: return
         if (attrs.type == FileMode.Type.DIRECTORY) {
             for (info in sftp.ls(remote)) {
                 val name = info.name
