@@ -1,12 +1,17 @@
 import { createInterface } from 'readline';
+import type {
+  DeprecatedHostMethodMap,
+  HostCallArgs,
+  HostMethod,
+  HostMethodMap,
+  HostParamsOf,
+  HostResultOf,
+  JsonValue
+} from '../types/host';
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+// 宿主方法表与共用结构统一从 types/host.d.ts 导出，避免与页面桥两份定义各自漂移。
+// 必须用 `export type *`：host.d.ts 是纯类型文件，运行时没有可解析的模块。
+export type * from '../types/host';
 
 export type PluginArgs = Record<string, unknown>;
 
@@ -59,14 +64,41 @@ function errorCode(error: unknown): string {
   return typeof code === 'string' && code ? code : 'PLUGIN_ERROR';
 }
 
-/** 调用宿主能力，对应文档中的 host.* 方法。 */
-export function hostCall<T = unknown>(method: string, params?: HostParams): Promise<T> {
+/**
+ * 调用宿主能力，对应文档中的 host.* 方法。
+ *
+ * 方法名与入参取自 `types/host.d.ts` 的 `HostMethodMap`：
+ *
+ * - 不写显式泛型时，入参与返回值按方法名自动推导；
+ * - 需要指定返回类型时仍可写 `hostCall<T>(...)`，此时入参归到所有方法入参的联合，
+ *   仅保留“错字段 / 错类型”的检查，不校验必填字段与方法的对应关系。
+ */
+export function hostCall<M extends keyof HostMethodMap>(
+  method: M,
+  ...args: HostCallArgs<M>
+): Promise<HostResultOf<M>>;
+
+/**
+ * @deprecated 该方法已废弃，仅保留在过渡期。请看本条声明对应的 `DeprecatedHostMethodMap`
+ * 条目上的 `replacedBy` / `removedIn`，尽早迁到现行方法。
+ *
+ * 这个重载单独拆出来，就是为了让调用处能拿到 deprecated 标记：`keyof` 会丢掉属性上的
+ * JSDoc，只标在 `DeprecatedHostMethodMap` 的属性上是没用的。
+ */
+export function hostCall<M extends keyof DeprecatedHostMethodMap>(
+  method: M,
+  ...args: HostCallArgs<M>
+): Promise<HostResultOf<M>>;
+
+export function hostCall<T = unknown>(
+  method: HostMethod,
+  ...args: [] | [params: HostParamsOf<HostMethod>]
+): Promise<T>;
+export function hostCall(method: string, ...args: unknown[]): Promise<unknown> {
+  const params = args[0] as HostParams | undefined;
   const id = 'host-' + ++hostSeq;
-  return new Promise<T>((resolve, reject) => {
-    pending.set(id, {
-      resolve: (value) => resolve(value as T),
-      reject
-    });
+  return new Promise<unknown>((resolve, reject) => {
+    pending.set(id, { resolve, reject });
     send({ jsonrpc: '2.0', id, method, params: params ?? {} });
   });
 }
