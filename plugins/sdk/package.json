@@ -1,0 +1,44 @@
+{
+  "name": "@jieapi/plugin-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for building AiCode plugins",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=12"
+  },
+  "keywords": [
+    "aicode",
+    "plugin",
+    "sdk"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jieapi/AiCode.git",
+    "directory": "plugins/sdk"
+  },
+  "homepage": "https://github.com/jieapi/AiCode/tree/main/plugins/sdk",
+  "bugs": {
+    "url": "https://github.com/jieapi/AiCode/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "aicode-plugin-template",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AiCode plugin starter",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@jieapi/plugin-sdk": "^0.1.0",
+    "@types/node": "^18.19.130",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

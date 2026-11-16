@@ -1,0 +1,40 @@
+{
+  "manifestVersion": 1,
+  "id": "example.hello",
+  "name": {
+    "default": "Hello Plugin",
+    "zh-CN": "问好插件"
+  },
+  "version": "1.0.0",
+  "publisher": "example",
+  "repository": "https://github.com/example/hello-plugin",
+  "description": {
+    "default": "A minimal AiCode plugin built from TypeScript.",
+    "zh-CN": "用 TypeScript 构建的最小 AiCode 插件。"
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "runtime": {
+    "type": "javascript",
+    "entry": "dist/main.js"
+  },
+  "contributes": {
+    "tools": [
+      {
+        "id": "echo",
+        "title": {
+          "default": "Echo",
+          "zh-CN": "回显"
+        },
+        "description": {
+          "default": "Echo the given text.",
+          "zh-CN": "将传入的文本原样回显。"
+        },
+        "inputSchema": "schemas/echo.input.json",
+        "handler": "tools.echo"
+      }
+    ]
+  }
+}
