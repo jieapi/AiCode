@@ -19,6 +19,7 @@
   "include": [
     "sdk/src/**/*.ts",
     "sdk/types/**/*.d.ts",
+    "sdk/test/**/*.ts",
     "samples/**/*.ts",
     "samples/**/*.d.ts",
     "../plugin-official/*/src/**/*.ts",

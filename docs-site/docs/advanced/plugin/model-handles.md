@@ -23,6 +23,8 @@
 | `cancel(streamId)` | 返回 `{ok}`，取消请求并保留已产生的事件；进程侧为 `host.model.cancel({streamId})` |
 | `stream(options, onEvent)` | 页面 SDK 封装 `start` + `read` 循环，回调事件并返回最终 read 结果，进程侧自行循环读取 |
 
+`listModels` 的 `inputTokens`、`outputTokens` 可能为 `null`，表示没有独立的输入或输出上限数据；展示或参与计算前应先检查空值。
+
 `params` 支持 `reasoningEffort`、`maxOutputTokens`、`temperature`。模型元数据不允许自定义温度时，传 `temperature` 会返回 `PARAM_UNSUPPORTED`；`maxOutputTokens` 会被限制在模型输出上限内。
 
 `tools` 只声明模型可用的工具，执行方式见[工具循环](#工具循环)。

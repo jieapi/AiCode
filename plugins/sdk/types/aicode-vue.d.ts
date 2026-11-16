@@ -8,9 +8,26 @@
  * 需要项目安装 `vue`（仅用于类型，构建时仍使用 `/__aicode/vue.global.prod.js`）。
  */
 
-import type { DefineComponent } from 'vue';
+import type {
+  ComponentOptionsMixin,
+  ComputedOptions,
+  DefineComponent,
+  EmitsOptions,
+  MethodOptions,
+} from 'vue';
 
 type AicodeOption = { label: string; value: string };
+
+type AicodeComponent<Props, Emits extends EmitsOptions> = DefineComponent<
+  Props,
+  {},
+  {},
+  ComputedOptions,
+  MethodOptions,
+  ComponentOptionsMixin,
+  ComponentOptionsMixin,
+  Emits
+>;
 
 interface AicodeBadgeProps {
   text?: string;
@@ -122,23 +139,49 @@ declare module 'vue' {
   export interface GlobalComponents {
     AicodeBadge: DefineComponent<AicodeBadgeProps>;
     AicodeCard: DefineComponent;
-    AicodeGroup: DefineComponent<AicodeGroupProps>;
-    AicodeRow: DefineComponent<AicodeRowProps>;
+    AicodeGroup: AicodeComponent<AicodeGroupProps, {
+      'update:expanded': (expanded: boolean) => void;
+    }>;
+    AicodeRow: AicodeComponent<AicodeRowProps, {
+      click: (event: MouseEvent) => void;
+    }>;
     AicodeField: DefineComponent<AicodeFieldProps>;
-    AicodeSegmented: DefineComponent<AicodeSegmentedProps>;
-    AicodeButton: DefineComponent<AicodeButtonProps>;
+    AicodeSegmented: AicodeComponent<AicodeSegmentedProps, {
+      'update:modelValue': (value: string) => void;
+    }>;
+    AicodeButton: AicodeComponent<AicodeButtonProps, {
+      click: (event: MouseEvent) => void;
+    }>;
     AicodeEmpty: DefineComponent<AicodeEmptyProps>;
     AicodeMarkdown: DefineComponent<AicodeMarkdownProps>;
-    AicodeIconButton: DefineComponent<AicodeIconButtonProps>;
-    AicodeSwipeRow: DefineComponent<AicodeSwipeRowProps>;
-    AicodeSwitch: DefineComponent<AicodeSwitchProps>;
-    AicodeInput: DefineComponent<AicodeInputProps>;
-    AicodeTextarea: DefineComponent<AicodeTextareaProps>;
-    AicodeSelect: DefineComponent<AicodeSelectProps>;
+    AicodeIconButton: AicodeComponent<AicodeIconButtonProps, {
+      click: (event: MouseEvent) => void;
+    }>;
+    AicodeSwipeRow: AicodeComponent<AicodeSwipeRowProps, {
+      delete: () => void;
+    }>;
+    AicodeSwitch: AicodeComponent<AicodeSwitchProps, {
+      'update:modelValue': (value: boolean) => void;
+    }>;
+    AicodeInput: AicodeComponent<AicodeInputProps, {
+      'update:modelValue': (value: string) => void;
+    }>;
+    AicodeTextarea: AicodeComponent<AicodeTextareaProps, {
+      'update:modelValue': (value: string) => void;
+    }>;
+    AicodeSelect: AicodeComponent<AicodeSelectProps, {
+      'update:modelValue': (value: string) => void;
+    }>;
     AicodeDivider: DefineComponent<AicodeDividerProps>;
     AicodeInfoRow: DefineComponent<AicodeInfoRowProps>;
-    AicodeBottomSheet: DefineComponent<AicodeBottomSheetProps>;
-    AicodeDialog: DefineComponent<AicodeDialogProps>;
+    AicodeBottomSheet: AicodeComponent<AicodeBottomSheetProps, {
+      'update:modelValue': (value: boolean) => void;
+    }>;
+    AicodeDialog: AicodeComponent<AicodeDialogProps, {
+      'update:modelValue': (value: boolean) => void;
+      confirm: () => void;
+      cancel: () => void;
+    }>;
   }
 }
 

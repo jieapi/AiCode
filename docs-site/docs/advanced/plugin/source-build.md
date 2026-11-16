@@ -174,7 +174,7 @@ import '@jieapi/plugin-sdk/page/vue';
 | 类型入口 | 提供内容 |
 | --- | --- |
 | `@jieapi/plugin-sdk/page` | `window.aicode`、全局 `aicode`、`AicodeUI`，以及桥方法、返回值和事件 payload |
-| `@jieapi/plugin-sdk/page/vue` | Vue `GlobalComponents` 中的 `aicode-*` 组件与 props 提示 |
+| `@jieapi/plugin-sdk/page/vue` | Vue `GlobalComponents` 中的 `aicode-*` 组件、props 与事件类型，包括 `v-model` 更新事件 |
 
 类型声明仅用于开发，不会进入页面产物。模板的 `npm run typecheck` 使用 `tsc` 检查 `.ts` 文件；Vue SFC 还需结合 Vue 编辑器的类型提示、页面构建和真机验证。
 

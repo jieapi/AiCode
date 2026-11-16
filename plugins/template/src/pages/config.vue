@@ -37,8 +37,9 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import type { AicodePageContext } from '@jieapi/plugin-sdk/page';
 
-const ctx = ref<AicodeContext | null>(null);
+const ctx = ref<AicodePageContext | null>(null);
 const greeting = ref('你好，AiCode');
 const saving = ref(false);
 const calling = ref(false);
@@ -46,7 +47,9 @@ const output = ref('');
 
 onMounted(async () => {
   try {
-    ctx.value = await aicode.context();
+    const context = await aicode.context();
+    if ('overlayId' in context) return;
+    ctx.value = context;
     const file = await aicode.fs.read('data://config.json');
     const saved = JSON.parse(file.content) as { greeting?: string };
     if (saved.greeting) greeting.value = saved.greeting;

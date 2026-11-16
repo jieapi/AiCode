@@ -28,7 +28,7 @@ const overlay = await aicode.overlay.create({
 });
 ```
 
-返回 `{overlayId, width, height, ...}`。未指定尺寸时使用清单默认值；超出 48–720 × 48–1200 将返回 `PARAM_INVALID`。
+返回 `OverlayInfo`，包含 `overlayId`、`pluginId`、尺寸、位置、拖拽、吸附与显示策略。宽高为 dp，创建结果的 `x` / `y` 为屏幕像素，不含 `density` 和 `foreground`。未指定尺寸时使用清单默认值；超出 48–720 × 48–1200 将返回 `PARAM_INVALID`。
 
 更新：
 
@@ -51,7 +51,7 @@ await aicode.overlay.close(overlay.overlayId);
 await aicode.overlay.close();
 ```
 
-浮层页面读取自身信息：
+浮层页面通过 `self()` 读取 `OverlaySelfInfo`，额外包含 `density`、`foreground`，其中 `x` / `y` 为当前显示位置，单位为 dp：
 
 ```js
 const self = await aicode.overlay.self();
@@ -73,7 +73,9 @@ const self = await aicode.overlay.self();
 
 ## 浮层页面
 
-浮层同样推荐使用 Vue + TypeScript，HTML 壳与构建方式见[页面构建](/advanced/plugin/source-build#页面构建)。透明背景与交互可写在 `.vue` 中：
+浮层同样推荐使用 Vue + TypeScript，HTML 壳与构建方式见[页面构建](/advanced/plugin/source-build#页面构建)。浮层的 `context()` 返回 `AicodeOverlayContext`，只有插件与窗口标识、页面 ID、版本和密度，不提供普通页面的工作区与文件接口；需要处理文件或命令时通过消息交给插件进程。
+
+透明背景与交互可写在 `.vue` 中：
 
 ```vue
 <template>

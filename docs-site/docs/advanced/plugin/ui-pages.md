@@ -75,7 +75,7 @@ HTML 壳的完整写法见[页面构建](/advanced/plugin/source-build#html-壳)
 
 ## 宿主接口
 
-宿主请求返回 Promise，失败时 reject 一个包含 `code` 与 `message` 的 Error；事件和返回键注册等页面侧方法同步返回取消函数。每次宿主请求都会校验页面所属插件仍启用且属于同一次安装，停用或替换后的旧页面不能继续调用宿主能力。
+宿主请求返回 Promise，失败时 reject 一个包含 `code` 与 `message` 的 Error。`events.on` 同步返回取消函数，`ui.onBack` 返回的 Promise 解析为取消函数。每次宿主请求都会校验页面所属插件仍启用且属于同一次安装，停用或替换后的旧页面不能继续调用宿主能力。
 
 TypeScript 页面可直接使用 SDK 的 `@jieapi/plugin-sdk/page` 入口：它按本页的方法表声明了 `window.aicode`，并为 `fs.changed`、`chat.run.finished` 等事件提供 payload 类型，配置方式见[页面类型提示](/advanced/plugin/source-build#页面类型提示)。
 
@@ -89,8 +89,10 @@ TypeScript 页面可直接使用 SDK 的 `@jieapi/plugin-sdk/page` 入口：它�
 | `aicode.app.isForeground()` | App 当前是否处于前台（有 Activity 处于 STARTED） |
 | `aicode.ui.close()` | 关闭插件页并回到打开前的位置（设置页、侧栏或顶栏对应的聊天页） |
 | `aicode.ui.setOverlay(visible, rect)` | 打开或关闭页面内全屏弹层并上报矩形；宿主在全局背景图上按矩形挖孔 |
-| `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理，返回注销函数 |
+| `aicode.ui.onBack(handler)` | 接管页面内返回；`handler` 同步返回 `true` 表示已处理，Promise 解析为注销函数 |
 | `aicode.applyTheme(variables)` | 设置 CSS 变量并派发 `aicode:theme` 事件 |
+
+普通页面的上下文类型为 `AicodePageContext`；浮层页面返回 `AicodeOverlayContext`，仅含 `pluginId`、`overlayId`、`pageId`、`version`、`density`。TypeScript 中可用 `'overlayId' in context` 区分两者，浮层能力见[浮层页面](/advanced/plugin/overlay#浮层页面)。
 
 ### 文件
 
@@ -161,7 +163,7 @@ const file = await aicode.fs.read(ctx.workspace + '/README.md', {contextKey: ctx
 | `aicode.chat.getSession(sessionId)` | 返回单个会话 |
 | `aicode.chat.renameSession(sessionId, title)` | 重命名；标题最多 100 字 |
 | `aicode.chat.pinSession(sessionId, pinned)` | 置顶/取消置顶 |
-| `aicode.chat.deleteSession(sessionId)` | 删除会话及其消息；由聊天页取消在途任务并清理运行时状态 |
+| `aicode.chat.deleteSession(sessionId)` | 返回 `{sessionId, accepted}`，表示删除请求已入队；由聊天页取消在途任务并删除会话及消息 |
 | `aicode.chat.getRunState(sessionId)` | 返回 `{sessionId, run}`，`run` 含 `running`、`status`、`startedAt`、`finishedAt`、`error?` |
 | `aicode.chat.waitForRun(sessionId, options?)` | 等待本轮结束；`options.timeoutMs` 默认 120000、范围 1000–600000；返回 `{timedOut, run}` |
 | `aicode.chat.listApprovals(sessionId)` | 返回 `{tool, question, plan}`，分别对应待确认工具、提问与计划审批 |
@@ -253,7 +255,7 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 页面存在多层视图时，使用 `onBack` 接管返回；回到最外层时返回 `false`，交由宿主退出。顶栏自绘的返回按钮应在首页调用 `aicode.ui.close()`，在子页调用自身的路由返回。
 
 ```js
-const off = aicode.ui.onBack(() => {
+const off = await aicode.ui.onBack(() => {
   if (drawerOpen) {
     drawerOpen = false;
     return true;

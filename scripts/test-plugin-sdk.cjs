@@ -51,7 +51,8 @@ function changed(request, extra = {}) {
   return {
     subscriptionId: request.params.subscriptionId,
     path: request.params.path,
-    changes: [{ path: request.params.path + '/updated.json', kind: 'modify' }],
+    contextKey: 'workspace-a',
+    changes: [{ path: request.params.path + '/updated.json', kind: 'modified' }],
     truncated: false,
     ...extra
   };
@@ -480,6 +481,87 @@ test('extended host methods forward parameters', async () => {
   }
 
   assert.deepEqual(harness.errors, []);
+});
+
+test('fs.watch preserves change batches and subscription failures', async () => {
+  const harness = loadSdk();
+  const received = [];
+  const registration = harness.sdk.fs.watch('data://records', event => received.push(plain(event)));
+  const request = harness.requests[0];
+  harness.resolve(request, { subscriptionId: request.params.subscriptionId });
+  const cancel = await registration;
+  const batch = changed(request, { truncated: true });
+  const failure = {
+    subscriptionId: request.params.subscriptionId,
+    path: request.params.path,
+    error: { code: 'WATCH_FAILED', message: 'watch failed' }
+  };
+  harness.event('fs.changed', batch);
+  harness.event('fs.changed', failure);
+  assert.deepEqual(received, [batch, failure]);
+  await cancelSubscription(harness, cancel, request.params.subscriptionId);
+});
+
+test('chat.deleteSession preserves the queued request acknowledgement', async () => {
+  const harness = loadSdk();
+  const promise = harness.sdk.chat.deleteSession('session-1');
+  const request = harness.requests[0];
+  assert.equal(request.method, 'chat.deleteSession');
+  assert.deepEqual(request.params, { sessionId: 'session-1' });
+  harness.resolve(request, { sessionId: 'session-1', accepted: true });
+  assert.deepEqual(plain(await promise), { sessionId: 'session-1', accepted: true });
+});
+
+test('model.listModels preserves nullable token metadata', async () => {
+  const harness = loadSdk();
+  const promise = harness.sdk.model.listModels('provider-1');
+  const request = harness.requests[0];
+  assert.equal(request.method, 'model.listModels');
+  const result = {
+    providerId: 'provider-1',
+    models: [{ id: 'model-1', contextTokens: 200000, inputTokens: null, outputTokens: null }]
+  };
+  harness.resolve(request, result);
+  assert.deepEqual(plain(await promise), result);
+});
+
+test('context and overlay methods preserve their page-specific result shapes', async () => {
+  const harness = loadSdk();
+  const contextPromise = harness.sdk.context();
+  const context = { pluginId: 'demo.pet', overlayId: 'demo.pet:ball', pageId: 'ball', version: '1.0.0', density: 2 };
+  harness.resolve(harness.requests[0], context);
+  assert.deepEqual(plain(await contextPromise), context);
+
+  const created = harness.sdk.overlay.create({ surface: 'ball' });
+  const info = {
+    overlayId: 'demo.pet:ball', pluginId: 'demo.pet', width: 48, height: 48,
+    x: 100, y: 200, draggable: true, snap: 'x', visibilityPolicy: 'always'
+  };
+  harness.resolve(harness.requests[1], info);
+  assert.deepEqual(plain(await created), info);
+
+  const self = harness.sdk.overlay.self();
+  const selfInfo = { ...info, x: 50, y: 100, density: 2, foreground: true };
+  harness.resolve(harness.requests[2], selfInfo);
+  assert.deepEqual(plain(await self), selfInfo);
+
+  const closed = harness.sdk.overlay.close();
+  assert.deepEqual(harness.requests[3].params, {});
+  harness.resolve(harness.requests[3], null);
+  assert.equal(await closed, null);
+});
+
+test('ui.onBack asynchronously returns its unregister function', async () => {
+  const harness = loadSdk();
+  let calls = 0;
+  const registration = harness.sdk.ui.onBack(() => { calls++; return true; });
+  assert.equal(typeof registration.then, 'function');
+  const off = await registration;
+  assert.equal(harness.window.__aicodeBack(), true);
+  assert.equal(calls, 1);
+  off();
+  assert.equal(harness.window.__aicodeBack(), false);
+  assert.equal(calls, 1);
 });
 
 for (const status of ['success', 'error', 'cancelled']) {

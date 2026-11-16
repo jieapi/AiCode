@@ -4,7 +4,7 @@
  * 与宿主资源 `/__aicode/aicode.js` 对应：页面加载该脚本后，`window.aicode` 即为本文件描述的
  * 桥对象。本文件只含类型，没有运行时代码；通过 `@jieapi/plugin-sdk/page` 引入后生效。
  *
- * 所有方法都返回 Promise；失败时 reject 一个带 `code` 与 `message` 的 Error，见
+ * 宿主请求返回 Promise；失败时 reject 一个带 `code` 与 `message` 的 Error，见
  * {@link AicodeError}。文档：/advanced/plugin/ui-pages
  */
 
@@ -118,8 +118,7 @@ export type TerminalState = 'running' | 'finished' | 'cancelled';
 /** 宿主工具执行结果状态。 */
 export type ToolResultStatus = 'success' | 'error' | 'partial';
 
-/** `aicode.context()` 的返回值；未使用的字段不出现。 */
-export interface AicodeContext {
+export interface AicodePageContext {
   /** 当前页面所属插件 ID。 */
   pluginId: string;
   /** 页面实例 ID；同一入口多次打开时不同。 */
@@ -154,6 +153,16 @@ export interface AicodeContext {
   /** 插件私有数据目录的真实路径，对应虚拟根 `data://`。 */
   dataDir: string;
 }
+
+export interface AicodeOverlayContext {
+  pluginId: string;
+  overlayId: string;
+  pageId: string;
+  version: string;
+  density: number;
+}
+
+export type AicodeContext = AicodePageContext | AicodeOverlayContext;
 
 /**
  * 已知事件的 payload 形状。`events.on` 的回调拿到的是通用 `AicodeEvent`；
@@ -216,14 +225,28 @@ export interface FsStatResult {
   size: number;
 }
 
-/** `fs.watch` 回调收到的事件。 */
-export interface FsChangeEvent {
+export interface FsChange {
+  path: string;
+  kind: 'created' | 'modified' | 'deleted';
+}
+
+export type FsChangeEvent = {
   subscriptionId: string;
   path: string;
-  contextKey?: string;
-  /** 监听本身失败时的信息。 */
-  error?: { code: string; message: string };
-}
+} & (
+  | {
+      contextKey: string;
+      changes: FsChange[];
+      truncated: boolean;
+      error?: never;
+    }
+  | {
+      error: { code: string; message: string };
+      contextKey?: never;
+      changes?: never;
+      truncated?: never;
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 命令与终端
@@ -435,8 +458,8 @@ export interface ModelInfo {
   id: string;
   displayName: string;
   contextTokens: number;
-  inputTokens: number;
-  outputTokens: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
   supportsTools: boolean;
   supportsVision: boolean;
   supportsReasoning: boolean;
@@ -660,18 +683,24 @@ export interface AppInfo {
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-/** 浮层窗口信息，`overlay.self()` 与 `overlay.create()` 都返回该结构。 */
 export interface OverlayInfo {
   overlayId: string;
   pluginId: string;
   width: number;
   height: number;
+  /** 创建结果的位置，单位为屏幕像素。 */
   x: number;
   y: number;
-  density: number;
   draggable: boolean;
   snap: string;
   visibilityPolicy: OverlayVisibilityPolicy;
+}
+
+export interface OverlaySelfInfo extends OverlayInfo {
+  /** 当前显示位置，单位为 dp。 */
+  x: number;
+  y: number;
+  density: number;
   foreground: boolean;
 }
 
@@ -752,8 +781,10 @@ export interface AicodeBridge {
         visibilityPolicy?: OverlayVisibilityPolicy;
       }
     ): Promise<{ ok: boolean }>;
-    close(overlayId?: string): Promise<{ ok: boolean }>;
-    self(): Promise<OverlayInfo>;
+    close(overlayId: string): Promise<{ ok: boolean }>;
+    /** 浮层页面关闭自身。 */
+    close(): Promise<null>;
+    self(): Promise<OverlaySelfInfo>;
     /** 浮层页面上报拖拽区域，单位为 CSS 像素。 */
     setDragRegion(rect: { left: number; top: number; width: number; height: number }): Promise<void>;
     moveBy(dx: number, dy: number): Promise<void>;
@@ -808,7 +839,8 @@ export interface AicodeBridge {
     getSession(sessionId: string): Promise<ChatSessionResult>;
     renameSession(sessionId: string, title: string): Promise<{ ok: boolean }>;
     pinSession(sessionId: string, pinned: boolean): Promise<{ ok: boolean }>;
-    deleteSession(sessionId: string): Promise<{ ok: boolean }>;
+    /** 提交删除请求；accepted 表示已入队。 */
+    deleteSession(sessionId: string): Promise<{ sessionId: string; accepted: boolean }>;
     getRunState(sessionId: string): Promise<ChatRunStateResult>;
     waitForRun(sessionId: string, options?: { timeoutMs?: number }): Promise<ChatWaitForRunResult>;
     listApprovals(sessionId: string): Promise<ChatApprovalsResult>;
