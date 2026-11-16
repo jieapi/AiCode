@@ -11,6 +11,8 @@ import com.aicode.feature.git.domain.model.GraphCommit
 import com.aicode.feature.git.domain.model.GitStash
 import com.aicode.feature.git.domain.model.GitStatus
 import com.aicode.feature.git.domain.model.GitTag
+import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,7 +36,8 @@ private const val TAG = "GitRepository"
 @Singleton
 class GitRepository @Inject constructor(
     private val engine: CommandEngine,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val executionModeHolder: ExecutionModeHolder
 ) {
     /** 当前选中的 git 仓库路径；null 表示未指定（用工作区根）。 */
     @Volatile
@@ -75,10 +78,12 @@ class GitRepository @Inject constructor(
     suspend fun discoverRepos(): List<String> {
         val root = workspaceRepository.currentPath()
         val candidates = mutableListOf(root)
-        runCatching {
-            java.io.File(root).listFiles { f -> f.isDirectory }
-                ?.sortedBy { it.name }
-                ?.forEach { candidates.add(it.absolutePath) }
+        if (executionModeHolder.currentMode() != ExecutionMode.REMOTE_SSH) {
+            runCatching {
+                java.io.File(root).listFiles { f -> f.isDirectory }
+                    ?.sortedBy { it.name }
+                    ?.forEach { candidates.add(it.absolutePath) }
+            }
         }
         return candidates.filter { isGitRepo(it) }
     }
@@ -95,6 +100,7 @@ class GitRepository @Inject constructor(
      * 本地模式用 File 列；远程模式下 File 操作无效（路径是远程的），runCatching 捕获后返回空。
      */
     fun listSubdirectories(): List<String> {
+        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) return emptyList()
         val root = workspaceRepository.currentPath()
         return runCatching {
             java.io.File(root).listFiles { f -> f.isDirectory }
