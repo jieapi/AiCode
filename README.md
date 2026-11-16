@@ -12,6 +12,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License GPL-3.0" /></a>
   <img src="https://img.shields.io/badge/Platform-Android-green.svg" alt="Android Platform" />
   <a href="https://github.com/jieapi/aicode/releases"><img src="https://img.shields.io/github/v/release/jieapi/aicode?display_name=tag&include_prereleases" alt="Latest Release" /></a>
+  <a href="https://trendshift.io/repositories/193355?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-193355" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/193355" alt="jieapi%2FAiCode | Trendshift" width="250" height="55"/></a>
 </p>
 
 ## 关于开源协议的声明
