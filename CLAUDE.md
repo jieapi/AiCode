@@ -13,11 +13,12 @@
   - **模态底栏**：一律使用 `core/ui/AdaptiveModalBottomSheet.kt`（已集成平板自适应与 fling fix），禁止直接调用原生 `ModalBottomSheet`；长表单容器外层注意追加 `.imePadding()` 避让软键盘。
   - **分组卡片与列表行**：设置与表单页面优先复用 `feature/settings/presentation/component/SettingsGroupComponents.kt` 中的 `SettingsGroup`、`SettingsRow`、`SettingsDivider`、`SettingsGroupHeader`，保持统一卡片与层级质感。
   - **左滑删除**：一律使用 `core/ui/SwipeToDeleteRow.kt`。
+  - **右侧抽屉**：一律使用 `core/ui/EndModalDrawer.kt`（跟手拖拽、打开后始终可拖拽关闭），禁止用原生 `ModalNavigationDrawer` 自拼右侧抽屉。
   - **主题与设计规范**：严格遵循 `core/theme/AIEditorTheme.kt` 的 `Spacing`、`Radius`（含 `Radius.mdLarge = 12.dp`）与 `MaterialTheme.semanticColors`，禁止随意硬编码非标魔数与色彩。
 
 ## 构建与验证
 
-**改完编译型代码（`.kt` / `.gradle.kts` / `AndroidManifest.xml`）→ 提交前必跑冒烟编译；`git push` 前必跑单元测试，并跑 `check_migrations.py` 迁移对账。** 只改文档 / 资源文案 / 纯 `.md` 时这些都跳过。
+**改完编译型代码（`.kt` / `.gradle.kts` / `AndroidManifest.xml`）→ 提交前必跑冒烟编译；`git push` 前必跑单元测试，并跑 `check_migrations.py` 迁移对账。** 只改文档 / 资源文案 / 纯 `.md` 时这些都跳过；插件 TS / Vue / 宿主页面 SDK 改动按下方插件条目单独验证。
 
 | 用途 | 命令 |
 | --- | --- |
@@ -26,26 +27,40 @@
 | 推送前迁移对账 | `python3 scripts/check_migrations.py`（或 `./gradlew checkMigrations`） |
 | 发版构建 APK / AAB | `./gradlew assembleRelease` / `./gradlew bundleRelease` |
 
+- **插件 SDK / 示例 / 页面资源改动**：`npm --prefix plugins run typecheck:plugins`；改 `plugins/samples` 的 TS 或页面源码后跑 `npm --prefix plugins run build:plugins` 更新 `dist/`；改插件 API 后必须同步改 `plugins/sdk`（`src/index.ts`、`types/aicode.d.ts`、`types/aicode-vue.d.ts`），需要发布时再跑 `npm --prefix plugins run build:sdk`；改 `app/src/main/assets/plugin-ui/aicode.js` 后跑 `node scripts/test-plugin-sdk.cjs`。纯文档 / Markdown 跳过。
 - **别用聚合任务做日常验证**：`assembleDebug` / `assembleRelease` / `test` / `build` 都会跨三个 flavor 全跑，耗时极长。
 - 产物：`app/build/outputs/apk/<flavor>/release/app-<flavor>-release.apk`、`.../bundle/<flavor>/release/app-<flavor>-release.aab`。
 - flavor 按 ABI 拆分：`universal`（arm64-v8a + x86_64）、`armsolo`（仅 arm64-v8a）、`x86solo`（仅 x86_64）。
 - release 签名凭据读 `app/keystore.properties`（`storeFile` / `storePassword` / `keyAlias` / `keyPassword`）；本地通常不存放签名文件，CI 从 GitHub secret 还原到 `app/aicode.jks`。
-- **`targetSdk` 锁定 28**（`minSdk = 26`）：PRoot 需在 App 可写目录执行二进制，Android 10+ 的 W^X / SELinux 禁止该行为，别升。
+- **`targetSdk` 锁定 28**（`minSdk = 26`）：升级前必须先解决两件事——外部工作区目前用 File API 直读 `/storage/emulated/0`（29+ 需改走 `MANAGE_EXTERNAL_STORAGE`），以及 `TerminalKeepaliveService` 的 `dataSync` 前台服务在 35+ 有 6 小时/24 小时累计上限（需换 `specialUse`）。PRoot 已改由 jniLibs 装到 `nativeLibraryDir`，W^X 不再挡容器启动。代价是不能上 Google Play。
 
 ## 架构地图
 
-feature-based 分层 + DDD。入口 `AIEditorApp` 初始化 `FileLogger`、`TerminalKeepaliveService`、`McpManager`。
+feature-based 分层 + DDD。入口 `AIEditorApp` 初始化日志 / 保活、MCP、插件工具与 hooks（`PluginToolManager` / `PluginHookDispatcher`）、配置热加载监听，并常驻进程级 `AgentRunManager`（Activity 回收后任务继续）。
 
-- **`core/`**：跨 feature 基础设施 —— `db/`（含 `MigrationLoader.kt`）、`net/`、`theme/`、`ui/`、`util/`（含 `FileLogger`）。
+- **`core/`**：跨 feature 基础设施 —— `db/`（含 `MigrationLoader.kt`）、`net/`、`datastore/`（`preferencesCorruptionHandler` 统一兜底 DataStore 损坏）、`security/`（`KeystoreCipher`：AES-256-GCM + Android Keystore）、`watch/`（`FileChangeHub` / `RemoteFileWatchHub` 文件变更订阅）、`theme/`、`ui/`、`util/`（含 `FileLogger`）。
 - **`feature/`**（`app/src/main/java/com/aicode/feature/`）：
-  - `agent`：AI agent 核心 —— 提示词、工具注册与权限、MCP、provider 适配（`data/remote/` 下 `anthropic` / `openai` / `gemini`）。
+  - `agent`：AI agent 核心 —— 提示词、工具注册与权限、MCP、provider 适配（`data/remote/` 下 `anthropic` / `openai` / `gemini`）、会话 / 检查点 / 技能 / 子代理；运行态由 `presentation/run/AgentRunManager` 承接。
   - `terminal`：终端与会话。本地模式 Termux 组件 + PRoot（`LinuxContainerEngine`）；远程模式 sshj。
-  - `workspace`：工作区与 DocumentsProvider，远程走 `RemoteSftpFileAccess`。
-  - `editor`：sora-editor 编辑器。`git`：Git 操作。`settings`：provider、日志、保活等设置。
-  - `backup`：备份恢复与加密。`credentials`：凭据管理与注入容器。
-- **远程 SSH 链路**：`RemoteSshConnection`（共享 sshj client）+ `RemoteSshEngine`（执行命令）+ `RemoteSftpFileAccess`（文件）+ `RemoteTerminalSessionManager`（终端）。
-- **工具系统**：`feature/agent/domain/tool/` 下各工具经 `ToolRegistry` 注册，执行权限由 `ToolPermissionManager` 与 `ToolPermissionPolicyEngine` 管控。
-- **MCP**：`feature/agent/domain/mcp/`，连接远端 server 并动态注册其工具。**DI**：Hilt，各 feature 自带 DI 模块。
+  - `workspace`：工作区与 DocumentsProvider，远程走 SFTP / FTP 同步（`RemoteSftpFileAccess`、`SftpSyncClient` / `FtpSyncClient`）。
+  - `editor`：sora-editor 编辑器。`git`：Git 操作。`settings`：provider / 模型 / 代理、日志、保活、存储、Token 统计等设置；设置页固定分组 `general / ai / environment / permissions / data / help`，也是插件 `settings.*` 槽位的挂载点。
+  - `backup`：备份恢复与加密（插件可扩展备份数据项）。`credentials`：凭据管理与注入容器。
+  - `plugin`：插件系统（预览）—— 安装 / 启停与贡献聚合（`domain/PluginManager`）、插件商店索引（`data/index/`）、容器内插件子进程与 JSON-RPC（`runtime/PluginRuntimeManager`）、WebView 页面与宿主桥（`presentation/PluginWebBridge`）、系统浮层（`overlay/`）。
+  - `browser`：内置多标签 WebView 浏览器面板；AI 自动化工具在 `feature/agent/domain/tool/browser/`（`BrowserManager` / `BrowserTool`）。
+  - `onboarding`：新手聚焦引导（`OnboardingCoordinator` / `OnboardingStateHolder` / `SpotlightOverlay`）。
+  - `agreement`：首次启动用户协议确认（`AgreementGate` / `AgreementRepository`）。
+- **工具类目**：`feature/agent/domain/tool/` 按能力分目录 —— `file` / `editor` / `explorer` / `container` / `search` / `browser` / `goal` / `memory` / `mode` / `question` / `shizuku` / `skill` / `subagent` / `todo` / `mcp`；各工具经 `ToolRegistry` 注册，执行权限由 `ToolPermissionManager` 与 `ToolPermissionPolicyEngine` 管控。
+- **远程 SSH 链路**：`RemoteSshConnection`（共享 sshj client）+ `RemoteSshEngine`（执行命令）+ `RemoteSftpFileAccess`（文件）+ `RemoteTerminalSessionManager`（终端）+ `PortForwardManager`（服务器端口映射到手机 `127.0.0.1`）。
+- **MCP**：`feature/agent/domain/mcp/`，支持本地 stdio 与远程 HTTP server，动态注册其工具。**DI**：Hilt，各 feature 自带 DI 模块。
+- **站点与文档**：`docs-site/` 为 VitePress 文档站（`npm --prefix docs-site run build`，构建同时导出 AI 文档）；`website/` 为 Vue 3 + Vite 官网（`npm --prefix website run build`，中英双语预渲染；改动跑 `npm --prefix website test`）。两者与 Android 构建相互独立。
+
+### 插件系统（预览）
+
+- **安装与清单**：`PluginManager` 校验 `.zip` 与 `plugin.json`，包 / 数据装在容器 `~/.aicode/plugins`，安装记录在宿主 `filesDir/plugin-registry.json`；字段以 `PluginManifest.kt` 为准，`PluginApi.VERSION`（当前 1.0.0）不兼容直接拒绝。**改插件 API 必须同步改 `plugins/sdk` 与页面 SDK（`app/src/main/assets/plugin-ui/aicode.js` / `aicode-ui-vue.js`）。** 插件贡献包括技能、子代理、工作区工具、槽位页面（`uiEntries`）、AI 工具、hooks、MCP、OpenAI 兼容提供商、Shizuku、系统浮层、备份扩展、模型句柄与配置页。
+- **运行时**：`PluginRuntimeManager` 在本地容器内以子进程运行 `runtime.entry`（JavaScript / Python），工具与 hooks 通过 JSON-RPC 调宿主；`PluginToolManager` 把生效插件的工具注册进 `ToolRegistry`，`PluginHookDispatcher` 派发 `app.started`、工具前后、HTTP、审批与备份等 hooks。
+- **商店标签（分类）**：`PluginTags`（`data/index/PluginIndexModels.kt`）固定 8 类 —— `provider` / `tool` / `skill` / `agent` / `mcp` / `ui` / `integration` / `other`；每个插件最多 4 个且不可重复；增删分类必须同步 `PluginIndexParser`、`plugin-index/schema/index.schema.json` 与索引 README。
+- **页面与浮层**：插件页面是 WebView HTML，经 `presentation/PluginWebBridge` 与 `assets/plugin-ui/aicode.js`（Vue 组件库 `aicode-ui-vue.js`）访问宿主能力；`overlay/` 管理可拖拽 / 吸附的系统浮层。SSH 模式下插件仍只在手机端运行；插件进程与 Bash 同级，宿主路径限制见 `PluginHostPaths`。
+- **仓库目录**：`plugins/`（共享 SDK、示例 `samples/`、独立模板 `template/` 与 TypeScript 构建脚本，`npm --prefix plugins run build:plugins`）随主仓库提交；`plugin-index/`、`plugin-official/`、`plugin-packages/` 被 `.gitignore` 忽略，分别是独立索引仓库、官方插件源码与 `scripts/package-plugins.py` 生成的打包产物，不要提交进主仓库。
 
 ### 数据库与迁移
 
@@ -73,18 +88,19 @@ Room（`feature/agent/data/local/database/AgentDatabase.kt` + 各 DAO），迁�
 - **AI 工作流改动 → 同步 `prompts/`**：工具增删改名、参数签名变化、agent 行为或提示词逻辑调整，都要更新 `prompts/` 下对应文件（自行查找，不存在则新建）。
 - **功能或工具变化 → 检查 `docs-site/docs/`** 是否有使用文档要更新。
 - **UI 变化（新增页面、改交互、调布局、改文案）→ 必须更新 `docs-site/docs/`**；新增文档页同步加进 `docs-site/.vitepress/config.ts` 侧栏与 `docs-site/docs/guide/overview.md` 索引。
+- **插件 API 变更 → 必须同步改 SDK（硬规则）**：只要改动 `PluginApi.VERSION`、`plugin.json` 清单字段、宿主桥 / `host.*` 接口、hook 事件或页面组件/事件，就必须同步修改 `plugins/sdk`（运行时 `src/index.ts`、页面类型 `types/aicode.d.ts` / `types/aicode-vue.d.ts`）与 `app/src/main/assets/plugin-ui/aicode.js` / `aicode-ui-vue.js`，并同步 `docs-site/docs/advanced/plugin/` 与 `plugins/samples/`；不允许只改宿主实现、不改 SDK。改 `plugin-index` 的 `tags` 枚举或 `PluginTags` 时，同时更新 `PluginIndexParser`、`index.schema.json` 与索引 `README.md`。`plugin-packages/*.zip` 由 `python3 scripts/package-plugins.py` 生成，禁止手改。
 - **用户可见中文文案 → 必须进双语 strings.xml**：写入 `values/strings.xml`（中文）与 `values-en/strings.xml`（英文），代码用 `stringResource(R.string.xxx)` 引用。**禁止在 `.kt` 中硬编码中文 UI 文案。** 命名用语义化英文小写下划线，跨页面复用的加 `common_` 前缀。
 - **提供商预设只在仓库数据文件维护**：新增或调整内置 AI 供应商，**只改 `data/providers.json`**（App 启动时从仓库动态拉取的源）；**不要**同步改 `app/src/main/assets/providers.json`（内置兜底快照，随发版固化）与 `docs-site/` 文档。
 - **容器镜像目录由脚本生成，禁止手改**：`data/container-images.json` 由 CI（`sync-container-images.yml`，每日）跑 `scripts/sync-container-images.py` 抓上游生成后发布到 `data` 分支；`app/src/main/assets/container-images.json` 是内置兜底快照，**发版前用同一脚本刷新**（`python3 scripts/sync-container-images.py --out app/src/main/assets/container-images.json`）——它承载离线可用的版本号与 SHA-256 校验和，与 providers 快照「不维护」的策略刻意不同。要增删发行版或改镜像源，改脚本里的配置或 `sources` 表，不要改生成结果。
 
-**文档目录约定**：`docs-site/docs/` 是文档唯一事实源，`guide/` 放功能说明、`advanced/` 放环境搭建与进阶教程。构建时由 `syncAiDocs` task 复制到 `assets/docs/`，AI 在容器内看到的是 `~/.aicode/docs/{guide,advanced}/*.md`。**面向用户书写**：讲清怎么做、会看到什么、出错怎么办；变量名、错误码、内部实现路径属于 `prompts/`，别写进用户文档。
+**文档目录约定**：`docs-site/docs/` 是文档唯一事实源，`guide/` 放功能说明（核心工作流、模型与用量、执行环境、扩展能力、设置与维护等分类），`advanced/` 放环境搭建、设备调试、模型与推理、扩展开发（含 `advanced/plugin/` 插件开发）等进阶教程。构建时由 `syncAiDocs` task 复制到 `assets/docs/`，AI 在容器内看到的是 `~/.aicode/docs/` 下的完整目录（`guide/`、`advanced/`、根级协议页与 `en/`）。**面向用户书写**：讲清怎么做、会看到什么、出错怎么办；变量名、错误码、内部实现路径属于 `prompts/`，别写进用户文档。
 
 ## Git 提交规范
 
 Conventional Commits（`.githooks/commit-msg` 本地校验），格式 `<type>(<scope>): <subject>`，正文空行隔开。
 
 - **type** ∈ `feat | fix | refactor | docs | style | chore | ci | build | perf | test`
-- **scope** 可选，用功能模块：`agent | settings | terminal | workspace | git | ui | mcp | db | core | docs | build | deps`
+- **scope** 可选，用功能模块：`agent | plugin | settings | terminal | workspace | editor | git | browser | backup | credentials | container | mcp | db | core | ui | docs | build | deps`
 - **subject** 一行简述，中英文均可，句末不加句号。例：`fix(settings): 修复 provider 保存时校验失败`
 - 仅紧急情况可用 `git commit --no-verify` 跳过校验。
 
