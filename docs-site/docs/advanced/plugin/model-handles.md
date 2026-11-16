@@ -2,41 +2,30 @@
 
 模型句柄让插件直接调用使用者已配置的 AI 供应商，不经过聊天页，也不启动宿主的 Agent 工具循环。它适合团队群聊、多模型对比、批量摘要这类由插件自己编排请求的场景。
 
-句柄只保存「供应商 + 模型 + 默认提示词/参数」，**不保存对话历史**。插件每次请求传完整 `messages`，群聊记录由插件自己管理。从 v1.1 起，请求还可以携带工具定义、工具结果、思考签名快照与图片；工具循环与工具审批仍由插件驱动，宿主只提供通用执行接口。
+句柄只保存「供应商 + 模型 + 默认提示词/参数」，**不保存对话历史**。插件每次请求传完整 `messages`，也可携带工具定义、工具结果、思考签名快照与图片；工具循环和审批由插件驱动。
 
 ## 先在清单声明
 
-调用模型句柄的插件必须在 `plugin.json` 中声明 `contributes.modelAccess`。安装预览会展示用途，并提示请求会计入对应供应商的用量。
-
-```json
-{
-  "contributes": {
-    "modelAccess": {
-      "purpose": "在团队群聊中轮流调用多个模型"
-    }
-  }
-}
-```
-
-`purpose` 必填，最多 200 字符。未声明的插件调用 `host.model.*` / `aicode.model.*` 会返回 `MODEL_ACCESS_NOT_DECLARED`。
+在 `plugin.json` 中声明 `contributes.modelAccess` 并填写用途，写法见[清单参考](/advanced/plugin/manifest#modelaccess)。安装预览会提示请求计入对应供应商用量；未声明时调用返回 `MODEL_ACCESS_NOT_DECLARED`。
 
 ## 页面与进程接口
 
-页面使用 `aicode.model.*`，插件 runtime 使用 `host.model.*`，方法同名：
+下表使用页面侧 `aicode.model.*` 的签名。进程通过 `hostCall('host.model.方法', {参数})` 调用，参数统一放入对象：
 
 | 方法 | 作用 |
 | --- | --- |
-| `listProviders()` | 列出已配置供应商，不返回 Key、地址、自定义头 |
-| `listModels({ providerId })` | 列出该供应商已添加的模型及窗口、能力、单价 |
-| `create({ providerId, model, name?, systemPrompt?, params? })` | 创建句柄 |
-| `close(handleId)` | 关闭句柄并取消它的流；尚在预检、未发出的请求也不能再用该句柄启动。进程侧为 `host.model.close({ handleId })` |
-| `start({ handleId, messages, tools?, systemPrompt?, params? })` | 发起一次流式补全，立即返回 `streamId` |
-| `read({ streamId, cursor?, maxEvents?, waitMs? })` | 按 cursor 读取一批事件 |
-| `cancel({ streamId })` | 取消请求，保留已产生的事件 |
+| `listProviders()` | 返回 `{providers}`，不包含 Key、地址、自定义头 |
+| `listModels({ providerId })` | 返回 `{providerId, models}`，含窗口、能力与单价元数据 |
+| `create({ providerId, model, name?, systemPrompt?, params? })` | 返回 `{handle}` |
+| `close(handleId)` | 返回 `{ok}`，取消句柄的流，尚在预检的请求也不能再启动；进程侧为 `host.model.close({handleId})` |
+| `start({ handleId, messages, tools?, systemPrompt?, params? })` | 返回 `{streamId}`，事件由 `read` 拉取 |
+| `read({ streamId, cursor?, maxEvents?, waitMs? })` | 返回 `{events, cursor, done, status?, final?, error?}`；`waitMs` 为 0–20000 毫秒 |
+| `cancel(streamId)` | 返回 `{ok}`，取消请求并保留已产生的事件；进程侧为 `host.model.cancel({streamId})` |
+| `stream(options, onEvent)` | 页面 SDK 封装 `start` + `read` 循环，回调事件并返回最终 read 结果，进程侧自行循环读取 |
 
 `params` 支持 `reasoningEffort`、`maxOutputTokens`、`temperature`。模型元数据不允许自定义温度时，传 `temperature` 会返回 `PARAM_UNSUPPORTED`；`maxOutputTokens` 会被限制在模型输出上限内。
 
-`tools` 只声明模型可用的工具，宿主不会执行它们；执行入口见下文「交给宿主执行」与[工具与运行时](/advanced/plugin/tools-runtime)。
+`tools` 只声明模型可用的工具，执行方式见[工具循环](#工具循环)。
 
 ## 消息格式
 
@@ -166,11 +155,7 @@ if (result.status === 'success') {
 }
 ```
 
-- 只允许内置与 MCP 工具；`plugin__` 前缀返回 `TOOL_NOT_ALLOWED`，未知工具返回 `TOOL_NOT_FOUND`。
-- 依赖聊天会话的工具（`askUserQuestion`、`planMode`、`goalStatus`、`todo`、`task`、`messageParent`）不能经此执行，返回 `TOOL_NOT_ALLOWED`。
-- `sessionId` 缺省为 `plugin:<插件ID>`，只能使用该会话或它的 `:` 子会话，其它值返回 `SESSION_FORBIDDEN`。`pending` 只返回指定会话的请求；`resolve` 只接受本插件会话命名空间内的 `requestId`。
-- `timeoutMs` 同时约束等待授权与执行本身，默认 120000，范围 1000–600000。
-- 返回对象：`status` 为 `success` / `error` / `partial`；成功与部分成功带 `data`，失败带 `message` 与 `code`。`data` 超过 256 KiB 时转为截断字符串并带 `dataTruncated: true`；工具返回的图片放在 `images`（`{mimeType, base64, path?}`），单图最多 1.5 MiB、合计最多 2 MiB，放不下的整张省略并带 `imagesTruncated: true`。`arguments` 超过 2 MiB 返回 `PARAM_INVALID`。
+工具范围、会话命名空间、超时与结果截断规则统一见[工具目录与代执行](/advanced/plugin/tools-runtime#工具目录与代执行)。将工具结果转换为 `tool` 消息后，再交给模型继续生成。
 
 ### 审批流程
 
@@ -193,23 +178,7 @@ try {
 }
 ```
 
-`pending.approval` 的字段：
-
-| 字段 | 说明 |
-| --- | --- |
-| `id` | 请求 id，传给 `resolve` |
-| `toolName` | 工具名 |
-| `title` / `summary` | 一行标题与摘要 |
-| `details` / `argsPreview` | 详细信息与参数预览，各最多 4000 字符 |
-| `sessionId` | 发起请求的插件会话 |
-| `rememberablePatterns` | 可记住的授权范围；为空时不要展示「始终允许」 |
-| `rememberDisabledReason?` | 不能记住时的原因 |
-
-按钮调用 `aicode.tools.resolve(approval.id, choice)`，`choice` 为 `once` / `always` / `reject`。`always` 只在 `rememberablePatterns` 非空时生效；请求已过期、已被处理或不属于当前插件会话时返回 `APPROVAL_NOT_FOUND`。
-
-超时与拒绝的错误码：等待授权超时为 `TOOL_APPROVAL_TIMEOUT`，执行超时为 `TOOL_TIMEOUT`，使用者拒绝为 `TOOL_USER_REJECTED`，权限策略直接拒绝为 `TOOL_DENIED`。
-
-工具调用绑定发起时的工作区与执行环境。评估或等待审批期间切换工作区、本地 / SSH 模式或 SSH 服务器，会使旧请求失效；插件应提示使用者在新环境重新发起，而不是自动重试写操作。失效请求不会执行工具，也不会把「始终允许」写入新项目。
+按钮调用 `aicode.tools.resolve(approval.id, choice)` 回传 `once` / `always` / `reject`；只有 `rememberablePatterns` 非空时才展示「始终允许」。审批字段、失效条件与错误码见[工具目录与代执行](/advanced/plugin/tools-runtime#工具目录与代执行)。
 
 ## 图片输入与输出
 
@@ -328,4 +297,3 @@ if (result.final.images) {
 
 - 宿主工具目录与执行细节：[AI 工具与插件运行时](/advanced/plugin/tools-runtime)
 - 页面桥的完整方法表：[插件页面与宿主接口](/advanced/plugin/ui-pages)
-- 完整群聊示例：`plugins/samples/team-chat`

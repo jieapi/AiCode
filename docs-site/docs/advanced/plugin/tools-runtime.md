@@ -1,27 +1,12 @@
 # AI 工具与插件运行时
 
-AI 工具使模型能够调用插件自身代码。业务逻辑运行在容器内的插件子进程中，通过按行 JSON-RPC 与宿主通信；同一进程还可响应 hook 和页面调用。
+AI 工具使模型能够调用插件自身代码，同一运行时还可响应 Hook 和页面调用。推荐用 TypeScript + SDK 注册 handler，源码写法见[运行时与 SDK](/advanced/plugin/source-build#运行时与-sdk)；本篇说明工具行为、宿主接口与底层协议。
 
 ## 声明工具
 
-```json
-{
-  "runtime": {"type": "javascript", "entry": "dist/main.js"},
-  "contributes": {
-    "tools": [
-      {
-        "id": "echo",
-        "title": {"default": "Echo", "zh-CN": "回显"},
-        "description": {"default": "Echo the given text.", "zh-CN": "将传入的文本原样回显。"},
-        "inputSchema": "schemas/echo.input.json",
-        "handler": "tools.echo"
-      }
-    ]
-  }
-}
-```
+在 `contributes.tools` 中声明 `handler` 和 `inputSchema`，并提供 `runtime`；字段写法见[工具清单](/advanced/plugin/manifest#tools)。
 
-`schemas/echo.input.json` 必须是根为 object 的标准 JSON Schema：
+`inputSchema` 指向包内 JSON 文件，例如 `schemas/echo.input.json`：
 
 ```json
 {
@@ -56,9 +41,11 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 
 `resident: true` 表示进程不参与 10 分钟空闲回收。插件停用、卸载、版本替换或 App 进程结束时仍会关闭。常驻进程会持续占用内存和容器资源，仅在确需常驻服务时启用。
 
+工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
+
 ## 进程协议
 
-宿主与插件均按行读写 JSON，一行一条消息，不可跨行。
+TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时，宿主与插件均按行读写 JSON，一行一条消息，不可跨行。
 
 宿主发往插件：
 
@@ -75,32 +62,19 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 {"jsonrpc":"2.0","id":2,"error":{"code":"PLUGIN_ERROR","message":"something failed"}}
 ```
 
-插件发往宿主：
+进程调用宿主使用 `host.*` 请求，SDK 的 `hostCall` 会生成 `id` 并匹配响应。自行实现协议时，也需要区分响应与通知。
 
-| 方法 | 参数 | 说明 |
-| --- | --- | --- |
-| `host.fs.read` / `write` / `list` / `stat` / `delete` | 见下表 | 读写真实路径与 `data://` 数据根 |
-| `host.fs.mkdir` / `rename` / `copy` / `append` / `readBinary` / `writeBinary` | 见下表 | 目录、移动、复制、追加与二进制读写 |
-| `host.app.isForeground` | 无 | App 是否有 Activity 处于 STARTED |
-| `host.bash` | `{command, timeout?}` | 在当前工作区执行一次性命令 |
-| `host.terminal.run` / `poll` / `stop` / `close` / `write` / `list` | 同页面桥 | 管理共享终端标签 |
-| `host.notify` | `{title, body, key?}` | 发送系统通知 |
-| `host.tip` | `{title?, text, action?}` | 在对话中显示提示条 |
-| `host.shizuku.exec` | `{command, timeout?}` | 经 Shizuku 执行 Android 命令 |
-| `host.chat.*` | 同页面桥 | 会话、消息、运行状态与审批 |
-| `host.model.*` | 同页面桥 | 模型句柄、供应商/模型列表与流式补全（需 `contributes.modelAccess`） |
-| `host.clipboard.read` / `write`、`host.share.text`、`host.ui.openUrl` | 见下表 | 系统剪贴板、分享与打开链接 |
-| `host.app.info`、`host.log` | 见下表 | App 信息与宿主日志 |
-| `host.secrets.get` / `set` / `delete` / `list` | 见下表 | 插件私有加密键值存储 |
-| `host.tools.list` / `execute` / `pending` / `resolve`、`host.mcp.status` | 见下表 | 工具目录、代执行与审批，以及 MCP 状态 |
-| `host.http.request` | 见下表 | 宿主代理 HTTP 请求 |
-| `host.overlay.create` / `close` / `postMessage` / `update` | 同页面桥 | 管理系统浮层 |
-| `host.ports.forward` / `close` / `list` | 见下表 | 把服务器端口映射到手机 loopback |
-| `plugin.event` | `{name, payload}` | 通知，推送给同插件已打开的页面 |
+页面事件使用 SDK 的 `emit`，用法见[插件事件](/advanced/plugin/ui-components#插件事件)。自行实现运行时时，按行输出不带 `id` 的通知：
 
-`host.*` 是普通 JSON-RPC 请求，需要插件自行生成 `id`，并将宿主响应与推送分开处理。最小 JavaScript 消息循环参见[快速开始](/advanced/plugin/quick-start)。
+```json
+{"jsonrpc":"2.0","method":"plugin.event","params":{"name":"records.changed","payload":{"count":4}}}
+```
 
-### host API 细节
+## host API 细节
+
+进程侧统一通过 `hostCall('host.方法', {参数})` 调用；页面桥的部分方法使用位置参数，不能直接照搬调用形式。
+
+### 文件
 
 | 方法 | 参数 | 返回 / 限制 |
 | --- | --- | --- |
@@ -115,6 +89,13 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.fs.append` | `{path, content}` | 追加文本；总大小不超过 1 MiB |
 | `host.fs.readBinary` | `{path}` | `{base64, size}`；单次最多 512 KiB |
 | `host.fs.writeBinary` | `{path, base64}` | Base64 写入；解码后最多 1 MiB |
+
+宿主文件接口的路径规则与[页面文件接口](/advanced/plugin/ui-pages#文件)相同，支持真实路径、`~` 和 `data://`。进程另有 `AICODE_DATA_DIR` 与 `AICODE_WORKSPACE` 环境变量；SSH 模式下，`host.fs.*` 操作远端路径，进程自身的文件操作仍发生在手机容器。
+
+### 命令与终端
+
+| 方法 | 参数 | 返回 / 限制 |
+| --- | --- | --- |
 | `host.bash` | `{command, timeout?}` | `{output, exitCode, truncated}`；默认 30 秒，范围 1–300 秒；命令最长 4000 字符 |
 | `host.terminal.run` | `{command, title?}` | `{tabId, state}`；命令最长 4000 字符 |
 | `host.terminal.poll` | `{tabId, offset}` | `{output, offset, state, exitCode?, truncated}`；仅保留最近 128 KiB |
@@ -122,9 +103,13 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.terminal.close` | `{tabId}` | 关闭标签 |
 | `host.terminal.write` | `{tabId, text, appendNewline?}` | 向标签写入输入；文本最多 4000 字符 |
 | `host.terminal.list` | 无 | 列出该插件自己的标签 `{tabId, title, command, state}` |
-| `host.notify` | `{title, body, key?}` | 标题最多 100 字，正文最多 1000 字，`key` 最多 64 字；同一 `key` 覆盖上一条 |
-| `host.tip` | `{title?, text, action?{label, handler}}` | 标题最多 80 字，正文最多 500 字，按钮文字最多 24 字；同插件仅保留最新一条，队列最多 3 条 |
-| `host.shizuku.exec` | `{command, timeout?}` | 默认 120 秒；需要插件声明 `shizuku` 且使用者单独授权 |
+
+终端标签的归属、显示和生命周期与[页面终端接口](/advanced/plugin/ui-pages#命令与终端)相同。
+
+### 会话与消息
+
+| 方法 | 参数 | 返回 / 限制 |
+| --- | --- | --- |
 | `host.chat.listSessions` | `{includeSubagents?, limit?}` | `{sessions}`；仅当前工作区，`limit` 默认 50、上限 200 |
 | `host.chat.createSession` | `{title?, mode?}` | `{session}`；`mode` 仅 `build` / `plan` |
 | `host.chat.listMessages` | `{sessionId, limit?, before?, after?}` | `{sessionId, messages, hasMore}`；`before` / `after` 互斥 |
@@ -142,18 +127,16 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.chat.resolveToolApproval` | `{sessionId, requestId, choice}` | `once` / `always` / `reject` |
 | `host.chat.resolveQuestion` | `{sessionId, requestId, answers}` | 回答 `AskUserQuestion` |
 | `host.chat.resolvePlanApproval` | `{sessionId, requestId, choice}` | `approve` / `refine` |
-| `host.model.listProviders` | 无 | `{providers}`；不含 Key、地址与自定义头 |
-| `host.model.listModels` | `{providerId}` | `{providerId, models}`；读取供应商已添加的模型与元数据 |
-| `host.model.create` | `{providerId, model, name?, systemPrompt?, params?}` | `{handle}`；每个插件最多 16 个句柄 |
-| `host.model.close` | `{handleId}` | `{ok}`；同时取消该句柄的流 |
-| `host.model.start` | `{handleId, messages, systemPrompt?, params?}` | `{streamId}`；立即返回，事件由 `read` 拉取 |
-| `host.model.read` | `{streamId, cursor?, maxEvents?, waitMs?}` | `{events, cursor, done, status?, final?, error?}`；`waitMs` 0–20 秒 |
-| `host.model.cancel` | `{streamId}` | `{ok}`；保留已产生的事件 |
-| `host.providers.listModels` | `{providerId}` | `{providerId, models, selectedModel}`；只读本插件声明提供商的配置 |
-| `host.providers.addModel` | `{providerId, model, contextTokens?}` | 追加模型；重复添加视为成功，尚无选中模型时自动选中 |
-| `host.providers.deleteModel` | `{providerId, model}` | 删除模型；返回 `{providerId, model, models, selectedModel, removed}` |
-| `host.providers.setModelContext` | `{providerId, model, contextTokens}` | 写入模型上下文窗口；`contextTokens` 为 1–10000000 |
-| `host.providers.setApiKey` | `{providerId, apiKey}` | 设置单 Key，空串清除；只影响本插件声明的提供商 |
+
+会话范围、消息格式、运行状态与审批行为见[页面会话接口](/advanced/plugin/ui-pages#会话与消息)。进程侧可用 `host.chat.waitForRun` 或 `agent.run.finished` Hook 等待结果；`sendMessage` 仅表示入队，不等待 AI 完成。`sendMessage` / `stop` / `openSession` / `deleteSession` 需要聊天页存活，否则返回 `CHAT_UI_UNAVAILABLE`。
+
+### 系统、密钥与网络
+
+| 方法 | 参数 | 返回 / 限制 |
+| --- | --- | --- |
+| `host.notify` | `{title, body, key?}` | 标题最多 100 字，正文最多 1000 字，`key` 最多 64 字；同一 `key` 覆盖上一条 |
+| `host.tip` | `{title?, text, action?{label, handler}}` | 标题最多 80 字，正文最多 500 字，按钮文字最多 24 字；同插件仅保留最新一条，队列最多 3 条 |
+| `host.app.isForeground` | 无 | App 是否有 Activity 处于 STARTED |
 | `host.clipboard.read` / `write` | `{}` / `{text}` | 剪贴板文本，上限 1 MiB |
 | `host.share.text` | `{text, title?}` | 拉起系统分享；文本最多 100000 字符 |
 | `host.ui.openUrl` | `{url}` | 仅 http/https，最长 4096 字符 |
@@ -161,44 +144,36 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.log` | `{level, message, tag?}` | 写宿主日志；正文最多 2000 字符 |
 | `host.secrets.get` / `set` / `delete` | `{key}` / `{key, value}` / `{key}` | 加密键值；值最多 64 KiB |
 | `host.secrets.list` | 无 | `{keys}`，只返回键名 |
+| `host.http.request` | `{url, method?, headers?, body?, timeout?}` | `{status, headers, body, truncated}`；不跟随重定向、不注入凭据 |
+
+`host.http.request` 只接受 http/https；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
+
+### 工具与 MCP
+
+| 方法 | 参数 | 返回 / 限制 |
+| --- | --- | --- |
 | `host.tools.list` | `{includeSchema?}` | `{tools}`；最多 200 项，描述最多 500 字符；`includeSchema` 为 true 时附带参数 schema |
 | `host.tools.execute` | `{name, arguments, sessionId?, context?, timeoutMs?}` | 工具结果；只允许内置 / MCP 工具，ASK 时挂起等待审批 |
 | `host.tools.pending` | `{sessionId?}` | `{approval}`；没有待审批请求时 `approval` 为 `null` |
 | `host.tools.resolve` | `{requestId, choice}` | `{ok}`；`choice` 为 `once` / `always` / `reject` |
 | `host.mcp.status` | 无 | `{servers}` 连接状态 |
-| `host.http.request` | `{url, method?, headers?, body?, timeout?}` | `{status, headers, body, truncated}`；不跟随重定向、不注入凭据 |
-| `host.overlay.create` | `{surface?, width?, height?, visibilityPolicy?}` | 创建清单声明的浮层 |
-| `host.overlay.update` | `{overlayId, width?, height?, visible?, visibilityPolicy?, dx?, dy?}` | 更新浮层 |
-| `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭浮层 |
-| `host.overlay.postMessage` | `{overlayId?, surface?, payload}` | 向浮层页面发送消息 |
+
+### 专用能力接口
+
+| 接口 | 参考文档 |
+| --- | --- |
+| `host.model.*`：模型列表、句柄与流式请求 | [模型句柄与流式调用](/advanced/plugin/model-handles#页面与进程接口) |
+| `host.providers.*`：维护本插件提供商的模型与凭据 | [模型与凭据维护](/advanced/plugin/shizuku-providers#由插件维护模型与凭据) |
+| `host.shizuku.exec`：Android 系统命令 | [Shizuku](/advanced/plugin/shizuku-providers#shizuku) |
+| `host.overlay.*`：系统浮层管理与消息 | [进程接口](/advanced/plugin/overlay#进程接口) |
+
+### 端口映射
+
+| 方法 | 参数 | 返回 / 限制 |
+| --- | --- | --- |
 | `host.ports.forward` | `{port, host?, localPort?}` | `{id, localPort, remoteHost, remotePort, url, direct}`；`host` 默认 `127.0.0.1`，`localPort` 被占用时向后顺延，以返回值为准 |
 | `host.ports.close` | `{id}` | `{closed}`；只能关闭本插件建立的映射 |
 | `host.ports.list` | 无 | 本插件的映射数组 |
-
-文件路径是当前执行环境的真实绝对路径：本地模式为容器内路径，SSH 模式为远端服务器路径。`~` 展开到当前 home，裸相对路径挂到工作区根。插件数据目录有稳定的虚拟根 `data://`；进程侧同时会拿到 `AICODE_DATA_DIR` 与 `AICODE_WORKSPACE`。
-
-| 位置 | 路径写法 | 读写 |
-| --- | --- | --- |
-| 插件自身数据目录，卸载时清理 | `data://…` 或 `AICODE_DATA_DIR` | 读写 |
-| 当前工作区 | `AICODE_WORKSPACE` | 读写 |
-| AI 配置目录 | `$HOME/.aicode` | 读写 |
-| 容器或服务器上的其它路径 | 直接写绝对路径 | 读写 |
-
-单次读取上限 512 KiB，写入上限 1 MiB，目录最多返回 500 条。本地模式下宿主只映射容器 rootfs、工作区与 `$HOME/.aicode`，App 自身的其它私有目录没有对应的容器路径，因此不可达。
-
-工具调用单次超时为 120 秒。超时或进程异常将结束该次调用并返回工具错误；常驻进程不会因该次超时被直接终止。
-
-`host.chat.sendMessage` 只表示请求已入队，不等待 AI 完成；可用 `host.chat.waitForRun`、页面事件 `chat.run.finished`、已有的 `agent.run.finished` hook 或 `host.chat.listMessages` 获取结果。`sendMessage` / `stop` / `openSession` / `deleteSession` 需要聊天页 ViewModel 存活（App 主界面存在时即满足），否则返回 `CHAT_UI_UNAVAILABLE`。消息与手动输入走同一套授权、模式、hooks 与队列，不会绕过宿主审批。
-
-模型句柄使用供应商现有的 Key 和适配器，不走聊天页或 Agent 循环；请求会计入对应渠道的用量。调用前必须在清单声明 `contributes.modelAccess`，否则返回 `MODEL_ACCESS_NOT_DECLARED`。完整参数、事件格式与限额见[模型句柄与流式调用](/advanced/plugin/model-handles)。
-
-`host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
-
-`host.http.request` 只接受 http/https，不跟随重定向、不注入宿主凭据；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
-
-`host.providers.*` 只接受当前插件在 `contributes.providers` 中声明且已注册的提供商：`providerId` 可传清单局部 ID 或完整插件提供商 ID，其它条目返回 `PROVIDER_NOT_FOUND`。每个提供商最多保留 500 个模型，模型名最长 200 字符；`contextTokens` 为 1–10000000 的正整数。设置 API Key 只写单 Key 字段，值由宿主加密保存且不会回显。
-
-### 端口映射
 
 `host.ports.forward` 把远程服务器视角的 `host:port` 映射到手机 `127.0.0.1:localPort`，复用宿主已建立的 SSH 连接，插件不接触服务器凭据。仅绑定 `127.0.0.1`，不向局域网暴露；同一插件重复映射同一目标会复用原映射；每插件最多 8 条、全局 32 条。
 
@@ -221,57 +196,52 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 
 `data` 超过 256 KiB 时转为截断字符串并带 `dataTruncated: true`；结果图片为 `{mimeType, base64, path?}`，单图超过 1.5 MiB 或合计超过 2 MiB 时整张省略并带 `imagesTruncated: true`。`arguments` 超过 2 MiB 返回 `PARAM_INVALID`。
 
-权限策略判定为 ASK 时，`execute` 会挂起等待确认。插件发起的请求不进入聊天页弹窗队列，也不会点亮侧边栏等待指示，只能由插件自己展示：轮询 `host.tools.pending({sessionId})` 拿到 `approval`（`id`、`toolName`、`title`、`summary`、`details`、`argsPreview`、`sessionId`、`rememberablePatterns`、`rememberDisabledReason?`），再由使用者点击按钮调用 `host.tools.resolve({requestId, choice})`。`always` 只在 `rememberablePatterns` 非空时有效；请求已过期、已处理或不属于当前插件会话时返回 `APPROVAL_NOT_FOUND`。等待授权超时返回 `TOOL_APPROVAL_TIMEOUT`，执行超时返回 `TOOL_TIMEOUT`，策略拒绝返回 `TOOL_DENIED`，使用者拒绝返回 `TOOL_USER_REJECTED`。
+权限策略判定为 ASK 时，`execute` 挂起等待确认，请求不进入聊天页弹窗队列，也不会点亮侧边栏等待指示。插件需轮询 `host.tools.pending({sessionId})`，由自己的页面展示 `approval`：
 
-页面侧同名接口为 `aicode.tools.list` / `execute` / `pending` / `resolve`，参数与进程侧一致，详见[插件页面与宿主接口](/advanced/plugin/ui-pages)。工具循环、`app` / `custom` 工具定义与模型侧配合方式见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 请求 ID，传给 `resolve` |
+| `toolName` | 工具名 |
+| `title` / `summary` | 标题与摘要 |
+| `details` / `argsPreview` | 详细信息与参数预览，各最多 4000 字符 |
+| `sessionId` | 发起请求的插件会话 |
+| `rememberablePatterns` | 可记住的授权范围；为空时不展示「始终允许」 |
+| `rememberDisabledReason?` | 不能记住时的原因 |
+
+使用者点击后调用 `host.tools.resolve({requestId, choice})`，`choice` 为 `once` / `always` / `reject`；`always` 仅在 `rememberablePatterns` 非空时有效。`pending` 只返回指定会话的请求，`resolve` 只接受当前插件会话命名空间内的请求。
+
+等待授权超时返回 `TOOL_APPROVAL_TIMEOUT`，执行超时返回 `TOOL_TIMEOUT`，策略拒绝返回 `TOOL_DENIED`，使用者拒绝返回 `TOOL_USER_REJECTED`；请求已过期、已处理或不属于当前插件时返回 `APPROVAL_NOT_FOUND`。
+
+工具调用绑定发起时的工作区与执行环境。评估或等待审批期间切换工作区、本地 / SSH 模式或 SSH 服务器，会使旧请求失效；应提示使用者在新环境重新发起，不要自动重试写操作。失效请求不会执行，也不会把「始终允许」写入新项目。
+
+页面侧使用 `aicode.tools.list` / `execute` / `pending` / `resolve`，调用形式见[页面工具接口](/advanced/plugin/ui-pages#工具与-mcp)。页面审批流程与模型工具循环见[模型句柄与流式调用](/advanced/plugin/model-handles#审批流程)。
 
 ## handler 约定
 
-以下示例沿用[快速开始](/advanced/plugin/quick-start)中的 `hostCall` 与消息循环。
+`hostCall` 从插件 SDK 导入，注册方式见[运行时与 SDK](/advanced/plugin/source-build#运行时与-sdk)。
 
 handler 可返回字符串、数字、布尔、数组或对象。抛出的异常会作为工具错误返回给 AI。
 
-```js
-const handlers = {
-  'tools.echo': (args) => ({text: String(args.text ?? '')}),
-  'tools.notify': async (args) => {
-    await hostCall('host.notify', {
-      title: String(args.title ?? ''),
-      body: String(args.body ?? ''),
-      key: args.key === undefined ? undefined : String(args.key)
-    });
-    return {ok: true};
-  },
-  'tools.run': async (args) => {
-    const result = await hostCall('host.bash', {
-      command: String(args.command),
-      timeout: 60
-    });
-    return result;
+```ts
+import { definePlugin, hostCall } from '@jieapi/plugin-sdk';
+
+definePlugin({
+  handlers: {
+    'tools.notify': async (args) => {
+      await hostCall('host.notify', {
+        title: String(args.title ?? ''),
+        body: String(args.body ?? ''),
+        key: args.key === undefined ? undefined : String(args.key)
+      });
+      return {ok: true, logs: ['notification sent']};
+    }
   }
-};
-```
-
-需要调试时可返回 `logs`：
-
-```js
-const handlers = {
-  'tools.echo': (args) => ({
-    text: String(args.text ?? ''),
-    logs: ['echo called', 'length=' + String(args.text ?? '').length]
-  })
-};
+});
 ```
 
 `logs` 最多 50 行、单行 500 字符，写入应用日志，不会作为工具结果展示给 AI。
 
-页面也可调用同一进程：
-
-```js
-const result = await aicode.invoke('tools.echo', {text: 'hi'});
-```
-
-进程需处理 `ui.invoke`，否则返回 `METHOD_UNKNOWN`。`aicode.invoke` 单次最多等待 60 秒。
+页面调用同一 handler 的方式见[进程调用](/advanced/plugin/ui-pages#进程调用)。SDK 已处理 `ui.invoke`；自行实现协议时缺少该方法会返回 `METHOD_UNKNOWN`。
 
 ## 依赖准备
 
@@ -314,12 +284,12 @@ const result = await aicode.invoke('tools.echo', {text: 'hi'});
 }
 ```
 
-`app.started` 仅在 App 主进程启动完成时派发一次，payload 包含 `launchId`、`startedAt`、`appVersion`、`process`。handler 应在完成初始化后尽快返回；需要常驻的服务应在进程内自行转入后台。观察 hook 单次超时为 30 秒，超时将关闭该插件进程。容器未初始化或缺少 node/python 时，hook 将失败并记录日志；之后调用工具或 hook 仍会按需启动进程。
+`app.started` 仅在 App 主进程启动完成时派发一次，安装后需要立即启动时应另提供手动入口。handler 完成初始化后应尽快返回，服务在进程内继续运行；payload 与超时规则见 [Hooks 文档](/advanced/plugin/hooks#执行顺序与超时)。容器未初始化或缺少 node/python 时，Hook 会失败并记录日志，后续调用工具或 Hook 仍会按需启动进程。
 
 ## 安全边界
 
 - 插件进程与 Bash 同级，拥有容器内的文件、网络和命令能力；
-- `host.fs` 的路径限制仅约束宿主接口，不约束进程自身；
+- 页面与宿主接口的限制不构成对插件进程的沙箱；
 - 命令与参数会原样执行，请勿在 `command` 中拼接未经校验的用户输入；
 - 仅安装可信来源的插件。
 

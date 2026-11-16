@@ -1,100 +1,54 @@
 # 插件开发
 
-插件通过一个 `.zip` 包向 AiCode 提供技能、子代理、AI 工具、页面、MCP 服务器、提供商、生命周期 hooks、系统浮层等能力。安装后，使用者可在「设置 → 插件」中统一启用、停用和卸载。
-
-本目录按能力组织，各篇分别说明声明方式、运行机制与示例。首次开发建议从[快速开始](/advanced/plugin/quick-start)阅读；如需查找特定能力，可直接参阅下面的能力总表。
+插件通过 `.zip` 包向 AiCode 添加技能、子代理、AI 工具、页面、MCP、提供商、Hooks 和系统浮层，由使用者在「设置 → 插件」中统一启停与卸载。一个插件可以组合多项能力。
 
 ::: warning 预览功能
-插件系统仍在快速演进。当前版本支持本地 `.zip` 导入与在线插件商店；清单中出现本目录未列出的字段将被拒绝安装，而不会被静默忽略。启用插件等同于信任其全部声明，安装前请确认来源。
+插件系统仍在快速演进。启用插件等同于信任其全部声明，安装前请确认来源；接口版本与清单限制见 [plugin.json 清单参考](/advanced/plugin/manifest)。
 :::
 
-## 能力总表
+## 推荐组合：TypeScript + Vue
 
-| 能力 | 声明位置 | 运行位置 | 需要 `runtime` | 详见 |
-| --- | --- | --- | --- | --- |
-| 技能 | `contributes.skills` | AI 系统提示词，按需加载 | 否 | [技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp) |
-| 子代理 | `contributes.agents` | 独立子会话 | 否 | [技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp) |
-| MCP 服务器 | `contributes.mcp` | 容器或 SSH 后端 | 否 | [技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp) |
-| AI 工具 | `contributes.tools` | 容器内的插件进程 | 是 | [AI 工具与插件运行时](/advanced/plugin/tools-runtime) |
-| 生命周期 hook | `contributes.hooks` | 容器内的插件进程 | 是 | [生命周期 Hooks](/advanced/plugin/hooks) |
-| 工作区工具 | `contributes.workspaceTools` | 右侧项目工具抽屉中的 WebView 页面 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 槽位入口 | `contributes.uiEntries` | 设置页分组、侧栏底部、聊天顶栏菜单、空态建议、会话长按菜单、文件树长按、编辑器选区菜单、备份页 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 插件配置页 | `configPage` | 插件详情中的配置分段 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 插件事件 | 进程发送 `plugin.event` | 推送给同插件已打开的页面 | 是 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
-| 文件订阅 | 页面调用 `aicode.fs.watch` | 页面，宿主负责监听 | 否 | [页面样式、组件与事件](/advanced/plugin/ui-components) |
-| 会话与消息 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 运行状态与审批 | 页面 `aicode.chat.*` / 进程 `host.chat.*` | 聊天页 ViewModel | 可无 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 模型句柄 | `contributes.modelAccess` + 页面 `aicode.model.*` / 进程 `host.model.*` | 宿主直接调用已配置供应商，支持工具与图片 | 可无 | [模型句柄与流式调用](/advanced/plugin/model-handles) |
-| 系统、密钥与 HTTP | `aicode.clipboard/share/secrets/http` / `host.*` | 宿主 | 否 | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
-| 系统浮层 | `contributes.overlay` | 宿主托管的系统窗口 | 可无 | [系统浮层](/advanced/plugin/overlay) |
-| Shizuku 命令 | `contributes.shizuku` | Android 系统 | 否 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
-| 备份与还原事件 | `contributes.backup` + `backup.export.before` / `backup.import.finished` | 容器内的插件进程 | 是 | [生命周期 Hooks](/advanced/plugin/hooks) |
-| OpenAI 兼容提供商 | `contributes.providers` | 插件自行启动的服务 | 通常需要 | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
+| 部分 | 推荐方式 | 交付产物 |
+| --- | --- | --- |
+| 插件逻辑 | TypeScript + 插件 SDK | esbuild 生成 JavaScript 运行时入口 |
+| 页面界面 | Vue 3 单文件组件 + TypeScript，优先使用宿主 `aicode-*` 组件 | Vite 生成 HTML、JavaScript 和 CSS |
+| 项目起点 | 仓库中的 `plugins/template/` 独立模板 | 清单、运行时与页面一起打包 |
 
-一个插件可同时声明多类能力，无需按类型拆分为多个包。纯声明式插件可仅包含 Markdown、HTML 和配置；需要业务逻辑时再增加 `runtime`。
+宿主运行构建后的 JavaScript 和 HTML，源码由开发者维护。仅提供技能、子代理或 MCP 配置时，可直接编写 Markdown / JSON，按需增加运行时和页面。
 
-## 插件目录结构
+## 开发流程
 
-```text
-demo-kit/
-├── plugin.json
-├── dist/
-│   └── main.js
-├── schemas/
-│   └── echo.input.json
-├── skills/
-│   └── project-notes/
-│       └── SKILL.md
-├── agents/
-│   └── reviewer.md
-├── mcp/
-│   └── project-context.json
-└── pages/
-    └── config.html
-```
-
-`plugin.json` 必须位于压缩包根部，不可再嵌套一层目录。清单声明包内内容，宿主仅按清单加载，不会扫描未声明的文件。业务逻辑较多时，可用 `src/` 编写 TypeScript 源码并构建出 `dist/main.js`，参见[用 TypeScript 编写与构建插件](/advanced/plugin/source-build)。
-
-## 信任边界
-
-插件启用后，清单声明的技能、子代理、工具、页面、hook、MCP 和提供商将一并生效，不再逐项授权。安装确认仅展示其提供的能力。
-
-- 插件页面通过宿主桥读写当前执行环境的真实路径：本地模式为容器内路径，SSH 模式为远端服务器路径；`~` 展开到当前 home，裸相对路径挂到工作区根；插件自己的数据目录用稳定的 `data://` 虚拟根，与插件 ID 和执行环境解耦。页面可执行 `aicode.bash`、创建共享终端标签，也可调用同插件进程的 handler。
-- 插件可以读取当前工作区的会话与消息、创建会话并向会话发送消息；发送与手动输入同路径，会正常消耗 token 并触发工具授权，不能绕过权限与 PLAN 模式。
-- 插件进程与 Bash 同级，拥有容器内的文件、网络和命令能力；宿主桥不再做路径白名单，App 自身的其它私有目录在本地模式下没有对应的容器路径，因此不可达。
-- Shizuku 和系统浮层是插件级独立授权，启用插件不会自动获得，需由使用者打开插件详情后单独开启。
-- 代审核 hook 可批准原本需要使用者确认的调用；HTTP hook 可读取并改写请求体，敏感鉴权头在 payload 中为 `{{Token}}` 占位符，跨 origin 改写会剥离原始敏感头。仅应安装可信来源的插件。
-
-## 学习路径
-
-1. [快速开始](/advanced/plugin/quick-start)：创建可导入的最小插件，并了解开发者侧载。
-2. [plugin.json 清单参考](/advanced/plugin/manifest)：查阅各字段的必填性、取值与限制。
-3. [用 TypeScript 编写与构建插件](/advanced/plugin/source-build)：用源码与共享 SDK 替代手写 `main.js`。
-4. 按需阅读能力章节：声明式能力参见[技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp)，业务逻辑参见[AI 工具与插件运行时](/advanced/plugin/tools-runtime)，拦截与代审核参见[生命周期 Hooks](/advanced/plugin/hooks)。
-5. 需要界面时，参见[插件页面与宿主接口](/advanced/plugin/ui-pages)和[页面样式、组件与事件](/advanced/plugin/ui-components)；需要悬浮窗时参见[系统浮层](/advanced/plugin/overlay)。
-6. 最后阅读[打包、导入与排错](/advanced/plugin/packaging)，以及[示例库](/advanced/plugin/examples)中的完整项目。
-
-## 示例库
-
-仓库的 `plugins/samples/` 目录提供覆盖各项能力的完整插件，可侧载后直接修改：
-
-| 示例 | 演示内容 |
+| 阶段 | 阅读内容 |
 | --- | --- |
-| `community.demo-kit` | 技能、只读子代理、工作区工具、AI 工具、只读与可写 hook、插件事件 |
-| `capability-demo` | 对话提示条、插件级 Shizuku 授权、配置页 |
-| `chat-bridge` | 设置页对话界面、会话长按动作、`aicode.chat`、`chat.run.finished` 完成通知 |
-| `team-chat` | 设置页多模型群聊、模型句柄流式请求、工具调用与审批、图片输入 |
-| `backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包，并在还原后写回 |
-| `dev-tools` | 两个工作区工具页面，调用 `aicode.bash` |
-| `ui-gallery` | 设置页、侧栏与顶栏槽位入口、插件配置页、宿主 Vue 组件库 |
-| `memory-manager` | 设置页读写全局与项目记忆 |
-| `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |
-| `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started`、`providers.*` 维护模型与访问令牌 |
-| `external-api` | 插件私有加密存储、通用 HTTP 请求、把外部接口包成 AI 工具 |
-| `ssh-manager` | 常驻进程、npm 依赖准备、设置页与三个 AI 工具 |
+| 跑通项目 | [快速开始](/advanced/plugin/quick-start)：创建模板项目、构建并侧载验证 |
+| 编写功能 | [TypeScript + Vue 开发与构建](/advanced/plugin/source-build)：源码结构、SDK、页面构建与类型提示 |
+| 交付插件 | [打包、导入与排错](/advanced/plugin/packaging)：发布文件、安装限制、日志与检查清单 |
 
-各示例的声明与关键代码摘要见[示例库](/advanced/plugin/examples)。
+清单字段按需查阅 [plugin.json 清单参考](/advanced/plugin/manifest)，具体能力按下表选择。
 
-## 版本与兼容
+## 能力索引
 
-清单中的 `engines.pluginApi` 声明所需的插件接口版本。当前宿主提供 `1.0.0`，可使用 `^1.0.0` 或包含 `1.0.0` 的范围。宿主将拒绝不兼容的插件，不会尝试降级运行。
+| 目标 | 声明或接口 | 参考文档 |
+| --- | --- | --- |
+| 添加操作规范、审查角色或外部工具服务 | `skills`、`agents`、`mcp` | [技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp) |
+| 让 AI 调用插件逻辑 | `tools` + `runtime` | [AI 工具与插件运行时](/advanced/plugin/tools-runtime) |
+| 监听运行、拦截请求、代审核或扩展备份 | `hooks`、`backup` + `runtime` | [生命周期 Hooks](/advanced/plugin/hooks) |
+| 添加工作区工具、设置页、菜单动作或配置页 | `workspaceTools`、`uiEntries`、`configPage` | [插件页面与宿主接口](/advanced/plugin/ui-pages) |
+| 读写文件、运行命令、管理会话、保存密钥或请求网络 | 页面 `aicode.*` / 进程 `host.*` | [页面接口](/advanced/plugin/ui-pages#宿主接口)、[进程接口](/advanced/plugin/tools-runtime#host-api-细节) |
+| 使用主题、组件、插件事件与文件订阅 | `aicode-*`、`events`、`fs.watch` | [页面样式、组件与事件](/advanced/plugin/ui-components) |
+| 直接调用已配置的模型并编排工具循环 | `modelAccess` + `model.*` | [模型句柄与流式调用](/advanced/plugin/model-handles) |
+| 创建 App 外的悬浮窗口 | `overlay` | [系统浮层](/advanced/plugin/overlay) |
+| 执行 Android 命令或接入 OpenAI 兼容服务 | `shizuku`、`providers` | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
+
+能力声明位于 `contributes`，`runtime` 单独放在清单顶层。带 `handler` 的工具、Hook 和动作入口需要运行时，纯页面可以直接调用宿主桥。
+
+## 信任与授权
+
+- 启用后，插件声明的能力一起生效；插件进程具有容器内的文件、网络和命令能力，页面也可通过宿主桥操作当前执行环境。
+- 向会话发送消息会正常消耗 token，并经过宿主的模式与工具权限判断；模型句柄请求计入对应供应商用量。
+- Shizuku、系统浮层、备份与还原事件需要使用者在插件详情中单独授权。
+- 代审核可以批准待确认调用，HTTP Hook 可以读取和改写请求体；具体边界见 [Hooks 文档](/advanced/plugin/hooks)。
+
+## Demo 插件
+
+仓库的 `plugins/samples/` 目录提供 Demo 插件，可按需查看源码。

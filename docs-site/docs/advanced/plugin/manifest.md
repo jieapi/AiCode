@@ -16,7 +16,7 @@
 | `license` | 是 | 许可证名称，最多 100 字符 |
 | `icon` | 否 | 插件列表与详情图标：内置图标名，或包内 `.png` / `.webp` 相对路径 |
 | `engines` | 是 | 目前仅接受 `{"pluginApi": "版本范围"}` |
-| `runtime` | 有工具或 hook 时必填 | 业务进程的入口与启动方式 |
+| `runtime` | 有工具、Hook 或动作型入口时必填 | 业务进程的入口与启动方式 |
 | `contributes` | 是 | 提供的内容，至少一项 |
 | `configPage` | 否 | 插件配置页，包内 HTML 相对路径；也可声明在 `contributes.configPage` 中 |
 
@@ -74,7 +74,7 @@
 | `dependencies` | 否 | 依赖输入：`tool` 为 `npm` 或 `pip`，`file` 分别为 `.json`（如 `package.json`）或 `.txt`（如 `requirements.txt`） |
 | `resident` | 否 | 为 `true` 时进程不参与 10 分钟空闲回收，首次启动后常驻；停用、卸载、版本替换或 App 进程结束仍会关闭 |
 
-存在 `contributes.tools` 或 `contributes.hooks` 时必须提供 `runtime`；纯声明式插件可省略。
+存在 `contributes.tools`、`contributes.hooks` 或使用 `handler` 的 `uiEntries` 时必须提供 `runtime`。TypeScript 源码构建见[运行时与 SDK](/advanced/plugin/source-build#运行时与-sdk)。
 
 ## contributes
 
@@ -173,7 +173,7 @@
 | --- | --- | --- |
 | `purpose` | 是 | 用途说明，最多 200 字符；显示在安装预览与插件详情 |
 
-声明后插件可以使用进程 `host.model.*` 与页面 `aicode.model.*`。宿主直接使用使用者已配置的供应商与 Key 发起请求，请求会计入对应渠道的用量；插件拿不到 Key。请求可携带工具定义、工具结果、思考签名与图片；工具执行走 `aicode.tools.*` / `host.tools.*`，需要授权时由插件页面展示审批。未声明时调用返回 `MODEL_ACCESS_NOT_DECLARED`。完整接口见[模型句柄与流式调用](/advanced/plugin/model-handles)。
+声明后可调用 `host.model.*` / `aicode.model.*`，请求计入对应供应商用量，插件拿不到 Key；未声明时返回 `MODEL_ACCESS_NOT_DECLARED`。调用方式见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
 ### mcp
 
@@ -212,7 +212,7 @@
 | `format` | 是 | 目前仅支持 `openai` |
 | `baseUrl` | 是 | `http`/`https` 绝对地址，不能包含账号、查询参数或片段，最长 2048 字符 |
 
-插件负责启动兼容服务并保证宿主可访问。启用插件后，设置 → 提供商中将出现带「插件」标记的条目；停用或卸载将删除该条目。插件可在运行时通过 `providers.*` 维护自己声明条目的模型列表、上下文窗口与 API Key，见[Shizuku 与插件提供商](/advanced/plugin/shizuku-providers)。
+宿主按此声明注册提供商；服务启动、模型与凭据维护见[插件提供商](/advanced/plugin/shizuku-providers#插件提供商)。
 
 ### workspaceTools
 
@@ -274,7 +274,7 @@
 | `confirm` | 否 | 仅动作入口：执行前弹确认框 |
 | `icon` | 否 | 图标名，默认 `book`，最长 32 字符 |
 
-`page` 与 `handler` 必须且只能出现一个。`settings.*` 槽位只接受 `page`；`files.tree.menu` 与 `editor.selection.menu` 只接受 `handler`；`backup.data` 只接受数据选项（不能写 `page` / `handler` / `confirm`）。动作返回 `{message}` 时宿主用 toast 显示；错误请用 JSON-RPC error 返回。
+除 `backup.data` 外，`page` 与 `handler` 必须且只能出现一个。`settings.*` 槽位只接受 `page`；`files.tree.menu` 与 `editor.selection.menu` 只接受 `handler`；`backup.data` 只接受数据选项（不能写 `page` / `handler` / `confirm`）。动作上下文与返回行为见[槽位入口](/advanced/plugin/ui-pages#槽位入口)。
 
 | `slot` | 位置 |
 | --- | --- |
@@ -387,79 +387,7 @@
 
 声明不会自动获得授权。使用者需在插件详情中单独开启「备份与还原事件」授权，停用期间不派发，重新启用后恢复；卸载插件会撤销授权。
 
-授权后，插件可在 `backup.data` 槽位声明一个数据选项（只写 `id` / `title` / `icon`，不写 `page` 或 `handler`），宿主会在「选择导出数据」里渲染开关。勾选后：
-
-- 导出前宿主调用 `backup.export.before`，插件把额外数据写入 payload 的 `dir`（`data://backup-export`）；宿主把该目录打包为归档内的 `plugins/<pluginId>/…` 区段。
-- 导入还原主数据后，宿主把该区段解到 `data://backup-import`，再调用 `backup.import.finished`，插件从 `dir` 写回真实路径。
-
-事件 payload 参见[生命周期 Hooks](/advanced/plugin/hooks)；真实示例见[示例库](/advanced/plugin/examples)的 `backup-helper`。
-
-## 完整示例
-
-下面的清单同时声明了技能、子代理、工具、hook、MCP、工作区工具、设置页、配置页、提供商、Shizuku 和浮层，用于说明各字段的相对位置。实际插件无需全部声明。
-
-```json
-{
-  "manifestVersion": 1,
-  "id": "community.workbench-kit",
-  "name": {"default": "Workbench Kit", "zh-CN": "工作台套件"},
-  "version": "1.0.0",
-  "publisher": "community",
-  "repository": "https://github.com/example/workbench-kit",
-  "description": {"default": "Project tools and pages.", "zh-CN": "项目工具与页面。"},
-  "license": "MIT",
-  "engines": {"pluginApi": "^1.0.0"},
-  "runtime": {"type": "javascript", "entry": "dist/main.js"},
-  "configPage": "pages/config.html",
-  "contributes": {
-    "skills": [{"id": "notes", "file": "skills/notes/SKILL.md"}],
-    "agents": [{"id": "reviewer", "file": "agents/reviewer.md"}],
-    "tools": [
-      {
-        "id": "project_info",
-        "title": "项目信息",
-        "description": "查询当前项目状态",
-        "inputSchema": "schemas/project-info.input.json",
-        "handler": "tools.projectInfo"
-      }
-    ],
-    "hooks": [
-      {"id": "run-log", "event": "agent.run.finished", "handler": "hooks.runFinished"}
-    ],
-    "mcp": [{"id": "context", "file": "mcp/project-context.json"}],
-    "workspaceTools": [
-      {
-        "id": "build",
-        "title": "项目操作",
-        "description": "构建与清理",
-        "pageFile": "pages/build.html"
-      }
-    ],
-    "uiEntries": [
-      {
-        "id": "settings",
-        "title": "工作台设置",
-        "slot": "settings.ai",
-        "page": "pages/settings.html",
-        "icon": "settings"
-      }
-    ],
-    "providers": [
-      {
-        "id": "gateway",
-        "name": "本地网关",
-        "format": "openai",
-        "baseUrl": "http://127.0.0.1:18080/v1"
-      }
-    ],
-    "shizuku": {"purpose": "查询系统设置"},
-    "overlay": {
-      "purpose": "状态悬浮球",
-      "surfaces": [{"id": "ball", "page": "pages/ball.html", "width": 48, "height": 48}]
-    }
-  }
-}
-```
+使用者在备份页勾选 `backup.data` 数据选项后，插件参与导出。暂存目录、备份区段与事件 payload 见[备份与还原事件](/advanced/plugin/hooks#备份与还原事件)。
 
 ## 会被拒绝的声明方式
 

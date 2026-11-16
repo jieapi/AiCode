@@ -89,4 +89,4 @@
 | 安装 Playwright 浏览器自动化 | 容器内装 Chromium 并接入 Playwright MCP，让 AI 操作网页 → [文档](/advanced/playwright-mcp) |
 | 用 adb 无线调试其他设备 | 在容器里用 adb 连接另一台手机或本机，安装应用、抓日志、截屏 → [文档](/advanced/adb-wireless-debug) |
 | 自定义面板 | 用脚本在输入框上方画余额或用量卡片 → [文档](/advanced/dashboard-cards) |
-| 开发插件 | 通过 `plugin.json` 声明技能、子代理、AI 工具、页面、MCP、Hooks 与浮层，从快速开始到打包排错 → [文档](/advanced/plugin/) |
+| 开发插件 | 推荐 TypeScript + Vue，从模板创建、源码构建到打包交付；能力与接口按需查阅 → [文档](/advanced/plugin/) |

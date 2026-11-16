@@ -4,33 +4,7 @@
 
 ## 声明
 
-```json
-{
-  "contributes": {
-    "overlay": {
-      "purpose": "悬浮小组件与状态 HUD",
-      "surfaces": [
-        {"id": "pet", "page": "pages/pet.html", "width": 240, "height": 320, "draggable": true, "snap": "x"},
-        {"id": "menu", "page": "pages/menu.html", "width": 150, "height": 130, "draggable": false}
-      ]
-    },
-    "configPage": "pages/config.html"
-  }
-}
-```
-
-| 字段 | 说明 |
-| --- | --- |
-| `purpose` | 用途说明，最多 200 字符，展示在授权界面 |
-| `surfaces` | 1–3 个浮层页面 |
-| `surface.id` | 局部 ID，同一插件内唯一 |
-| `surface.page` | 包内 `.html`/`.htm` 页面 |
-| `surface.width` | 默认宽度，单位 dp，默认 240，范围 48–720 |
-| `surface.height` | 默认高度，单位 dp，默认 320，范围 48–1200 |
-| `surface.draggable` | 是否允许拖动，默认 `true` |
-| `surface.snap` | 松手吸附轴：`none`、`x`、`y`、`both`，默认 `none` |
-
-全局最多同时存在 8 个插件浮层窗口，单个插件最多 3 个。窗口不可全屏，也不保证覆盖安全界面。
+使用 `contributes.overlay` 声明用途与 surface，字段、尺寸范围和数量限制见[清单参考](/advanced/plugin/manifest#overlay)。全局最多同时存在 8 个插件浮层窗口，窗口不可全屏，也不保证覆盖安全界面。
 
 ## 授权
 
@@ -43,7 +17,7 @@
 
 ## 创建与更新
 
-普通页面或插件进程均可创建清单中声明的 surface：
+普通页面通过 `aicode.overlay.create({surface?, width?, height?, visibilityPolicy?})` 创建清单中的 surface：
 
 ```js
 const overlay = await aicode.overlay.create({
@@ -86,57 +60,62 @@ const self = await aicode.overlay.self();
 
 窗口位置按 `pluginId:surfaceId` 自动保存，重启或自动拉起时恢复。插件拖动窗口或调用 `moveBy` 后均会更新保存位置。
 
+## 进程接口
+
+进程通过 SDK 的 `hostCall` 调用：
+
+| 方法 | 参数 | 作用 |
+| --- | --- | --- |
+| `host.overlay.create` | `{surface?, width?, height?, visibilityPolicy?}` | 返回 `{overlayId, width, height, ...}` |
+| `host.overlay.update` | `{overlayId, width?, height?, visible?, visibilityPolicy?, dx?, dy?}` | 更新窗口 |
+| `host.overlay.close` | `{overlayId}` 或 `{surface}` | 关闭窗口 |
+| `host.overlay.postMessage` | `{overlayId?, surface?, payload}` | 向浮层页面发送消息 |
+
 ## 浮层页面
 
-```html
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/__aicode/theme.css">
-  <script src="/__aicode/aicode.js"></script>
-  <style>
-    html, body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: transparent;
-    }
-    .ball {
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      background: var(--aicode-primary);
-      display: grid;
-      place-items: center;
-      color: var(--aicode-on-surface);
-      font-size: 14px;
-    }
-  </style>
-</head>
-<body>
-  <div class="ball" id="ball">AI</div>
-  <script>
-    const ball = document.getElementById('ball');
+浮层同样推荐使用 Vue + TypeScript，HTML 壳与构建方式见[页面构建](/advanced/plugin/source-build#页面构建)。透明背景与交互可写在 `.vue` 中：
 
-    aicode.overlay.self().then((self) => {
-      aicode.overlay.setDragRegion({left: 0, top: 0, width: self.width, height: self.height});
-    });
+```vue
+<template>
+  <button class="ball" @click="sendClick">{{ label }}</button>
+</template>
 
-    ball.addEventListener('click', () => {
-      aicode.overlay.postMessage({type: 'click'});
-    });
+<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue';
 
-    aicode.overlay.onMessage((message) => {
-      if (message.type === 'state') {
-        ball.textContent = message.busy ? '忙' : 'AI';
-      }
-    });
-  </script>
-</body>
-</html>
+const label = ref('AI');
+const off = aicode.overlay.onMessage((message) => {
+  if (message.type === 'state') label.value = message.busy ? '忙' : 'AI';
+});
+
+onMounted(async () => {
+  const rect = document.body.getBoundingClientRect();
+  await aicode.overlay.setDragRegion({left: 0, top: 0, width: rect.width, height: rect.height});
+});
+onUnmounted(off);
+
+async function sendClick(): Promise<void> {
+  await aicode.overlay.postMessage({type: 'click'});
+}
+</script>
+
+<style>
+html, body, #app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+.ball {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 50%;
+  background: var(--aicode-primary);
+  color: var(--aicode-on-surface);
+}
+</style>
 ```
 
 浮层页面支持以下操作：
@@ -220,50 +199,30 @@ App 前后台状态以 `ProcessLifecycleOwner` 为准。插件也可轮询 `aico
 
 ## 自动启动
 
-自动启动不由宿主内置。插件声明 `app.started` hook，在 handler 中读取自身 `data://` 设置，随后调用 `host.overlay.create`（以下 `hostCall` 沿用[快速开始](/advanced/plugin/quick-start)）：
+插件可以在 `app.started` Hook 中读取自身设置，再调用 `host.overlay.create`。清单中的 Hook 与常驻配置见[常驻与自启动](/advanced/plugin/tools-runtime#常驻与自启动)，对应 handler 例如：
 
-```json
-{
-  "runtime": {"type": "javascript", "entry": "dist/main.js", "resident": true},
-  "contributes": {
-    "overlay": {
-      "purpose": "状态悬浮球",
-      "surfaces": [{"id": "ball", "page": "pages/ball.html", "width": 48, "height": 48}]
-    },
-    "hooks": [{"id": "boot", "event": "app.started", "handler": "hooks.boot"}]
-  }
-}
-```
+```ts
+import { definePlugin, hostCall } from '@jieapi/plugin-sdk';
 
-```js
-const handlers = {
-  'hooks.boot': async () => {
-    const enabled = await hostCall('host.fs.read', {path: 'data://enabled'})
-      .then((result) => result.content.trim() === 'true')
-      .catch(() => false);
-    if (!enabled) return {logs: ['overlay disabled']};
-    await hostCall('host.overlay.create', {
-      surface: 'ball',
-      visibilityPolicy: 'always'
-    });
-    return {logs: ['overlay created']};
+definePlugin({
+  handlers: {
+    'hooks.boot': async () => {
+      const enabled = await hostCall<{content: string}>('host.fs.read', {path: 'data://enabled'})
+        .then((result) => result.content.trim() === 'true')
+        .catch(() => false);
+      if (!enabled) return {logs: ['overlay disabled']};
+      await hostCall('host.overlay.create', {
+        surface: 'ball',
+        visibilityPolicy: 'always'
+      });
+      return {logs: ['overlay created']};
+    }
   }
-};
+});
 ```
 
 宿主仅负责在 App 启动时派发事件；是否创建、尺寸与数量均由插件决定。浮层授权未开启或系统权限缺失时，创建将失败并记录日志。
 
-## 示例
+## 参考源码
 
-独立仓库 [`jieapi/aicode-plugin-desktop-pet`](https://github.com/jieapi/aicode-plugin-desktop-pet) 演示单 surface：宠物会眨眼、摆耳、摇尾，拖拽松手有落地回弹，靠近屏幕边缘后以翻身动画贴边。长按宠物会在下方展开菜单，点喂食、休息或关闭按钮后收起；菜单展开和收起时保持宠物宽度与大小，动画完成后再执行喂食或休息，并恢复展开前的位置。喂食时会低头咀嚼，休息时闭眼并放慢呼吸，睡眠标志仅在休息时出现。连续空闲 3 分钟会自动休息，抚摸、拖动和菜单操作会重计空闲时间；思考、工作和进食期间不计时。睡眠时每次抚摸有 30% 概率醒来，未醒来则继续睡；喂食或新任务会切换到相应状态。该示例声明了 `app.started`、`plugin.enabled`、`agent.run.started`、`agent.tool.started`、`agent.tool.finished`、`agent.run.finished` 六个只读 hook：启动或启用插件时按“随 App 启动”设置创建浮层，并以 AI 运行状态驱动宠物表情。
-
-`plugins/samples/background-approval` 演示后台审批：`app.started` 时创建悬浮球，`agent.permission.review` 收到审批请求后将悬浮球展开为面板；App 在前台时直接返回 `pass`，交回应用内确认框。
-
-## 限制
-
-- 单个插件最多 3 个 surface，全局最多 8 个窗口；
-- 宽度 48–720 dp，高度 48–1200 dp；
-- 窗口不可全屏，也不保证覆盖安全界面；
-- 浮层页面不得调用 Shizuku、Shell 或终端；
-- 授权撤销、插件停用或卸载时，窗口将被关闭；
-- 位置按插件与 surface 保存，不按页面实例保存。
+浮层插件可参考 [`jieapi/aicode-plugin-desktop-pet`](https://github.com/jieapi/aicode-plugin-desktop-pet)。

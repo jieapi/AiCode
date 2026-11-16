@@ -4,14 +4,11 @@
 
 ## 主题
 
-引用宿主动态生成的 `/__aicode/theme.css`：
+在页面 HTML 壳中引用主题和组件样式；Vue 与桥脚本的统一引入方式见[页面构建](/advanced/plugin/source-build#html-壳)：
 
 ```html
 <link rel="stylesheet" href="/__aicode/theme.css">
 <link rel="stylesheet" href="/__aicode/ui.css">
-<script src="/__aicode/vue.global.prod.js"></script>
-<script src="/__aicode/aicode-ui-vue.js"></script>
-<script src="/__aicode/aicode.js"></script>
 ```
 
 可用 CSS 变量：
@@ -29,7 +26,7 @@
 | `--aicode-space-*` | 间距 |
 | `--aicode-font-scale` | 字号缩放 |
 
-深浅色切换时，宿主直接更新变量，页面不会重新加载。`aicode.applyTheme(variables)` 可在页面内临时覆盖变量，并派发 `aicode:theme` 事件。
+深浅色切换时，宿主直接更新变量，页面不会重新加载；请依赖 CSS 变量，不要在脚本中缓存具体颜色值。`aicode.applyTheme(variables)` 可临时覆盖变量，并派发 `aicode:theme` 事件。
 
 ### 布局
 
@@ -47,29 +44,23 @@
 
 ## Vue 组件库
 
-在 Vue 应用挂载前注册组件：
+按 [Vue 入口](/advanced/plugin/source-build#vue-入口)注册 `AicodeUI` 后，在单文件组件中使用 `aicode-*`：
 
-```html
-<div id="app">
-  <aicode-field label="名称">
-    <aicode-input v-model="name" placeholder="输入名称"></aicode-input>
-  </aicode-field>
+```vue
+<template>
   <aicode-field label="描述">
-    <aicode-textarea v-model="description" placeholder="输入描述"></aicode-textarea>
+    <aicode-textarea v-model="description" placeholder="输入描述" />
   </aicode-field>
-</div>
+</template>
 
-<script>
-  const {createApp, ref} = Vue;
-  const app = createApp({
-    setup() {
-      return {name: ref(''), description: ref('')};
-    }
-  });
-  app.use(AicodeUI);
-  app.mount('#app');
+<script setup lang="ts">
+import { ref } from 'vue';
+
+const description = ref('');
 </script>
 ```
+
+组件名与 props 的类型提示见[页面类型提示](/advanced/plugin/source-build#页面类型提示)。
 
 ### 输入框
 
@@ -136,14 +127,12 @@ await aicode.ui.setOverlay(false);
 
 ## 插件事件
 
-插件进程可主动向页面推送事件：
+插件进程用 SDK 主动推送事件：
 
-```js
-process.stdout.write(JSON.stringify({
-  jsonrpc: '2.0',
-  method: 'plugin.event',
-  params: {name: 'records.changed', payload: {count: 4}}
-}) + '\n');
+```ts
+import { emit } from '@jieapi/plugin-sdk';
+
+emit('records.changed', {count: 4});
 ```
 
 页面侧：
@@ -246,7 +235,8 @@ async function refreshRecords() {
   try {
     const ctx = await aicode.context();
     const result = await aicode.fs.read('data://records.json', {contextKey: ctx.contextKey});
-    if (!ctx.visible) return;
+    const current = await aicode.context();
+    if (!current.visible || current.contextKey !== ctx.contextKey) return;
     render(JSON.parse(result.content));
   } catch (error) {
     if (error.code === 'STALE_CONTEXT') return;
@@ -257,11 +247,4 @@ async function refreshRecords() {
 }
 ```
 
-## 限制
-
-- 页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截；
-- 页面文件最大 512 KiB；
-- 每个页面最多 16 个文件订阅；
-- 单次读取 512 KiB、写入 1 MiB、目录最多 500 条；
-- 页面不可绕过宿主桥直接读取容器文件；
-- 主题切换不会重新加载页面；页面应仅依赖 CSS 变量，请勿在脚本中缓存具体颜色值。
+页面桥、文件读写和安全边界统一见[插件页面与宿主接口](/advanced/plugin/ui-pages)。

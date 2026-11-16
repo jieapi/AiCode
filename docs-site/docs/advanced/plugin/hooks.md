@@ -1,6 +1,6 @@
 # 生命周期 Hooks
 
-Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行前后、provider 请求发出前、权限确认前介入。Hooks 运行在插件运行时进程中，与 AI 工具共用同一 handler 表。
+Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行前后、provider 请求发出前、权限确认前介入。Hooks 与 AI 工具共用同一运行时和 handler 表，声明写法见[清单参考](/advanced/plugin/manifest#hooks)，TypeScript 注册方式见[运行时与 SDK](/advanced/plugin/source-build#运行时与-sdk)。
 
 ## 三种模式
 
@@ -46,20 +46,7 @@ Hooks 使插件可在 AI 运行的固定节点接收通知，或在工具执行�
 - 暂存目录由宿主在操作结束后清理；如果宿主本次已经恢复了 MCP（`stats.mcpServers > 0`），插件应跳过自己区段里的 `mcp.json`，避免覆盖宿主版本。
 - 事件由宿主同步等待：导出前把数据写入暂存区，导入后再写回真实路径；失败或超时只写日志，不阻塞备份与还原。
 
-```json
-{
-  "contributes": {
-    "backup": {"purpose": "把额外数据随备份一起导出"},
-    "hooks": [
-      {"id": "before-export", "event": "backup.export.before", "handler": "hooks.onExportBefore"},
-      {"id": "after-import", "event": "backup.import.finished", "handler": "hooks.onImport"}
-    ],
-    "uiEntries": [
-      {"id": "extra-data", "title": "记忆 / 技能", "slot": "backup.data", "icon": "package"}
-    ]
-  }
-}
-```
+`backup`、备份 Hooks 与数据选项的声明见[备份清单](/advanced/plugin/manifest#backup)。
 
 插件把数据写入 `dir`，宿主负责打包；导入时从 `dir` 读回。数据量应控制在单文件 8 MiB、单插件 64 MiB 以内。宿主在读取前及读取过程中限制大小；超限文件会跳过并写入日志，超过单插件总量后不再继续打包该插件的后续文件。
 
@@ -80,8 +67,6 @@ const handlers = {
 };
 ```
 
-完整实现见[示例库](/advanced/plugin/examples)的 `backup-helper`：它把记忆、技能、MCP 配置与子代理写入宿主备份包，并在还原后写回。
-
 ## 可写事件
 
 | 事件 | 时机 | 可返回的变更 |
@@ -94,7 +79,7 @@ const handlers = {
 
 `agent.tool.after` 仅处理成功结果，不得将错误改为成功，也不得伪造附件或图片。改写后的结果同时用于界面展示和回放给模型。
 
-`agent.http.before` 挂载在共享 HTTP 客户端上，覆盖对话、标题生成、上下文压缩、模型列表/测试与图片请求。每次实际发送都会执行；网络重试或更换 Key 会重复触发，handler 应保持幂等。该 hook 在 OkHttp 线程上同步等待，预算比工具 hook 更紧：单次最多 3 秒，一次请求合计最多 5 秒；超时后按原请求继续发送。
+`agent.http.before` 处理共享 HTTP 客户端中符合条件的 POST 请求：请求体不超过 4 MiB，且去除前导空白后以 `{` 开头；GET、超限或其他正文格式会跳过。对话、标题生成、上下文压缩、测试和图片请求中符合条件的调用均可触发；网络重试或更换 Key 可能重复触发，handler 应保持幂等。超时预算见[执行顺序与超时](#执行顺序与超时)。
 
 `agent.http.before` 的敏感请求头在 payload 中只以占位符 `{{Token}}` 出现：App 实际会添加的 `Authorization`（OpenAI/MCP）、`x-api-key`（Anthropic）与 `x-goog-api-key`（Gemini）；provider 自定义 header 中如果包含同一份密钥值，也会被替换为占位符。插件原样回传 `{{Token}}`，且请求仍发往原 origin 时，宿主才恢复真实值；插件无法读到真实鉴权头。
 
@@ -149,25 +134,7 @@ payload 仍包含完整请求体（可能含对话内容），仅应安装可信
 | `agent.http.before` | `url`、`method`、`headers`、`body` |
 | `agent.permission.review` | `callId`、`toolName`、`arguments`、`appForeground` |
 
-## 声明
-
-```json
-{
-  "runtime": {"type": "javascript", "entry": "dist/main.js"},
-  "contributes": {
-    "hooks": [
-      {"id": "run-finished", "event": "agent.run.finished", "handler": "hooks.runFinished"},
-      {"id": "guard-bash", "event": "agent.tool.before", "handler": "hooks.guardBash", "mode": "transform"},
-      {"id": "redact-result", "event": "agent.tool.after", "handler": "hooks.redactResult", "mode": "transform"},
-      {"id": "review", "event": "agent.permission.review", "handler": "hooks.reviewPermission", "mode": "review"}
-    ]
-  }
-}
-```
-
-`handler` 是运行时 handler 表中的键。hook 与 AI 工具共用同一进程，声明本身不会执行代码。
-
-## 示例
+## 处理事件
 
 ### 记录每轮运行结果
 
@@ -243,8 +210,6 @@ const handlers = {
 
 需要用户在后台确认时，插件可创建 `visibilityPolicy: "background"` 的浮层并轮询 `host.app.isForeground`；App 回到前台后应返回 `pass`，将请求交回应用内确认框，避免审批持续至超时。
 
-完整实现参见 `plugins/samples/background-approval`：`app.started` 时创建悬浮球，`agent.permission.review` 将审批请求展开为面板，用户在浮层上选择同意或拒绝；App 在前台时直接返回 `pass`。
-
 ## 执行顺序与超时
 
 - 多个可写 hook 按插件 ID 升序、各自清单顺序执行，后一个 hook 读取前一个改写后的值；
@@ -257,13 +222,6 @@ const handlers = {
 
 ## 调试输出
 
-handler 可返回 `{logs: ["..."]}`，宿主将每行写入应用日志，最多 50 行、单行 500 字符。可写 hook 的 `decision`、`arguments`、`data`、`url`、`headers`、`body` 与 `logs` 可同时返回；代审核的 `decision`、`reason` 与 `logs` 可同时返回。
+handler 可返回 `logs` 写入应用日志，格式与限额见 [handler 约定](/advanced/plugin/tools-runtime#handler-约定)。可写 Hook 的 `decision`、`arguments`、`data`、`url`、`headers`、`body` 与 `logs` 可同时返回；代审核的 `decision`、`reason` 与 `logs` 可同时返回。
 
-## 边界
-
-- 不得提权：可写 hook 仅可拒绝或缩小调用，不得批准工具、不得将宿主拒绝改为允许、不得绕过 PLAN 模式或权限策略；
-- 改写参数后必须重新执行完整权限判断；审批后不会静默改写参数；
-- `agent.tool.after` 仅处理成功结果；
-- `agent.http.before` 读取不到真实鉴权头（payload 中为 `{{Token}}`）；跨 origin 改写会剥离原始敏感头；不得修改请求方法，也不得将请求改为非 JSON；
-- 代审核可批准原本需要用户确认的调用，属于高权限能力；它不得修改参数、不得覆盖宿主 DENY/PLAN、不得写入永久允许规则，也不得代审自身提供的工具；
-- hook 与 AI 工具共用同一插件进程，进程拥有容器内的文件与命令能力。仅安装可信插件。
+Transform Hook 不批准工具或绕过模式限制，改写参数后仍由宿主重新判断权限。代审核属于高权限能力，仅应启用可信插件。
