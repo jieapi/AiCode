@@ -63,6 +63,7 @@ class PluginRuntimeManager @Inject constructor(
     private val overlayManager: PluginOverlayManager,
     private val chatService: PluginChatService,
     private val modelService: PluginModelService,
+    private val providerService: PluginProviderService,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
@@ -316,6 +317,11 @@ class PluginRuntimeManager @Inject constructor(
             "host.model.start" -> hostCall { modelService.start(pluginId, params, PROCESS_ORIGIN) }
             "host.model.read" -> hostCall { modelService.read(pluginId, params) }
             "host.model.cancel" -> hostCall { modelService.cancel(pluginId, params) }
+            "host.providers.listModels" -> hostCall { providerService.listModels(pluginId, params) }
+            "host.providers.addModel" -> hostCall { providerService.addModel(pluginId, params) }
+            "host.providers.deleteModel" -> hostCall { providerService.deleteModel(pluginId, params) }
+            "host.providers.setModelContext" -> hostCall { providerService.setModelContext(pluginId, params) }
+            "host.providers.setApiKey" -> hostCall { providerService.setApiKey(pluginId, params) }
             "host.clipboard.read" -> hostCall { systemService.clipboardRead(pluginId) }
             "host.clipboard.write" -> hostCall {
                 systemService.clipboardWrite(pluginId, PluginHostPaths.requireString(params, "text"))

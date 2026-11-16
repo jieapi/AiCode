@@ -149,6 +149,11 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 | `host.model.start` | `{handleId, messages, systemPrompt?, params?}` | `{streamId}`；立即返回，事件由 `read` 拉取 |
 | `host.model.read` | `{streamId, cursor?, maxEvents?, waitMs?}` | `{events, cursor, done, status?, final?, error?}`；`waitMs` 0–20 秒 |
 | `host.model.cancel` | `{streamId}` | `{ok}`；保留已产生的事件 |
+| `host.providers.listModels` | `{providerId}` | `{providerId, models, selectedModel}`；只读本插件声明提供商的配置 |
+| `host.providers.addModel` | `{providerId, model, contextTokens?}` | 追加模型；重复添加视为成功，尚无选中模型时自动选中 |
+| `host.providers.deleteModel` | `{providerId, model}` | 删除模型；返回 `{providerId, model, models, selectedModel, removed}` |
+| `host.providers.setModelContext` | `{providerId, model, contextTokens}` | 写入模型上下文窗口；`contextTokens` 为 1–10000000 |
+| `host.providers.setApiKey` | `{providerId, apiKey}` | 设置单 Key，空串清除；只影响本插件声明的提供商 |
 | `host.clipboard.read` / `write` | `{}` / `{text}` | 剪贴板文本，上限 1 MiB |
 | `host.share.text` | `{text, title?}` | 拉起系统分享；文本最多 100000 字符 |
 | `host.ui.openUrl` | `{url}` | 仅 http/https，最长 4096 字符 |
@@ -190,6 +195,8 @@ plugin__<清洗后的插件ID>__<清洗后的工具id>
 `host.chat.listApprovals` 返回该会话待处理的工具授权、提问与计划审批；对应 resolve 接口只接受该会话当前的 requestId，不能用它批准其他会话或已过期的请求。页面内处理工具授权也可以继续使用 `agent.permission.review` hook。
 
 `host.http.request` 只接受 http/https，不跟随重定向、不注入宿主凭据；URL 最长 4096 字符，headers 最多 64 项且禁止 Host/Content-Length 等受控头，请求体与响应体各最多 1 MiB，超时 1–60 秒。
+
+`host.providers.*` 只接受当前插件在 `contributes.providers` 中声明且已注册的提供商：`providerId` 可传清单局部 ID 或完整插件提供商 ID，其它条目返回 `PROVIDER_NOT_FOUND`。每个提供商最多保留 500 个模型，模型名最长 200 字符；`contextTokens` 为 1–10000000 的正整数。设置 API Key 只写单 Key 字段，值由宿主加密保存且不会回显。
 
 ### 端口映射
 

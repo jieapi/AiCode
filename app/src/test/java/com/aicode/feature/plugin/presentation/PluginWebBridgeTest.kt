@@ -19,6 +19,7 @@ import com.aicode.feature.plugin.domain.PluginPage
 import com.aicode.feature.plugin.domain.PluginStatus
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginModelService
+import com.aicode.feature.plugin.runtime.PluginProviderService
 import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import io.mockk.coEvery
@@ -63,7 +64,8 @@ class PluginWebBridgeTest {
         val plugins: MutableStateFlow<List<InstalledPlugin>>,
         val commandEngine: CommandEngine,
         val fileAccess: FileAccessProvider,
-        val modelService: PluginModelService
+        val modelService: PluginModelService,
+        val providerService: PluginProviderService
     )
 
     @After
@@ -100,6 +102,7 @@ class PluginWebBridgeTest {
         val runs = mockk<AgentRunStateStore>(relaxed = true)
         every { runs.events } returns MutableSharedFlow<AgentRunEvent>()
         val modelService = mockk<PluginModelService>(relaxed = true)
+        val providerService = mockk<PluginProviderService>(relaxed = true)
         val bridge = PluginWebBridge(
             context = ApplicationProvider.getApplicationContext(),
             page = page,
@@ -118,6 +121,7 @@ class PluginWebBridgeTest {
             overlayManager = mockk(relaxed = true),
             chatService = mockk(relaxed = true),
             modelService = modelService,
+            providerService = providerService,
             agentRunStateStore = runs,
             secretStore = mockk(relaxed = true),
             systemService = mockk(relaxed = true),
@@ -130,7 +134,7 @@ class PluginWebBridgeTest {
             post = {}
         )
         bridges += bridge
-        return Env(bridge, plugins, engine, fileAccess, modelService)
+        return Env(bridge, plugins, engine, fileAccess, modelService, providerService)
     }
 
     private suspend fun assertInactive(bridge: PluginWebBridge, method: String, params: JsonObject) {
@@ -145,6 +149,22 @@ class PluginWebBridgeTest {
         val result = env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") }) as JsonObject
         assertEquals("ok", result.getValue("output").jsonPrimitive.content)
         coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit("pwd", "/projects/a", any()) }
+    }
+
+    @Test
+    fun providerManagementIsForwardedToProviderService() = runBlocking {
+        val env = env()
+        coEvery { env.providerService.setApiKey(any(), any()) } returns buildJsonObject { put("ok", true) }
+
+        env.bridge.dispatch(
+            "providers.setApiKey",
+            buildJsonObject {
+                put("providerId", "echo")
+                put("apiKey", "local-token")
+            }
+        )
+
+        coVerify(exactly = 1) { env.providerService.setApiKey(pluginId, any()) }
     }
 
     @Test

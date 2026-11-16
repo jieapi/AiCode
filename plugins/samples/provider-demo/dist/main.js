@@ -8,6 +8,7 @@ var import_url = require("url");
 var import_readline = require("readline");
 var SUPPORTED_METHODS = /* @__PURE__ */ new Set(["tool.invoke", "hook.invoke", "ui.invoke"]);
 var pending = /* @__PURE__ */ new Map();
+var hostSeq = 0;
 var started = false;
 function send(message) {
   process.stdout.write(JSON.stringify(message) + "\n");
@@ -18,6 +19,16 @@ function errorMessage(error) {
 function errorCode(error) {
   const code = error == null ? void 0 : error.code;
   return typeof code === "string" && code ? code : "PLUGIN_ERROR";
+}
+function hostCall(method, params) {
+  const id = "host-" + ++hostSeq;
+  return new Promise((resolve, reject) => {
+    pending.set(id, {
+      resolve: (value) => resolve(value),
+      reject
+    });
+    send({ jsonrpc: "2.0", id, method, params: params != null ? params : {} });
+  });
 }
 function log(message) {
   process.stderr.write("[plugin] " + message + "\n");
@@ -84,6 +95,7 @@ function definePlugin(definition) {
 var HOST = "127.0.0.1";
 var PORT = 18080;
 var MODEL = "demo-echo";
+var API_TOKEN = "demo-local-token";
 var MAX_BODY_BYTES = 4 * 1024 * 1024;
 var server = null;
 function sendJson(res, status, payload) {
@@ -198,6 +210,10 @@ function handleChat(res, body) {
 }
 function handleRequest2(req, res) {
   const url = new import_url.URL(req.url || "/", "http://" + HOST + ":" + PORT);
+  if (url.pathname.startsWith("/v1/") && req.headers.authorization !== "Bearer " + API_TOKEN) {
+    sendJson(res, 401, { error: { message: "invalid api key", type: "invalid_request_error" } });
+    return;
+  }
   if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/v1/health")) {
     sendJson(res, 200, { ok: true, service: "demo.provider", port: PORT, model: MODEL });
     return;
@@ -238,9 +254,27 @@ function startServer() {
   server.listen(PORT, HOST, () => log("provider-demo listening on http://" + HOST + ":" + PORT + "/v1"));
   return { ok: true, port: PORT, model: MODEL };
 }
+async function syncProvider() {
+  const synced = {};
+  try {
+    synced.model = await hostCall("host.providers.addModel", {
+      providerId: "echo",
+      model: MODEL,
+      contextTokens: 32768
+    });
+    synced.apiKey = await hostCall("host.providers.setApiKey", {
+      providerId: "echo",
+      apiKey: API_TOKEN
+    });
+  } catch (error) {
+    const message = error == null ? void 0 : error.message;
+    log("provider-demo sync provider failed: " + String(message || error));
+  }
+  return synced;
+}
 var handlers = {
-  "provider.started": () => startServer(),
-  "provider.start": () => startServer()
+  "provider.started": async () => ({ ...startServer(), ...await syncProvider() }),
+  "provider.start": async () => ({ ...startServer(), ...await syncProvider() })
 };
 process.on("unhandledRejection", (error) => {
   const message = error == null ? void 0 : error.message;

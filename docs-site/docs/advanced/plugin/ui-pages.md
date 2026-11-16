@@ -286,6 +286,20 @@ await aicode.chat.sendMessage(created.session.id, '用一句话介绍当前项�
 
 `messages` 支持 `user`、`assistant`、`tool` 三种角色：`user` 可带 `images`；`assistant` 可带 `toolCalls`、`reasoning` 与 `providerState`；`tool` 必带 `toolCallId` 与 `name`。`tools` 里 `{type: 'app', name}` 引用内置 / MCP 工具，`{type: 'custom', name, description?, inputSchema?}` 由插件自己执行。`final` 带 `toolCalls`，并新增 `providerState` 与 `images`（base64）。完整消息格式、工具循环、审批与限额见[模型句柄与流式调用](/advanced/plugin/model-handles)。
 
+### 插件提供商
+
+无需声明 `contributes.modelAccess`，只维护本插件在 `contributes.providers` 中声明的提供商：
+
+| 方法 | 作用 |
+| --- | --- |
+| `aicode.providers.listModels(providerId)` | 返回 `{providerId, models, selectedModel}`；只读宿主配置，不访问上游 |
+| `aicode.providers.addModel(providerId, model, options?)` | 追加模型；`options.contextTokens` 可选，用于自动识别不到的上下文窗口；最多 500 个模型 |
+| `aicode.providers.deleteModel(providerId, model)` | 删除模型并返回 `{providerId, model, models, selectedModel, removed}`；不存在时 `removed: false` |
+| `aicode.providers.setModelContext(providerId, model, contextTokens)` | 修改模型上下文窗口；`contextTokens` 为 1–10000000 |
+| `aicode.providers.setApiKey(providerId, apiKey)` | 设置单 Key，空串清除；值不回显，多 Key 模式仍优先使用多 Key |
+
+`providerId` 可传清单里的局部 `id` 或 `model.listProviders()` 返回的完整 ID。只接受当前插件声明且已注册的提供商，其它条目返回 `PROVIDER_NOT_FOUND`。
+
 ### 工具与 MCP
 
 | 方法 | 作用 |

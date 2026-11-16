@@ -76,8 +76,8 @@ Vue.createPropsRestProxy;
 Vue.createRenderer;
 Vue.createSSRApp;
 Vue.createSlots;
-Vue.createStaticVNode;
-const createTextVNode = Vue.createTextVNode;
+const createStaticVNode = Vue.createStaticVNode;
+Vue.createTextVNode;
 Vue.createVNode;
 Vue.customRef;
 Vue.defineAsyncComponent;
@@ -238,43 +238,7 @@ const _sfc_main = {
         Fragment,
         null,
         [
-          _cache[0] || (_cache[0] = createElementVNode(
-            "h2",
-            null,
-            "演示提供商",
-            -1
-            /* CACHED */
-          )),
-          _cache[1] || (_cache[1] = createElementVNode(
-            "p",
-            null,
-            "插件内置一个本机 OpenAI 兼容回声服务，只把最后一条用户消息原样返回。",
-            -1
-            /* CACHED */
-          )),
-          _cache[2] || (_cache[2] = createElementVNode(
-            "ul",
-            null,
-            [
-              createElementVNode("li", null, [
-                createTextVNode("地址："),
-                createElementVNode("code", null, "http://127.0.0.1:18080/v1")
-              ]),
-              createElementVNode("li", null, [
-                createTextVNode("模型："),
-                createElementVNode("code", null, "demo-echo")
-              ])
-            ],
-            -1
-            /* CACHED */
-          )),
-          _cache[3] || (_cache[3] = createElementVNode(
-            "p",
-            null,
-            "安装后如果没有重启 App，服务可能尚未启动；点下面的按钮手动启动。",
-            -1
-            /* CACHED */
-          )),
+          _cache[0] || (_cache[0] = createStaticVNode("<h2>演示提供商</h2><p>插件内置一个本机 OpenAI 兼容回声服务，只把最后一条用户消息原样返回。</p><ul><li>地址：<code>http://127.0.0.1:18080/v1</code></li><li>模型：<code>demo-echo</code></li><li>访问令牌：<code>demo-local-token</code></li></ul><p>启动服务后会自动把模型和访问令牌同步到宿主里的插件提供商条目。</p><p>安装后如果没有重启 App，服务可能尚未启动；点下面的按钮手动启动。</p>", 5)),
           createElementVNode("button", {
             disabled: starting.value,
             onClick: start

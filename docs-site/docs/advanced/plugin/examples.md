@@ -24,7 +24,7 @@
 | `ui-gallery` | `demo.gallery` | 设置页/侧栏/顶栏槽位入口、配置页、一个加载入口承载多个视图（vue-router）、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
-| `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started` | 提供商 |
+| `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started`、`providers.*` 同步模型与访问令牌 | 提供商 |
 | `external-api` | `demo.external-api` | 插件私有加密存储、通用 HTTP 请求、把外部接口包成 AI 工具 | 凭据与外部请求 |
 | `ssh-manager` | `demo.ssh-manager` | 常驻进程、npm 依赖、设置页、三个 AI 工具 | 常驻与依赖 |
 
@@ -155,10 +155,11 @@ await aicode.fs.write('data://config.json', JSON.stringify(config, null, 2));
 
 - `providers` 声明 `baseUrl: http://127.0.0.1:18080/v1`；
 - `resident: true` 通过 `app.started` hook 自动启动服务；
+- 启动后调用 `host.providers.addModel` 写入 `demo-echo` 与 32768 上下文窗口，并调用 `host.providers.setApiKey` 写入本地访问令牌；
 - `start` 工具用于安装后不重启 App 时手动启动；
-- 配置页显示服务状态。
+- 配置页显示服务状态与访问令牌。
 
-启用后前往「设置 → 提供商」，找到带「插件」标记的条目，拉取模型后即可对话。
+启用后在「设置 → 提供商」找到带「插件」标记的条目即可直接对话，无需手动拉取模型或填 Key。
 
 ## external-api
 

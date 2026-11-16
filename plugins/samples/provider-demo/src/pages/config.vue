@@ -4,7 +4,9 @@
   <ul>
     <li>地址：<code>http://127.0.0.1:18080/v1</code></li>
     <li>模型：<code>demo-echo</code></li>
+    <li>访问令牌：<code>demo-local-token</code></li>
   </ul>
+  <p>启动服务后会自动把模型和访问令牌同步到宿主里的插件提供商条目。</p>
   <p>安装后如果没有重启 App，服务可能尚未启动；点下面的按钮手动启动。</p>
   <button :disabled="starting" @click="start">{{ starting ? '启动中…' : '启动服务' }}</button>
   <pre>{{ output }}</pre>

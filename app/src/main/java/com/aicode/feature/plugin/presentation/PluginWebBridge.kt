@@ -21,6 +21,7 @@ import com.aicode.feature.plugin.runtime.PluginModelService
 import com.aicode.feature.plugin.runtime.PluginHttpService
 import com.aicode.feature.plugin.runtime.PluginIntrospectionService
 import com.aicode.feature.plugin.runtime.PluginProcessException
+import com.aicode.feature.plugin.runtime.PluginProviderService
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginSecretStore
 import com.aicode.feature.plugin.runtime.PluginShizukuException
@@ -81,6 +82,7 @@ class PluginWebBridge(
     private val overlayManager: PluginOverlayManager,
     private val chatService: PluginChatService,
     private val modelService: PluginModelService,
+    private val providerService: PluginProviderService,
     private val agentRunStateStore: AgentRunStateStore,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
@@ -419,6 +421,11 @@ class PluginWebBridge(
         "model.start" -> modelService.start(page.pluginId, params, "page:${page.cacheKey}")
         "model.read" -> modelService.read(page.pluginId, params)
         "model.cancel" -> modelService.cancel(page.pluginId, params)
+        "providers.listModels" -> providerService.listModels(page.pluginId, params)
+        "providers.addModel" -> providerService.addModel(page.pluginId, params)
+        "providers.deleteModel" -> providerService.deleteModel(page.pluginId, params)
+        "providers.setModelContext" -> providerService.setModelContext(page.pluginId, params)
+        "providers.setApiKey" -> providerService.setApiKey(page.pluginId, params)
         "clipboard.read" -> systemService.clipboardRead(page.pluginId)
         "clipboard.write" -> systemService.clipboardWrite(
             page.pluginId,

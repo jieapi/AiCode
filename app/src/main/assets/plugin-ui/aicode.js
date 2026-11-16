@@ -417,6 +417,39 @@
         });
       }
     },
+    // 仅供插件维护自己在清单 contributes.providers 中声明的提供商；其它提供商一律不可见。
+    providers: {
+      listModels: function (providerId) {
+        return call('providers.listModels', { providerId: String(providerId || '') });
+      },
+      addModel: function (providerId, model, options) {
+        var params = {
+          providerId: String(providerId || ''),
+          model: String(model || '')
+        };
+        if (options && options.contextTokens != null) params.contextTokens = Number(options.contextTokens);
+        return call('providers.addModel', params);
+      },
+      deleteModel: function (providerId, model) {
+        return call('providers.deleteModel', {
+          providerId: String(providerId || ''),
+          model: String(model || '')
+        });
+      },
+      setModelContext: function (providerId, model, contextTokens) {
+        return call('providers.setModelContext', {
+          providerId: String(providerId || ''),
+          model: String(model || ''),
+          contextTokens: Number(contextTokens)
+        });
+      },
+      setApiKey: function (providerId, apiKey) {
+        return call('providers.setApiKey', {
+          providerId: String(providerId || ''),
+          apiKey: String(apiKey == null ? '' : apiKey)
+        });
+      }
+    },
     // 文件路径是当前执行环境的真实绝对路径：本地为容器内路径（如 /root/workspace/a.txt），
     // SSH 为远端服务器路径。~ 展开到当前 home，裸相对路径挂到工作区根。
     // 插件自己的数据目录用稳定的 data:// 虚拟根（如 data://config.json），与插件 ID 和执行环境无关。

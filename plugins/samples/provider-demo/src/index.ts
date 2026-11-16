@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { URL } from 'url';
-import { definePlugin, log, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, log, type PluginHandler } from '@aicode/plugin-sdk';
 
 const HOST = '127.0.0.1';
 const PORT = 18080;
 const MODEL = 'demo-echo';
+const API_TOKEN = 'demo-local-token';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 let server: Server | null = null;
@@ -140,6 +141,11 @@ function handleChat(
 function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url || '/', 'http://' + HOST + ':' + PORT);
 
+  if (url.pathname.startsWith('/v1/') && req.headers.authorization !== 'Bearer ' + API_TOKEN) {
+    sendJson(res, 401, { error: { message: 'invalid api key', type: 'invalid_request_error' } });
+    return;
+  }
+
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/v1/health')) {
     sendJson(res, 200, { ok: true, service: 'demo.provider', port: PORT, model: MODEL });
     return;
@@ -187,9 +193,29 @@ function startServer(): Record<string, unknown> {
   return { ok: true, port: PORT, model: MODEL };
 }
 
+/** 启动服务后把模型与访问令牌同步到宿主里本插件声明的提供商条目。 */
+async function syncProvider(): Promise<Record<string, unknown>> {
+  const synced: Record<string, unknown> = {};
+  try {
+    synced.model = await hostCall('host.providers.addModel', {
+      providerId: 'echo',
+      model: MODEL,
+      contextTokens: 32768
+    });
+    synced.apiKey = await hostCall('host.providers.setApiKey', {
+      providerId: 'echo',
+      apiKey: API_TOKEN
+    });
+  } catch (error) {
+    const message = (error as { message?: unknown } | null)?.message;
+    log('provider-demo sync provider failed: ' + String(message || error));
+  }
+  return synced;
+}
+
 const handlers: Record<string, PluginHandler> = {
-  'provider.started': () => startServer(),
-  'provider.start': () => startServer()
+  'provider.started': async () => ({ ...startServer(), ...(await syncProvider()) }),
+  'provider.start': async () => ({ ...startServer(), ...(await syncProvider()) })
 };
 
 process.on('unhandledRejection', (error) => {

@@ -436,6 +436,21 @@ test('extended host methods forward parameters', async () => {
     [() => harness.sdk.chat.resolvePlanApproval('s1', 'r1', 'approve'), 'chat.resolvePlanApproval', {
       sessionId: 's1', requestId: 'r1', choice: 'approve'
     }],
+    [() => harness.sdk.providers.listModels('gateway'), 'providers.listModels', { providerId: 'gateway' }],
+    [() => harness.sdk.providers.addModel('gateway', 'model-a', { contextTokens: 128000 }),
+      'providers.addModel', {
+        providerId: 'gateway', model: 'model-a', contextTokens: 128000
+      }],
+    [() => harness.sdk.providers.deleteModel('gateway', 'model-a'), 'providers.deleteModel', {
+      providerId: 'gateway', model: 'model-a'
+    }],
+    [() => harness.sdk.providers.setModelContext('gateway', 'model-a', 64000),
+      'providers.setModelContext', {
+        providerId: 'gateway', model: 'model-a', contextTokens: 64000
+      }],
+    [() => harness.sdk.providers.setApiKey('gateway', 'local-token'), 'providers.setApiKey', {
+      providerId: 'gateway', apiKey: 'local-token'
+    }],
     [() => harness.sdk.clipboard.read(), 'clipboard.read', {}],
     [() => harness.sdk.clipboard.write('x'), 'clipboard.write', { text: 'x' }],
     [() => harness.sdk.share.text('x', { title: 't' }), 'share.text', { text: 'x', title: 't' }],

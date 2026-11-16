@@ -63,6 +63,7 @@ export type AicodeErrorCode =
   | 'PROVIDER_NO_KEY'
   | 'HANDLE_NOT_FOUND'
   | 'HANDLE_LIMIT'
+  | 'MODEL_LIMIT'
   | 'SELF_PROVIDER_FORBIDDEN'
   | 'STREAM_NOT_FOUND'
   | 'STREAM_LIMIT'
@@ -407,6 +408,15 @@ export interface UserQuestionAnswer {
 // ---------------------------------------------------------------------------
 // 模型句柄
 // ---------------------------------------------------------------------------
+
+/** 插件自己声明的提供商当前配置的模型列表。 */
+export interface ProviderModelsResult {
+  providerId: string;
+  /** 本次操作的模型；仅 addModel / deleteModel 返回。 */
+  model?: string;
+  models: string[];
+  selectedModel: string;
+}
 
 export interface ModelProviderInfo {
   id: string;
@@ -818,6 +828,36 @@ export interface AicodeBridge {
       requestId: string,
       choice: PlanApprovalChoice
     ): Promise<{ ok: boolean }>;
+  };
+
+  /**
+   * 维护本插件在 `contributes.providers` 中声明的提供商。
+   * 只能访问本插件声明的条目；其它插件或用户自建的提供商一律按不存在处理。
+   */
+  providers: {
+    /** 读取当前配置的模型列表；不访问上游服务。 */
+    listModels(providerId: string): Promise<ProviderModelsResult>;
+    /** 追加模型；重复添加视为成功，尚无选中模型时自动选中该模型。 */
+    addModel(
+      providerId: string,
+      model: string,
+      options?: { contextTokens?: number }
+    ): Promise<ProviderModelsResult>;
+    /** 删除模型；不存在视为成功，删除的是选中模型时回退到剩余模型。 */
+    deleteModel(providerId: string, model: string): Promise<ProviderModelsResult & {
+      removed: boolean;
+    }>;
+    /** 修改模型上下文窗口，用于自动识别不到的模型。 */
+    setModelContext(
+      providerId: string,
+      model: string,
+      contextTokens: number
+    ): Promise<{ providerId: string; model: string; contextTokens: number }>;
+    /** 设置插件提供商的 API Key；空串清除，旧值不会返回。 */
+    setApiKey(providerId: string, apiKey: string): Promise<{
+      providerId: string;
+      hasKey: boolean;
+    }>;
   };
 
   /** 模型句柄；需要清单声明 `contributes.modelAccess`。 */

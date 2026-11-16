@@ -104,6 +104,40 @@ const result = await hostCall('host.shizuku.exec', {
 
 插件不内嵌上游密钥。使用者可在提供商条目中填写凭据，或由插件在本地服务中处理。
 
+### 由插件维护模型与凭据
+
+插件启动本地兼容服务后通常已经知道可用模型和访问令牌，可在运行时维护自己声明的提供商，不必让使用者手动进入设置页操作。页面与插件进程分别使用以下接口：
+
+| 页面调用 | 进程调用 | 作用 |
+| --- | --- | --- |
+| `aicode.providers.listModels(providerId)` | `host.providers.listModels({providerId})` | 读取当前配置的模型列表，返回 `{providerId, models, selectedModel}`，不访问上游服务 |
+| `aicode.providers.addModel(providerId, model, options?)` | `host.providers.addModel({providerId, model, contextTokens?})` | 追加模型；重复添加视为成功，尚无选中模型时自动选中它 |
+| `aicode.providers.deleteModel(providerId, model)` | `host.providers.deleteModel({providerId, model})` | 删除模型；不存在视为成功，删除选中模型时回退到剩余模型 |
+| `aicode.providers.setModelContext(providerId, model, contextTokens)` | `host.providers.setModelContext({providerId, model, contextTokens})` | 写入模型的上下文窗口，供自动识别不到的模型使用 |
+| `aicode.providers.setApiKey(providerId, apiKey)` | `host.providers.setApiKey({providerId, apiKey})` | 设置单 Key；空串清除，旧值不会返回 |
+
+```js
+// 页面：服务启动后同步模型与访问令牌
+await aicode.providers.addModel('gateway', 'local-model', {contextTokens: 32768})
+const token = (await aicode.secrets.get('gateway-token')).value
+await aicode.providers.setApiKey('gateway', token)
+const {models, selectedModel} = await aicode.providers.listModels('gateway')
+
+// 进程：效果相同
+await hostCall('host.providers.addModel', {
+  providerId: 'gateway',
+  model: 'local-model',
+  contextTokens: 32768
+})
+await hostCall('host.providers.setApiKey', {providerId: 'gateway', apiKey: token})
+```
+
+`providerId` 可以使用清单里的局部 `id`，也可以使用 `model.listProviders()` 返回的完整 ID。接口只接受当前插件在 `contributes.providers` 中声明、且已注册的提供商；传入其它插件或用户自建的提供商一律返回 `PROVIDER_NOT_FOUND`。
+
+`contextTokens` 为 1–10000000 的正整数；模型自动识别不到窗口时由插件给出准确值，设置后会立即影响上下文预算。每个提供商最多保留 500 个模型，模型名最长 200 字符。
+
+`setApiKey` 写入的是提供商的单 Key 字段，值由宿主加密落盘，接口不会返回旧值。若使用者在该条目上启用了多 Key 模式，多 Key 列表仍优先于单 Key；此时插件应先提示使用者关闭多 Key，或由使用者自行维护多 Key 列表。
+
 ### 启动服务
 
 提供商服务需由插件自行启动。常见做法是设置 `resident: true` 并声明 `app.started` hook：

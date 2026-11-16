@@ -43,6 +43,7 @@ import com.aicode.feature.plugin.runtime.PluginSystemService
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginProviderRegistrar
+import com.aicode.feature.plugin.runtime.PluginProviderService
 import com.aicode.feature.plugin.runtime.PluginRuntimeManager
 import com.aicode.feature.plugin.runtime.PluginShizukuRunner
 import com.aicode.feature.plugin.runtime.PluginTerminalRunner
@@ -167,6 +168,7 @@ class PluginsViewModel @Inject constructor(
     private val pageEnvironment: PluginPageEnvironment,
     private val chatService: PluginChatService,
     private val modelService: PluginModelService,
+    private val providerService: PluginProviderService,
     private val agentRunStateStore: AgentRunStateStore,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
@@ -735,6 +737,7 @@ class PluginsViewModel @Inject constructor(
             overlayManager = overlayManager,
             chatService = chatService,
             modelService = modelService,
+            providerService = providerService,
             agentRunStateStore = agentRunStateStore,
             secretStore = secretStore,
             systemService = systemService,

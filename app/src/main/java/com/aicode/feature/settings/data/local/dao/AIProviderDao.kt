@@ -45,6 +45,9 @@ interface AIProviderDao {
     @Query("UPDATE ai_providers SET selectedModel = :model WHERE id = :id")
     suspend fun setSelectedModel(id: String, model: String)
 
+    @Query("UPDATE ai_providers SET apiKey = :apiKey WHERE id = :id")
+    suspend fun setProviderApiKey(id: String, apiKey: String)
+
     @Query("UPDATE ai_providers SET models = :models WHERE id = :id")
     suspend fun setModels(id: String, models: String)
 

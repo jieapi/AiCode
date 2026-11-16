@@ -13,6 +13,9 @@ interface AIProviderRepository {
     suspend fun deleteProviders(ids: Collection<String>)
 
     suspend fun setSelectedModel(id: String, model: String)
+
+    /** 只更新 API Key（加密落库），避免整行 REPLACE 覆盖并发修改的其它字段。 */
+    suspend fun setProviderApiKey(id: String, apiKey: String)
     suspend fun updateModels(id: String, models: List<String>)
     suspend fun setProviderEnabled(id: String, isEnabled: Boolean)
 

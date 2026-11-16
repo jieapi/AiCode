@@ -89,7 +89,7 @@ demo-kit/
 | `ui-gallery` | 设置页、侧栏与顶栏槽位入口、插件配置页、宿主 Vue 组件库 |
 | `memory-manager` | 设置页读写全局与项目记忆 |
 | `background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` |
-| `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started` |
+| `provider-demo` | OpenAI 兼容提供商、常驻进程、`app.started`、`providers.*` 维护模型与访问令牌 |
 | `external-api` | 插件私有加密存储、通用 HTTP 请求、把外部接口包成 AI 工具 |
 | `ssh-manager` | 常驻进程、npm 依赖准备、设置页与三个 AI 工具 |
 

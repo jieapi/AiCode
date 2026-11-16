@@ -113,6 +113,11 @@ class AIProviderRepositoryImpl @Inject constructor(
         aiProviderDao.setSelectedModel(id, model)
     }
 
+    override suspend fun setProviderApiKey(id: String, apiKey: String) {
+        FileLogger.i(TAG, "更新提供商 API Key id=$id")
+        aiProviderDao.setProviderApiKey(id, KeystoreCipher.encryptString(apiKey))
+    }
+
     override suspend fun updateModels(id: String, models: List<String>) {
         FileLogger.d(TAG, "更新模型列表 provider=$id 共 ${models.size} 个")
         aiProviderDao.setModels(id, models.joinToString("\n"))
