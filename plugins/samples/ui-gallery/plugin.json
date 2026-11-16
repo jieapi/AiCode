@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 1,
+  "id": "demo.gallery",
+  "name": {
+    "zh-CN": "UI与配置演示",
+    "en": "UI & Config Demo"
+  },
+  "version": "1.2.2",
+  "publisher": "demo",
+  "repository": "https://github.com/jieapi/AiCode",
+  "description": {
+    "zh-CN": "演示插件专属配置页面（configPage）、设置页/侧栏/顶栏槽位入口及宿主 Vue 组件库。组件与配置共用同一个加载入口，按入口路由到 #/gallery 或 #/config。",
+    "en": "Demonstrates plugin configuration page (configPage), settings/drawer/header slots and host Vue UI components. The gallery and config views share one loader page and route to #/gallery or #/config by entry."
+  },
+  "license": "MIT",
+  "engines": {
+    "pluginApi": "^1.0.0"
+  },
+  "contributes": {
+    "uiEntries": [
+      {
+        "id": "gallery",
+        "title": {
+          "zh-CN": "组件演示",
+          "en": "UI Gallery"
+        },
+        "slot": "settings.help",
+        "page": "pages/index.html",
+        "icon": "settings"
+      },
+      {
+        "id": "gallery-drawer",
+        "title": {
+          "zh-CN": "组件演示",
+          "en": "UI Gallery"
+        },
+        "slot": "drawer.footer",
+        "page": "pages/index.html",
+        "icon": "settings"
+      },
+      {
+        "id": "gallery-header",
+        "title": {
+          "zh-CN": "组件演示",
+          "en": "UI Gallery"
+        },
+        "slot": "chat.header.menu",
+        "page": "pages/index.html",
+        "icon": "settings"
+      }
+    ],
+    "configPage": "pages/index.html"
+  }
+}

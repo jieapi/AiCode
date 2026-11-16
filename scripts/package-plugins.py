@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 plugin-samples 下的示例插件打成可导入的 zip 包。
+"""把 plugins/samples 下的示例插件打成可导入的 zip 包。
 
 用法：
     python3 scripts/package-plugins.py                 # 打包全部示例
@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SAMPLES_DIR = ROOT / "plugin-samples"
+SAMPLES_DIR = ROOT / "plugins/samples"
 OUTPUT_DIR = ROOT / "plugin-packages"
 
 # 与宿主安装器保持同一量级的上限，避免打出必然被拒绝的包。
@@ -29,7 +29,7 @@ MAX_ENTRIES = 512
 MAX_ENTRY_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
 
-SKIPPED_DIRS = {".git", ".gradle", "node_modules", ".venv", "__pycache__", ".idea"}
+SKIPPED_DIRS = {".git", ".gradle", "node_modules", ".venv", "__pycache__", ".idea", "test"}
 SKIPPED_NAMES = {".DS_Store", "Thumbs.db"}
 
 
@@ -111,7 +111,7 @@ def package_sample(sample_dir: Path, output_dir: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="打包 plugin-samples 下的示例插件")
+    parser = argparse.ArgumentParser(description="打包 plugins/samples 下的示例插件")
     parser.add_argument("samples", nargs="*", help="只打包指定目录名；省略则打包全部")
     parser.add_argument("--clean", action="store_true", help="打包前删除 plugin-packages 下已有的 zip")
     args = parser.parse_args()

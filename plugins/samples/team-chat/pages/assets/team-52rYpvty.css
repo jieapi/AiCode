@@ -1,0 +1,144 @@
+
+:root { color-scheme: light dark;
+}
+* { box-sizing: border-box;
+}
+html, body { height: 100%; margin: 0;
+}
+body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--aicode-page-bg, var(--aicode-bg, #ffffff));
+      color: var(--aicode-on-surface, #1f2328);
+}
+.app {
+      max-width: 860px;
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+}
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+h1 { margin: 0; font-size: 19px;
+}
+.hint { margin: 0; color: var(--aicode-subtle-text, #59636e); font-size: 12px;
+}
+.members { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+@media (max-width: 640px) {
+.members { grid-template-columns: 1fr;
+}
+}
+.member {
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--aicode-surface, #f6f8fa);
+}
+.member-head { display: flex; align-items: center; gap: 8px;
+}
+.member-head strong { flex-shrink: 0;
+}
+label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--aicode-subtle-text, #59636e);
+}
+input, select, button {
+      font: inherit;
+      color: inherit;
+      background: var(--aicode-page-bg, #ffffff);
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 8px;
+      padding: 8px 10px;
+      min-width: 0;
+}
+button {
+      cursor: pointer;
+      background: var(--aicode-primary, #0969da);
+      border-color: transparent;
+      color: var(--aicode-on-primary, #ffffff);
+      font-weight: 600;
+}
+button:disabled { opacity: .55; cursor: default;
+}
+.actions { display: flex; gap: 8px;
+}
+.actions button:first-child {
+      background: var(--aicode-page-bg, #ffffff);
+      color: inherit;
+      border-color: var(--aicode-outline, #d0d7de);
+}
+.chat {
+      flex: 1;
+      min-height: 160px;
+      overflow: auto;
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--aicode-page-bg, #ffffff);
+}
+.bubble {
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--aicode-surface, #f6f8fa);
+      border: 1px solid var(--aicode-outline, #d0d7de);
+      white-space: pre-wrap;
+      word-break: break-word;
+}
+.bubble.user { align-self: flex-end; background: var(--aicode-primary-container, #ddf4ff);
+}
+.bubble.error { border-color: var(--aicode-error, #cf222e);
+}
+.bubble-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--aicode-subtle-text, #59636e); margin-bottom: 3px;
+}
+.bubble-body { font-size: 14px; line-height: 1.45;
+}
+.bubble-image { display: block; max-width: 100%; max-height: 220px; margin-top: 6px; border-radius: 8px;
+}
+.composer { display: flex; gap: 8px;
+}
+.composer input { flex: 1;
+}
+.composer #pick-image { flex-shrink: 0; background: var(--aicode-page-bg, #ffffff); color: inherit; border-color: var(--aicode-outline, #d0d7de);
+}
+.attachment { display: flex; align-items: center; gap: 8px; font-size: 12px;
+}
+.attachment[hidden] { display: none;
+}
+.attachment img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--aicode-outline, #d0d7de);
+}
+.attachment button { padding: 6px 10px; background: var(--aicode-page-bg, #ffffff); color: inherit; border-color: var(--aicode-outline, #d0d7de);
+}
+.approval {
+      border: 1px solid var(--aicode-warning, #bf8700);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: var(--aicode-warning-container, #fff8c5);
+}
+.approval[hidden] { display: none;
+}
+.approval-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px;
+}
+.approval-tool { color: var(--aicode-subtle-text, #59636e); font-size: 12px;
+}
+.approval-summary { margin: 0; font-size: 13px;
+}
+.approval-details { margin: 0; max-height: 120px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word;
+}
+.approval .actions button { padding: 6px 10px;
+}
+.approval .actions button[data-choice="reject"] { background: var(--aicode-page-bg, #ffffff); color: var(--aicode-error, #cf222e); border-color: var(--aicode-error, #cf222e);
+}
+.status { margin: 0; min-height: 18px; font-size: 12px; color: var(--aicode-subtle-text, #59636e);
+}
+.status.error { color: var(--aicode-error, #cf222e);
+}

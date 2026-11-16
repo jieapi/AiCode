@@ -1,0 +1,185 @@
+
+html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+}
+* { box-sizing: border-box;
+}
+.shell {
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 316px;
+      height: 276px;
+      overflow: hidden;
+      border-radius: 18px;
+      clip-path: inset(0 272px 232px 0 round 22px);
+      background: #3d6deb;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+      transition: clip-path .28s cubic-bezier(.2, 0, 0, 1), background .28s ease;
+}
+.shell.expanded {
+      clip-path: inset(0 round 18px);
+      background: rgba(28, 30, 38, .98);
+}
+.mark {
+      position: absolute;
+      z-index: 1;
+      left: 0;
+      top: 0;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+}
+.mark svg { width: 22px; height: 22px;
+}
+.badge {
+      position: absolute;
+      z-index: 2;
+      top: 0;
+      left: 26px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 20px;
+      background: #f05d69;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 16px;
+      text-align: center;
+      opacity: 0;
+      transform: scale(.6);
+      transition: opacity .12s ease, transform .18s ease;
+}
+.badge.show { opacity: 1; transform: scale(1);
+}
+.shell.expanded .badge { opacity: 0; transform: scale(.6);
+}
+.panel {
+      width: 316px;
+      height: 276px;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(6px);
+      transition: opacity .09s ease, transform .18s ease;
+}
+.shell.expanded.ready .panel {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+      transition: opacity .16s ease, transform .2s ease;
+}
+.header {
+      flex: none;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      padding: 0 4px 0 46px;
+      gap: 8px;
+}
+.heading { flex: 1; min-width: 0;
+}
+.title { font-size: 13px; font-weight: 600;
+}
+.subtitle {
+      margin-top: 2px;
+      color: rgba(255, 255, 255, .5);
+      font-size: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+}
+button {
+      border: 0;
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background .15s ease, transform .12s ease, opacity .15s ease;
+}
+button:active { transform: scale(.96);
+}
+button:focus-visible { outline: 2px solid #adc4ff; outline-offset: -3px;
+}
+button:disabled { opacity: .5; cursor: default;
+}
+.collapse {
+      flex: none;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: transparent;
+}
+.collapse:active { background: rgba(255, 255, 255, .1);
+}
+.collapse svg { width: 18px; height: 18px;
+}
+.body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 4px 12px 0;
+}
+.tool {
+      flex: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: rgba(255, 255, 255, .65);
+      font: 600 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+pre {
+      flex: 1;
+      min-height: 0;
+      margin: 0;
+      overflow: auto;
+      padding: 9px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .065);
+      color: rgba(255, 255, 255, .85);
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overscroll-behavior: contain;
+}
+.actions { flex: none; display: flex; gap: 8px; padding: 12px;
+}
+.actions button { flex: 1; height: 42px; border-radius: 12px; font-size: 13px; font-weight: 600;
+}
+.deny { background: rgba(255, 255, 255, .1);
+}
+.allow { background: #3d7eff;
+}
+.empty {
+      margin: auto;
+      color: rgba(255, 255, 255, .5);
+      font-size: 12px;
+      line-height: 1.8;
+      text-align: center;
+}
+.empty strong { display: block; color: rgba(255, 255, 255, .8); font-size: 13px;
+}
+[hidden] { display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+*, *::before, *::after { transition: none !important;
+}
+}

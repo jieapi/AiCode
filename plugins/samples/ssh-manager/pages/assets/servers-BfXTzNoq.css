@@ -1,0 +1,56 @@
+
+* { box-sizing: border-box;
+}
+html, body { margin: 0; padding: 0;
+}
+[hidden], [v-cloak] { display: none !important;
+}
+body {
+      background: var(--aicode-page-bg);
+      color: var(--aicode-on-surface);
+      font-family: var(--aicode-font-sans);
+      font-size: calc(14px * var(--aicode-font-scale));
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+}
+.page-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 16px 28px;
+}
+.hint {
+      margin: 4px 4px 0;
+      color: var(--aicode-on-surface-variant);
+      font-size: calc(12px * var(--aicode-font-scale));
+}
+.warning {
+      margin: 8px 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--aicode-error) 12%, transparent);
+      color: var(--aicode-error);
+      font-size: calc(12px * var(--aicode-font-scale));
+}
+.action-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 0;
+}
+.status {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: calc(11px * var(--aicode-font-scale));
+      white-space: nowrap;
+}
+.status.online { background: color-mix(in srgb, var(--aicode-success) 18%, transparent); color: var(--aicode-success);
+}
+.status.connecting { background: color-mix(in srgb, var(--aicode-warning) 18%, transparent); color: var(--aicode-warning);
+}
+.status.offline { background: color-mix(in srgb, var(--aicode-error) 14%, transparent); color: var(--aicode-error);
+}
