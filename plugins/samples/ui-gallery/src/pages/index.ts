@@ -18,6 +18,6 @@ const router = window.VueRouter.createRouter({
 const app = createApp(App);
 if (window.AicodeUI) app.use(window.AicodeUI);
 app.use(router);
-router.isReady().then(function () {
+router.isReady().then(() => {
   app.mount('#app');
 });

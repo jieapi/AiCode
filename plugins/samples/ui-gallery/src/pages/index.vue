@@ -41,9 +41,18 @@
   </div>
 </template>
 
-<script>
-export default {
-  data: function () {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface GalleryIndexData {
+  contextLoaded: boolean;
+  canClose: boolean;
+  isConfigPage: boolean;
+  sheetOpen: boolean;
+}
+
+export default defineComponent({
+  data(): GalleryIndexData {
     return {
       contextLoaded: false,
       canClose: true,
@@ -89,7 +98,7 @@ export default {
       }
     }
   }
-};
+});
 </script>
 
 <style>

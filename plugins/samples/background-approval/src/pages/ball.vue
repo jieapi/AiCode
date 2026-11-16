@@ -34,30 +34,77 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import type { JsonValue, OverlayMessage } from '@jieapi/plugin-sdk/page';
 
 const BALL_SIZE = 48;
 const PANEL_WIDTH = 320;
 const PANEL_HEIGHT = 280;
 
-const expanded = ref(false);
-const ready = ref(false);
-const transitioning = ref(false);
-const submitting = ref(false);
-const foreground = ref(false);
-const initialized = ref(false);
-const request = ref(null);
-const count = ref(0);
-const denyText = ref('拒绝');
-const allowText = ref('同意');
-const previewEl = ref(null);
+interface ApprovalRequest {
+  requestId: string;
+  toolName: string;
+  preview: string;
+  mode: string;
+  agentName: string | null;
+}
 
-let minimizedRequestId = null;
-let ballAnchor = null;
-let panelOrigin = null;
+interface ApprovalStateMessage {
+  type: 'approvalState';
+  request?: ApprovalRequest | null;
+  count?: number;
+}
+
+interface ResizeMessage {
+  type: 'resize';
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
+
+interface DragEndMessage {
+  type: 'dragEnd';
+  x: number;
+  y: number;
+}
+
+interface AppStateMessage {
+  type: 'appState';
+  foreground?: boolean;
+}
+
+interface SimpleMessage {
+  type: 'ballReady' | 'ballClick' | 'click' | 'foreground' | 'displayError';
+  requestId?: string;
+}
+
+type IncomingMessage = ApprovalStateMessage | ResizeMessage | DragEndMessage | AppStateMessage | SimpleMessage;
+type OverlayPayload = Record<string, JsonValue>;
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+const expanded = ref<boolean>(false);
+const ready = ref<boolean>(false);
+const transitioning = ref<boolean>(false);
+const submitting = ref<boolean>(false);
+const foreground = ref<boolean>(false);
+const initialized = ref<boolean>(false);
+const request = ref<ApprovalRequest | null>(null);
+const count = ref<number>(0);
+const denyText = ref<string>('拒绝');
+const allowText = ref<string>('同意');
+const previewEl = ref<HTMLElement | null>(null);
+
+let minimizedRequestId: string | null = null;
+let ballAnchor: Point | null = null;
+let panelOrigin: Point | null = null;
 let transitionSeq = 0;
-let offMessage = null;
+let offMessage: (() => void) | null = null;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const badgeText = computed(() => (count.value > 99 ? '99+' : String(count.value)));
@@ -71,11 +118,11 @@ const buttonsDisabled = computed(
   () => !request.value || submitting.value || transitioning.value || !expanded.value || foreground.value
 );
 
-function post(payload) {
-  return aicode.overlay.postMessage(payload);
+function post(payload: OverlayPayload): Promise<void> {
+  return aicode.overlay.postMessage(payload as unknown as JsonValue);
 }
 
-function updateDragRegion() {
+function updateDragRegion(): Promise<void> {
   return aicode.overlay.setDragRegion({
     left: 0,
     top: 0,
@@ -84,7 +131,7 @@ function updateDragRegion() {
   });
 }
 
-async function setExpanded(value) {
+async function setExpanded(value: boolean): Promise<void> {
   if (!initialized.value || expanded.value === value) return;
   expanded.value = value;
   transitioning.value = true;
@@ -96,8 +143,8 @@ async function setExpanded(value) {
     if (seq !== transitionSeq) return;
     await aicode.overlay.resize(value ? PANEL_WIDTH : BALL_SIZE, value ? PANEL_HEIGHT : BALL_SIZE, {
       animate: !reducedMotion,
-      x: !value && ballAnchor ? ballAnchor.x : null,
-      y: !value && ballAnchor ? ballAnchor.y : null
+      x: !value && ballAnchor ? ballAnchor.x : undefined,
+      y: !value && ballAnchor ? ballAnchor.y : undefined
     });
   } catch (error) {
     if (seq !== transitionSeq) return;
@@ -108,9 +155,9 @@ async function setExpanded(value) {
   }
 }
 
-function applyState(message) {
-  const previousId = request.value && request.value.requestId;
-  request.value = message.request || null;
+function applyState(message: ApprovalStateMessage): void {
+  const previousId = request.value?.requestId;
+  request.value = message.request ?? null;
   count.value = Math.max(0, Number(message.count) || 0);
   if (previousId !== (request.value && request.value.requestId)) {
     submitting.value = false;
@@ -118,7 +165,7 @@ function applyState(message) {
     allowText.value = '同意';
     nextTick(() => {
       if (previewEl.value) previewEl.value.scrollTop = 0;
-    });
+    }).catch(() => {});
   }
   if (request.value && request.value.requestId !== minimizedRequestId && !foreground.value) {
     void setExpanded(true);
@@ -128,7 +175,7 @@ function applyState(message) {
   }
 }
 
-function decide(decision) {
+function decide(decision: 'allow' | 'deny'): void {
   if (buttonsDisabled.value) return;
   const requestId = request.value.requestId;
   submitting.value = true;
@@ -142,13 +189,13 @@ function decide(decision) {
   });
 }
 
-function collapse() {
+function collapse(): void {
   minimizedRequestId = request.value && request.value.requestId;
   void setExpanded(false);
 }
 
-function handleMessage(message) {
-  if (!message) return;
+function handleMessage(rawMessage: OverlayMessage): void {
+  const message = rawMessage as unknown as IncomingMessage;
   if (message.type === 'approvalState') {
     applyState(message);
   } else if (message.type === 'click' && !expanded.value && !transitioning.value) {

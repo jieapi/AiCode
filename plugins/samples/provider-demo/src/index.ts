@@ -8,7 +8,77 @@ const MODEL = 'demo-echo';
 const API_TOKEN = 'demo-local-token';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
+interface ContentPart {
+  type?: string;
+  text?: string;
+}
+
+type MessageContent = string | ContentPart[];
+
+interface ChatMessage {
+  role?: string;
+  content?: MessageContent;
+}
+
+interface ChatCompletionRequest {
+  messages?: ChatMessage[];
+  model?: string;
+  stream?: boolean;
+}
+
+interface CompletionUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+interface ChatCompletionResponse {
+  id: string;
+  object: 'chat.completion';
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message: { role: 'assistant'; content: string };
+    finish_reason: 'stop';
+  }>;
+  usage: CompletionUsage;
+}
+
+interface ChatCompletionChunk {
+  id: string;
+  object: 'chat.completion.chunk';
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    delta: { content?: string };
+    finish_reason: 'stop' | null;
+  }>;
+  usage?: CompletionUsage;
+}
+
+interface ServerInfo {
+  ok: true;
+  port: number;
+  model: string;
+  alreadyRunning?: boolean;
+}
+
+interface SyncProviderResult {
+  modelResult?: unknown;
+  apiKeyResult?: unknown;
+}
+
 let server: Server | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload);
@@ -37,88 +107,79 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-function textOf(content: unknown): string {
+function textOf(content: MessageContent | undefined): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
     .map((part) => {
       if (typeof part === 'string') return part;
-      if (part && typeof part.text === 'string') return part.text;
-      return '';
+      return part && typeof part === 'object' && typeof part.text === 'string' ? part.text : '';
     })
     .join('');
 }
 
-function lastUserText(messages: unknown): string {
+function lastUserText(messages: ChatMessage[] | undefined): string {
   if (!Array.isArray(messages)) return '';
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message && message.role === 'user') return textOf(message.content);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'user') return textOf(message.content);
   }
   return '';
 }
 
-function roughTokens(text: unknown): number {
-  return Math.max(1, Math.ceil(String(text || '').length / 4));
+function roughTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 function completionId(): string {
   return 'chatcmpl-demo-' + Date.now().toString(36);
 }
 
-function handleChat(
-  res: ServerResponse,
-  body: Record<string, unknown>
-): void {
+function handleChat(res: ServerResponse, body: ChatCompletionRequest): void {
   const created = Math.floor(Date.now() / 1000);
   const prompt = lastUserText(body.messages);
   const reply = '演示提供商回声：' + (prompt || '（没有收到用户消息）');
   const promptTokens = roughTokens(prompt);
   const completionTokens = roughTokens(reply);
+  const usage: CompletionUsage = {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens
+  };
 
-  if (body.stream) {
+  if (body.stream === true) {
     const id = completionId();
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive'
     });
-    const chunks = reply.match(/[\s\S]{1,8}/g) || [reply];
+    const chunks = reply.match(/[\s\S]{1,8}/g) ?? [reply];
     chunks.forEach((text) => {
-      res.write(
-        'data: ' +
-          JSON.stringify({
-            id,
-            object: 'chat.completion.chunk',
-            created,
-            model: MODEL,
-            choices: [{ index: 0, delta: { content: text }, finish_reason: null }]
-          }) +
-          '\n\n'
-      );
+      const chunk: ChatCompletionChunk = {
+        id,
+        object: 'chat.completion.chunk',
+        created,
+        model: MODEL,
+        choices: [{ index: 0, delta: { content: text }, finish_reason: null }]
+      };
+      res.write('data: ' + JSON.stringify(chunk) + '\n\n');
     });
-    res.write(
-      'data: ' +
-        JSON.stringify({
-          id,
-          object: 'chat.completion.chunk',
-          created,
-          model: MODEL,
-          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          usage: {
-            prompt_tokens: promptTokens,
-            completion_tokens: completionTokens,
-            total_tokens: promptTokens + completionTokens
-          }
-        }) +
-        '\n\n'
-    );
+    const lastChunk: ChatCompletionChunk = {
+      id,
+      object: 'chat.completion.chunk',
+      created,
+      model: MODEL,
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage
+    };
+    res.write('data: ' + JSON.stringify(lastChunk) + '\n\n');
     res.write('data: [DONE]\n\n');
     res.end();
     return;
   }
 
-  sendJson(res, 200, {
+  const response: ChatCompletionResponse = {
     id: completionId(),
     object: 'chat.completion',
     created,
@@ -130,16 +191,19 @@ function handleChat(
         finish_reason: 'stop'
       }
     ],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens
-    }
-  });
+    usage
+  };
+  sendJson(res, 200, response);
+}
+
+function parseRequest(raw: string): ChatCompletionRequest {
+  const parsed: unknown = JSON.parse(raw || '{}');
+  if (!isRecord(parsed)) throw new Error('request body must be a JSON object');
+  return parsed as ChatCompletionRequest;
 }
 
 function handleRequest(req: IncomingMessage, res: ServerResponse): void {
-  const url = new URL(req.url || '/', 'http://' + HOST + ':' + PORT);
+  const url = new URL(req.url ?? '/', 'http://' + HOST + ':' + PORT);
 
   if (url.pathname.startsWith('/v1/') && req.headers.authorization !== 'Bearer ' + API_TOKEN) {
     sendJson(res, 401, { error: { message: 'invalid api key', type: 'invalid_request_error' } });
@@ -162,18 +226,17 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
     readBody(req)
       .then((raw) => {
-        let body: Record<string, unknown>;
         try {
-          body = JSON.parse(raw || '{}');
-        } catch {
-          sendJson(res, 400, { error: { message: 'invalid json', type: 'invalid_request_error' } });
-          return;
+          handleChat(res, parseRequest(raw));
+        } catch (error) {
+          sendJson(res, 400, {
+            error: { message: errorMessage(error), type: 'invalid_request_error' }
+          });
         }
-        handleChat(res, body);
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         if (!res.headersSent) {
-          sendJson(res, 400, { error: { message: String((error && error.message) || error) } });
+          sendJson(res, 400, { error: { message: errorMessage(error), type: 'invalid_request_error' } });
         }
       });
     return;
@@ -182,45 +245,51 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 404, { error: { message: 'not found', path: url.pathname } });
 }
 
-function startServer(): Record<string, unknown> {
+function startServer(): ServerInfo {
   if (server) return { ok: true, alreadyRunning: true, port: PORT, model: MODEL };
   server = createServer(handleRequest);
-  server.on('error', (error) => {
+  server.on('error', (error: Error) => {
     log('provider-demo server error: ' + error.message);
     server = null;
   });
-  server.listen(PORT, HOST, () => log('provider-demo listening on http://' + HOST + ':' + PORT + '/v1'));
+  server.listen(PORT, HOST, () => {
+    log('provider-demo listening on http://' + HOST + ':' + PORT + '/v1');
+  });
   return { ok: true, port: PORT, model: MODEL };
 }
 
 /** 启动服务后把模型与访问令牌同步到宿主里本插件声明的提供商条目。 */
-async function syncProvider(): Promise<Record<string, unknown>> {
-  const synced: Record<string, unknown> = {};
+async function syncProvider(): Promise<SyncProviderResult> {
+  const synced: SyncProviderResult = {};
   try {
-    synced.model = await hostCall('host.providers.addModel', {
+    synced.modelResult = await hostCall<unknown>('host.providers.addModel', {
       providerId: 'echo',
       model: MODEL,
       contextTokens: 32768
     });
-    synced.apiKey = await hostCall('host.providers.setApiKey', {
+    synced.apiKeyResult = await hostCall<unknown>('host.providers.setApiKey', {
       providerId: 'echo',
       apiKey: API_TOKEN
     });
   } catch (error) {
-    const message = (error as { message?: unknown } | null)?.message;
-    log('provider-demo sync provider failed: ' + String(message || error));
+    log('provider-demo sync provider failed: ' + errorMessage(error));
   }
   return synced;
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'provider.started': async () => ({ ...startServer(), ...(await syncProvider()) }),
-  'provider.start': async () => ({ ...startServer(), ...(await syncProvider()) })
-};
+const handlers = {
+  'provider.started': async (): Promise<ServerInfo & SyncProviderResult> => ({
+    ...startServer(),
+    ...(await syncProvider())
+  }),
+  'provider.start': async (): Promise<ServerInfo & SyncProviderResult> => ({
+    ...startServer(),
+    ...(await syncProvider())
+  })
+} satisfies Record<string, PluginHandler>;
 
-process.on('unhandledRejection', (error) => {
-  const message = (error as { message?: unknown } | null)?.message;
-  log('provider-demo unhandled rejection: ' + String(message || error));
+process.on('unhandledRejection', (error: unknown) => {
+  log('provider-demo unhandled rejection: ' + errorMessage(error));
 });
 
 startServer();

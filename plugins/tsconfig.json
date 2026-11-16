@@ -19,7 +19,8 @@
   "include": [
     "sdk/src/**/*.ts",
     "sdk/types/**/*.d.ts",
-    "samples/*/src/**/*.ts",
+    "samples/**/*.ts",
+    "samples/**/*.d.ts",
     "../plugin-official/*/src/**/*.ts",
     "template/types/**/*.d.ts"
   ]

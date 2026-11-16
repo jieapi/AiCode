@@ -1,4 +1,4 @@
-import { definePlugin, hostCall, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
 
 const ENDPOINT = 'https://httpbin.org/bearer';
 const SECRET_KEY = 'api-token';
@@ -11,9 +11,37 @@ interface EndpointResult {
   message?: string;
 }
 
+interface KeyListResult {
+  ok: true;
+  keys: string[];
+}
+
+interface SaveKeyArgs extends PluginArgs {
+  token?: unknown;
+}
+
+interface BearerResponse {
+  authenticated?: boolean;
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code ? code : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readString(args: PluginArgs, key: string, fallback = ''): string {
+  const value = args[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
 async function readToken(): Promise<string> {
   const result = await hostCall<{ value?: string }>('host.secrets.get', { key: SECRET_KEY });
-  return String(result?.value || '');
+  return String(result?.value ?? '');
 }
 
 async function keyNames(): Promise<string[]> {
@@ -32,9 +60,10 @@ async function callEndpoint(): Promise<EndpointResult> {
       headers: { Authorization: 'Bearer ' + token },
       timeout: 20
     });
-    let body: { authenticated?: boolean } = {};
+    let body: BearerResponse = {};
     try {
-      body = JSON.parse(String(response.body || '{}'));
+      const parsed: unknown = JSON.parse(String(response.body ?? '{}'));
+      if (typeof parsed === 'object' && parsed !== null) body = parsed as BearerResponse;
     } catch {
       body = {};
     }
@@ -44,41 +73,42 @@ async function callEndpoint(): Promise<EndpointResult> {
       authenticated: body.authenticated === true
     };
   } catch (error) {
-    const code = (error as { code?: unknown }).code;
+    const code = errorCode(error);
     return {
       ok: false,
-      error: typeof code === 'string' ? code : 'HTTP_FAILED',
-      message: String((error as Error).message || error)
+      error: code ?? 'HTTP_FAILED',
+      message: errorMessage(error)
     };
   }
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'tools.whoami': async () => {
+const handlers = {
+  'tools.whoami': async (): Promise<{ authenticated: boolean; status?: number | null; message?: string }> => {
     const result = await callEndpoint();
     if (result.ok) return { authenticated: true, status: result.status };
     return {
       authenticated: false,
-      status: result.status === undefined ? null : result.status,
-      message: result.message || 'API Key 未被接受'
+      status: result.status ?? null,
+      message: result.message ?? 'API Key 未被接受'
     };
   },
 
-  'actions.saveKey': async (args) => {
-    const token = String(args.token || '').trim();
+  'actions.saveKey': async (rawArgs: PluginArgs): Promise<KeyListResult | { ok: false; message: string }> => {
+    const args = rawArgs as SaveKeyArgs;
+    const token = readString(args, 'token').trim();
     if (!token) return { ok: false, message: 'API Key 不能为空' };
     await hostCall('host.secrets.set', { key: SECRET_KEY, value: token });
     return { ok: true, keys: await keyNames() };
   },
 
-  'actions.deleteKey': async () => {
+  'actions.deleteKey': async (): Promise<KeyListResult> => {
     await hostCall('host.secrets.delete', { key: SECRET_KEY });
     return { ok: true, keys: await keyNames() };
   },
 
-  'actions.listKeys': async () => ({ ok: true, keys: await keyNames() }),
+  'actions.listKeys': async (): Promise<KeyListResult> => ({ ok: true, keys: await keyNames() }),
 
-  'actions.test': async () => callEndpoint()
-};
+  'actions.test': async (): Promise<EndpointResult> => callEndpoint()
+} satisfies Record<string, PluginHandler>;
 
 definePlugin({ handlers });

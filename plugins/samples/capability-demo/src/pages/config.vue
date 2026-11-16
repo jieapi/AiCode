@@ -9,25 +9,27 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
-const output = ref('尚未操作');
+const output = ref<string>('尚未操作');
 
-function showError(text) {
+function showError(text: string): void {
   output.value = text;
   if (window.eruda) eruda.show();
 }
 
-function onWindowError(event) {
-  showError('页面错误：' + (event.message || event));
+function onWindowError(event: ErrorEvent): void {
+  showError('页面错误：' + event.message);
 }
 
-function onUnhandledRejection(event) {
-  showError('未处理异常：' + ((event.reason && event.reason.message) || event.reason));
+function onUnhandledRejection(event: PromiseRejectionEvent): void {
+  const reason = event.reason as { message?: string } | string | undefined;
+  const detail = typeof reason === 'string' ? reason : reason?.message;
+  showError('未处理异常：' + (detail ?? String(reason)));
 }
 
-async function showTip() {
+async function showTip(): Promise<void> {
   console.log('[capability-demo] tip clicked');
   try {
     const result = await aicode.tip({
@@ -37,21 +39,21 @@ async function showTip() {
     });
     output.value = JSON.stringify(result, null, 2);
   } catch (error) {
-    output.value = '提示失败：' + (error.message || error);
+    output.value = '提示失败：' + (error instanceof Error ? error.message : String(error));
   }
 }
 
-async function runShizuku() {
+async function runShizuku(): Promise<void> {
   console.log('[capability-demo] shizuku clicked');
   try {
     const result = await aicode.shizuku.exec('settings get global zen_mode');
     output.value = JSON.stringify(result, null, 2);
   } catch (error) {
-    output.value = 'Shizuku 失败：' + (error.message || error);
+    output.value = 'Shizuku 失败：' + (error instanceof Error ? error.message : String(error));
   }
 }
 
-function openConsole() {
+function openConsole(): void {
   if (window.eruda) {
     eruda.show();
   } else {
@@ -83,8 +85,8 @@ onMounted(() => {
       if (output.value === '尚未操作') {
         output.value = '页面已连接：' + (context.pageId || context.pluginId || 'ok');
       }
-    }).catch((error) => {
-      output.value = '页面连接失败：' + (error.message || error);
+    }).catch((error: unknown) => {
+      output.value = '页面连接失败：' + (error instanceof Error ? error.message : String(error));
     });
   }
 });

@@ -100,8 +100,36 @@
   </div>
 </template>
 
-<script>
-function emptyForm() {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface ServerForm {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth: string;
+  privateKeyPath: string;
+  passphrase: string;
+  password: string;
+  enabled: boolean;
+  status?: string;
+  error?: string;
+}
+
+interface ServersData {
+  view: 'list' | 'edit' | 'detail';
+  servers: ServerForm[];
+  current: ServerForm | null;
+  form: ServerForm;
+  editingId: string;
+  busy: boolean;
+  saving: boolean;
+  error: string;
+}
+
+function emptyForm(): ServerForm {
       return {
         id: '',
         name: '',
@@ -118,7 +146,7 @@ function emptyForm() {
       };
     }
 
-    function plainServer(server) {
+    function plainServer(server: Partial<ServerForm>): ServerForm {
       return {
         id: server.id || '',
         name: server.name || '',
@@ -133,8 +161,8 @@ function emptyForm() {
       };
     }
 
-export default {
-      data: function () {
+export default defineComponent({
+      data(): ServersData {
         return {
           view: 'list',
           servers: [],
@@ -183,7 +211,7 @@ export default {
           return aicode.fs.read('data://servers.json').then(function (res) {
             var parsed = {};
             try { parsed = res && res.content ? JSON.parse(res.content) : {}; } catch (e) {}
-            self.servers = (Array.isArray(parsed.servers) ? parsed.servers : []).map(function (server) {
+            self.servers = (Array.isArray(parsed.servers) ? parsed.servers : []).map(function (server: Partial<ServerForm>) {
               var item = plainServer(server);
               item.status = 'offline';
               return item;
@@ -192,7 +220,7 @@ export default {
             self.servers = [];
           });
         },
-        mergeStatus: function (list) {
+        mergeStatus: function (list: Partial<ServerForm>[]) {
           var byId = {};
           (list || []).forEach(function (server) { byId[server.id] = server; });
           this.servers.forEach(function (server) {
@@ -218,12 +246,12 @@ export default {
         saveConfig: function () {
           return aicode.fs.write('data://servers.json', JSON.stringify({ servers: this.servers }, null, 2));
         },
-        openDetail: function (server) {
+        openDetail: function (server: ServerForm) {
           this.current = server;
           this.view = 'detail';
           this.error = '';
         },
-        openEdit: function (server) {
+        openEdit: function (server?: ServerForm) {
           this.error = '';
           if (server) {
             this.editingId = server.id;
@@ -278,7 +306,7 @@ export default {
             .catch(function (e) { self.error = e.message || String(e); })
             .then(function () { self.saving = false; });
         },
-        remove: function (server) {
+        remove: function (server: ServerForm) {
           var self = this;
           this.servers = this.servers.filter(function (item) { return item.id !== server.id; });
           this.current = null;
@@ -290,7 +318,7 @@ export default {
             })
             .catch(function (e) { self.error = e.message || String(e); });
         },
-        connect: function (server) {
+        connect: function (server?: ServerForm) {
           var self = this;
           if (!server) return;
           this.busy = true;
@@ -299,20 +327,20 @@ export default {
             .catch(function (e) { aicode.toast(e.message || String(e)); })
             .then(function () { self.busy = false; });
         },
-        disconnect: function (server) {
+        disconnect: function (server?: ServerForm) {
           var self = this;
           if (!server) return;
           aicode.invoke('ui.disconnect', { serverId: server.id })
             .then(function () { return self.refreshStatus(); })
             .catch(function (e) { aicode.toast(e.message || String(e)); });
         },
-        statusLabel: function (status) {
+        statusLabel: function (status: string) {
           if (status === 'online') return '已连接';
           if (status === 'connecting') return '连接中';
           return '未连接';
         }
       }
-    };
+    });
 </script>
 
 <style>

@@ -27,7 +27,7 @@
 | 推送前迁移对账 | `python3 scripts/check_migrations.py`（或 `./gradlew checkMigrations`） |
 | 发版构建 APK / AAB | `./gradlew assembleRelease` / `./gradlew bundleRelease` |
 
-- **插件 SDK / 示例 / 页面资源改动**：`npm --prefix plugins run typecheck:plugins`；改 `plugins/samples` 的 TS 或页面源码后跑 `npm --prefix plugins run build:plugins` 更新 `dist/`；改插件 API 后必须同步改 `plugins/sdk`（`src/index.ts`、`types/aicode.d.ts`、`types/aicode-vue.d.ts`），需要发布时再跑 `npm --prefix plugins run build:sdk`；改 `app/src/main/assets/plugin-ui/aicode.js` 后跑 `node scripts/test-plugin-sdk.cjs`。纯文档 / Markdown 跳过。
+- **插件 SDK / 示例 / 页面资源改动**：`npm --prefix plugins run typecheck:plugins`；改 `plugins/samples` 的 TS 或页面源码后跑 `npm --prefix plugins run build:plugins` 验证构建（`dist/` 与 `pages/` 是生成产物，不提交）；改插件 API 后必须同步改 `plugins/sdk`（`src/index.ts`、`types/aicode.d.ts`、`types/aicode-vue.d.ts`），需要发布时再跑 `npm --prefix plugins run build:sdk`；改 `app/src/main/assets/plugin-ui/aicode.js` 后跑 `node scripts/test-plugin-sdk.cjs`。纯文档 / Markdown 跳过。
 - **别用聚合任务做日常验证**：`assembleDebug` / `assembleRelease` / `test` / `build` 都会跨三个 flavor 全跑，耗时极长。
 - 产物：`app/build/outputs/apk/<flavor>/release/app-<flavor>-release.apk`、`.../bundle/<flavor>/release/app-<flavor>-release.aab`。
 - flavor 按 ABI 拆分：`universal`（arm64-v8a + x86_64）、`armsolo`（仅 arm64-v8a）、`x86solo`（仅 x86_64）。

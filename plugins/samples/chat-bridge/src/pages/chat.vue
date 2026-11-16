@@ -58,38 +58,70 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { AicodeEvent, JsonValue } from '@jieapi/plugin-sdk/page';
 
 const STORAGE_PATH = 'data://chat-bridge.json';
 const POLL_MS = 1000;
 const IDLE_FINISH_MS = 10000;
 const MAX_MESSAGES = 300;
 
-const messages = ref([]);
-const pending = ref(false);
-const statusText = ref('连接中…');
-const statusKind = ref('');
-const inputText = ref('');
-const permissionRequests = ref([]);
-const resolvingPermission = ref(false);
-const permissionError = ref('');
-const copiedId = ref(null);
-const messagesEl = ref(null);
+interface ChatItem {
+  id: string;
+  role: string;
+  content: string;
+  timestamp: number;
+  local?: boolean;
+  error?: boolean;
+  isCompactionMarker?: boolean;
+  isContextSummary?: boolean;
+  isCompacted?: boolean;
+}
 
-let sessionId = null;
+interface PermissionRequest {
+  requestId: string;
+  sessionId?: string | null;
+  toolName?: string;
+  arguments?: JsonValue;
+}
+
+interface RunFinishedPayload {
+  sessionId?: string;
+  status?: string;
+  error?: string;
+  errorCode?: string;
+}
+
+interface UiLifecyclePayload {
+  visible?: boolean;
+  reason?: string;
+}
+
+const messages = ref<ChatItem[]>([]);
+const pending = ref<boolean>(false);
+const statusText = ref<string>('连接中…');
+const statusKind = ref<string>('');
+const inputText = ref<string>('');
+const permissionRequests = ref<PermissionRequest[]>([]);
+const resolvingPermission = ref<boolean>(false);
+const permissionError = ref<string>('');
+const copiedId = ref<string | null>(null);
+const messagesEl = ref<HTMLElement | null>(null);
+
+let sessionId: string | null = null;
 let lastTimestamp = 0;
 let lastActivityAt = 0;
 let pageVisible = true;
 let polling = false;
 let initializing = false;
-let optimisticId = null;
+let optimisticId: string | null = null;
 let turnId = 0;
 let sawAssistantSinceSend = false;
 let runFinished = false;
-let offEvents = null;
-let pollTimer = null;
-let finishTimer = null;
+let offEvents: (() => void) | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let finishTimer: ReturnType<typeof setInterval> | null = null;
 
 const visibleMessages = computed(() => messages.value.filter((message) => {
   return !message.isCompactionMarker && !message.isContextSummary && !message.isCompacted &&
@@ -109,16 +141,16 @@ const permissionArgs = computed(() => {
   return args.length > 2000 ? args.slice(0, 2000) + '\n…' : args;
 });
 
-function apiReady() {
-  return window.aicode && aicode.chat;
+function apiReady(): boolean {
+  return Boolean(window.aicode && aicode.chat);
 }
 
-function setStatus(text, kind) {
+function setStatus(text: string, kind = ''): void {
   statusText.value = text;
   statusKind.value = kind || '';
 }
 
-function addSystem(text, kind) {
+function addSystem(text: string, kind = ''): void {
   messages.value.push({
     id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     role: 'system',
@@ -129,7 +161,7 @@ function addSystem(text, kind) {
   });
 }
 
-function queuePermission(payload) {
+function queuePermission(payload: PermissionRequest): void {
   if (!payload || !payload.requestId || !sessionId) return;
   if (payload.sessionId && payload.sessionId !== sessionId) return;
   if (permissionRequests.value.some((item) => item.requestId === payload.requestId)) return;
@@ -139,16 +171,16 @@ function queuePermission(payload) {
   setStatus('等待授权：' + (payload.toolName || '工具'), 'busy');
 }
 
-function removePermission(requestId) {
+function removePermission(requestId: string): void {
   permissionRequests.value = permissionRequests.value.filter((item) => item.requestId !== requestId);
 }
 
-function clearPermissions() {
+function clearPermissions(): void {
   permissionRequests.value = [];
   permissionError.value = '';
 }
 
-async function resolvePermission(requestId, decision) {
+async function resolvePermission(requestId: string, decision: 'allow' | 'deny'): Promise<void> {
   if (resolvingPermission.value) return;
   if (!apiReady() || typeof aicode.invoke !== 'function') {
     permissionError.value = '当前 APK 不支持插件代审核。';
@@ -173,7 +205,7 @@ async function resolvePermission(requestId, decision) {
   }
 }
 
-async function syncPendingReviews() {
+async function syncPendingReviews(): Promise<void> {
   if (!apiReady() || typeof aicode.invoke !== 'function' || !sessionId) return;
   try {
     const result = await aicode.invoke('ui.pageReady', {});
@@ -184,7 +216,7 @@ async function syncPendingReviews() {
   }
 }
 
-function fallbackCopy(text) {
+function fallbackCopy(text: string): void {
   const area = document.createElement('textarea');
   area.value = text;
   area.style.position = 'fixed';
@@ -195,7 +227,7 @@ function fallbackCopy(text) {
   document.body.removeChild(area);
 }
 
-async function copyText(text, id) {
+async function copyText(text: string, id: string): Promise<void> {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     try {
       await navigator.clipboard.writeText(text);
@@ -211,7 +243,7 @@ async function copyText(text, id) {
   }, 1200);
 }
 
-function mergeMessages(incoming) {
+function mergeMessages(incoming: ChatItem[]): boolean {
   if (!incoming || !incoming.length) return false;
   let changed = false;
   incoming.forEach((message) => {
@@ -244,7 +276,7 @@ function mergeMessages(incoming) {
   return changed;
 }
 
-function maybeFinish() {
+function maybeFinish(): void {
   if (!pending.value) return;
   if (runFinished) {
     pending.value = false;
@@ -257,7 +289,7 @@ function maybeFinish() {
   }
 }
 
-async function pollOnce() {
+async function pollOnce(): Promise<void> {
   if (!apiReady() || !sessionId || !pageVisible || polling) return;
   polling = true;
   try {
@@ -282,7 +314,7 @@ async function pollOnce() {
   }
 }
 
-async function readStoredSession() {
+async function readStoredSession(): Promise<string | null> {
   try {
     const result = await aicode.fs.read(STORAGE_PATH);
     const data = JSON.parse(result.content || '{}');
@@ -292,7 +324,7 @@ async function readStoredSession() {
   }
 }
 
-async function storeSession(id) {
+async function storeSession(id: string): Promise<void> {
   try {
     await aicode.fs.write(STORAGE_PATH, JSON.stringify({
       sessionId: id,
@@ -303,7 +335,7 @@ async function storeSession(id) {
   }
 }
 
-async function loadSession(id) {
+async function loadSession(id: string): Promise<boolean> {
   try {
     const result = await aicode.chat.listMessages(id, { limit: 50 });
     sessionId = id;
@@ -327,7 +359,7 @@ async function loadSession(id) {
   }
 }
 
-async function startFreshSession() {
+async function startFreshSession(): Promise<string> {
   const result = await aicode.chat.createSession({ title: '对话桥' });
   sessionId = result.session.id;
   messages.value = [];
@@ -342,7 +374,7 @@ async function startFreshSession() {
   return sessionId;
 }
 
-async function initialize() {
+async function initialize(): Promise<void> {
   if (!apiReady()) {
     setStatus('API 不可用', 'error');
     messages.value = [{
@@ -374,13 +406,13 @@ async function initialize() {
   }
 }
 
-function onInputKeydown(event) {
+function onInputKeydown(event: KeyboardEvent): void {
   if (event.shiftKey) return;
   event.preventDefault();
   void sendMessage();
 }
 
-async function sendMessage() {
+async function sendMessage(): Promise<void> {
   const text = inputText.value.trim();
   if (!text || pending.value || !apiReady()) return;
   if (!sessionId) await startFreshSession();
@@ -413,7 +445,7 @@ async function sendMessage() {
   }
 }
 
-async function stopRun() {
+async function stopRun(): Promise<void> {
   if (!sessionId || !apiReady()) return;
   try {
     await aicode.chat.stop(sessionId);
@@ -428,7 +460,7 @@ async function stopRun() {
   }
 }
 
-async function newSession() {
+async function newSession(): Promise<void> {
   if (!apiReady()) return;
   try {
     await startFreshSession();
@@ -438,7 +470,7 @@ async function newSession() {
   }
 }
 
-function onRunFinished(payload) {
+function onRunFinished(payload: RunFinishedPayload): void {
   if (!payload || payload.sessionId !== sessionId) return;
   const finishedTurn = turnId;
   runFinished = true;
@@ -463,7 +495,7 @@ function onRunFinished(payload) {
   }, 300);
 }
 
-function handleEvent(event) {
+function handleEvent(event: AicodeEvent): void {
   if (!event) return;
   if (event.name === 'chat.run.finished') {
     onRunFinished(event.payload);
@@ -490,7 +522,7 @@ function handleEvent(event) {
   }
 }
 
-async function scrollMessages() {
+async function scrollMessages(): Promise<void> {
   await nextTick();
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
 }

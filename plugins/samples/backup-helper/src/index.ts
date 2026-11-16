@@ -1,28 +1,34 @@
-import { definePlugin, hostCall, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
 
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 1500;
 
+type BackupScope = 'global' | 'project';
+
 interface BackupSource {
-  scope: 'global' | 'project';
+  scope: BackupScope;
   root: string;
   entries: string[];
 }
 
-interface FileEntry {
-  scope: string;
+interface BackupFileRef {
+  scope: BackupScope;
   path: string;
+}
+
+interface FileEntry extends BackupFileRef {
   size: number;
 }
 
-interface SkippedEntry {
-  scope: string;
-  path: string;
+interface SkippedEntry extends BackupFileRef {
   reason: string;
 }
 
 interface Manifest {
-  files?: Array<{ scope: string; path: string }>;
+  version?: number;
+  createdAt?: number;
+  files?: BackupFileRef[];
+  skipped?: SkippedEntry[];
 }
 
 interface StatInfo {
@@ -40,6 +46,15 @@ interface BinaryInfo {
   size?: number;
 }
 
+interface ExportBeforeArgs extends PluginArgs {
+  dir?: unknown;
+}
+
+interface ImportArgs extends PluginArgs {
+  dir?: unknown;
+  stats?: { mcpServers?: unknown };
+}
+
 const SOURCES: BackupSource[] = [
   { scope: 'global', root: '~/.aicode', entries: ['memory', 'skills', 'agents', 'mcp.json'] },
   {
@@ -53,6 +68,11 @@ function join(root: string, entry: string): string {
   return root ? root + '/' + entry : entry;
 }
 
+function readString(args: PluginArgs, key: string, fallback = ''): string {
+  const value = args[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
 async function stat(path: string): Promise<StatInfo> {
   try {
     return await hostCall<StatInfo>('host.fs.stat', { path });
@@ -63,7 +83,7 @@ async function stat(path: string): Promise<StatInfo> {
 
 async function collectFile(
   stagingDir: string,
-  scope: string,
+  scope: BackupScope,
   root: string,
   relative: string,
   files: FileEntry[],
@@ -80,7 +100,7 @@ async function collectFile(
       skipped.push({ scope, path: relative, reason: 'list_failed' });
       return;
     }
-    for (const entry of listing.entries || []) {
+    for (const entry of listing.entries ?? []) {
       if (files.length >= MAX_FILES) {
         skipped.push({ scope, path: relative, reason: 'file_limit' });
         return;
@@ -127,19 +147,22 @@ async function readManifest(stagingDir: string): Promise<Manifest | null> {
     const file = await hostCall<{ content?: string }>('host.fs.read', {
       path: `${stagingDir}/manifest.json`
     });
-    const manifest = JSON.parse(String(file.content || ''));
-    if (manifest && Array.isArray(manifest.files)) return manifest as Manifest;
+    const parsed: unknown = JSON.parse(String(file.content ?? ''));
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Array.isArray((parsed as Manifest).files)
+    ) {
+      return parsed as Manifest;
+    }
   } catch {
     // 兼容没有 manifest 的旧区段，下面按目录扫描。
   }
   return null;
 }
 
-async function scanSection(
-  stagingDir: string,
-  scope: string
-): Promise<Array<{ scope: string; path: string }>> {
-  const files: Array<{ scope: string; path: string }> = [];
+async function scanSection(stagingDir: string, scope: BackupScope): Promise<BackupFileRef[]> {
+  const files: BackupFileRef[] = [];
   const walk = async (relative: string): Promise<void> => {
     const path = relative ? `${stagingDir}/${scope}/${relative}` : `${stagingDir}/${scope}`;
     const info = await stat(path);
@@ -151,7 +174,7 @@ async function scanSection(
       } catch {
         return;
       }
-      for (const entry of listing.entries || []) {
+      for (const entry of listing.entries ?? []) {
         await walk(relative ? relative + '/' + entry.name : entry.name);
       }
       return;
@@ -170,7 +193,7 @@ async function restoreSection(
   let restored = 0;
   const skipped: SkippedEntry[] = [];
   const files = manifest?.files
-    ? manifest.files.map((file) => ({ scope: file.scope, path: file.path }))
+    ? manifest.files
     : [...(await scanSection(stagingDir, 'global')), ...(await scanSection(stagingDir, 'project'))];
   for (const file of files) {
     if (skipMcp && String(file.path || '').endsWith('mcp.json')) {
@@ -191,9 +214,10 @@ async function restoreSection(
   return { restored, skipped };
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'hooks.onExportBefore': async (args) => {
-    const stagingDir = String(args.dir || '');
+const handlers = {
+  'hooks.onExportBefore': async (rawArgs: PluginArgs): Promise<{ logs: string[] }> => {
+    const args = rawArgs as ExportBeforeArgs;
+    const stagingDir = readString(args, 'dir');
     if (!stagingDir) throw new Error('missing staging dir');
     const files: FileEntry[] = [];
     const skipped: SkippedEntry[] = [];
@@ -210,12 +234,12 @@ const handlers: Record<string, PluginHandler> = {
     };
   },
 
-  'hooks.onImport': async (args) => {
-    const stagingDir = String(args.dir || '');
+  'hooks.onImport': async (rawArgs: PluginArgs): Promise<{ logs: string[] }> => {
+    const args = rawArgs as ImportArgs;
+    const stagingDir = readString(args, 'dir');
     if (!stagingDir) throw new Error('missing staging dir');
     const manifest = await readManifest(stagingDir);
-    const stats = args.stats as { mcpServers?: unknown } | undefined;
-    const skipMcp = Number(stats?.mcpServers) > 0;
+    const skipMcp = Number(args.stats?.mcpServers) > 0;
     const result = await restoreSection(stagingDir, manifest, skipMcp);
     return {
       logs: [
@@ -223,6 +247,6 @@ const handlers: Record<string, PluginHandler> = {
       ]
     };
   }
-};
+} satisfies Record<string, PluginHandler>;
 
 definePlugin({ handlers });

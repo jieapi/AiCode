@@ -32,7 +32,22 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface BuildTask {
+  value: string;
+  label: string;
+}
+
+interface BuildData {
+  detecting: boolean;
+  running: boolean;
+  projectType: string;
+  task: string;
+  output: string;
+}
+
 var FLUTTER_TASKS = [
       { value: 'flutter build apk --debug', label: 'Flutter · Debug APK' },
       { value: 'flutter build apk --release', label: 'Flutter · Release APK' }
@@ -42,8 +57,8 @@ var FLUTTER_TASKS = [
       { value: './gradlew assembleRelease', label: 'Android · Release APK' }
     ];
 
-export default {
-      data: function () {
+export default defineComponent({
+      data(): BuildData {
         return {
           detecting: true,
           running: false,
@@ -127,7 +142,7 @@ export default {
             });
         }
       }
-    };
+    });
 </script>
 
 <style>

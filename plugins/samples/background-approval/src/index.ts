@@ -5,6 +5,8 @@ const REVIEW_TIMEOUT_MS = 4.5 * 60 * 1000;
 const FOREGROUND_POLL_MS = 1000;
 const PREVIEW_LIMIT = 1800;
 
+type ReviewDecision = 'allow' | 'deny' | 'pass';
+
 interface ReviewRequest {
   requestId: string;
   toolName: string;
@@ -14,7 +16,7 @@ interface ReviewRequest {
 }
 
 interface ReviewResult {
-  decision: string;
+  decision: ReviewDecision;
   reason: string;
   logs: string[];
 }
@@ -29,7 +31,40 @@ interface OverlayInfo {
   overlayId: string;
 }
 
-const state: {
+interface ApprovalStatePayload {
+  type: 'approvalState';
+  request: ReviewRequest | null;
+  count: number;
+}
+
+interface ActionPayload {
+  type: 'ballReady' | 'ballClick' | 'foreground' | 'displayError';
+  requestId?: string;
+}
+
+interface DecisionPayload {
+  type: 'decision';
+  requestId: string;
+  decision: ReviewDecision;
+}
+
+type OverlayPayload = ApprovalStatePayload | ActionPayload | DecisionPayload;
+
+interface ReviewPayload extends PluginArgs {
+  callId?: unknown;
+  toolName?: unknown;
+  arguments?: unknown;
+  mode?: unknown;
+  agentName?: unknown;
+  appForeground?: unknown;
+}
+
+interface OverlayMessage extends PluginArgs {
+  overlayId?: unknown;
+  payload?: unknown;
+}
+
+interface ApprovalState {
   ballId: string | null;
   ballPromise: Promise<string> | null;
   active: QueueItem | null;
@@ -38,7 +73,9 @@ const state: {
   pumping: boolean;
   publishing: Promise<void>;
   requestSeq: number;
-} = {
+}
+
+const state: ApprovalState = {
   ballId: null,
   ballPromise: null,
   active: null,
@@ -48,6 +85,21 @@ const state: {
   publishing: Promise.resolve(),
   requestSeq: 0
 };
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code ? code : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readString(args: PluginArgs, key: string, fallback = ''): string {
+  const value = args[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
 
 function summarizeArguments(value: unknown): string {
   let text: string;
@@ -88,12 +140,12 @@ async function ensureBall(): Promise<string> {
   return state.ballPromise;
 }
 
-async function postBall(payload: Record<string, unknown>): Promise<void> {
+async function postBall(payload: OverlayPayload): Promise<void> {
   await ensureBall();
   try {
     await hostCall('host.overlay.postMessage', { surface: 'ball', payload });
   } catch (error) {
-    if ((error as { code?: string }).code !== 'OVERLAY_NOT_FOUND') throw error;
+    if (errorCode(error) !== 'OVERLAY_NOT_FOUND') throw error;
     state.ballId = null;
     await ensureBall();
     await hostCall('host.overlay.postMessage', { surface: 'ball', payload });
@@ -137,7 +189,7 @@ function startForegroundPoll(): void {
   }, FOREGROUND_POLL_MS);
 }
 
-function finishActive(decision: string, reason: string): void {
+function finishActive(decision: ReviewDecision, reason: string): void {
   const active = state.active;
   if (!active) return;
   state.active = null;
@@ -151,7 +203,7 @@ function finishActive(decision: string, reason: string): void {
   }
 }
 
-function drainQueue(decision: string, reason: string): void {
+function drainQueue(decision: ReviewDecision, reason: string): void {
   const pending = state.queue.splice(0);
   pending.forEach((item) => {
     clearTimeout(item.timer);
@@ -187,8 +239,7 @@ async function pump(): Promise<void> {
     startForegroundPoll();
     await publishState();
   } catch (error) {
-    const detail = (error as { code?: string; message?: string }).code ||
-      (error as { message?: string }).message;
+    const detail = errorCode(error) ?? errorMessage(error);
     finishActive('pass', '审批浮层不可用: ' + detail);
   } finally {
     state.pumping = false;
@@ -196,18 +247,18 @@ async function pump(): Promise<void> {
   }
 }
 
-function reviewPayload(args: PluginArgs): ReviewRequest {
+function reviewPayload(args: ReviewPayload): ReviewRequest {
   return {
-    requestId: String(args.callId || 'review-' + ++state.requestSeq),
-    toolName: String(args.toolName || 'unknown'),
+    requestId: args.callId ? String(args.callId) : 'review-' + ++state.requestSeq,
+    toolName: readString(args, 'toolName', 'unknown'),
     preview: summarizeArguments(args.arguments),
-    mode: String(args.mode || ''),
+    mode: readString(args, 'mode'),
     agentName: args.agentName ? String(args.agentName) : null
   };
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'hooks.boot': async () => {
+const handlers = {
+  'hooks.boot': async (): Promise<{ ok: boolean; overlayId?: string | null; code?: string; message?: string }> => {
     try {
       await ensureBall();
       await publishState();
@@ -215,22 +266,24 @@ const handlers: Record<string, PluginHandler> = {
     } catch (error) {
       return {
         ok: false,
-        code: (error as { code?: string }).code || 'OVERLAY_FAILED',
-        message: String((error as Error).message || error)
+        code: errorCode(error) ?? 'OVERLAY_FAILED',
+        message: errorMessage(error)
       };
     }
   },
 
-  'hooks.reviewPermission': async (payload) => {
+  'hooks.reviewPermission': async (rawPayload: PluginArgs): Promise<ReviewResult> => {
+    const payload = rawPayload as ReviewPayload;
     if (payload.appForeground === true || (await isAppForeground())) {
-      return { decision: 'pass', logs: ['App 在前台，交回应用内确认'] };
+      return { decision: 'pass', reason: '', logs: ['App 在前台，交回应用内确认'] };
     }
     try {
       await ensureBall();
     } catch (error) {
       return {
         decision: 'pass',
-        logs: ['浮层不可用: ' + ((error as { code?: string }).code || (error as Error).message)]
+        reason: '',
+        logs: ['浮层不可用: ' + (errorCode(error) ?? errorMessage(error))]
       };
     }
     const request = reviewPayload(payload);
@@ -246,9 +299,10 @@ const handlers: Record<string, PluginHandler> = {
     });
   },
 
-  'overlay.message': async (args) => {
-    const payload =
-      args.payload && typeof args.payload === 'object'
+  'overlay.message': async (rawArgs: PluginArgs): Promise<{ ok: boolean; error?: string }> => {
+    const args = rawArgs as OverlayMessage;
+    const payload: Record<string, unknown> =
+      typeof args.payload === 'object' && args.payload !== null
         ? (args.payload as Record<string, unknown>)
         : {};
     const overlayId = args.overlayId ? String(args.overlayId) : '';
@@ -272,7 +326,7 @@ const handlers: Record<string, PluginHandler> = {
       return { ok: true };
     }
     if (payload.type === 'decision' && state.active) {
-      if (String(payload.requestId || '') !== state.active.request.requestId) {
+      if (String(payload.requestId ?? '') !== state.active.request.requestId) {
         return { ok: false, error: 'stale request' };
       }
       if (payload.decision !== 'allow' && payload.decision !== 'deny') {
@@ -287,6 +341,6 @@ const handlers: Record<string, PluginHandler> = {
     }
     return { ok: true };
   }
-};
+} satisfies Record<string, PluginHandler>;
 
 definePlugin({ handlers });

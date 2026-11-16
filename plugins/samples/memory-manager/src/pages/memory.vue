@@ -133,12 +133,63 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface MemoryItem {
+  scope: 'global' | 'project';
+  fileName: string;
+  name: string;
+  description: string;
+  content: string;
+}
+
+interface MemoryForm {
+  name: string;
+  description: string;
+  content: string;
+  scope: 'global' | 'project';
+}
+
+interface MemoryData {
+  view: 'list' | 'edit' | 'detail';
+  globalExpanded: boolean;
+  projectExpanded: boolean;
+  globalItems: MemoryItem[];
+  projectItems: MemoryItem[];
+  currentItem: MemoryItem | null;
+  editingItem: MemoryItem | null;
+  form: MemoryForm;
+  selectionMode: boolean;
+  selected: string[];
+  saving: boolean;
+  error: string;
+  notice: string;
+  conflict: string;
+  contextConflict: boolean;
+  editEpoch: number | null;
+  contextKey: string | null;
+  contextEpoch: number;
+  contextRequest: number;
+  contextError: string;
+  loadErrors: { global: string; project: string };
+  watchErrors: { global: string; project: string };
+  pendingScopes: Record<string, boolean>;
+  scopeVersions: { global: number; project: number };
+  refreshPromise: Promise<unknown> | null;
+  watchStops: Array<() => void>;
+  eventsStop: (() => void) | null;
+  backStop: (() => void) | null;
+  disposed: boolean;
+  batchConfirm: boolean;
+  batchTimer: ReturnType<typeof setTimeout> | null;
+}
+
 var GLOBAL_ROOT = '';
     var PROJECT_ROOT = '';
 
-export default {
-      data: function () {
+export default defineComponent({
+      data(): MemoryData {
         return {
           view: 'list',
           globalExpanded: true,
@@ -677,7 +728,7 @@ export default {
         if (this.backStop) this.backStop();
         clearTimeout(this.batchTimer);
       }
-    };
+    });
 </script>
 
 <style>

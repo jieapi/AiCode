@@ -1,4 +1,4 @@
-import { definePlugin, emit, hostCall, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, emit, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
 
 const ENV_BASENAME = /^\.env(?:\..+)?$/i;
 const ENV_TOKEN = /(^|[\s"'`=<>|;&()/*?\\])\.env(?:\.[A-Za-z0-9._-]+)?($|[\s"'`<>|;&()/*?\\])/i;
@@ -6,7 +6,40 @@ const PATH_KEYS = ['path', 'paths', 'file', 'files', 'output_path', 'input_path'
 const COMMAND_TOOLS = new Set(['bash', 'terminal', 'shizuku']);
 const DETECT_TOOLS = new Set(['list', 'search']);
 
-let lastRun: unknown = null;
+interface EchoArgs extends PluginArgs {
+  text?: unknown;
+}
+
+interface NotifyArgs extends PluginArgs {
+  title?: unknown;
+  body?: unknown;
+  key?: unknown;
+}
+
+interface DenyEnvArgs extends PluginArgs {
+  toolName?: unknown;
+  arguments?: unknown;
+}
+
+interface DenyResult {
+  decision?: 'deny';
+  reason?: string;
+  logs?: string[];
+}
+
+interface EchoResult {
+  text: string;
+  length: number;
+  plugin: string;
+  runtime: string;
+}
+
+let lastRun: Record<string, unknown> | null = null;
+
+function readString(args: PluginArgs, key: string, fallback = ''): string {
+  const value = args[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
 
 function flattenStrings(value: unknown, out: string[] = []): string[] {
   if (typeof value === 'string') {
@@ -53,9 +86,10 @@ function inspectEnvAccess(toolName: string, args: Record<string, unknown>): stri
   return hits;
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'tools.echo': (args) => {
-    const text = String(args.text ?? '');
+const handlers = {
+  'tools.echo': (rawArgs: PluginArgs): EchoResult => {
+    const args = rawArgs as EchoArgs;
+    const text = readString(args, 'text');
     void hostCall('host.fs.write', {
       path: 'data://echo.log',
       content: text + '\n'
@@ -63,26 +97,32 @@ const handlers: Record<string, PluginHandler> = {
     emit('echo.done', { length: text.length });
     return { text, length: text.length, plugin: 'community.demo-kit', runtime: 'process' };
   },
-  'tools.lastRun': () => lastRun,
-  'tools.notify': async (args) => {
+
+  'tools.lastRun': (): Record<string, unknown> | null => lastRun,
+
+  'tools.notify': async (rawArgs: PluginArgs): Promise<{ ok: boolean }> => {
+    const args = rawArgs as NotifyArgs;
     await hostCall('host.notify', {
-      title: String(args.title ?? ''),
-      body: String(args.body ?? ''),
+      title: readString(args, 'title'),
+      body: readString(args, 'body'),
       key: args.key === undefined ? undefined : String(args.key)
     });
     return { ok: true };
   },
-  'hooks.runFinished': (args) => {
-    lastRun = args;
+
+  'hooks.runFinished': (rawArgs: PluginArgs): string => {
+    lastRun = rawArgs;
     return 'stored';
   },
-  'hooks.denyEnv': (payload) => {
-    const toolName = String(payload.toolName || '').toLowerCase();
-    const args =
-      payload.arguments && typeof payload.arguments === 'object'
-        ? (payload.arguments as Record<string, unknown>)
+
+  'hooks.denyEnv': (rawArgs: PluginArgs): DenyResult => {
+    const args = rawArgs as DenyEnvArgs;
+    const toolName = readString(args, 'toolName').toLowerCase();
+    const toolArgs =
+      typeof args.arguments === 'object' && args.arguments !== null
+        ? (args.arguments as Record<string, unknown>)
         : {};
-    const hits = inspectEnvAccess(toolName, args);
+    const hits = inspectEnvAccess(toolName, toolArgs);
     if (hits.length === 0) return {};
     const detail = hits[0].slice(0, 120);
     return {
@@ -91,6 +131,6 @@ const handlers: Record<string, PluginHandler> = {
       logs: [`blocked ${toolName}: ${hits.join(', ')}`]
     };
   }
-};
+} satisfies Record<string, PluginHandler>;
 
 definePlugin({ handlers });

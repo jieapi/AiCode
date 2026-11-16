@@ -28,13 +28,23 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface CleanData {
+  detecting: boolean;
+  running: boolean;
+  projectType: string;
+  sizes: string;
+  output: string;
+}
+
 var SIZES_COMMAND =
       'for d in build .dart_tool .gradle android/.gradle android/build; do ' +
       'if [ -e "$d" ]; then du -sh "$d"; fi; done';
 
-export default {
-      data: function () {
+export default defineComponent({
+      data(): CleanData {
         return {
           detecting: true,
           running: false,
@@ -117,7 +127,7 @@ export default {
             });
         }
       }
-    };
+    });
 </script>
 
 <style>

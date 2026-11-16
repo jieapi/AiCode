@@ -14,11 +14,11 @@ capability-demo/
 │   └── handlers/
 │       ├── tools.ts
 │       └── actions.ts
-└── dist/
-    └── main.js          # 构建产物，随插件包发布
+└── dist/                # 构建生成，不提交仓库
+    └── main.js          # 随插件包发布
 ```
 
-`src/` 不参与宿主运行；`dist/main.js` 必须随包发布。清单中的 `runtime.entry` 不需要修改。
+`src/` 不参与宿主运行；`dist/main.js` 必须随包发布。仓库内的 `plugins/samples/` 只提交源码，`dist/` 与生成的 `pages/` 都由构建脚本生成，不提交；清单中的 `runtime.entry` 不需要修改。
 
 ## 工具链
 
@@ -129,7 +129,7 @@ npm --prefix plugins run typecheck:plugins                      # 只做类型�
 ```text
 src/pages/
 ├── config.html     # 页面壳：外部 /__aicode/* 脚本 + <div id="app">
-├── config.js       # createApp(App).mount('#app')
+├── config.ts       # createApp(App).mount('#app')
 └── config.vue      # template、script、style
 ```
 
@@ -140,12 +140,12 @@ src/pages/
 <script src="/__aicode/vue.global.prod.js"></script>
 <script src="/__aicode/aicode-ui-vue.js"></script>
 <script src="/__aicode/aicode.js"></script>
-<script type="module" src="./config.js"></script>
+<script type="module" src="./config.ts"></script>
 ```
 
-`config.js` 使用全局 Vue 创建应用；需要 `aicode-*` 组件时注册组件库：
+`config.ts` 使用全局 Vue 创建应用；需要 `aicode-*` 组件时注册组件库：
 
-```js
+```ts
 import { createApp } from 'vue';
 import App from './config.vue';
 
@@ -156,7 +156,7 @@ app.mount('#app');
 
 构建时 Vite 与 `@vitejs/plugin-vue` 编译 SFC，`vue` 的导入被映射到宿主全局 `window.Vue`，页面产物因此不需要再携带一份 Vue runtime。输出是 `pages/<页面名>.html` 加 `pages/assets/*.js|css`，HTML 用相对路径引用资产；宿主 `/plugin/` 映射插件目录，可以直接加载这些文件，**不要求页面单文件**。
 
-`/__aicode/*` 绝对路径不会被打包，运行时由宿主提供。页面脚本支持普通 JavaScript、ES module 与 SFC。`pages/` 下的 HTML 和 assets 都是构建产物，不要直接编辑。
+`/__aicode/*` 绝对路径不会被打包，运行时由宿主提供。页面脚本支持 TypeScript、ES module 与 SFC；页面入口建议使用 `.ts`，SFC 脚本使用 `<script setup lang="ts">`。`pages/` 下的 HTML 和 assets 都是构建产物，不要直接编辑。
 
 
 `--watch` 会监听 `src/pages` 并重建页面。
@@ -203,11 +203,16 @@ app.mount('#app');
 
 ## 打包与发布
 
-先构建，再打包：
+`scripts/package-plugins.py` 会在打包前自动调用构建脚本，从 `src/` 生成 `dist/main.js` 与 `pages/`：
 
 ```bash
-npm --prefix plugins run build:plugins
 python3 scripts/package-plugins.py capability-demo
+```
+
+也可以先手动构建检查产物：
+
+```bash
+npm --prefix plugins run build:plugins -- --plugin capability-demo
 ```
 
 `src/` 可以留在包里，但运行时只使用 `dist/main.js`。发布前确认：
@@ -228,7 +233,7 @@ python3 scripts/package-plugins.py capability-demo
 ## 边界
 
 - 页面 HTML（`pages/*.html`）、技能 Markdown、JSON Schema、MCP 配置仍直接编辑，不经过构建；
-- 宿主不会运行 TypeScript 源码，提交或发布前必须生成 `dist/main.js`；
+- 宿主不会运行 TypeScript 源码，发布前必须生成 `dist/main.js`；仓库只提交 `src/`，`dist/` 与生成的 `pages/` 不提交；
 - SDK 只封装通用协议，`host.*` 方法名与参数以[AI 工具与插件运行时](/advanced/plugin/tools-runtime)为准。
 
 可参考[示例库](/advanced/plugin/examples)中的 `capability-demo`，它使用本页的源码结构。

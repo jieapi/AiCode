@@ -17,9 +17,18 @@
   </div>
 </template>
 
-<script>
-export default {
-      data: function () {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface SnapshotData {
+  loading: boolean;
+  status: string;
+  files: string;
+  fileCount: number;
+}
+
+export default defineComponent({
+      data(): SnapshotData {
         return {
           loading: false,
           status: '',
@@ -52,7 +61,7 @@ export default {
           });
         }
       }
-    };
+    });
 </script>
 
 <style>

@@ -12,13 +12,13 @@
   <pre>{{ output }}</pre>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 
-const starting = ref(false);
-const output = ref('尚未启动');
+const starting = ref<boolean>(false);
+const output = ref<string>('尚未启动');
 
-async function start() {
+async function start(): Promise<void> {
   if (starting.value) return;
   if (!window.aicode) {
     output.value = '页面 SDK 未加载';
@@ -31,7 +31,7 @@ async function start() {
     output.value = JSON.stringify(result, null, 2);
     window.aicode.toast('演示提供商已启动');
   } catch (error) {
-    output.value = '启动失败：' + (error && error.message ? error.message : error);
+    output.value = '启动失败：' + (error instanceof Error ? error.message : String(error));
   } finally {
     starting.value = false;
   }

@@ -79,8 +79,54 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import type { ModelInfo, ModelProviderInfo } from '@jieapi/plugin-sdk/page';
+
+interface Member {
+  key: string;
+  label: string;
+  name: string;
+  prompt: string;
+  providerId: string;
+  model: string;
+  models: ModelInfo[];
+  modelState: 'idle' | 'loading' | 'ready' | 'error';
+  supportsTools: boolean;
+  supportsVision: boolean;
+}
+
+interface ProviderItem extends Pick<ModelProviderInfo, 'id' | 'enabled' | 'hasKey'> {
+  name?: string;
+}
+
+interface ChatItem {
+  id: number;
+  role: string;
+  name: string;
+  content: string;
+  meta: string;
+  images: Array<{ src: string }>;
+  error: boolean;
+}
+
+interface PendingImage {
+  mimeType: string;
+  base64: string;
+  name: string;
+  size: number;
+}
+
+interface HistoryItem {
+  role: string;
+  content: string;
+  images?: Array<{ mimeType: string; base64: string }>;
+}
+
+interface ApprovalState {
+  id: string;
+  rememberablePatterns?: unknown[];
+}
 
 const TOOLS = [
   {
@@ -101,7 +147,7 @@ const TOOLS = [
   {type: 'app', name: 'writeFile'}
 ];
 
-const members = reactive([
+const members = reactive<Member[]>([
   {
     key: 'a',
     label: '成员 A',
@@ -128,18 +174,18 @@ const members = reactive([
   }
 ]);
 
-const providers = ref([]);
-const statusText = ref('');
-const statusError = ref(false);
-const chatMessages = ref([]);
-const chatEl = ref(null);
-const inputText = ref('');
-const pendingImage = ref(null);
-const imageInput = ref(null);
-const sending = ref(false);
-const applying = ref(false);
-const approval = ref(null);
-const approvalBusy = ref(false);
+const providers = ref<ProviderItem[]>([]);
+const statusText = ref<string>('');
+const statusError = ref<boolean>(false);
+const chatMessages = ref<ChatItem[]>([]);
+const chatEl = ref<HTMLElement | null>(null);
+const inputText = ref<string>('');
+const pendingImage = ref<PendingImage | null>(null);
+const imageInput = ref<HTMLInputElement | null>(null);
+const sending = ref<boolean>(false);
+const applying = ref<boolean>(false);
+const approval = ref<ApprovalState | null>(null);
+const approvalBusy = ref<boolean>(false);
 
 const approvalRememberable = computed(
   () => (approval.value && approval.value.rememberablePatterns ? approval.value.rememberablePatterns.length : 0) > 0
@@ -151,33 +197,33 @@ const pendingImageLabel = computed(() => {
   return image.name + ' · ' + Math.max(1, Math.round(image.size / 1024)) + ' KiB';
 });
 
-let handles = [null, null];
-let history = [];
-let voteTally = {};
+const handles: Array<string | null> = [null, null];
+const history: HistoryItem[] = [];
+const voteTally: Record<string, Record<string, number>> = {};
 let messageSeq = 0;
 let sessionId = 'plugin:demo.team-chat:team-chat';
 
-function setStatus(text, isError) {
+function setStatus(text: string, isError = false): void {
   statusText.value = text || '';
   statusError.value = isError === true;
 }
 
-function memberName(index) {
+function memberName(index: number): string {
   return members[index].name.trim() || '成员 ' + (index + 1);
 }
 
-function modelPlaceholder(member) {
+function modelPlaceholder(member: Member): string {
   if (!member.providerId) return '先选择供应商';
   if (member.modelState === 'loading') return '加载中…';
   if (member.modelState === 'error') return '加载失败';
   return member.models.length ? '选择模型' : '没有已添加的模型';
 }
 
-function imageSource(image) {
+function imageSource(image: PendingImage): string {
   return 'data:' + image.mimeType + ';base64,' + image.base64;
 }
 
-async function loadModels(index, providerId) {
+async function loadModels(index: number, providerId?: string): Promise<void> {
   const member = members[index];
   if (providerId === undefined) providerId = member.providerId;
   member.providerId = providerId;
@@ -200,7 +246,7 @@ async function loadModels(index, providerId) {
   }
 }
 
-async function loadProviders() {
+async function loadProviders(): Promise<void> {
   setStatus('加载供应商…');
   try {
     const result = await aicode.model.listProviders();
@@ -222,7 +268,7 @@ async function loadProviders() {
   }
 }
 
-async function applyMembers() {
+async function applyMembers(): Promise<void> {
   applying.value = true;
   setStatus('创建句柄…');
   try {
@@ -257,12 +303,12 @@ async function applyMembers() {
   }
 }
 
-async function scrollChat() {
+async function scrollChat(): Promise<void> {
   await nextTick();
   if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight;
 }
 
-function appendBubble(role, name) {
+function appendBubble(role: string, name: string): ChatItem {
   const message = reactive({
     id: ++messageSeq,
     role: role,
@@ -277,7 +323,7 @@ function appendBubble(role, name) {
   return message;
 }
 
-function setMessageImages(message, images) {
+function setMessageImages(message: ChatItem, images: Array<{ base64?: string }> | undefined): void {
   message.images = (images || [])
     .filter((image) => image && image.base64)
     .map((image) => ({ src: imageSource(image) }));
@@ -285,7 +331,7 @@ function setMessageImages(message, images) {
 
 // 群聊里多个成员会连续发言，相邻同角色消息会破坏 user/assistant 交替；
 // 发送前把同角色消息合并，图片顺带拼接（单条最多 4 张）。
-function buildMessages() {
+function buildMessages(): HistoryItem[] {
   const merged = [];
   history.forEach((item) => {
     const last = merged[merged.length - 1];
@@ -317,7 +363,7 @@ function buildMessages() {
   return merged;
 }
 
-function messagesForMember(messages, index) {
+function messagesForMember(messages: HistoryItem[], index: number): HistoryItem[] {
   if (members[index].supportsVision !== false) return messages;
   return messages.map((message) => {
     if (!message.images) return message;
@@ -327,7 +373,7 @@ function messagesForMember(messages, index) {
   });
 }
 
-function callArguments(call) {
+function callArguments(call: { arguments?: unknown }): Record<string, unknown> {
   if (call.arguments && typeof call.arguments === 'object') return call.arguments;
   if (typeof call.arguments === 'string') {
     try {
@@ -339,7 +385,7 @@ function callArguments(call) {
   return {};
 }
 
-function assistantMessage(final, calls) {
+function assistantMessage(final: { content?: string; reasoning?: string; providerState?: unknown }, calls: Array<{ id: string; name: string; arguments?: unknown; argumentsTruncated?: boolean }>): Record<string, unknown> {
   return {
     role: 'assistant',
     content: final.content || '',
@@ -355,7 +401,7 @@ function assistantMessage(final, calls) {
   };
 }
 
-function runTeamVote(call, memberIndex) {
+function runTeamVote(call: { arguments?: unknown }, memberIndex: number): string {
   const args = callArguments(call);
   const topic = String(args.topic || '未命名议题');
   const choice = String(args.choice || '');
@@ -376,12 +422,12 @@ function runTeamVote(call, memberIndex) {
   });
 }
 
-function setApproval(pending) {
+function setApproval(pending: { approval?: ApprovalState | null } | null): void {
   approval.value = pending ? pending.approval : null;
 }
 
 // execute 遇到 ASK 会一直挂起；轮询 pending 把审批条显示出来，resolve 后 execute 才继续。
-async function executeHostTool(name, args) {
+async function executeHostTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const timer = setInterval(async () => {
     try {
       const pending = await aicode.tools.pending(sessionId);
@@ -398,7 +444,7 @@ async function executeHostTool(name, args) {
   }
 }
 
-async function resolveApproval(choice) {
+async function resolveApproval(choice: 'allow' | 'deny' | 'always'): Promise<void> {
   if (!approval.value || approvalBusy.value) return;
   const requestId = approval.value.id;
   approvalBusy.value = true;
@@ -412,7 +458,7 @@ async function resolveApproval(choice) {
   }
 }
 
-async function runTool(call, memberIndex, message) {
+async function runTool(call: { name: string; arguments?: unknown; argumentsTruncated?: boolean }, memberIndex: number, message: ChatItem): Promise<string> {
   if (call.argumentsTruncated) {
     return JSON.stringify({ error: 'ARGUMENTS_TRUNCATED', message: '工具参数被截断，请减少内容后重试' });
   }
@@ -434,7 +480,7 @@ async function runTool(call, memberIndex, message) {
   return JSON.stringify({ error: 'UNKNOWN_TOOL', message: '未知工具：' + call.name });
 }
 
-async function requestMember(index, messages, message) {
+async function requestMember(index: number, messages: HistoryItem[], message: ChatItem): Promise<unknown> {
   let streamed = '';
   let current = messages;
   const tools = members[index].supportsTools === false ? undefined : TOOLS;
@@ -490,7 +536,7 @@ async function requestMember(index, messages, message) {
   return { status: 'error', error: { code: 'TOOL_LOOP_LIMIT', message: '工具轮数超过上限' } };
 }
 
-function readImage(file) {
+function readImage(file: File): Promise<PendingImage> {
   return new Promise((resolve, reject) => {
     const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
     if (allowed.indexOf(file.type) < 0) {
@@ -519,16 +565,16 @@ function readImage(file) {
   });
 }
 
-function clearPendingImage() {
+function clearPendingImage(): void {
   pendingImage.value = null;
   if (imageInput.value) imageInput.value.value = '';
 }
 
-function pickImage() {
+function pickImage(): void {
   if (imageInput.value) imageInput.value.click();
 }
 
-async function onImageChange(event) {
+async function onImageChange(event: Event): Promise<void> {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
   try {
@@ -540,7 +586,7 @@ async function onImageChange(event) {
   }
 }
 
-async function sendGroupMessage() {
+async function sendGroupMessage(): Promise<void> {
   const text = inputText.value.trim();
   if ((!text && !pendingImage.value) || sending.value) return;
   if (!handles.some(Boolean)) {

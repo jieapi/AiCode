@@ -6,9 +6,11 @@ app/build/
 # 插件源码构建工具链
 node_modules/
 
-# SDK 与模板的构建产物
+# SDK、模板与示例插件的构建产物（仓库只保留 src/ 源码）
 /plugins/sdk/dist/
 /plugins/template/dist/
+/plugins/samples/*/dist/
+/plugins/samples/*/pages/
 
 # IDE
 .idea/

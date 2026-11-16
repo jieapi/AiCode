@@ -93,10 +93,24 @@
     confirm-text="确定" cancel-text="取消" @confirm="toast('已确认')"></aicode-dialog>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface GalleryViewData {
+  switchOn: boolean;
+  name: string;
+  description: string;
+  content: string;
+  scope: string;
+  inputDialogOpen: boolean;
+  dialogName: string;
+  dialogOpen: boolean;
+  markdown: string;
+}
+
+export default defineComponent({
   emits: ['open-sheet'],
-  data: function () {
+  data(): GalleryViewData {
     return {
       switchOn: true,
       name: '',
@@ -121,11 +135,11 @@ export default {
     openSheet: function () {
       this.$emit('open-sheet');
     },
-    toast: function (message) {
+    toast: function (message: string) {
       if (window.aicode && aicode.toast) aicode.toast(message);
     }
   }
-};
+});
 </script>
 
 <style>

@@ -1,10 +1,32 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { buildSync } = require('esbuild');
 
-const runtime = path.resolve(__dirname, '..', 'dist', 'main.js');
+const sample = path.resolve(__dirname, '..');
+const sdkEntry = path.resolve(__dirname, '../../../sdk/src/index.ts');
+const runtime = path.join(os.tmpdir(), `aicode-chat-bridge-test-${process.pid}.cjs`);
+buildSync({
+  entryPoints: [path.join(sample, 'src/index.ts')],
+  outfile: runtime,
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node12',
+  logLevel: 'silent',
+  alias: { '@aicode/plugin-sdk': sdkEntry }
+});
+process.on('exit', () => {
+  try {
+    fs.unlinkSync(runtime);
+  } catch {
+    // 临时文件已删除时忽略。
+  }
+});
 const child = spawn(process.execPath, [runtime], { stdio: ['pipe', 'pipe', 'inherit'] });
 const messages = [];
 let missing = '';

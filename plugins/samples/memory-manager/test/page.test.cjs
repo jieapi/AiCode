@@ -5,14 +5,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { transformSync } = require('esbuild');
 
 const pluginDir = path.resolve(__dirname, '..');
 const vueSource = fs.readFileSync(path.join(pluginDir, 'src/pages/memory.vue'), 'utf8');
 const vueScript = [...vueSource.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
-const exportAt = vueScript.indexOf('export default');
-const prelude = vueScript.slice(0, exportAt);
-const optionsSource = vueScript.slice(exportAt + 'export default'.length).replace(/;\s*$/, '');
-const source = `${prelude}\nVue.createApp(${optionsSource}).mount('#app');`;
+const stripped = transformSync(vueScript, { loader: 'ts' }).code
+  .replace(/^import[^;]+;\s*$/gm, '')
+  .replace('export default', 'const __component =');
+const source = `${stripped}\nVue.createApp(__component).mount('#app');`;
 const script = new vm.Script(source, { filename: 'memory.vue' });
 const GLOBAL = '/root/.aicode/memory';
 const PROJECT = '/root/workspace/.aicode/memory';
@@ -127,6 +128,7 @@ function createPage(t, initial = {}, setup = () => {}) {
   let options;
   let state;
   script.runInNewContext({
+    defineComponent: (options) => options,
     Vue: {
       createApp(config) {
         options = config;

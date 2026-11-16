@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -73,6 +75,25 @@ def iter_package_files(sample_dir: Path):
         yield path, relative.as_posix()
 
 
+def build_samples(sample_dirs: list[Path]) -> None:
+    """打包前从 src 重新生成每个插件的 dist/main.js 与 pages/ 产物。"""
+    node = shutil.which("node")
+    if not node:
+        fail("未找到 node，无法从 src 构建插件产物")
+    build_script = ROOT / "plugins/build.mjs"
+    if not build_script.is_file():
+        fail(f"缺少构建脚本: {build_script}")
+    for sample_dir in sample_dirs:
+        print(f"构建 {sample_dir.name} ...", flush=True)
+        result = subprocess.run(
+            [node, str(build_script), "--plugin", sample_dir.name],
+            cwd=ROOT,
+            check=False,
+        )
+        if result.returncode != 0:
+            fail(f"{sample_dir.name} 构建失败")
+
+
 def package_sample(sample_dir: Path, output_dir: Path) -> Path:
     manifest = load_manifest(sample_dir)
     plugin_id = manifest["id"]
@@ -129,6 +150,8 @@ def main() -> int:
         )
     if not sample_dirs:
         fail(f"{SAMPLES_DIR} 下没有找到示例插件")
+
+    build_samples(sample_dirs)
 
     for sample_dir in sample_dirs:
         if not sample_dir.is_dir():

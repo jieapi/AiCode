@@ -32,9 +32,18 @@
   </div>
 </template>
 
-<script>
-export default {
-      data: function () {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface ExternalConfigData {
+  token: string;
+  keys: string[];
+  busy: boolean;
+  result: string;
+}
+
+export default defineComponent({
+      data(): ExternalConfigData {
         return {
           token: '',
           keys: [],
@@ -107,7 +116,7 @@ export default {
           }
         }
       }
-    };
+    });
 </script>
 
 <style>

@@ -46,8 +46,22 @@
   </div>
 </template>
 
-<script>
-var DEFAULT_CONFIG = {
+<script lang="ts">
+import { defineComponent } from 'vue';
+
+interface GalleryConfig {
+  endpoint: string;
+  apiKey: string;
+  environment: string;
+  autoSync: boolean;
+  verboseLog: boolean;
+}
+
+interface ConfigViewData {
+  config: GalleryConfig;
+}
+
+var DEFAULT_CONFIG: GalleryConfig = {
   endpoint: 'https://api.example.com/v1',
   apiKey: '',
   environment: 'prod',
@@ -55,10 +69,10 @@ var DEFAULT_CONFIG = {
   verboseLog: false
 };
 
-export default {
-  data: function () {
+export default defineComponent({
+  data(): ConfigViewData {
     return {
-      config: Object.assign({}, DEFAULT_CONFIG)
+      config: { ...DEFAULT_CONFIG }
     };
   },
   computed: {
@@ -105,7 +119,7 @@ export default {
       }
     }
   }
-};
+});
 </script>
 
 <style>

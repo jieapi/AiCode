@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import path from 'path';
-import { definePlugin, emit, hostCall, log, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, emit, hostCall, log, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
 
 const DATA_DIR =
   process.env.AICODE_DATA_DIR ||
@@ -24,15 +24,30 @@ interface ServerConfig {
   password?: string;
 }
 
+interface PublicServer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  enabled: boolean;
+  auth: 'password' | 'key';
+  status: string;
+  error: string | null;
+}
+
 interface SshChannel {
-  on(event: string, listener: (...args: any[]) => void): void;
+  on(event: 'data', listener: (data: Buffer | string) => void): void;
+  on(event: 'close', listener: (code: number | null) => void): void;
   stderr: SshChannel;
   close(): void;
 }
 
 interface SshClient {
-  on(event: string, listener: (...args: any[]) => void): void;
-  connect(config: object): void;
+  on(event: 'ready', listener: () => void): void;
+  on(event: 'error', listener: (error: Error) => void): void;
+  on(event: 'close', listener: () => void): void;
+  connect(config: ConnectionConfig): void;
   end(): void;
   exec(
     command: string,
@@ -73,20 +88,56 @@ interface ExecResult {
   timedOut: boolean;
 }
 
+interface ServersResult {
+  servers: PublicServer[];
+}
+
+interface ServerStatusResult extends ExecResult {
+  server: PublicServer;
+}
+
+interface ExecToolResult extends ExecResult {
+  serverId: string;
+  command: string;
+}
+
+type ToolStatusResult = ServersResult | ServerStatusResult;
+
+interface StatusArgs extends PluginArgs {
+  serverId?: unknown;
+}
+
+interface ExecArgs extends PluginArgs {
+  serverId?: unknown;
+  command?: unknown;
+  timeout?: unknown;
+}
+
 const connections = new Map<string, Connection>();
 let ssh2: Ssh2Module | null = null;
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readString(args: PluginArgs, key: string, fallback = ''): string {
+  const value = args[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
 function readServers(): ServerConfig[] {
   try {
-    const parsed = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as { servers?: unknown };
-    return Array.isArray(parsed.servers) ? (parsed.servers as ServerConfig[]) : [];
+    const parsed: unknown = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return [];
+    const servers = (parsed as { servers?: unknown }).servers;
+    return Array.isArray(servers) ? (servers as ServerConfig[]) : [];
   } catch {
     return [];
   }
 }
 
 function expandHome(value: unknown): string {
-  const text = String(value || '').trim();
+  const text = String(value ?? '').trim();
   if (text === '~') return process.env.HOME || '/root';
   if (text.startsWith('~/')) return path.join(process.env.HOME || '/root', text.slice(2));
   if (text.startsWith('data://')) return path.join(DATA_DIR, text.slice('data://'.length));
@@ -105,7 +156,7 @@ function getSsh2(): Ssh2Module {
 }
 
 function connectionStatus(serverId: string): string {
-  return connections.get(serverId)?.status || 'offline';
+  return connections.get(serverId)?.status ?? 'offline';
 }
 
 function connectionKey(server: ServerConfig): string {
@@ -118,12 +169,12 @@ function connectionKey(server: ServerConfig): string {
     server.passphrase,
     server.password
   ]
-    .map((value) => String(value == null ? '' : value))
+    .map((value) => String(value ?? ''))
     .join('\u0000');
 }
 
-function publicServer(server: ServerConfig): Record<string, unknown> {
-  const serverId = String(server.id || '');
+function publicServer(server: ServerConfig): PublicServer {
+  const serverId = String(server.id ?? '');
   const conn = connections.get(serverId);
   return {
     id: serverId,
@@ -134,11 +185,11 @@ function publicServer(server: ServerConfig): Record<string, unknown> {
     enabled: server.enabled !== false,
     auth: server.auth === 'password' ? 'password' : 'key',
     status: connectionStatus(serverId),
-    error: conn?.error || null
+    error: conn?.error ?? null
   };
 }
 
-function publicServers(): Array<Record<string, unknown>> {
+function publicServers(): PublicServer[] {
   return readServers().map(publicServer);
 }
 
@@ -173,7 +224,7 @@ function buildConnectionConfig(server: ServerConfig): ConnectionConfig {
 }
 
 function connectServer(server: ServerConfig): Promise<Connection> {
-  if (!server || !server.id) return Promise.reject(new Error('invalid server'));
+  if (!server.id) return Promise.reject(new Error('invalid server'));
   const serverId = String(server.id);
   const configKey = connectionKey(server);
   const existing = connections.get(serverId);
@@ -188,7 +239,7 @@ function connectServer(server: ServerConfig): Promise<Connection> {
   try {
     Client = getSsh2().Client;
   } catch (error) {
-    emitStatus(serverId, 'offline', (error as Error).message);
+    emitStatus(serverId, 'offline', errorMessage(error));
     return Promise.reject(error);
   }
 
@@ -222,13 +273,12 @@ function connectServer(server: ServerConfig): Promise<Connection> {
       clearTimeout(timer);
       conn.pending = null;
       if (conn.closed) {
-        if (error) reject(error);
-        else reject(new Error('连接已关闭'));
+        reject(error ?? new Error('连接已关闭'));
         return;
       }
       if (error) {
         conn.status = 'offline';
-        conn.error = String(error.message || error).slice(0, 300);
+        conn.error = errorMessage(error).slice(0, 300);
         emitStatus(serverId, 'offline', conn.error);
         reject(error);
       } else {
@@ -281,7 +331,7 @@ function bootstrap(): void {
     connectServer(server).catch((error) => {
       void hostCall('host.notify', {
         title: 'SSH 连接失败',
-        body: `${server.name || server.host || server.id}: ${String(error.message || error).slice(0, 200)}`,
+        body: `${server.name || server.host || server.id}: ${errorMessage(error).slice(0, 200)}`,
         key: `ssh-${server.id}`
       }).catch(() => {});
     });
@@ -289,7 +339,7 @@ function bootstrap(): void {
 }
 
 async function ensureConnection(server: ServerConfig): Promise<Connection> {
-  const serverId = String(server.id || '');
+  const serverId = String(server.id ?? '');
   const conn = connections.get(serverId);
   if (conn && conn.status === 'online') return conn;
   return connectServer(server);
@@ -337,7 +387,7 @@ function execRemote(
           if (error) {
             clearTimeout(timer);
             settled = true;
-            resolve({ output: String(error.message || error), exitCode: null, timedOut: false });
+            resolve({ output: errorMessage(error), exitCode: null, timedOut: false });
             return;
           }
           stream = channel;
@@ -356,20 +406,21 @@ function findServer(serverId: string): ServerConfig | undefined {
   return readServers().find((server) => String(server.id) === String(serverId));
 }
 
-const handlers: Record<string, PluginHandler> = {
-  'hooks.boot': () => {
+const handlers = {
+  'hooks.boot': (): { started: true } => {
     void Promise.resolve()
       .then(bootstrap)
       .catch((error) => {
-        log(`bootstrap failed: ${(error as Error).message || error}`);
+        log(`bootstrap failed: ${errorMessage(error)}`);
       });
     return { started: true };
   },
 
-  'tools.list': () => ({ servers: publicServers() }),
+  'tools.list': (): ServersResult => ({ servers: publicServers() }),
 
-  'tools.status': async (args) => {
-    const serverId = args.serverId === undefined ? '' : String(args.serverId);
+  'tools.status': async (rawArgs: PluginArgs): Promise<ToolStatusResult> => {
+    const args = rawArgs as StatusArgs;
+    const serverId = readString(args, 'serverId');
     if (!serverId) return { servers: publicServers() };
     const server = findServer(serverId);
     if (!server) throw new Error(`未知 serverId: ${serverId}`);
@@ -377,11 +428,12 @@ const handlers: Record<string, PluginHandler> = {
     return { server: publicServer(server), ...result };
   },
 
-  'tools.exec': async (args) => {
-    const serverId = String(args.serverId || '');
+  'tools.exec': async (rawArgs: PluginArgs): Promise<ExecToolResult> => {
+    const args = rawArgs as ExecArgs;
+    const serverId = readString(args, 'serverId');
     const server = findServer(serverId);
     if (!server) throw new Error(`未知 serverId: ${serverId}`);
-    const command = String(args.command || '').trim();
+    const command = readString(args, 'command').trim();
     if (!command) throw new Error('command 不能为空');
     if (command.length > 4000) throw new Error('command 过长');
     const timeout = Math.min(
@@ -392,21 +444,23 @@ const handlers: Record<string, PluginHandler> = {
     return { serverId, command, ...result };
   },
 
-  'ui.status': () => ({ servers: publicServers() }),
+  'ui.status': (): ServersResult => ({ servers: publicServers() }),
 
-  'ui.connect': async (args) => {
-    const server = findServer(String(args.serverId || ''));
+  'ui.connect': async (rawArgs: PluginArgs): Promise<{ server: PublicServer }> => {
+    const args = rawArgs as StatusArgs;
+    const server = findServer(readString(args, 'serverId'));
     if (!server) throw new Error('未知服务器');
     await connectServer(server);
     return { server: publicServer(server) };
   },
 
-  'ui.disconnect': (args) => {
-    closeServer(String(args.serverId || ''));
+  'ui.disconnect': (rawArgs: PluginArgs): { ok: true } => {
+    const args = rawArgs as StatusArgs;
+    closeServer(readString(args, 'serverId'));
     return { ok: true };
   },
 
-  'ui.reload': async () => {
+  'ui.reload': async (): Promise<ServersResult> => {
     const servers = readServers();
     const byId = new Map(servers.map((server) => [String(server.id), server]));
     for (const id of Array.from(connections.keys())) {
@@ -420,10 +474,10 @@ const handlers: Record<string, PluginHandler> = {
     await Promise.allSettled(enabled.map((server) => connectServer(server)));
     return { servers: publicServers() };
   }
-};
+} satisfies Record<string, PluginHandler>;
 
-process.on('unhandledRejection', (error) => {
-  log(`ssh-manager unhandled rejection: ${(error as Error)?.message || error}`);
+process.on('unhandledRejection', (error: unknown) => {
+  log(`ssh-manager unhandled rejection: ${errorMessage(error)}`);
 });
 
 definePlugin({ handlers });

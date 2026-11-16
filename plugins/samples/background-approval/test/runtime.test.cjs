@@ -1,13 +1,23 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { buildSync } = require('esbuild');
 
 const sample = path.resolve(__dirname, '..');
-const runtimeSource = fs.readFileSync(path.join(sample, 'dist/main.js'), 'utf8');
+const sdkEntry = path.resolve(__dirname, '../../../sdk/src/index.ts');
+const runtimeSource = buildSync({
+  entryPoints: [path.join(sample, 'src/index.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node12',
+  write: false,
+  logLevel: 'silent',
+  alias: { '@aicode/plugin-sdk': sdkEntry }
+}).outputFiles[0].text;
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function loadRuntime() {
