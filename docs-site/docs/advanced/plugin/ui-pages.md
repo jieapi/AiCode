@@ -163,6 +163,8 @@
 
 所有方法均返回 Promise。失败时 reject 一个包含 `code` 与 `message` 的 Error。每次调用都会校验页面所属插件仍启用且属于同一次安装；停用或替换后的旧页面不能继续读写文件、执行命令或调用其他宿主能力。
 
+TypeScript 页面可直接使用 SDK 的 `@jieapi/plugin-sdk/page` 入口：它按本页的方法表声明了 `window.aicode`，并为 `fs.changed`、`chat.run.finished` 等事件提供 payload 类型，配置方式见[页面类型提示](/advanced/plugin/source-build#页面类型提示)。
+
 ### 基础
 
 | 方法 | 作用 |

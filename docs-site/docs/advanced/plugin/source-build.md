@@ -51,7 +51,7 @@ npm install
 npm run build
 ```
 
-也可以手动复制 `plugins/template/` 目录。模板自带 `package.json`、`build.mjs`、`tsconfig.json` 和一个 echo 工具，依赖已发布的 `@jieapi/plugin-sdk`。
+也可以手动复制 `plugins/template/` 目录。模板自带 `package.json`、`build.mjs`、`build-pages.mjs`、`tsconfig.json`、一个 echo 工具和一个配置页示例 `src/pages/config.vue`，依赖已发布的 `@jieapi/plugin-sdk`。
 
 开始前修改：
 
@@ -63,7 +63,7 @@ npm run build
 模板的命令：
 
 ```bash
-npm run build      # 生成 dist/main.js
+npm run build      # 生成 dist/main.js 与 dist/pages/
 npm run watch      # 监听源码变化
 npm run typecheck  # 类型检查
 ```
@@ -160,6 +160,19 @@ app.mount('#app');
 
 
 `--watch` 会监听 `src/pages` 并重建页面。
+
+模板的 `src/pages/config.vue` 是一个可直接运行的配置页示例：读取 `aicode.context()`、用 `aicode.fs` 读写 `data://config.json`、调用 runtime 的 `tools.echo`，并使用 `aicode-*` 组件；`npm run build` 会同时生成 `dist/main.js` 与 `dist/pages/config.html`，模板统一把运行时与页面产物放在 `dist/` 下。
+
+## 页面类型提示
+
+页面桥的类型由 SDK 按子路径导出：
+
+| 入口 | 作用 |
+| --- | --- |
+| `@jieapi/plugin-sdk/page` | 声明 `window.aicode`、全局 `aicode` 与 `AicodeUI`，覆盖 `context`、`fs`、`chat`、`model`、`tools`、`overlay` 等全部页面桥方法、返回值与事件 payload |
+| `@jieapi/plugin-sdk/page/vue` | 把 `aicode-*` 组件并入 Vue 的 `GlobalComponents`，模板里可补全组件名与 props |
+
+模板的 `types/env.d.ts` 已经引入这两个入口。页面脚本改用 `<script setup lang="ts">` 或 `.ts` 后即可获得参数、返回值与错误码提示，`npm run typecheck` 会把类型错误当作失败。类型声明只用于编辑器与类型检查，`vue` 也只是类型依赖；构建产物仍使用宿主注入的 `/__aicode/vue.global.prod.js`。
 
 ## 第三方依赖
 

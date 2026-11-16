@@ -11,10 +11,17 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./page": {
+      "types": "./types/aicode.d.ts"
+    },
+    "./page/vue": {
+      "types": "./types/aicode-vue.d.ts"
     }
   },
   "files": [
     "dist",
+    "types",
     "LICENSE"
   ],
   "engines": {

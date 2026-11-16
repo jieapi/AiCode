@@ -9,8 +9,8 @@
   "publisher": "example",
   "repository": "https://github.com/example/hello-plugin",
   "description": {
-    "default": "A minimal AiCode plugin built from TypeScript.",
-    "zh-CN": "用 TypeScript 构建的最小 AiCode 插件。"
+    "default": "A minimal AiCode plugin built from TypeScript, with an echo tool and a config page example.",
+    "zh-CN": "用 TypeScript 构建的最小 AiCode 插件，包含 echo 工具与配置页示例。"
   },
   "license": "MIT",
   "engines": {
@@ -21,6 +21,7 @@
     "entry": "dist/main.js"
   },
   "contributes": {
+    "configPage": "dist/pages/config.html",
     "tools": [
       {
         "id": "echo",

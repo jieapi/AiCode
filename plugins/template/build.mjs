@@ -1,6 +1,8 @@
 import { build, context } from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import { existsSync, watch } from 'node:fs';
 import path from 'node:path';
+import { buildPluginPages } from './build-pages.mjs';
 
 const args = new Set(process.argv.slice(2));
 const manifest = JSON.parse(await readFile('plugin.json', 'utf8'));
@@ -24,11 +26,37 @@ const options = {
   logLevel: 'warning'
 };
 
+async function buildPages() {
+  const pages = await buildPluginPages(process.cwd(), { minify: args.has('--minify') });
+  for (const page of pages) {
+    const kib = (page.size / 1024).toFixed(1);
+    console.log(`构建页面 -> ${path.relative(process.cwd(), page.output)} (${kib} KiB)`);
+  }
+}
+
 if (args.has('--watch')) {
   const ctx = await context(options);
   await ctx.watch();
-  console.log('正在监听 src/，按 Ctrl+C 退出');
+  await buildPages();
+
+  const pagesDir = path.join(process.cwd(), 'src/pages');
+  let timer;
+  const rebuild = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      buildPages().catch((error) => console.error(`页面构建失败: ${error.message}`));
+    }, 150);
+  };
+  if (existsSync(pagesDir)) {
+    try {
+      watch(pagesDir, { recursive: true }, rebuild);
+    } catch {
+      watch(pagesDir, rebuild);
+    }
+  }
+  console.log('正在监听 src/ 与 src/pages/，按 Ctrl+C 退出');
 } else {
   await build(options);
+  await buildPages();
   console.log(`构建完成 -> ${path.relative(process.cwd(), outfile)}`);
 }
