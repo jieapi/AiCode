@@ -2,10 +2,15 @@
 
 `plugin.json` 是插件的唯一入口声明。宿主仅加载清单中列出的内容；无法识别的字段和贡献类型将直接拒绝安装，不会静默忽略。
 
+清单有配套的 JSON Schema（`plugins/schema/plugin.schema.json`）：在编辑器里给 `plugin.json` 加上 `"$schema": "…/plugin.schema.json"`（相对路径指向该文件）后，字段名写错或类型不对会直接红线，还有字段补全与枚举提示。`$schema` 只给编辑器用，宿主会忽略它的内容。
+
+独立项目不在本仓库里，相对路径指不到那份 schema，可以把它复制进自己的仓库，或改成仓库的 raw 地址（`https://raw.githubusercontent.com/jieapi/AiCode/main/plugins/schema/plugin.schema.json`）；使用 `plugins/template` 开始的项目默认已指向仓库内路径，搬出去时改这一行即可。
+
 ## 顶层字段
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
+| `$schema` | 否 | JSON Schema 地址，仅编辑器使用；宿主忽略 |
 | `manifestVersion` | 是 | 固定为整数 `1` |
 | `id` | 是 | 稳定插件标识，格式 `发布者.插件名` |
 | `name` | 是 | 展示名称，字符串或按语言的对象，最多 80 字符，不能换行 |

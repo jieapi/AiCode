@@ -61,6 +61,21 @@ jobs:
       - name: Check migration versions
         run: python3 scripts/check_migrations.py
 
+      # 插件 host 方法表对账：宿主 PluginRuntimeManager 的 host.* 分支与
+      # plugins/sdk/types/host.d.ts 的 HostMethodMap 必须一一对应，改宿主忘改 SDK 会在这里被拦。
+      - name: Check plugin host methods
+        run: node scripts/check-host-methods.mjs
+
+      # 插件页面桥对账：PluginWebBridge / PluginOverlayBridge 的 dispatch 分支与
+      # assets/plugin-ui/aicode.js 的 call(...) 必须一一对应，否则运行期 METHOD_UNKNOWN。
+      - name: Check plugin page bridge
+        run: node scripts/check-page-bridge.mjs
+
+      # 插件清单校验：用 plugins/schema/plugin.schema.json 校验仓库内所有 plugin.json，
+      # 字段写错在 CI 就暴露，不用等装到设备上被 PluginManifestParser 拒绝。
+      - name: Check plugin manifests
+        run: node scripts/check-plugin-manifests.mjs
+
       # 镜像目录同步脚本的离线自测：锁住 Alpine/Ubuntu/Debian 三套解析器对上游格式的假设，
       # 上游改版式时在 PR 阶段就暴露，而不是等每日定时任务悄悄失败。
       - name: Self-test container image sync script

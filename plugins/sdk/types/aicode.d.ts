@@ -371,6 +371,7 @@ export interface ChatRunStateResult {
 }
 
 export interface ChatWaitForRunResult {
+  sessionId: string;
   timedOut: boolean;
   run: ChatRun;
 }
@@ -739,7 +740,10 @@ export interface AicodeBridge {
 
   /** 在对话中显示可关闭提示条；按钮点击回调同插件进程的 handler。 */
   tip(options: { title?: string; text: string; action?: { label: string; handler: string } }): Promise<{
-    ok: boolean;
+    /** 提示条实例 ID。 */
+    tipId: string;
+    /** 是否已入队；宿主同一时刻只展示有限条提示。 */
+    queued: boolean;
   }>;
 
   app: {

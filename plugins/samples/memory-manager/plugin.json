@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/plugin.schema.json",
   "manifestVersion": 1,
   "id": "demo.memory",
   "name": {

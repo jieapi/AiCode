@@ -1,0 +1,372 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jieapi/AiCode/plugins/schema/plugin.schema.json",
+  "title": "AiCode 插件清单 plugin.json",
+  "description": "字段与宿主 PluginManifestParser 一致。解析器同样拒绝未知字段，所以每一层都是 additionalProperties: false——写错字段名在编辑器里就会红线，不用装上去试。改清单字段时必须同步改本文件与 PluginManifestParser。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestVersion",
+    "id",
+    "name",
+    "version",
+    "publisher",
+    "repository",
+    "description",
+    "license",
+    "engines",
+    "contributes"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "编辑器用的 JSON Schema 地址；宿主解析时忽略。"
+    },
+    "manifestVersion": {
+      "const": 1,
+      "description": "清单格式版本，目前只能为 1。"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9-]{0,31}$",
+      "description": "全局唯一标识，形如 publisher.name，两段都是小写字母开头、各最长 32 字符。"
+    },
+    "name": { "$ref": "#/$defs/localizedText80" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?$",
+      "description": "语义化版本，如 1.0.0。"
+    },
+    "publisher": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "repository": {
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^https://",
+      "description": "必须是 https 地址，且带主机名与路径，不能含账号、查询串或锚点。"
+    },
+    "description": { "$ref": "#/$defs/localizedText600" },
+    "license": { "type": "string", "maxLength": 100 },
+    "icon": {
+      "type": "string",
+      "description": "内置图标标识符，或以 .png / .webp 结尾的包内相对路径。"
+    },
+    "engines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pluginApi"],
+      "properties": {
+        "pluginApi": {
+          "type": "string",
+          "pattern": "^(\\^|~|>=|=)?\\d+\\.\\d+\\.\\d+(\\s+[<>]=?\\d+\\.\\d+\\.\\d+)?$",
+          "description": "宿主插件 API 版本范围。写法限 ^1.0.0、~1.0.0、>=1.0.0 <2.0.0、1.0.0 这几种，且必须包含宿主当前版本。"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "entry"],
+      "description": "进程运行时。声明了 tools / hooks / sessionSources / 带 handler 的 uiEntries 时必须提供。",
+      "properties": {
+        "type": { "enum": ["javascript", "python"] },
+        "entry": { "$ref": "#/$defs/packagePath" },
+        "command": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "maxLength": 200 },
+          "description": "覆盖启动命令，直接交给 execve，不经 shell。"
+        },
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool", "file"],
+          "properties": {
+            "tool": { "type": "string" },
+            "file": { "$ref": "#/$defs/packagePath" }
+          }
+        },
+        "resident": {
+          "type": "boolean",
+          "description": "为 true 时进程不参与空闲回收，直到插件停用、卸载、版本替换或 App 进程结束。"
+        }
+      }
+    },
+    "configPage": { "$ref": "#/$defs/packagePath" },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configPage": { "$ref": "#/$defs/packagePath" },
+        "skills": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/contributionRef" }
+        },
+        "agents": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/contributionRef" }
+        },
+        "mcp": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/contributionRef" }
+        },
+        "tools": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "description", "inputSchema", "handler"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "inputSchema": { "$ref": "#/$defs/packagePath" },
+              "handler": { "$ref": "#/$defs/handlerName" }
+            }
+          }
+        },
+        "hooks": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "event", "handler"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "event": { "$ref": "#/$defs/hookEvent" },
+              "handler": { "$ref": "#/$defs/handlerName" },
+              "mode": {
+                "enum": ["observe", "transform", "review"],
+                "default": "observe",
+                "description": "只读观察 / 可改写 payload / 可参与审批判定。部分事件只接受特定模式。"
+              }
+            }
+          }
+        },
+        "uiEntries": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "slot", "title"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "slot": { "$ref": "#/$defs/uiSlot" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "page": { "$ref": "#/$defs/packagePath" },
+              "handler": { "$ref": "#/$defs/handlerName" },
+              "confirm": { "type": "boolean" },
+              "icon": { "type": "string" }
+            }
+          }
+        },
+        "workspaceTools": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "description", "pageFile"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "icon": { "type": "string", "maxLength": 32 },
+              "category": { "type": "string", "maxLength": 32 },
+              "pageFile": { "$ref": "#/$defs/packagePath" }
+            }
+          }
+        },
+        "providers": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "description", "format", "baseUrl"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "name": { "$ref": "#/$defs/localizedText80" },
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "format": { "const": "openai" },
+              "baseUrl": { "type": "string", "maxLength": 2048, "pattern": "^https?://" }
+            }
+          }
+        },
+        "sessionSources": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "handlers"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "handlers": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "listSessions": { "$ref": "#/$defs/handlerName" },
+                  "readSession": { "$ref": "#/$defs/handlerName" },
+                  "sendMessage": { "$ref": "#/$defs/handlerName" },
+                  "interruptSession": { "$ref": "#/$defs/handlerName" },
+                  "createSession": { "$ref": "#/$defs/handlerName" }
+                }
+              }
+            }
+          }
+        },
+        "shizuku": { "$ref": "#/$defs/purposeRef" },
+        "backup": { "$ref": "#/$defs/purposeRef" },
+        "modelAccess": { "$ref": "#/$defs/purposeRef" },
+        "overlay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["purpose"],
+          "properties": {
+            "purpose": { "type": "string", "maxLength": 200 },
+            "surfaces": {
+              "type": "array",
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "page"],
+                "properties": {
+                  "id": { "$ref": "#/$defs/localId" },
+                  "page": { "$ref": "#/$defs/packagePath" },
+                  "width": { "type": "integer", "minimum": 48, "maximum": 720 },
+                  "height": { "type": "integer", "minimum": 48, "maximum": 1200 },
+                  "draggable": { "type": "boolean" },
+                  "snap": { "enum": ["none", "x", "y", "both"] }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "localId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+      "description": "插件内唯一 ID，字母开头，最长 64 字符。"
+    },
+    "handlerName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$",
+      "description": "运行时 handler 表中的键。"
+    },
+    "packagePath": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^(?!/)(?!.*\\.\\.)(?!.*\\\\)[^\\u0000]+$",
+      "description": "包内相对路径：不以 / 开头，不含 .. 或反斜杠，最长 200 字符。"
+    },
+    "purposeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose"],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "向使用者说明用途，会展示在授权界面上。"
+        }
+      }
+    },
+    "contributionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "file": { "$ref": "#/$defs/packagePath" }
+      }
+    },
+    "uiSlot": {
+      "enum": [
+        "settings.general",
+        "settings.ai",
+        "settings.environment",
+        "settings.permissions",
+        "settings.data",
+        "settings.help",
+        "drawer.footer",
+        "chat.header.menu",
+        "chat.welcome",
+        "chat.session.menu",
+        "files.tree.menu",
+        "editor.selection.menu",
+        "backup.data"
+      ],
+      "description": "宿主挂载点，取值见 PluginUiSlots。files.tree.menu 与 editor.selection.menu 只接受动作入口，backup.data 只接受数据选项。"
+    },
+    "hookEvent": {
+      "enum": [
+        "app.started",
+        "agent.run.started",
+        "agent.run.finished",
+        "agent.request.started",
+        "agent.request.finished",
+        "agent.tool.started",
+        "agent.tool.finished",
+        "agent.compaction",
+        "agent.tool.before",
+        "agent.tool.after",
+        "agent.http.before",
+        "agent.permission.review",
+        "plugin.installed",
+        "plugin.uninstalled",
+        "plugin.enabled",
+        "plugin.disabled",
+        "backup.export.before",
+        "backup.import.finished"
+      ],
+      "description": "生命周期事件，取值见 PluginHookEvents。backup.* 事件必须同时声明 contributes.backup。"
+    },
+    "localizedText80": {
+      "description": "纯字符串，或 { default, \"zh-CN\": … } 形式的本地化对象；单条文本上限 80。没有 default 时宿主回退到 en，再回退到第一个值。",
+      "oneOf": [
+        { "type": "string", "maxLength": 80 },
+        { "$ref": "#/$defs/localizedObject80" }
+      ]
+    },
+    "localizedText600": {
+      "description": "纯字符串，或 { default, \"zh-CN\": … } 形式的本地化对象；单条文本上限 600，可含换行。",
+      "oneOf": [
+        { "type": "string", "maxLength": 600 },
+        { "$ref": "#/$defs/localizedObject600" }
+      ]
+    },
+    "localizedObject80": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "patternProperties": {
+        "^([Dd]efault|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$": { "type": "string", "maxLength": 80 }
+      },
+      "additionalProperties": false,
+      "description": "键是 default 或语言标签（zh-CN、en…），全部为字符串；zh_CN 与 zh-cn 视为同一个。"
+    },
+    "localizedObject600": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "patternProperties": {
+        "^([Dd]efault|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$": { "type": "string", "maxLength": 600 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

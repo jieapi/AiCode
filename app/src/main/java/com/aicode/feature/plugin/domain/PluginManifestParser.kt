@@ -42,6 +42,8 @@ object PluginManifestParser {
         ManifestParseResult.Failure(listOf(PluginError(code, detail)))
 
     private val TOP_LEVEL_KEYS = setOf(
+        // 仅给编辑器（JSON Schema）用，宿主不解析其内容。
+        "\$schema",
         "manifestVersion", "id", "name", "version", "publisher", "repository",
         "description", "license", "engines", "runtime", "contributes", "configPage", "icon"
     )
