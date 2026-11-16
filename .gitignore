@@ -3,6 +3,13 @@
 build/
 app/build/
 
+# 插件源码构建工具链
+node_modules/
+
+# SDK 与模板的构建产物
+/plugins/sdk/dist/
+/plugins/template/dist/
+
 # IDE
 .idea/
 *.iml
