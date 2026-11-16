@@ -328,4 +328,4 @@ if (result.final.images) {
 
 - 宿主工具目录与执行细节：[AI 工具与插件运行时](/advanced/plugin/tools-runtime)
 - 页面桥的完整方法表：[插件页面与宿主接口](/advanced/plugin/ui-pages)
-- 完整群聊示例：`plugin-samples/team-chat`
+- 完整群聊示例：`plugins/samples/team-chat`

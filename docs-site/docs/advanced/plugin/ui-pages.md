@@ -2,6 +2,8 @@
 
 插件使用 HTML/WebView 构建界面，共有三类入口：工作区工具、槽位入口（设置页 / 侧栏 / 顶栏 / 空态 / 会话菜单 / 文件树 / 编辑器选区 / 备份页）、插件配置页。页面通过宿主注入的 `window.aicode` 桥读写数据、执行命令、订阅变化。
 
+页面源码可以放在 `src/pages/`，用 Vue SFC + Vite 构建成 `pages/*.html` 与 `pages/assets/*`；构建方式见[用 TypeScript 编写与构建插件](/advanced/plugin/source-build#页面构建)。
+
 ## 三种页面
 
 | 类型 | 声明位置 | 入口 | 典型用途 |
@@ -109,6 +111,12 @@
 
 配置页仅出现在「设置 → 插件」的插件详情中，与启停、卸载等原生项通过分段控件切换，不会混入设置主菜单。配置页仅在插件启用时加载和预热，适用于填写 API Key、开关和选项。停用、卸载或替换安装会使旧页面桥失效并取消该桥的在途任务、文件订阅和模型流；重新启用后需要重新打开页面，旧桥不会恢复授权。
 
+### 一个加载入口承载多个视图
+
+同一插件的多个入口不必各留一份 HTML 壳和启动脚本。可以让 `uiEntries[].page` 与 `configPage` 指向同一个 HTML 加载器，在加载器里用 `aicode.context()` 的 `pageId` 判断入口（配置页为 `config`），再用 vue-router 的 hash 路由（`#/gallery` / `#/config`）选择独立视图。路由由入口决定，页面上不必放切换控件；视图代码仍可拆成多个 `.vue` 文件，共用一份入口和公共样式；清单里的多个入口可以指向同一个页面文件，宿主仍按入口分别创建页面桥与缓存。
+
+示例见[示例库](/advanced/plugin/examples)中的 `ui-gallery`。
+
 ## 加载资源
 
 页面中引用宿主提供的脚本和样式：
@@ -131,6 +139,17 @@
 `/__aicode/theme.css` 提供跟随 App 主题的 CSS 变量，`/__aicode/aicode.js` 注入 `window.aicode`。页面资源仅能从插件包经虚拟域加载，外部链接会被宿主拦截。
 
 页面文件最大 512 KiB。`uiEntries` 的 `page` 入口和 `workspaceTools` 的 `pageFile` 必须是包内 `.html`/`.htm`；`handler` 入口不涉及页面文件。
+
+## 页面路由
+
+宿主还提供 `/__aicode/vue-router.global.prod.js`（Vue Router 4.x 的官方 global prod 构建）。需要路由的页面在 Vue 之后引入它：
+
+```html
+<script src="/__aicode/vue.global.prod.js"></script>
+<script src="/__aicode/vue-router.global.prod.js"></script>
+```
+
+然后使用 `VueRouter.createRouter(VueRouter.createWebHashHistory(), routes)` 与 `<router-view>`。必须使用 hash 模式：`createWebHistory()` 生成的路径会被 WebView 的主框架导航拦截。系统返回手势仍通过 `aicode.ui.onBack` 交给页面，页面需要把返回接到 `router.back()` 或 `router.replace('/gallery')`。
 
 ## 安全边界与资源缓存
 

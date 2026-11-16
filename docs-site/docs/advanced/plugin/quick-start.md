@@ -174,6 +174,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 
 `runtime` 支持 `javascript`（使用 `node` 启动）和 `python`（使用 `python3` 启动）；也可通过 `command` 覆盖启动命令。容器缺少 node 或 python3 时，请先在终端完成「环境安装」。
 
+业务逻辑较多时，建议用 TypeScript 分模块编写并构建成入口文件，避免在单个 `main.js` 里堆叠协议循环与全部 handler，参见[用 TypeScript 编写与构建插件](/advanced/plugin/source-build)。
+
 ## 4. 打包
 
 在插件目录中执行，注意命令末尾的 `.`：

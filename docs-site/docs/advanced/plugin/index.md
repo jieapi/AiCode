@@ -53,7 +53,7 @@ demo-kit/
     └── config.html
 ```
 
-`plugin.json` 必须位于压缩包根部，不可再嵌套一层目录。清单声明包内内容，宿主仅按清单加载，不会扫描未声明的文件。
+`plugin.json` 必须位于压缩包根部，不可再嵌套一层目录。清单声明包内内容，宿主仅按清单加载，不会扫描未声明的文件。业务逻辑较多时，可用 `src/` 编写 TypeScript 源码并构建出 `dist/main.js`，参见[用 TypeScript 编写与构建插件](/advanced/plugin/source-build)。
 
 ## 信任边界
 
@@ -69,13 +69,14 @@ demo-kit/
 
 1. [快速开始](/advanced/plugin/quick-start)：创建可导入的最小插件，并了解开发者侧载。
 2. [plugin.json 清单参考](/advanced/plugin/manifest)：查阅各字段的必填性、取值与限制。
-3. 按需阅读能力章节：声明式能力参见[技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp)，业务逻辑参见[AI 工具与插件运行时](/advanced/plugin/tools-runtime)，拦截与代审核参见[生命周期 Hooks](/advanced/plugin/hooks)。
-4. 需要界面时，参见[插件页面与宿主接口](/advanced/plugin/ui-pages)和[页面样式、组件与事件](/advanced/plugin/ui-components)；需要悬浮窗时参见[系统浮层](/advanced/plugin/overlay)。
-5. 最后阅读[打包、导入与排错](/advanced/plugin/packaging)，以及[示例库](/advanced/plugin/examples)中的完整项目。
+3. [用 TypeScript 编写与构建插件](/advanced/plugin/source-build)：用源码与共享 SDK 替代手写 `main.js`。
+4. 按需阅读能力章节：声明式能力参见[技能、子代理与 MCP](/advanced/plugin/skills-agents-mcp)，业务逻辑参见[AI 工具与插件运行时](/advanced/plugin/tools-runtime)，拦截与代审核参见[生命周期 Hooks](/advanced/plugin/hooks)。
+5. 需要界面时，参见[插件页面与宿主接口](/advanced/plugin/ui-pages)和[页面样式、组件与事件](/advanced/plugin/ui-components)；需要悬浮窗时参见[系统浮层](/advanced/plugin/overlay)。
+6. 最后阅读[打包、导入与排错](/advanced/plugin/packaging)，以及[示例库](/advanced/plugin/examples)中的完整项目。
 
 ## 示例库
 
-仓库的 `plugin-samples/` 目录提供覆盖各项能力的完整插件，可侧载后直接修改：
+仓库的 `plugins/samples/` 目录提供覆盖各项能力的完整插件，可侧载后直接修改：
 
 | 示例 | 演示内容 |
 | --- | --- |

@@ -243,7 +243,7 @@ const handlers = {
 
 需要用户在后台确认时，插件可创建 `visibilityPolicy: "background"` 的浮层并轮询 `host.app.isForeground`；App 回到前台后应返回 `pass`，将请求交回应用内确认框，避免审批持续至超时。
 
-完整实现参见 `plugin-samples/background-approval`：`app.started` 时创建悬浮球，`agent.permission.review` 将审批请求展开为面板，用户在浮层上选择同意或拒绝；App 在前台时直接返回 `pass`。
+完整实现参见 `plugins/samples/background-approval`：`app.started` 时创建悬浮球，`agent.permission.review` 将审批请求展开为面板，用户在浮层上选择同意或拒绝；App 在前台时直接返回 `pass`。
 
 ## 执行顺序与超时
 

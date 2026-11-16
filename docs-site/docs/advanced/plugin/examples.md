@@ -1,6 +1,6 @@
 # 示例库
 
-仓库的 `plugin-samples/` 目录提供一组可直接侧载的完整插件。每个示例仅演示一至两项能力，可先运行再修改。
+仓库的 `plugins/samples/` 目录提供一组可直接侧载的完整插件。每个示例仅演示一至两项能力，可先运行再修改。
 
 ## 运行示例
 
@@ -21,7 +21,7 @@
 | `team-chat` | `demo.team-chat` | 设置页多模型群聊、模型句柄流式轮流请求、工具调用与审批、图片输入 | 模型句柄 |
 | `backup-helper` | `jieapi.backup-helper` | 把记忆、技能、MCP、子代理写入宿主备份包；`backup.data` 数据选项、备份与还原事件、独立授权 | 备份事件与授权 |
 | `dev-tools` | `community.dev-tools` | 两个工作区工具页面，调用 `aicode.bash` | 工作区工具 |
-| `ui-gallery` | `demo.gallery` | 设置页、侧栏与顶栏槽位入口、配置页、宿主 Vue 组件库 | 页面组件 |
+| `ui-gallery` | `demo.gallery` | 设置页/侧栏/顶栏槽位入口、配置页、一个加载入口承载多个视图（vue-router）、宿主 Vue 组件库 | 页面组件 |
 | `memory-manager` | `demo.memory` | 设置页读写全局与项目记忆、文件订阅、返回键 | 设置页与文件订阅 |
 | `background-approval` | `demo.background-approval` | 后台审批浮层、代审核 hook、`app.isForeground` | 代审核 |
 | `provider-demo` | `demo.provider` | OpenAI 兼容提供商、常驻进程、`app.started` | 提供商 |
@@ -59,6 +59,8 @@
 ## capability-demo
 
 演示插件级 Shizuku 授权、对话提示条、输入框写入 API 与文件/选区动作入口。
+
+该示例采用 `src/` TypeScript 源码与 `dist/main.js` 构建产物的结构，可作为[源码构建方式](/advanced/plugin/source-build)的参考。
 
 - `show-tip` 工具调用 `host.tip`，在对话中显示一条可关闭提示；
 - `shizuku-command` 工具通过 `host.shizuku.exec` 执行只读 `settings` 命令；
@@ -113,11 +115,11 @@
 
 ## ui-gallery
 
-演示槽位入口和插件配置页：
+演示槽位入口、插件配置页，以及一个加载入口承载多个独立视图：
 
 - `uiEntries` 将「组件演示」挂载到 `settings.help`、侧栏底部与聊天顶栏菜单；
-- `configPage` 演示配置读取、保存、重置；
-- 页面展示宿主 Vue 组件库的输入框、文本域、对话框和底部弹层。
+- `configPage` 与这三个入口都指向 `pages/index.html`：加载器按 `aicode.context().pageId` 判断入口（配置页为 `config`），再用宿主提供的 vue-router hash 路由选择视图；组件演示入口固定 `/gallery`，配置页固定 `/config`，页面上不放切换控件；
+- `GalleryView.vue` 展示宿主 Vue 组件库的输入框、文本域、对话框和底部弹层，`ConfigView.vue` 演示配置读取、保存、重置；两个视图和加载器分开，共用一份 HTML 壳与公共样式。
 
 配置持久化使用 `data://config.json`：
 

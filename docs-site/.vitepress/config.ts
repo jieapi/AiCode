@@ -205,6 +205,7 @@ export default defineConfig({
               items: [
                 { text: '总览与能力清单', link: '/advanced/plugin/' },
                 { text: '快速开始', link: '/advanced/plugin/quick-start' },
+                { text: '用 TypeScript 编写与构建插件', link: '/advanced/plugin/source-build' },
                 { text: 'plugin.json 清单参考', link: '/advanced/plugin/manifest' },
                 { text: '技能、子代理与 MCP', link: '/advanced/plugin/skills-agents-mcp' },
                 { text: 'AI 工具与插件运行时', link: '/advanced/plugin/tools-runtime' },

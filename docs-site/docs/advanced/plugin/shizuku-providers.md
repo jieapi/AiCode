@@ -47,7 +47,7 @@ const result = await hostCall('host.shizuku.exec', {
 
 ### 示例
 
-`plugin-samples/capability-demo` 声明了 `contributes.shizuku`，提供两个 AI 工具：
+`plugins/samples/capability-demo` 声明了 `contributes.shizuku`，提供两个 AI 工具：
 
 - `show-tip` 在对话中显示可关闭的提示条；
 - `shizuku-command` 通过 Shizuku 执行一条只读 `settings` 命令。

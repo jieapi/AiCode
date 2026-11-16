@@ -2,6 +2,8 @@
 
 ## 打包
 
+插件的运行时入口由 TypeScript 构建产生时，请先在仓库根目录执行 `npm --prefix plugins run build:plugins`，再打包目录；构建流程参见[用 TypeScript 编写与构建插件](/advanced/plugin/source-build)。
+
 在插件目录中执行，注意命令末尾的 `.`：
 
 ```bash
