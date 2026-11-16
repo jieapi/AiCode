@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { URL } from 'url';
-import { definePlugin, hostCall, log, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, log, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const HOST = '127.0.0.1';
 const PORT = 18080;

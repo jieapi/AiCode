@@ -18,7 +18,7 @@ buildSync({
   format: 'cjs',
   target: 'node12',
   logLevel: 'silent',
-  alias: { '@aicode/plugin-sdk': sdkEntry }
+  alias: { '@jieapi/plugin-sdk': sdkEntry }
 });
 process.on('exit', () => {
   try {

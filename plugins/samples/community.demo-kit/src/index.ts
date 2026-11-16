@@ -1,4 +1,4 @@
-import { definePlugin, emit, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, emit, hostCall, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const ENV_BASENAME = /^\.env(?:\..+)?$/i;
 const ENV_TOKEN = /(^|[\s"'`=<>|;&()/*?\\])\.env(?:\.[A-Za-z0-9._-]+)?($|[\s"'`<>|;&()/*?\\])/i;

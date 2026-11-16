@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import path from 'path';
-import { definePlugin, emit, hostCall, log, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, emit, hostCall, log, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const DATA_DIR =
   process.env.AICODE_DATA_DIR ||

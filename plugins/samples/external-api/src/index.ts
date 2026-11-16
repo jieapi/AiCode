@@ -1,4 +1,4 @@
-import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const ENDPOINT = 'https://httpbin.org/bearer';
 const SECRET_KEY = 'api-token';

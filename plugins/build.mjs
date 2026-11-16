@@ -24,7 +24,7 @@ const PLUGIN_ROOTS = ['plugins/samples', 'plugin-official'];
 const ENTRY_CANDIDATES = ['src/index.ts', 'src/main.ts'];
 const DEFAULT_OUTPUT = 'dist/main.js';
 const SDK_ALIAS = {
-  '@aicode/plugin-sdk': path.join(ROOT, 'plugins/sdk/src/index.ts')
+  '@jieapi/plugin-sdk': path.join(ROOT, 'plugins/sdk/src/index.ts')
 };
 const MAX_ENTRY_BYTES = 512 * 1024;
 

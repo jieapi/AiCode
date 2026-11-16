@@ -1,4 +1,4 @@
-import { definePlugin, emit, type JsonValue, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, emit, type JsonValue, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const REVIEW_TIMEOUT_MS = 4.5 * 60 * 1000;
 let reviewSeq = 0;

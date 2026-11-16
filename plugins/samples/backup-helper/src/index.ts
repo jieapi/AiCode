@@ -1,4 +1,4 @@
-import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 1500;

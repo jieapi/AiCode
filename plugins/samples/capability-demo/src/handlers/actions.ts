@@ -1,4 +1,4 @@
-import { hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { hostCall, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 interface FileInfoArgs extends PluginArgs {
   path?: unknown;

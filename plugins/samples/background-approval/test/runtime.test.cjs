@@ -16,7 +16,7 @@ const runtimeSource = buildSync({
   target: 'node12',
   write: false,
   logLevel: 'silent',
-  alias: { '@aicode/plugin-sdk': sdkEntry }
+  alias: { '@jieapi/plugin-sdk': sdkEntry }
 }).outputFiles[0].text;
 const flush = () => new Promise(resolve => setImmediate(resolve));
 

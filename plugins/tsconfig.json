@@ -11,7 +11,7 @@
     "noUnusedParameters": true,
     "types": ["node"],
     "paths": {
-      "@aicode/plugin-sdk": ["./sdk/src/index.ts"],
+      "@jieapi/plugin-sdk": ["./sdk/src/index.ts"],
       "@jieapi/plugin-sdk/page": ["./sdk/types/aicode.d.ts"],
       "@jieapi/plugin-sdk/page/vue": ["./sdk/types/aicode-vue.d.ts"]
     }
@@ -23,6 +23,7 @@
     "samples/**/*.ts",
     "samples/**/*.d.ts",
     "../plugin-official/*/src/**/*.ts",
-    "template/types/**/*.d.ts"
+    "template/types/**/*.d.ts",
+    "template/src/**/*.ts"
   ]
 }

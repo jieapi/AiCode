@@ -1,4 +1,4 @@
-import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@aicode/plugin-sdk';
+import { definePlugin, hostCall, type PluginArgs, type PluginHandler } from '@jieapi/plugin-sdk';
 
 const BALL_SIZE = 48;
 const REVIEW_TIMEOUT_MS = 4.5 * 60 * 1000;

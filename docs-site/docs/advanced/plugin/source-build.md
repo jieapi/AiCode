@@ -212,7 +212,7 @@ import '@jieapi/plugin-sdk/page/vue';
 | `plugins/build-pages.mjs` | Vue SFC 页面构建 |
 | `plugins/tsconfig.json` | 共享类型检查配置 |
 
-仓库内的运行时使用 `@aicode/plugin-sdk` 别名，映射到 `plugins/sdk/src/index.ts`；独立项目使用已发布的 `@jieapi/plugin-sdk`。页面类型入口保持一致。
+运行时 SDK 统一用 `@jieapi/plugin-sdk` 引入：仓库内由 `plugins/tsconfig.json` 与 `plugins/build.mjs` 的别名映射到 `plugins/sdk/src/index.ts`，独立项目直接安装已发布的包；两种方式同一套类型，包括 `hostCall` 的方法名与入参声明。页面类型入口（`@jieapi/plugin-sdk/page`、`@jieapi/plugin-sdk/page/vue`）保持一致。
 
 在仓库根目录执行，`<目录名>` 替换为插件的实际目录名：
 
