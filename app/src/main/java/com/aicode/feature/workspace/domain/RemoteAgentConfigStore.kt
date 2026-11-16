@@ -41,7 +41,14 @@ internal data class RemoteAgentConfigKey(
     }
 }
 
-internal class RemoteAgentConfigIdentityChangedException : IOException("Remote configuration connection identity changed")
+/**
+ * 连接身份（主机 / 端口 / 用户 / 主目录 / 工作区 / 连接代次）在读取过程中发生了变化。
+ *
+ * 典型场景是刚好连上或重连：用旧键取到的清单对新连接无效。这是**瞬态竞态**而非故障，
+ * [RemoteAgentConfigCache] 会重新派生键重读；上层把它当作“等待连接就绪”处理，
+ * 不要当成配置损坏或读取失败上报。
+ */
+class RemoteAgentConfigIdentityChangedException : IOException("Remote configuration connection identity changed")
 
 internal interface RemoteAgentConfigTransport {
     fun checkIdentity(key: RemoteAgentConfigKey) = Unit

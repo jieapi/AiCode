@@ -90,6 +90,7 @@ import com.aicode.feature.settings.data.repository.ToolSafetySettingsRepository
 import com.aicode.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aicode.feature.settings.data.repository.ImageGenModelSettingsRepository
 import com.aicode.feature.settings.data.repository.VisionModelSettingsRepository
+import com.aicode.feature.workspace.domain.RemoteAgentConfigIdentityChangedException
 import com.aicode.feature.workspace.domain.model.RemoteConnection
 import com.aicode.feature.workspace.domain.repository.RemoteRepository
 import com.aicode.feature.settings.domain.model.AIProviderConfig
@@ -1534,7 +1535,11 @@ class SettingsViewModel @Inject constructor(
                 }
             } catch (error: java.io.IOException) {
                 if (error is java.io.InterruptedIOException) throw error
-                FileLogger.w("Settings", "技能清单读取失败", error)
+                if (isTransientRemoteConfigError(error)) {
+                    FileLogger.d("Settings", "技能清单等待 SSH 就绪")
+                } else {
+                    FileLogger.w("Settings", "技能清单读取失败", error)
+                }
                 emptyList()
             }
         }
@@ -1703,7 +1708,11 @@ class SettingsViewModel @Inject constructor(
                 }
             } catch (error: java.io.IOException) {
                 if (error is java.io.InterruptedIOException) throw error
-                FileLogger.w("Settings", "子代理清单读取失败", error)
+                if (isTransientRemoteConfigError(error)) {
+                    FileLogger.d("Settings", "子代理清单等待 SSH 就绪")
+                } else {
+                    FileLogger.w("Settings", "子代理清单读取失败", error)
+                }
                 emptyList()
             }
         }
@@ -2975,6 +2984,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { toolSafetySettingsRepository.setDisableSafetyInterception(disabled) }
     }
 }
+
+/**
+ * 远程模式下技能/子代理清单的“暂不可用”是否属于瞬态：
+ * - 刚启动/刚切换模式时 SSH 配置或主目录尚未就绪（异常文案标识）；
+ * - 读取过程中连接身份变化（刚好连上或重连，见 [RemoteAgentConfigIdentityChangedException]）。
+ * 这两类后续会被连接就绪/文件变更监听重扫补齐，不应按故障打 WARN。
+ */
+private fun isTransientRemoteConfigError(error: java.io.IOException): Boolean =
+    error is RemoteAgentConfigIdentityChangedException ||
+        error.message == "SSH configuration unavailable" ||
+        error.message == "SSH home unavailable"
 
 /** 读取公告 md（zh 用中文版，其余英文版）；跟随系统语言时按系统语言判断。读取失败返回空串（空内容不弹窗）。 */
 private fun loadContainerAnnouncement(context: Context, languageTag: String?): String {

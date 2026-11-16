@@ -116,7 +116,10 @@ class SystemPromptProvider @Inject constructor(
             val entries = try {
                 agentDefinitionRepository.listEnabled()
             } catch (e: Exception) {
-                FileLogger.w(TAG, "扫描子代理定义失败: ${e.message}", e)
+                // 连接身份变化（刚好连上/重连）是瞬态竞态，缓存层已重试过，这里不再当故障上报。
+                if (e !is com.aicode.feature.workspace.domain.RemoteAgentConfigIdentityChangedException) {
+                    FileLogger.w(TAG, "扫描子代理定义失败: ${e.message}", e)
+                }
                 if (e is IOException) throw e
                 return null
             }

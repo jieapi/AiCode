@@ -31,10 +31,10 @@ class RemoteAgentConfigCache @Inject constructor(
     )
 
     fun directory(root: String, kind: AgentConfigKind, forceRefresh: Boolean = false): AgentConfigSnapshot =
-        engine.directory(key(root, kind), forceRefresh)
+        withIdentityChangeRetry { engine.directory(key(root, kind), forceRefresh) }
 
     fun cachedDirectory(root: String, kind: AgentConfigKind): AgentConfigSnapshot? =
-        engine.cachedDirectory(key(root, kind))
+        withIdentityChangeRetry { engine.cachedDirectory(key(root, kind)) }
 
     fun invalidate(path: String? = null) {
         if (path == null) {
@@ -78,6 +78,45 @@ class RemoteAgentConfigCache @Inject constructor(
             }
         }
         return (if (absolute) "/" else "") + parts.joinToString("/")
+    }
+}
+
+/** 身份变化重试的总尝试次数（首次 + 重试）。 */
+internal const val AGENT_CONFIG_IDENTITY_MAX_ATTEMPTS = 3
+
+/** 两次尝试之间的退避时长（毫秒），给连接状态落定留出时间。 */
+internal const val AGENT_CONFIG_IDENTITY_RETRY_DELAY_MILLIS = 50L
+
+/**
+ * 连接身份变化时用**新派生的键**重读，而不是把瞬态竞态抛给调用方。
+ *
+ * 刚好连上 / 重连的那一刻，`config`、`remoteHome` 与 `connectionGeneration` 可能正在更新：
+ * 本次读到的身份与读取过程中看到的身份不一致，结果对新连接无效。键每次由 [block] 重新派生，
+ * 所以重试天然会拿到新身份。最多尝试 [AGENT_CONFIG_IDENTITY_MAX_ATTEMPTS] 次，
+ * 仍持续变化才向外抛（此时确实是连接在反复抖动）。
+ *
+ * [sleepMillis] 仅为单测可注入，生产走默认线程休眠；被中断时转成 [InterruptedIOException]，
+ * 让调用方保留“取消而非失败”的语义。
+ */
+internal inline fun <T> withIdentityChangeRetry(
+    maxAttempts: Int = AGENT_CONFIG_IDENTITY_MAX_ATTEMPTS,
+    sleepMillis: (Long) -> Unit = { Thread.sleep(it) },
+    block: () -> T
+): T {
+    var attempt = 1
+    while (true) {
+        try {
+            return block()
+        } catch (changed: RemoteAgentConfigIdentityChangedException) {
+            if (attempt >= maxAttempts) throw changed
+            attempt++
+            try {
+                sleepMillis(AGENT_CONFIG_IDENTITY_RETRY_DELAY_MILLIS)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw InterruptedIOException("Remote configuration identity retry interrupted").apply { initCause(interrupted) }
+            }
+        }
     }
 }
 
