@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -1506,7 +1505,7 @@ fun AIChatPanel(
                         viewModel.setReasoningExpanded(item.message.id, it)
                         onToolItemToggled()
                     },
-                    scrollState = viewModel.reasoningScrollStates.getOrPut(item.message.id) { LazyListState() },
+                    scrollState = viewModel.reasoningScrollStates.getOrPut(item.message.id) { newReasoningScrollState() },
                 )
             }
             group != null -> {
@@ -1680,7 +1679,7 @@ fun AIChatPanel(
                                             viewModel.setReasoningExpanded(assistant.messageId, expanded)
                                             onToolItemToggled()
                                         },
-                                        scrollState = viewModel.reasoningScrollStates.getOrPut(assistant.messageId) { LazyListState() },
+                                        scrollState = viewModel.reasoningScrollStates.getOrPut(assistant.messageId) { newReasoningScrollState() },
                                     )
                                 }
                             }
