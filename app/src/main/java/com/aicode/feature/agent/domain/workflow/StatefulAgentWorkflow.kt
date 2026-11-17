@@ -923,19 +923,17 @@ class StatefulAgentWorkflow @Inject constructor(
                                 }
                             }
                             if (!isError && hookSessionId != null) {
-                                toolResultSuccessData(rawResult)?.let { data ->
-                                    val transform = pluginHookDispatcher.afterToolCall(
-                                        sessionId = hookSessionId,
-                                        runId = hookRunId,
-                                        callId = toolCall.id,
-                                        toolName = toolCall.name,
-                                        mode = currentContext.mode.name,
-                                        scope = hookScope,
-                                        agentName = hookAgentName,
-                                        data = data
-                                    )
-                                    transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
-                                }
+                                val transform = pluginHookDispatcher.afterToolCall(
+                                    sessionId = hookSessionId,
+                                    runId = hookRunId,
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    mode = currentContext.mode.name,
+                                    scope = hookScope,
+                                    agentName = hookAgentName,
+                                    data = { toolResultSuccessData(rawResult) }
+                                )
+                                transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
                         }
@@ -1188,6 +1186,8 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (e: Exception) {
             ToolRunResult(ToolResult.Error("工具执行失败: ${e.message}", "TOOL_EXECUTION_FAILED").toTransportString(), true)
         }
+    }
+
     private suspend fun runToolDelegate(
         delegation: ToolDelegation,
         runId: String,
@@ -1209,8 +1209,6 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         val processed = toolOutputStore.process(toolCall.name, toolCall.id, result)
         ToolRunResult(processed.toTransportString(), processed is ToolResult.Error)
-    }
-
     }
 
     private suspend fun activeModelSupportsVision(sessionId: String?): Boolean {

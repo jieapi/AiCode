@@ -27,6 +27,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import java.time.Duration
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -65,7 +66,10 @@ class PluginWebBridgeTest {
         val commandEngine: CommandEngine,
         val fileAccess: FileAccessProvider,
         val modelService: PluginModelService,
-        val providerService: PluginProviderService
+        val providerService: PluginProviderService,
+        val eventBus: PluginEventBus,
+        val environment: PluginPageEnvironment,
+        val scripts: MutableList<String>
     )
 
     @After
@@ -103,6 +107,8 @@ class PluginWebBridgeTest {
         every { runs.events } returns MutableSharedFlow<AgentRunEvent>()
         val modelService = mockk<PluginModelService>(relaxed = true)
         val providerService = mockk<PluginProviderService>(relaxed = true)
+        val eventBus = PluginEventBus()
+        val scripts = mutableListOf<String>()
         val bridge = PluginWebBridge(
             context = ApplicationProvider.getApplicationContext(),
             page = page,
@@ -112,7 +118,7 @@ class PluginWebBridgeTest {
             homeResolver = home,
             commandEngine = engine,
             workspacePath = { "/projects/a" },
-            eventBus = PluginEventBus(),
+            eventBus = eventBus,
             pluginManager = manager,
             pluginRuntimeManager = mockk(relaxed = true),
             terminalRunner = mockk(relaxed = true),
@@ -133,10 +139,10 @@ class PluginWebBridgeTest {
             environment = environment,
             theme = { "light" },
             onClosePage = {},
-            post = {}
+            post = { scripts += it }
         )
         bridges += bridge
-        return Env(bridge, plugins, engine, fileAccess, modelService, providerService)
+        return Env(bridge, plugins, engine, fileAccess, modelService, providerService, eventBus, environment, scripts)
     }
 
     private suspend fun assertInactive(bridge: PluginWebBridge, method: String, params: JsonObject) {
@@ -234,6 +240,63 @@ class PluginWebBridgeTest {
         assertTrue(env.bridge.isActive)
         env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") })
         coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
+    @Test
+    fun burstEventsShareJavascriptCallsAndKeepTheirOrder() {
+        val env = env()
+        repeat(65) { index ->
+            env.eventBus.publish(pluginId, buildJsonObject { put("name", "event-$index") })
+        }
+        val looper = shadowOf(Looper.getMainLooper())
+        looper.idle()
+        assertTrue(env.scripts.isEmpty())
+
+        looper.idleFor(Duration.ofMillis(16))
+        assertEquals(1, env.scripts.size)
+        assertEquals(32, env.scripts.single().split("window.__aicodeEvent(").size - 1)
+        looper.idleFor(Duration.ofMillis(32))
+
+        assertEquals(3, env.scripts.size)
+        val eventNames = Regex("event-\\d+").findAll(env.scripts.joinToString("\n")).map { it.value }.toList()
+        assertEquals((0 until 65).map { "event-$it" }, eventNames)
+    }
+
+    @Test
+    fun cachedPageStillReceivesEventsWithoutBeingShown() {
+        val env = env()
+        env.eventBus.publish(pluginId, buildJsonObject { put("name", "background-finished") })
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+
+        assertTrue(env.scripts.single().contains("background-finished"))
+    }
+
+    @Test
+    fun queuedContextEventsAreDiscardedAfterWorkspaceChange() {
+        val env = env()
+        env.eventBus.publish(pluginId, buildJsonObject {
+            put("name", "fs.changed")
+            put("payload", buildJsonObject { put("contextKey", "workspace-a") })
+        })
+        env.eventBus.publish(pluginId, buildJsonObject { put("name", "custom-event") })
+        every { env.environment.contextKey() } returns "workspace-b"
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+
+        assertFalse(env.scripts.single().contains("fs.changed"))
+        assertTrue(env.scripts.single().contains("custom-event"))
+    }
+
+    @Test
+    fun closingBridgeCancelsPendingEventBatches() {
+        val env = env()
+        env.eventBus.publish(pluginId, buildJsonObject { put("name", "pending-event") })
+        env.bridge.close()
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+
+        assertTrue(env.scripts.isEmpty())
     }
 
     @Test

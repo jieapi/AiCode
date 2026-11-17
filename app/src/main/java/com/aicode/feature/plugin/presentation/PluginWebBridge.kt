@@ -113,6 +113,11 @@ class PluginWebBridge(
     @Volatile private var visible = false
     @Volatile private var closed = false
     @Volatile private var contextKey = environment.contextKey()
+    private data class QueuedEvent(val script: String, val contextKey: String?)
+    private val eventLock = Any()
+    private val queuedEvents = ArrayDeque<QueuedEvent>()
+    private var eventFlushScheduled = false
+    private val eventFlush = Runnable { flushEvents() }
     private val fileSubscriptions = PluginFileSubscriptions(
         scope = scope,
         watch = { path, recursive -> environment.watch(hostPaths, path, recursive) },
@@ -166,12 +171,12 @@ class PluginWebBridge(
 
     @JavascriptInterface
     fun postMessage(payload: String) {
-        val root = runCatching { Json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return
-        val id = (root["id"] as? JsonPrimitive)?.contentOrNull ?: return
-        val method = (root["method"] as? JsonPrimitive)?.contentOrNull ?: return
-        val params = root["params"] as? JsonObject ?: JsonObject(emptyMap())
         val requestContext = environment.contextKey()
         scope.launch {
+            val root = runCatching { Json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return@launch
+            val id = (root["id"] as? JsonPrimitive)?.contentOrNull ?: return@launch
+            val method = (root["method"] as? JsonPrimitive)?.contentOrNull ?: return@launch
+            val params = root["params"] as? JsonObject ?: JsonObject(emptyMap())
             val reply = try {
                 if (method.startsWith("fs.") && method != "fs.unwatch") {
                     val expected = (params["contextKey"] as? JsonPrimitive)?.contentOrNull
@@ -208,6 +213,11 @@ class PluginWebBridge(
         if (closed) return
         closed = true
         visible = false
+        synchronized(eventLock) {
+            queuedEvents.clear()
+            eventFlushScheduled = false
+            mainHandler.removeCallbacks(eventFlush)
+        }
         modelService.closeOrigin("page:${page.cacheKey}")
         fileSubscriptions.close()
         updateOverlay(false, null)
@@ -253,15 +263,37 @@ class PluginWebBridge(
     }
 
     private fun postEvent(event: JsonObject) {
+        if (closed) return
         val payload = event["payload"] as? JsonObject
-        val key = (payload?.get("contextKey") as? JsonPrimitive)?.contentOrNull
         val contextual = (event["name"] as? JsonPrimitive)?.contentOrNull in setOf("fs.changed", "ui.lifecycle")
-        val script = "window.__aicodeEvent(${jsString(event.toString())})"
-        mainHandler.post {
-            if (isAuthorized() && (!contextual || key == null || key == environment.contextKey())) {
-                runCatching { post(script) }
+        val key = if (contextual) (payload?.get("contextKey") as? JsonPrimitive)?.contentOrNull else null
+        val queued = QueuedEvent("try{window.__aicodeEvent(${jsString(event.toString())})}catch(e){}", key)
+        synchronized(eventLock) {
+            if (closed) return
+            queuedEvents.addLast(queued)
+            if (!eventFlushScheduled) {
+                eventFlushScheduled = true
+                mainHandler.postDelayed(eventFlush, EVENT_BATCH_WINDOW_MS)
             }
         }
+    }
+
+    private fun flushEvents() {
+        val batch = synchronized(eventLock) {
+            val events = List(minOf(queuedEvents.size, MAX_EVENT_BATCH_SIZE)) { queuedEvents.removeFirst() }
+            if (queuedEvents.isEmpty()) {
+                eventFlushScheduled = false
+            } else {
+                mainHandler.postDelayed(eventFlush, EVENT_BATCH_WINDOW_MS)
+            }
+            events
+        }
+        if (batch.isEmpty() || !isAuthorized()) return
+        val key = environment.contextKey()
+        val script = batch.asSequence()
+            .filter { it.contextKey == null || it.contextKey == key }
+            .joinToString(";\n") { it.script }
+        if (script.isNotEmpty()) runCatching { post(script) }
     }
 
     /**
@@ -467,6 +499,10 @@ class PluginWebBridge(
             page.pluginId,
             includeSchema = (params["includeSchema"] as? JsonPrimitive)?.booleanOrNull ?: false
         )
+        "sessionSource.setMessages" -> sessionSourceService.setMessages(page.pluginId, params)
+        "sessionSource.pushEvent" -> sessionSourceService.pushEvent(page.pluginId, params)
+        "permissions.request" -> permissionService.request(page.pluginId, params)
+        "permissions.cancel" -> permissionService.cancel(page.pluginId, params)
         "tools.execute" -> toolService.execute(page.pluginId, params)
         "tools.pending" -> toolService.pending(page.pluginId, params)
         "tools.resolve" -> toolService.resolve(page.pluginId, params)
@@ -499,10 +535,6 @@ class PluginWebBridge(
                 handler = handler,
                 args = args,
                 method = "ui.invoke",
-        "sessionSource.setMessages" -> sessionSourceService.setMessages(page.pluginId, params)
-        "sessionSource.pushEvent" -> sessionSourceService.pushEvent(page.pluginId, params)
-        "permissions.request" -> permissionService.request(page.pluginId, params)
-        "permissions.cancel" -> permissionService.cancel(page.pluginId, params)
                 timeoutMs = UI_INVOKE_TIMEOUT_MS
             )
         } catch (e: PluginProcessException) {
@@ -706,6 +738,8 @@ class PluginWebBridge(
 
     private companion object {
         const val TAG = "PluginWebBridge"
+        const val EVENT_BATCH_WINDOW_MS = 16L
+        const val MAX_EVENT_BATCH_SIZE = 32
         const val UI_INVOKE_TIMEOUT_MS = 60_000L
         const val MAX_INVOKE_ARGS_CHARS = 256 * 1024
         const val MAX_TERMINAL_TITLE_CHARS = 120
