@@ -54,6 +54,8 @@ TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时�
 | `tool.invoke` | `{handler, args}` | 执行 AI 工具 |
 | `hook.invoke` | `{handler, args}` | 执行生命周期 hook |
 | `ui.invoke` | `{handler, args}` | 页面通过 `aicode.invoke` 调用进程 |
+| `backend.invoke` | `{handler, args}` | 执行后端文件、命令、终端与工作区操作 |
+| `workflow.invoke` | `{handler, args}` | 执行 Agent 工作流轮次、取消、压缩或标题生成 |
 
 插件使用同一条 `id` 返回 `result` 或 `error`：
 
@@ -69,6 +71,30 @@ TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时�
 ```json
 {"jsonrpc":"2.0","method":"plugin.event","params":{"name":"records.changed","payload":{"count":4}}}
 ```
+
+### UDS 二进制通道
+
+对于高吞吐场景（`executionBackends` 文件字节传输、流式命令输出、`pty` 终端以及 `workflows` 流式事件），宿主在启动插件进程时会通过环境变量注入 Unix Domain Socket（`AF_UNIX`）通道参数：
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `AICODE_IPC_SOCKET` | 容器内 Unix Domain Socket 文件路径 |
+| `AICODE_IPC_TOKEN` | 建连首帧握手用的鉴权令牌 |
+
+使用 `@jieapi/plugin-sdk` 的 `definePlugin(...)` 时，SDK 会自动在 `AICODE_IPC_SOCKET` 创建监听服务端并在就绪后向 `stdout` 发送 `{"jsonrpc":"2.0","method":"ipc.ready","params":{"socket":...}}`。宿主连接后立即发送 `PING` 帧携带 `{"token": "..."}`，校验通过后回复 `PONG` 完成握手；此后 `hostCall`、`emit` 与 `backend.invoke` / `workflow.invoke` 均优先复用该二进制通道，未连接或通道不可用时无缝回退到 `stdin`/`stdout` NDJSON。
+
+二进制帧采用 16 字节大端（Big-Endian）帧头，将调度元数据与原始二进制载荷分离（免去 Base64 编码与 JSON 转义开销）：
+
+```text
++------------+---------+------+----------+----------+------------+-------------------+-------------------+
+| Magic (2B) | Ver(1B) | Type | StreamId | MetaLen  | PayloadLen | Meta (UTF-8 JSON) | Payload (Raw)     |
+| 0x4143     | 0x01    | 1B   | 4B (u32) | 4B (u32) | 4B (u32)   | MetaLen bytes     | PayloadLen bytes  |
++------------+---------+------+----------+----------+------------+-------------------+-------------------+
+```
+
+- **帧类型（`Type`）**：`REQ (1)`、`RESP (2)`、`ERR (3)`、`STREAM_DATA (4)`、`STREAM_END (5)`、`EVENT (6)`、`PING (7)`、`PONG (8)`。
+- **分片与限额**：`Meta` 上限 `1 MiB`，单帧 `Payload` 上限 `16 MiB`，默认分片大小 `64 KiB`。大流量按 `StreamId` 多路复用并与控制帧分队列写出，避免文件读写或日志流阻塞取消、审批等控制请求。
+- **SDK 辅助能力**：可使用 `binaryResult(payload, meta)` 直接返回 `Uint8Array` 二进制载荷；`workflow.invoke` handler 支持返回异步生成器（`async function*`）逐条 `yield` 工作流事件；高频增量输出可使用 `createEventCoalescer` 进行微批合并。
 
 ## host API 细节
 
@@ -188,6 +214,24 @@ TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时�
 `host.ports.forward` 把远程服务器视角的 `host:port` 映射到手机 `127.0.0.1:localPort`，复用宿主已建立的 SSH 连接，插件不接触服务器凭据。仅绑定 `127.0.0.1`，不向局域网暴露；同一插件重复映射同一目标会复用原映射；每插件最多 8 条、全局 32 条。
 
 本地容器模式下容器与 App 处于同一网络命名空间，无需隧道：返回 `direct: true`，`url` 可直接访问。SSH 模式下建隧道前会先探测目标，目标未监听或服务器 `AllowTcpForwarding no` 时立即返回 `TARGET_UNREACHABLE`；连接断开或切换执行环境时宿主统一回收映射，不会跨连接残留。
+
+### 工作区与外部会话
+
+声明了 `contributes.executionBackends` 或 `contributes.sessions` 的已激活插件，可通过以下方法增量维护自己的工作区与外部会话分组（`backendId` / `sourceId` 必须归属当前插件，支持本地 ID 或 `<插件ID>:<局部ID>`）：
+
+| 方法 | 参数 | 说明 |
+| --- | --- | --- |
+| `host.workspaces.upsert` | `{backendId, workspaces}` | 按工作区 `id`（缺省取 `path`）增量插入或更新工作区；单次最多 500 条 |
+| `host.workspaces.remove` | `{backendId, workspaceIds}` | 按 ID 批量移除该执行后端下的工作区 |
+| `host.workspaces.set` | `{backendId, workspaces}` | 全量替换该执行后端下的工作区列表 |
+| `host.sessions.upsert` | `{sourceId, sessions}` | 按 `sessionId` 增量新增或更新外部会话摘要（局部 Diff 更新） |
+| `host.sessions.remove` | `{sourceId, sessionIds}` | 按 `sessionId` 批量移除指定外部会话 |
+| `host.sessions.replaceAll` | `{sourceId, sessions}` | 全量替换该会话源的会话列表（首次拉取或重同步使用） |
+| `host.sessions.setLoading` | `{sourceId, loading}` | 设置外部会话分组的加载指示状态 |
+| `host.sessions.setError` | `{sourceId, error}` | 设置或清除外部会话分组的错误提示（传 `null` 清除） |
+| `host.sessions.setThinking` | `{sourceId, sessionId, visible?, text?}` | 控制外部会话聊天页的等待思考气泡展示与文案 |
+
+`workspaces` 数组中的每个 `WorkspaceItem` 包含必填的 `id`、`name`、`path`，以及可选的 `group`、`available`（默认 `true`）和 `capabilities`（`createChild`、`delete`、`git`）。外部会话摘要可关联 `workflowId`、`backendId`、`workspaceId` 等元数据，供用户在聊天页继续发送消息时由宿主路由到对应工作流。
 
 ### 工具目录与代执行
 
