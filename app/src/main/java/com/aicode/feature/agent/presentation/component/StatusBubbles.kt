@@ -52,13 +52,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -104,7 +106,7 @@ private const val RIPPLE_PEAK_ALPHA = 0.5f
  * 画出一条色带方块。高光默认白色（Claude Code / 主流 shimmer 的做法）；浅色主题下白色会在
  * 文字像素上把字朝背景提亮，形成一道掠过的光泽，而不是盖上一层灰。
  *
- * 性能：进度在 [drawWithContent] 的绘制阶段读取（`by` 委托在 lambda 内取值），只重绘、不重组。
+ * 渐变缓存在 [drawWithCache] 中，进度只在绘制阶段读取，避免逐帧重建 brush 或重组。
  */
 @Composable
 internal fun Modifier.rippleHighlight(
@@ -112,6 +114,7 @@ internal fun Modifier.rippleHighlight(
     bandRatio: Float = RIPPLE_BAND_RATIO,
     periodMs: Int = RIPPLE_PERIOD_MS
 ): Modifier {
+    if (!chatAnimationsEnabled()) return this
     val transition = rememberInfiniteTransition(label = "ripple-highlight")
     val progress by transition.animateFloat(
         initialValue = 0f,
@@ -122,26 +125,34 @@ internal fun Modifier.rippleHighlight(
         ),
         label = "ripple-progress"
     )
-    return drawWithContent {
-        drawContent()
+    return drawWithCache {
         val band = size.width * bandRatio
-        // 起点在左侧完全移出、终点在右侧完全移出，两端各留一个带的余量做「停顿感」
-        val center = -band + progress * (size.width + 2 * band)
-        drawRect(
-            brush = Brush.linearGradient(
-                // 五档渐变：两端全透明、中间一个软峰，扫过时是「亮一下」而不是一条硬边色带
-                colors = listOf(
-                    Color.Transparent,
-                    highlight.copy(alpha = RIPPLE_EDGE_ALPHA),
-                    highlight.copy(alpha = RIPPLE_PEAK_ALPHA),
-                    highlight.copy(alpha = RIPPLE_EDGE_ALPHA),
-                    Color.Transparent
-                ),
-                start = Offset(center - band / 2f, 0f),
-                end = Offset(center + band / 2f, 0f)
+        val brush = Brush.linearGradient(
+            colors = listOf(
+                Color.Transparent,
+                highlight.copy(alpha = RIPPLE_EDGE_ALPHA),
+                highlight.copy(alpha = RIPPLE_PEAK_ALPHA),
+                highlight.copy(alpha = RIPPLE_EDGE_ALPHA),
+                Color.Transparent
             ),
-            blendMode = BlendMode.SrcAtop
+            start = Offset(-band / 2f, 0f),
+            end = Offset(band / 2f, 0f)
         )
+        onDrawWithContent {
+            drawContent()
+            // 起点和终点各在内容外留一个带的余量，维持两端的停顿感。
+            val center = -band + progress * (size.width + 2 * band)
+            clipRect {
+                translate(left = center) {
+                    drawRect(
+                        brush = brush,
+                        topLeft = Offset(-band / 2f, 0f),
+                        size = Size(band, size.height),
+                        blendMode = BlendMode.SrcAtop
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -612,7 +623,8 @@ internal fun rememberTypewriterStreamingText(
 @Composable
 internal fun StreamingBubble(
     text: String,
-    cache: MarkdownRenderCache? = null
+    cache: MarkdownRenderCache? = null,
+    streamingCacheKey: String? = null
 ) {
     val renderText = text
     // 与落库助手正文同构：不套容器，直接铺在页面底色上，底部挂「生成中」的点
@@ -621,7 +633,8 @@ internal fun StreamingBubble(
             text = renderText,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth(),
-            cache = cache
+            cache = cache,
+            streamingCacheKey = streamingCacheKey
         )
         Spacer(Modifier.height(Spacing.xs))
         TypingDots(color = MaterialTheme.colorScheme.primary, dotSize = 5.dp)
@@ -711,6 +724,7 @@ internal fun ReasoningBubble(
     /** 手动展开/收起时回传新状态，由上层持久化。 */
     onExpandedChange: ((Boolean) -> Unit)? = null,
     scrollState: LazyListState = rememberLazyListState(ReasoningCacheWindow, 0, 0),
+    streamingCacheKey: String? = null,
 ) {
     var localExpanded by remember { mutableStateOf(defaultExpanded) }
     val expanded = expandedOverride ?: localExpanded
@@ -808,6 +822,7 @@ internal fun ReasoningBubble(
                             compact = true,
                             lazyScroll = true,
                             lazyListState = scrollState,
+                            streamingCacheKey = streamingCacheKey,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = ReasoningWindowMaxHeight)
@@ -840,7 +855,11 @@ internal fun TypingDots(
     /** 是否单独给读屏播报「正在生成」：嵌在 [AgentBusyIndicator] 里时由外层状态行统一播报。 */
     announce: Boolean = true
 ) {
-    val transition = rememberInfiniteTransition(label = "typing-dots")
+    val transition = if (chatAnimationsEnabled()) {
+        rememberInfiniteTransition(label = "typing-dots")
+    } else {
+        null
+    }
     val label = stringResource(R.string.chat_status_generating)
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -852,7 +871,7 @@ internal fun TypingDots(
             )
     ) {
         repeat(3) { index ->
-            val offsetY by transition.animateFloat(
+            val offsetY by if (transition != null) transition.animateFloat(
                 initialValue = 0f,
                 targetValue = 0f,
                 animationSpec = infiniteRepeatable(
@@ -867,7 +886,7 @@ internal fun TypingDots(
                     initialStartOffset = StartOffset(index * 150)
                 ),
                 label = "dot-$index"
-            )
+            ) else rememberUpdatedState(0f)
             Box(
                 modifier = Modifier
                     .graphicsLayer { translationY = offsetY }

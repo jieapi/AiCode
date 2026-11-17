@@ -113,7 +113,7 @@ class PluginWebBridge(
     @Volatile private var visible = false
     @Volatile private var closed = false
     @Volatile private var contextKey = environment.contextKey()
-    private data class QueuedEvent(val script: String, val contextKey: String?)
+    private data class QueuedEvent(val script: String, val contextKey: String?, val reply: Boolean)
     private val eventLock = Any()
     private val queuedEvents = ArrayDeque<QueuedEvent>()
     private var eventFlushScheduled = false
@@ -267,11 +267,18 @@ class PluginWebBridge(
         val payload = event["payload"] as? JsonObject
         val contextual = (event["name"] as? JsonPrimitive)?.contentOrNull in setOf("fs.changed", "ui.lifecycle")
         val key = if (contextual) (payload?.get("contextKey") as? JsonPrimitive)?.contentOrNull else null
-        val queued = QueuedEvent("try{window.__aicodeEvent(${jsString(event.toString())})}catch(e){}", key)
+        enqueueScript("try{window.__aicodeEvent(${jsString(event.toString())})}catch(e){}", key)
+    }
+
+    private fun enqueueScript(script: String, contextKey: String? = null, immediate: Boolean = false) {
         synchronized(eventLock) {
             if (closed) return
-            queuedEvents.addLast(queued)
-            if (!eventFlushScheduled) {
+            queuedEvents.addLast(QueuedEvent(script, contextKey, reply = immediate))
+            if (immediate) {
+                mainHandler.removeCallbacks(eventFlush)
+                eventFlushScheduled = true
+                mainHandler.post(eventFlush)
+            } else if (!eventFlushScheduled) {
                 eventFlushScheduled = true
                 mainHandler.postDelayed(eventFlush, EVENT_BATCH_WINDOW_MS)
             }
@@ -280,11 +287,20 @@ class PluginWebBridge(
 
     private fun flushEvents() {
         val batch = synchronized(eventLock) {
-            val events = List(minOf(queuedEvents.size, MAX_EVENT_BATCH_SIZE)) { queuedEvents.removeFirst() }
+            val events = ArrayList<QueuedEvent>()
+            var chars = 0
+            while (queuedEvents.isNotEmpty() && events.size < MAX_EVENT_BATCH_SIZE) {
+                val next = queuedEvents.first()
+                // Promise 回复单独执行，保留其微任务先于后续事件处理的顺序。
+                if (events.isNotEmpty() && (events.first().reply || next.reply ||
+                        chars + next.script.length > MAX_EVENT_BATCH_CHARS)) break
+                events += queuedEvents.removeFirst()
+                chars += next.script.length
+            }
             if (queuedEvents.isEmpty()) {
                 eventFlushScheduled = false
             } else {
-                mainHandler.postDelayed(eventFlush, EVENT_BATCH_WINDOW_MS)
+                mainHandler.post(eventFlush)
             }
             events
         }
@@ -710,9 +726,9 @@ class PluginWebBridge(
     }
 
     private fun deliver(id: String, payload: JsonObject) {
-        val script = "window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})"
-        // 预热时 WebView 还没 attach，View.post 会一直排队；直接走主线程 Handler，不依赖窗口。
-        mainHandler.post { if (isAuthorized()) post(script) }
+        val script = "try{window.__aicodeResolve(${jsString(id)}, ${jsString(payload.toString())})}catch(e){}"
+        // 回复不能越过已经排队的事件；不依赖 View.post，以兼容尚未 attach 的缓存实例。
+        enqueueScript(script, immediate = true)
     }
 
     private fun jsString(value: String): String = buildString {
@@ -740,6 +756,7 @@ class PluginWebBridge(
         const val TAG = "PluginWebBridge"
         const val EVENT_BATCH_WINDOW_MS = 16L
         const val MAX_EVENT_BATCH_SIZE = 32
+        const val MAX_EVENT_BATCH_CHARS = 64 * 1024
         const val UI_INVOKE_TIMEOUT_MS = 60_000L
         const val MAX_INVOKE_ARGS_CHARS = 256 * 1024
         const val MAX_TERMINAL_TITLE_CHARS = 120

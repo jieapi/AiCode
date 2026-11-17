@@ -92,7 +92,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -194,8 +193,16 @@ class AgentRunManager @Inject constructor(
     private val _reasoningDurationEvents = MutableSharedFlow<ReasoningDurationEvent>(extraBufferCapacity = 32)
     val reasoningDurationEvents: SharedFlow<ReasoningDurationEvent> = _reasoningDurationEvents.asSharedFlow()
 
-    private val _streamingAssistants = MutableStateFlow<Map<String, StreamingAssistantMessage>>(emptyMap())
-    val streamingAssistants: StateFlow<Map<String, StreamingAssistantMessage>> = _streamingAssistants.asStateFlow()
+    private val streamingAssistantStore = StreamingAssistantStore()
+    val streamingAssistants: StateFlow<Map<String, StreamingAssistantMessage>> = streamingAssistantStore.messages
+
+    fun acknowledgeRenderedAssistant(sessionId: String, messageId: String) {
+        streamingAssistantStore.acknowledgeRenderedAssistant(sessionId, messageId)
+    }
+
+    fun setSelectedLocalSession(ownerToken: Any, sessionId: String?) {
+        streamingAssistantStore.setSelectedSession(ownerToken, sessionId)
+    }
 
     private val _retryStates = MutableStateFlow<Map<String, RetryState?>>(emptyMap())
     val retryStates: StateFlow<Map<String, RetryState?>> = _retryStates.asStateFlow()
@@ -430,18 +437,11 @@ class AgentRunManager @Inject constructor(
         messageId: String,
         transform: (StreamingAssistantMessage) -> StreamingAssistantMessage
     ) {
-        _streamingAssistants.update { assistants ->
-            val current = assistants[sessionId]?.takeIf { it.messageId == messageId }
-                ?: StreamingAssistantMessage(sessionId, messageId)
-            assistants + (sessionId to transform(current))
-        }
+        streamingAssistantStore.update(sessionId, messageId, transform)
     }
 
     private fun clearStreamingAssistant(sessionId: String, keepSettled: Boolean = false) {
-        _streamingAssistants.update { assistants ->
-            if (keepSettled && assistants[sessionId]?.settled == true) assistants
-            else assistants - sessionId
-        }
+        streamingAssistantStore.clear(sessionId, keepSettled)
     }
 
     private fun setRetryState(sessionId: String, state: RetryState?) {
@@ -651,17 +651,19 @@ class AgentRunManager @Inject constructor(
     /** 命令执行结束后的接续（斜杠命令在聊天页执行，结束后通知运行器消费队列）。 */
     fun onCommandFinished(sessionId: String) {
         _runningCommandSessions.value = _runningCommandSessions.value - sessionId
+        streamingAssistantStore.setCommandRunning(sessionId, false)
         flushPendingNotifications(sessionId)
         processNextInQueue(sessionId)
     }
 
     fun markCommandStarted(sessionId: String) {
+        streamingAssistantStore.setCommandRunning(sessionId, true)
         _runningCommandSessions.value = _runningCommandSessions.value + sessionId
     }
 
     /** 回滚前停止会话任务并清空运行态（队列、运行中工具、流式内容、压缩与重试提示）。 */
     fun suspendSessionForRewind(sessionId: String) {
-        clearStreamingAssistant(sessionId)
+        streamingAssistantStore.clearSession(sessionId)
         _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
         agentNotificationCenter.clear(sessionId)
         sessionJobs[sessionId]?.cancel()
@@ -753,29 +755,12 @@ class AgentRunManager @Inject constructor(
             "stopAgent: sid=$sessionId runningTools=${runningTools.size} pendingPerm=${pendingPermission?.id} " +
                 "pendingNotifs=$pendingNotifs state=${_agentStates.value[sessionId]}"
         )
-        val stoppedAt = System.currentTimeMillis()
-        fun settlePartialAssistant(current: StreamingAssistantMessage): StreamingAssistantMessage? {
-            if (runningTools.isNotEmpty() || current.settled ||
-                (current.content.isEmpty() && current.reasoning.isEmpty())
-            ) return null
-            val partial = current.content.trimEnd()
-            return current.copy(
-                content = if (partial.isNotEmpty()) "$partial\n\n$stoppedText" else stoppedText,
-                reasoning = current.reasoning.takeIf { it.hasVisibleContent() }.orEmpty(),
-                settled = true,
-                reasoningEndMs = current.reasoningStartMs?.let { current.reasoningEndMs ?: stoppedAt }
-            )
-        }
-        val previousAssistant = _streamingAssistants.getAndUpdate { assistants ->
-            val current = assistants[sessionId] ?: return@getAndUpdate assistants
-            val stopped = settlePartialAssistant(current)
-            when {
-                stopped != null -> assistants + (sessionId to stopped)
-                current.settled -> assistants
-                else -> assistants - sessionId
-            }
-        }[sessionId]
-        val stoppedAssistant = previousAssistant?.let { settlePartialAssistant(it) }
+        val stoppedAssistant = streamingAssistantStore.settlePartial(
+            sessionId = sessionId,
+            stoppedText = stoppedText,
+            stoppedAt = System.currentTimeMillis(),
+            hasRunningTools = runningTools.isNotEmpty()
+        )
         stoppedAssistant?.reasoningStartMs?.let { start ->
             stoppedAssistant.reasoningEndMs?.minus(start)?.takeIf { it > 0 }?.let { duration ->
                 _reasoningDurationEvents.tryEmit(ReasoningDurationEvent(stoppedAssistant.messageId, duration))
@@ -812,6 +797,9 @@ class AgentRunManager @Inject constructor(
                     content = stoppedAssistant.content,
                     id = stoppedAssistant.messageId,
                     reasoning = stoppedAssistant.reasoning.ifEmpty { null }
+                )
+                streamingAssistantStore.markPersisted(
+                    sessionId, stoppedAssistant.messageId, stoppedAssistant.content, stoppedAssistant.reasoning
                 )
             }
             if (pendingPermission != null) {
@@ -856,14 +844,14 @@ class AgentRunManager @Inject constructor(
         sessionJobs.clear()
         _runningCommandSessions.value = emptySet()
         _agentStates.value = _agentStates.value.mapValues { AgentUIState.Idle }
-        _streamingAssistants.value = emptyMap()
+        streamingAssistantStore.clearAll()
         _runningTools.value = emptyMap()
         _retryStates.value = emptyMap()
         releaseKeepalive()
     }
 
     fun clearSessionRuntimeState(sessionId: String) {
-        clearStreamingAssistant(sessionId)
+        streamingAssistantStore.clearSession(sessionId)
         subAgentEventBus.release(sessionId)
         agentNotificationCenter.clear(sessionId)
         _queuedRequests.value = _queuedRequests.value - sessionId
@@ -1128,7 +1116,12 @@ class AgentRunManager @Inject constructor(
         persistUserMessage: Boolean = true,
         skipTitleUpdate: Boolean = false,
         notificationSeqs: List<Long> = emptyList()
-    ): Job = scope.launch {
+    ): Job {
+        val runToken = Any()
+        if (targetSessionId != null && !request.startsWith("/")) {
+            streamingAssistantStore.startRun(targetSessionId, runToken)
+        }
+        return scope.launch {
         val sessionId = targetSessionId ?: return@launch
         if (request.startsWith("/")) {
             return@launch
@@ -1270,11 +1263,8 @@ class AgentRunManager @Inject constructor(
                 if (currentReasoningEnd == null) {
                     val end = System.currentTimeMillis()
                     currentReasoningEnd = end
-                    _streamingAssistants.update { assistants ->
-                        val current = assistants[sessionId]
-                            ?.takeIf { it.messageId == currentAssistantMessageId }
-                            ?: return@update assistants
-                        assistants + (sessionId to current.copy(reasoningStartMs = start, reasoningEndMs = end))
+                    streamingAssistantStore.updateIfPresent(sessionId, currentAssistantMessageId) {
+                        it.copy(reasoningStartMs = start, reasoningEndMs = end)
                     }
                 }
             }
@@ -1377,6 +1367,7 @@ class AgentRunManager @Inject constructor(
                                 content = normalized,
                                 reasoning = reasoning.orEmpty(),
                                 settled = true,
+                                persisted = false,
                                 reasoningStartMs = currentReasoningStart,
                                 reasoningEndMs = currentReasoningEnd
                             )
@@ -1405,6 +1396,7 @@ class AgentRunManager @Inject constructor(
                             outputTokens = event.outputTokens,
                             cachedInputTokens = event.cachedInputTokens
                         )
+                        streamingAssistantStore.markPersisted(sessionId, msgId, normalized, reasoning.orEmpty())
                         if (event.inputTokens > 0 || event.outputTokens > 0) {
                             _llmCallEvents.tryEmit(
                                 LlmCallEvent(sessionId, event.inputTokens, event.outputTokens, event.cachedInputTokens)
@@ -1562,21 +1554,13 @@ class AgentRunManager @Inject constructor(
             if (isSubSession) subAgentEventBus.release(sessionId)
             if (isOwnJob) {
                 sessionJobs.remove(sessionId)
-                clearStreamingAssistant(sessionId, keepSettled = true)
+                streamingAssistantStore.finishRun(sessionId, runToken, System.currentTimeMillis())
             }
             _runningTools.value = _runningTools.value - sessionId
             setPreparingTool(sessionId, null)
             setCompacting(sessionId, false)
             setRetryState(sessionId, null)
             setKeySwitchState(sessionId, null)
-            _streamingAssistants.update { assistants ->
-                val current = assistants[sessionId] ?: return@update assistants
-                if (current.reasoningStartMs != null && current.reasoningEndMs == null) {
-                    assistants + (sessionId to current.copy(reasoningEndMs = System.currentTimeMillis()))
-                } else {
-                    assistants
-                }
-            }
 
             val finishState = _agentStates.value[sessionId]
             val finishStatus = when {
@@ -1611,7 +1595,9 @@ class AgentRunManager @Inject constructor(
     }.also { job ->
         if (targetSessionId != null) {
             sessionJobs[targetSessionId] = job
+            job.invokeOnCompletion { streamingAssistantStore.finishRun(targetSessionId, runToken) }
         }
+    }
     }
 
     private suspend fun maybeQueueGoalContinuation(sessionId: String, isGoalTurn: Boolean, hadActivity: Boolean) {

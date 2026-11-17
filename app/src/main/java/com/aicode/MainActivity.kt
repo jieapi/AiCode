@@ -96,6 +96,7 @@ import com.aicode.feature.agent.presentation.AIAgentViewModel
 import com.aicode.feature.agent.presentation.AgentAttachment
 import com.aicode.feature.agent.presentation.component.AIChatPanel
 import com.aicode.feature.agent.presentation.component.ChatDrawerContent
+import com.aicode.feature.agent.presentation.component.LocalChatAnimationsEnabled
 import com.aicode.feature.agent.presentation.component.chatImageLoader
 import com.aicode.feature.agent.presentation.component.openSentAttachment
 import com.aicode.feature.agreement.presentation.AgreementGate
@@ -699,7 +700,8 @@ fun AppNavigation(
     }
 
     // 侧栏内容：modal 抽屉与大屏常驻栏共用同一份，不在两处重复几十行参数。
-    val drawerBody: @Composable () -> Unit = {
+    val drawerBody: @Composable (Boolean) -> Unit = { animationsEnabled ->
+        CompositionLocalProvider(LocalChatAnimationsEnabled provides animationsEnabled) {
         ChatDrawerContent(
             sessions = sessions,
             currentSessionId = currentSessionId,
@@ -817,6 +819,7 @@ fun AppNavigation(
                 if (!permanentDrawer) scope.launch { drawerState.close() }
             }
         )
+        }
     }
 
     var reopenRightDrawerOnDetailBack by remember { mutableStateOf(false) }
@@ -1165,7 +1168,7 @@ fun AppNavigation(
                             .fillMaxHeight()
                     ) {
                         sidebarStateHolder.SaveableStateProvider("chat-sidebar") {
-                            drawerBody()
+                            drawerBody(currentRoute == "chat" && sidebarWidth > 0.dp)
                         }
                     }
                 }
@@ -1194,7 +1197,10 @@ fun AppNavigation(
                     drawerTonalElevation = 0.dp,
                     modifier = Modifier.width(drawerWidth())
                 ) {
-                    drawerBody()
+                    drawerBody(
+                        drawerState.currentValue == DrawerValue.Open ||
+                            drawerState.targetValue == DrawerValue.Open
+                    )
                 }
             }
         ) {

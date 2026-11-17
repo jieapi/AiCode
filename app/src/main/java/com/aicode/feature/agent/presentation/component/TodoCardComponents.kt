@@ -1,9 +1,7 @@
 package com.aicode.feature.agent.presentation.component
 
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -142,8 +140,7 @@ internal fun TodoItemRow(item: ParsedTodoItem) {
                 )
             }
             isInProgress -> {
-                val transition = rememberInfiniteTransition(label = "todo-progress-dot")
-                val alpha by transition.animateFloat(
+                val alpha by rememberChatInfiniteFloat(
                     initialValue = 1f,
                     targetValue = 0.3f,
                     animationSpec = infiniteRepeatable(

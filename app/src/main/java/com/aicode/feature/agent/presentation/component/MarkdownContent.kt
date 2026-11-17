@@ -73,47 +73,17 @@ import kotlinx.coroutines.withContext
 private val CodeFontFamily = FontFamily(Font(R.font.jetbrains_mono_nl))
 
 internal class MarkdownRenderCache(
-    private val maxEntries: Int = 80
+    maxEntries: Int = 80,
+    maxChars: Int = 512 * 1024
 ) {
-    private val parsedStates = object : LinkedHashMap<String, MarkdownParseState.Success>(
-        maxEntries,
-        0.75f,
-        true
-    ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MarkdownParseState.Success>?): Boolean {
-            return size > maxEntries
-        }
-    }
+    // AST 与全文同时存活，以文本字符预算约束缓存，而不是估算精确堆字节数。
+    private val snapshots = MarkdownSnapshotCache<MarkdownParseState.Success>(maxEntries, maxChars) { it.content }
 
-    fun get(text: String): MarkdownParseState.Success? =
-        parsedStates[text] ?: parsedStates[text.trim()]
+    fun get(text: String): MarkdownParseState.Success? = snapshots.get(text)
 
-    /**
-     * 在缓存中寻找是 [text] 前缀的最长解析态。
-     * 流式转落库交接瞬间，全文可能比上一帧打字机内容多出尾部字符，直接拿最长前缀 AST 兜底，
-     * 确保首帧以排版好的 Markdown 呈现，彻底消灭裸纯文本（- **xxx**）闪现。
-     */
-    fun getBestPrefix(text: String): MarkdownParseState.Success? {
-        val exact = get(text)
-        if (exact != null) return exact
-        var bestMatch: MarkdownParseState.Success? = null
-        var bestLength = 0
-        for ((key, value) in parsedStates) {
-            if (key.length in (bestLength + 1)..text.length && text.startsWith(key)) {
-                bestMatch = value
-                bestLength = key.length
-            }
-        }
-        return bestMatch
-    }
+    fun getBestPrefix(text: String): MarkdownParseState.Success? = snapshots.getBestPrefix(text)
 
-    fun put(state: MarkdownParseState.Success) {
-        parsedStates[state.content] = state
-        val trimmed = state.content.trim()
-        if (trimmed != state.content) {
-            parsedStates[trimmed] = state
-        }
-    }
+    fun put(state: MarkdownParseState.Success, streamKey: String? = null) = snapshots.put(state, streamKey)
 }
 
 internal fun formatTokenCount(tokens: Long): String = when {
@@ -135,7 +105,8 @@ internal fun MarkdownContent(
     /** 长文本虚拟化渲染：正文改用 LazyColumn 逐块渲染（调用方需配合 heightIn 等有限高度约束
      *  才能触发懒加载），避免超大 md 一次性全量组合/测量造成的卡顿。 */
     lazyScroll: Boolean = false,
-    lazyListState: LazyListState? = null
+    lazyListState: LazyListState? = null,
+    streamingCacheKey: String? = null
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val semantic = MaterialTheme.semanticColors
@@ -189,7 +160,9 @@ internal fun MarkdownContent(
         Highlights.Builder().theme(SyntaxThemes.atom(darkMode = isDark))
     }
 
-    val processed = remember(text) { MarkdownPreprocessor.process(text) }
+    val processed = remember(text, streamingCacheKey) {
+        MarkdownPreprocessor.process(text, cacheResult = streamingCacheKey == null)
+    }
     val baseTransformer = LocalMarkdownImageTransformer.current
     val mathTransformer = remember(baseTransformer, body.fontSize.value) {
         MathImageTransformer(baseTransformer, body.fontSize.value)
@@ -237,7 +210,7 @@ internal fun MarkdownContent(
         if (parsedState is MarkdownParseState.Success) {
             lastSuccessState = parsedState
             // 同步写入缓存：让同轮次接力的落库消息首帧即可命中，避免 LaunchedEffect 异步延迟导致的裸纯文本闪烁
-            cache?.put(parsedState)
+            if (parsedState.content == processed) cache?.put(parsedState, streamingCacheKey)
         }
 
         // Success 渲染当前结果；Loading 优先渲染本组件或前缀缓存的成功结果（杜绝裸纯文本闪现）；Error 回退原文
@@ -373,16 +346,15 @@ internal fun MarkdownContent(
 private object CodeHighlightCache {
     private data class Key(val code: String, val language: String?, val dark: Boolean)
 
-    private const val MAX = 128
-    private val cache = object : LinkedHashMap<Key, AnnotatedString>(MAX, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, AnnotatedString>?): Boolean = size > MAX
+    private val cache = TextBudgetCache<Key, AnnotatedString>(128, 512 * 1024) { key, value ->
+        key.code.length.toLong() + value.length
     }
 
     fun get(code: String, language: String?, dark: Boolean): AnnotatedString? =
-        synchronized(cache) { cache[Key(code, language, dark)] }
+        cache[Key(code, language, dark)]
 
     fun put(code: String, language: String?, dark: Boolean, value: AnnotatedString) {
-        synchronized(cache) { cache[Key(code, language, dark)] = value }
+        cache.put(Key(code, language, dark), value)
     }
 }
 

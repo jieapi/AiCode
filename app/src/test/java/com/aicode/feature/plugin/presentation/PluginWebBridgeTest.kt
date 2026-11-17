@@ -28,6 +28,8 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -253,13 +255,82 @@ class PluginWebBridgeTest {
         assertTrue(env.scripts.isEmpty())
 
         looper.idleFor(Duration.ofMillis(16))
-        assertEquals(1, env.scripts.size)
-        assertEquals(32, env.scripts.single().split("window.__aicodeEvent(").size - 1)
-        looper.idleFor(Duration.ofMillis(32))
 
         assertEquals(3, env.scripts.size)
+        assertEquals(32, env.scripts.first().split("window.__aicodeEvent(").size - 1)
         val eventNames = Regex("event-\\d+").findAll(env.scripts.joinToString("\n")).map { it.value }.toList()
         assertEquals((0 until 65).map { "event-$it" }, eventNames)
+    }
+
+    @Test
+    fun largeEventsAreNotCombinedIntoOversizedJavascriptBatches() {
+        val env = env()
+        repeat(3) { index ->
+            env.eventBus.publish(pluginId, buildJsonObject {
+                put("name", "large-$index")
+                put("payload", "x".repeat(40_000))
+            })
+        }
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+
+        assertEquals(3, env.scripts.size)
+        assertTrue(env.scripts.all { it.length < 64 * 1024 })
+    }
+
+    @Test
+    fun repliesKeepTheirPositionAndRemainSeparateFromEventBatches() {
+        val env = env()
+        env.eventBus.publish(pluginId, buildJsonObject { put("name", "before-reply") })
+        val deliver = PluginWebBridge::class.java.getDeclaredMethod("deliver", String::class.java, JsonObject::class.java)
+        deliver.isAccessible = true
+        deliver.invoke(env.bridge, "request-1", buildJsonObject { put("ok", true) })
+        env.eventBus.publish(pluginId, buildJsonObject { put("name", "after-reply") })
+
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(3, env.scripts.size)
+        assertTrue(env.scripts[0].contains("before-reply"))
+        assertTrue(env.scripts[1].contains("__aicodeResolve"))
+        assertFalse(env.scripts[1].contains("__aicodeEvent"))
+        assertTrue(env.scripts[2].contains("after-reply"))
+    }
+
+    @Test
+    fun postMessageParsesRequestsOffTheCallingThreadAndDeliversAReply() {
+        val env = env()
+        val responseReady = CountDownLatch(1)
+        val pendingScripts = mutableListOf<String>()
+        val handler = mockk<android.os.Handler>()
+        val originalHandler = PluginWebBridge::class.java.getDeclaredField("mainHandler").apply {
+            isAccessible = true
+        }.get(env.bridge)
+        val callerThread = Thread.currentThread()
+        var processingThread: Thread? = null
+        every { handler.removeCallbacks(any()) } returns Unit
+        every { handler.post(any()) } answers {
+            responseReady.countDown()
+            true
+        }
+        val handlerField = PluginWebBridge::class.java.getDeclaredField("mainHandler")
+        handlerField.isAccessible = true
+        handlerField.set(env.bridge, handler)
+        every { env.environment.workspaceName() } answers {
+            processingThread = Thread.currentThread()
+            "workspace"
+        }
+        env.bridge.updateCallbacks({ "light" }, {}, { pendingScripts += it })
+
+        env.bridge.postMessage("""{"id":"request-1","method":"context","params":{}}""")
+        assertTrue(responseReady.await(5, TimeUnit.SECONDS))
+        val flush = PluginWebBridge::class.java.getDeclaredMethod("flushEvents")
+        flush.isAccessible = true
+        flush.invoke(env.bridge)
+
+        assertTrue(processingThread !== callerThread)
+        assertTrue(pendingScripts.single().contains("__aicodeResolve"))
+        assertTrue(pendingScripts.single().contains("request-1"))
+        handlerField.set(env.bridge, originalHandler)
     }
 
     @Test
