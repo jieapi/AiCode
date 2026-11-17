@@ -24,6 +24,7 @@ import com.aicode.feature.agent.domain.command.SlashCommandRegistry.ResolvedComm
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
+import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.GoalStatus
 import com.aicode.feature.agent.domain.notification.AgentNotificationCenter
@@ -49,7 +50,7 @@ import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.agent.domain.workflow.AgentEvent
-import com.aicode.feature.agent.domain.workflow.AgentWorkflow
+import com.aicode.feature.agent.domain.workflow.AgentWorkflowRegistry
 import com.aicode.feature.agent.presentation.AgentAttachment
 import com.aicode.feature.agent.presentation.AgentUIState
 import com.aicode.feature.agent.presentation.BACKGROUND_NOTIFICATION_PREFIX
@@ -86,10 +87,12 @@ import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -111,6 +114,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -126,7 +130,7 @@ data class ReasoningDurationEvent(val messageId: String, val durationMs: Long)
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @Singleton
 class AgentRunManager @Inject constructor(
-    private val agentWorkflow: AgentWorkflow,
+    private val workflowRegistry: AgentWorkflowRegistry,
     private val toolRegistry: ToolRegistry,
     private val agentMessageDao: AgentMessageDao,
     private val chatSessionDao: ChatSessionDao,
@@ -162,6 +166,7 @@ class AgentRunManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val sessionJobs = mutableMapOf<String, Job>()
+    private val externalSessionIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val commandJobs = mutableMapOf<String, Job>()
     private val chatRequestConsumerId = UUID.randomUUID().toString()
     private val goalEmptyTurnCounts = mutableMapOf<String, Int>()
@@ -732,7 +737,8 @@ class AgentRunManager @Inject constructor(
         setCompacting(sessionId, true)
         var failed = false
         try {
-            val changed = agentWorkflow.compactSession(sessionId) { event ->
+            val session = sessionUseCase.getSessionById(sessionId)
+            val changed = workflowRegistry.resolve(session?.workflowId).compactSession(sessionId) { event ->
                 when (event) {
                     is AgentEvent.CompactionStarted -> setCompacting(sessionId, true)
                     AgentEvent.CompactionFinished -> {
@@ -1026,7 +1032,8 @@ class AgentRunManager @Inject constructor(
     fun stopAgentSession(sessionId: String) {
         val job = sessionJobs[sessionId] ?: return
         if (!job.isActive) return
-        if (subAgentEventBus.release(sessionId)) {
+        val isExternal = sessionId in externalSessionIds
+        if (!isExternal && subAgentEventBus.release(sessionId)) {
             scope.launch {
                 val sub = sessionUseCase.getSessionById(sessionId)
                 val parentId = sub?.parentId
@@ -1042,7 +1049,7 @@ class AgentRunManager @Inject constructor(
             }
         }
         val runningTools = _runningTools.value[sessionId]?.values?.toList() ?: emptyList()
-        val pendingPermission = toolPermissionManager.pendingChatForSession(sessionId)
+        val pendingPermission = if (isExternal) null else toolPermissionManager.pendingChatForSession(sessionId)
         val stoppedText = context.getString(R.string.agent_stopped_by_user)
         val pendingNotifs = agentNotificationCenter.pendingCount(sessionId)
         FileLogger.d(
@@ -1066,8 +1073,11 @@ class AgentRunManager @Inject constructor(
             setAgentState(sessionId, AgentUIState.Idle)
         }
         _runningTools.value = _runningTools.value - sessionId
+        setPreparingTool(sessionId, null)
         setCompacting(sessionId, false)
         setRetryState(sessionId, null)
+        setKeySwitchState(sessionId, null)
+        if (isExternal) return
         scope.launch {
             if (runningTools.isNotEmpty()) {
                 runningTools.forEach { running ->
@@ -1137,6 +1147,7 @@ class AgentRunManager @Inject constructor(
         }
         jobs.forEach { it.cancel() }
         sessionJobs.clear()
+        externalSessionIds.clear()
         commandJobs.values.forEach { it.cancel() }
         commandJobs.clear()
         _runningCommandSessions.value = emptySet()
@@ -1154,6 +1165,7 @@ class AgentRunManager @Inject constructor(
         _queuedRequests.value = _queuedRequests.value - sessionId
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
+        externalSessionIds.remove(sessionId)
         commandJobs[sessionId]?.cancel()
         commandJobs.remove(sessionId)
         _runningCommandSessions.value = _runningCommandSessions.value - sessionId
@@ -1501,9 +1513,10 @@ class AgentRunManager @Inject constructor(
                     sessionUseCase.updateTitle(sessionId, sessionUseCase.deriveTitle(request))
                     pendingTitleRequest = {
                         scope.launch {
-                            agentWorkflow.generateTitle(sessionId, request)?.let {
-                                sessionUseCase.updateTitle(sessionId, it)
-                            }
+                            workflowRegistry.resolve(currentSession?.workflowId)
+                                .generateTitle(sessionId, request)?.let {
+                                    sessionUseCase.updateTitle(sessionId, it)
+                                }
                         }
                     }
                 }
@@ -1577,7 +1590,7 @@ class AgentRunManager @Inject constructor(
                     }
                 }
             }
-            agentWorkflow.executeEvents(
+            workflowRegistry.resolve(sessionDomain?.workflowId).executeEvents(
                 userRequest = modelRequest,
                 context = agentContext,
                 tools = tools
@@ -1907,6 +1920,314 @@ class AgentRunManager @Inject constructor(
             job.invokeOnCompletion { streamingAssistantStore.finishRun(targetSessionId, runToken) }
         }
     }
+    }
+
+    /**
+     * 外部会话单轮执行：复用保活、`sessionJobs` 互斥与取消、`agentStates`、流式内容、工具进度与
+     * `AgentWorkflowRegistry` 路由，但不写入 Room 数据库（`chatSessionDao` / `agentMessageDao` / `checkpointManager`）。
+     */
+    fun launchExternalTurn(
+        externalSessionId: String,
+        workflowId: String?,
+        request: String,
+        workspacePath: String,
+        history: List<AgentMessage> = emptyList(),
+        @Suppress("UNUSED_PARAMETER") providerId: String? = null,
+        @Suppress("UNUSED_PARAMETER") model: String? = null,
+        mode: AgentMode = AgentMode.BUILD,
+        onCommittedEvent: suspend (AgentEvent) -> Unit = {},
+        onFinished: suspend (succeeded: Boolean) -> Unit = {}
+    ): Job {
+        val runToken = Any()
+        val job: Job = synchronized(sessionJobs) {
+            sessionJobs[externalSessionId]?.takeIf { it.isActive }?.let { return it }
+            externalSessionIds.add(externalSessionId)
+            streamingAssistantStore.startRun(externalSessionId, runToken)
+            setAgentState(externalSessionId, AgentUIState.Streaming)
+            acquireKeepalive()
+            scope.launch(start = CoroutineStart.LAZY) {
+                var turnSucceeded = false
+                var runStatus = "success"
+                var runError: String? = null
+                val externalToolArgs = mutableMapOf<String, String>()
+                try {
+                    agentRunStateStore.started(externalSessionId)
+                    var failed = false
+                    val agentContext = AgentContext(
+                        currentFile = null,
+                        selectedCode = null,
+                        projectRoot = workspacePath,
+                        language = null,
+                        history = history,
+                        sessionId = externalSessionId,
+                        inputMessageId = UUID.randomUUID().toString(),
+                        mode = mode
+                    )
+                    val tools = toolRegistry.getAvailableTools()
+                        .filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
+                        .filterNot { it.name == "goalStatus" }
+
+                    var currentAssistantMessageId: String? = null
+                    var currentReasoningStart: Long? = null
+                    var currentReasoningEnd: Long? = null
+                    fun startAssistantMessage(messageId: String) {
+                        if (currentAssistantMessageId == messageId) return
+                        currentAssistantMessageId = messageId
+                        currentReasoningStart = null
+                        currentReasoningEnd = null
+                    }
+                    fun finishReasoning() {
+                        val start = currentReasoningStart ?: return
+                        if (currentReasoningEnd == null) {
+                            val end = System.currentTimeMillis()
+                            currentReasoningEnd = end
+                            streamingAssistantStore.updateIfPresent(externalSessionId, currentAssistantMessageId) {
+                                it.copy(reasoningStartMs = start, reasoningEndMs = end)
+                            }
+                        }
+                    }
+
+                    workflowRegistry.resolve(workflowId).executeEvents(
+                        userRequest = request,
+                        context = agentContext,
+                        tools = tools
+                    ).collect { event ->
+                        when (event) {
+                            is AgentEvent.AssistantDelta -> {
+                                startAssistantMessage(event.messageId)
+                                if (event.accumulated.hasVisibleContent()) {
+                                    finishReasoning()
+                                }
+                                setRetryState(externalSessionId, null)
+                                setKeySwitchState(externalSessionId, null)
+                                updateStreamingAssistant(externalSessionId, event.messageId) {
+                                    it.copy(content = event.accumulated)
+                                }
+                            }
+                            is AgentEvent.ReasoningDelta -> {
+                                startAssistantMessage(event.messageId)
+                                setRetryState(externalSessionId, null)
+                                setKeySwitchState(externalSessionId, null)
+                                if (currentReasoningStart == null) {
+                                    currentReasoningStart = System.currentTimeMillis()
+                                    currentReasoningEnd = null
+                                }
+                                updateStreamingAssistant(externalSessionId, event.messageId) {
+                                    it.copy(
+                                        reasoning = event.accumulated,
+                                        reasoningStartMs = currentReasoningStart,
+                                        reasoningEndMs = currentReasoningEnd
+                                    )
+                                }
+                            }
+                            is AgentEvent.ToolCallPreparing -> {
+                                finishReasoning()
+                                setPreparingTool(externalSessionId, event.toolName)
+                            }
+                            is AgentEvent.Retrying -> {
+                                clearStreamingAssistant(externalSessionId)
+                                currentAssistantMessageId = null
+                                currentReasoningStart = null
+                                currentReasoningEnd = null
+                                setRetryState(externalSessionId, RetryState(event.attempt, event.maxRetries, event.error))
+                                setKeySwitchState(externalSessionId, null)
+                            }
+                            is AgentEvent.KeySwitched -> {
+                                clearStreamingAssistant(externalSessionId)
+                                currentAssistantMessageId = null
+                                currentReasoningStart = null
+                                currentReasoningEnd = null
+                                setKeySwitchState(externalSessionId, KeySwitchState(event.newIndex, event.total))
+                            }
+                            is AgentEvent.CompactionStarted -> {
+                                clearStreamingAssistant(externalSessionId)
+                                currentAssistantMessageId = null
+                                currentReasoningStart = null
+                                currentReasoningEnd = null
+                                setRetryState(externalSessionId, null)
+                                setKeySwitchState(externalSessionId, null)
+                                setCompacting(externalSessionId, true)
+                                _compactionFailedSessions.value = _compactionFailedSessions.value - externalSessionId
+                            }
+                            AgentEvent.CompactionFinished -> {
+                                setCompacting(externalSessionId, false)
+                                val compactionFailed = externalSessionId in _compactionFailedSessions.value
+                                if (!compactionFailed) _contextUsages.value = _contextUsages.value - externalSessionId
+                                _compactionFailedSessions.value = _compactionFailedSessions.value - externalSessionId
+                            }
+                            is AgentEvent.ContextUsage -> {
+                                _contextUsages.value = _contextUsages.value + (externalSessionId to event)
+                            }
+                            is AgentEvent.CompactionFailed -> {
+                                setCompacting(externalSessionId, false)
+                                _compactionFailedSessions.value = _compactionFailedSessions.value + externalSessionId
+                            }
+                            is AgentEvent.AssistantText -> {
+                                startAssistantMessage(event.messageId)
+                                finishReasoning()
+                                val normalized = if (event.content.hasVisibleContent()) event.content else ""
+                                val reasoning = event.reasoning.takeIf { it.hasVisibleContent() }
+                                val msgId = event.messageId
+                                val reasoningDuration = currentReasoningStart?.let { start ->
+                                    currentReasoningEnd?.minus(start)
+                                }
+                                updateStreamingAssistant(externalSessionId, msgId) {
+                                    it.copy(
+                                        content = normalized,
+                                        reasoning = reasoning.orEmpty(),
+                                        settled = true,
+                                        persisted = false,
+                                        reasoningStartMs = currentReasoningStart,
+                                        reasoningEndMs = currentReasoningEnd
+                                    )
+                                }
+                                currentReasoningStart = null
+                                currentReasoningEnd = null
+                                if (event.toolCalls.isEmpty()) {
+                                    setPreparingTool(externalSessionId, null)
+                                }
+                                if (reasoningDuration != null && reasoningDuration > 0) {
+                                    _reasoningDurationEvents.tryEmit(ReasoningDurationEvent(msgId, reasoningDuration))
+                                }
+                                if (event.inputTokens > 0 || event.outputTokens > 0) {
+                                    _llmCallEvents.tryEmit(
+                                        LlmCallEvent(
+                                            externalSessionId,
+                                            event.inputTokens,
+                                            event.outputTokens,
+                                            event.cachedInputTokens
+                                        )
+                                    )
+                                } else {
+                                    _llmCallEvents.tryEmit(LlmCallEvent(externalSessionId, 0, 0, 0))
+                                }
+                                streamingAssistantStore.markPersisted(
+                                    externalSessionId,
+                                    msgId,
+                                    normalized,
+                                    reasoning.orEmpty()
+                                )
+                                event.persisted?.complete(Unit)
+                                onCommittedEvent(event)
+                            }
+                            is AgentEvent.ToolCallStarted -> {
+                                val msgId = "tool_${event.id}"
+                                setPreparingTool(externalSessionId, null)
+                                externalToolArgs[msgId] = event.argsPreview
+                                setRunningTool(
+                                    externalSessionId,
+                                    msgId,
+                                    RunningToolOutput(msgId, "", event.toolName, event.argsPreview)
+                                )
+                            }
+                            is AgentEvent.ToolCallProgress -> {
+                                val msgId = "tool_${event.id}"
+                                setRunningTool(
+                                    externalSessionId,
+                                    msgId,
+                                    RunningToolOutput(
+                                        msgId,
+                                        event.accumulated,
+                                        event.toolName,
+                                        externalToolArgs[msgId] ?: ""
+                                    )
+                                )
+                            }
+                            is AgentEvent.ToolCallFinished -> {
+                                val msgId = "tool_${event.id}"
+                                externalToolArgs.remove(msgId)
+                                removeRunningTool(externalSessionId, msgId)
+                                event.persisted?.complete(Unit)
+                                onCommittedEvent(event)
+                            }
+                            is AgentEvent.Failed -> {
+                                failed = true
+                                setCompacting(externalSessionId, false)
+                                setAgentState(externalSessionId, AgentUIState.Error(describeFailure(event)))
+                            }
+                            AgentEvent.Completed -> {
+                                setRetryState(externalSessionId, null)
+                                setKeySwitchState(externalSessionId, null)
+                                setCompacting(externalSessionId, false)
+                            }
+                            is AgentEvent.ModeChanged -> {
+                            }
+                        }
+                    }
+                    turnSucceeded = !failed
+                    val finishedState = _agentStates.value[externalSessionId]
+                    if (!failed && (finishedState is AgentUIState.Loading || finishedState is AgentUIState.Streaming)) {
+                        setAgentState(externalSessionId, AgentUIState.Result(WorkflowStatus.SUCCESS))
+                        _completedSessions.value = _completedSessions.value + externalSessionId
+                    }
+                } catch (e: CancellationException) {
+                    turnSucceeded = false
+                    val cancelledState = _agentStates.value[externalSessionId]
+                    val isOwnJob = sessionJobs[externalSessionId] == coroutineContext[Job]
+                    if (isOwnJob && (cancelledState is AgentUIState.Loading || cancelledState is AgentUIState.Streaming)) {
+                        setAgentState(externalSessionId, AgentUIState.Idle)
+                        _completedSessions.value = _completedSessions.value - externalSessionId
+                    }
+                    runStatus = "cancelled"
+                    throw e
+                } catch (e: Exception) {
+                    turnSucceeded = false
+                    FileLogger.e(TAG, "launchExternalTurn 失败: sid=$externalSessionId request=$request", e)
+                    runStatus = "error"
+                    runError = e.toUserMessage(context)
+                    setAgentState(externalSessionId, AgentUIState.Error(runError))
+                    _completedSessions.value = _completedSessions.value - externalSessionId
+                } finally {
+                    val isOwnJob = synchronized(sessionJobs) {
+                        val own = sessionJobs[externalSessionId] == coroutineContext[Job]
+                        if (own) {
+                            sessionJobs.remove(externalSessionId)
+                            externalSessionIds.remove(externalSessionId)
+                        }
+                        own
+                    }
+                    if (isOwnJob) {
+                        streamingAssistantStore.finishRun(externalSessionId, runToken, System.currentTimeMillis())
+                    }
+                    _runningTools.value = _runningTools.value - externalSessionId
+                    setPreparingTool(externalSessionId, null)
+                    setCompacting(externalSessionId, false)
+                    setRetryState(externalSessionId, null)
+                    setKeySwitchState(externalSessionId, null)
+
+                    val finishState = _agentStates.value[externalSessionId]
+                    val finishStatus = when {
+                        runStatus != "success" -> runStatus
+                        finishState is AgentUIState.Error -> "error"
+                        else -> "success"
+                    }
+                    val finishError = runError ?: (finishState as? AgentUIState.Error)?.message
+                    agentRunStateStore.finished(externalSessionId, finishStatus, finishError)
+
+                    val currentState = _agentStates.value[externalSessionId]
+                    if (currentState !is AgentUIState.Error &&
+                        currentState !is AgentUIState.Loading &&
+                        currentState !is AgentUIState.Streaming
+                    ) {
+                        setAgentState(externalSessionId, AgentUIState.Idle)
+                    }
+                    if (activeSessionIds().isEmpty()) {
+                        releaseKeepalive()
+                    }
+                    withContext(NonCancellable) {
+                        runCatching { onFinished(turnSucceeded) }
+                            .onFailure {
+                                FileLogger.w(TAG, "launchExternalTurn onFinished 回调失败: sid=$externalSessionId", it)
+                            }
+                    }
+                }
+            }.also { created ->
+                sessionJobs[externalSessionId] = created
+                created.invokeOnCompletion { streamingAssistantStore.finishRun(externalSessionId, runToken) }
+            }
+        }
+        job.start()
+        return job
     }
 
     private suspend fun maybeQueueGoalContinuation(sessionId: String, isGoalTurn: Boolean, hadActivity: Boolean) {

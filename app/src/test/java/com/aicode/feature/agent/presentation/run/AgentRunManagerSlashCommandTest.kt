@@ -33,6 +33,8 @@ import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.agent.domain.workflow.AgentEvent
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
+import com.aicode.feature.agent.domain.workflow.AgentWorkflowRegistry
+import com.aicode.feature.agent.domain.workflow.WorkflowDescriptor
 import com.aicode.feature.agent.presentation.MessageRole
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager
 import com.aicode.feature.agent.presentation.notification.AgentLiveNotificationManager
@@ -62,6 +64,7 @@ import org.junit.Test
 class AgentRunManagerSlashCommandTest {
 
     private val agentWorkflow = mockk<AgentWorkflow>(relaxed = true)
+    private val workflowRegistry = AgentWorkflowRegistry(agentWorkflow)
     private val toolRegistry = mockk<ToolRegistry>(relaxed = true)
     private val agentMessageDao = mockk<AgentMessageDao>(relaxed = true)
     private val chatSessionDao = mockk<ChatSessionDao>(relaxed = true)
@@ -152,7 +155,7 @@ class AgentRunManagerSlashCommandTest {
         runBlocking { slashCommandRegistry.refresh() }
 
         manager = AgentRunManager(
-            agentWorkflow = agentWorkflow,
+            workflowRegistry = workflowRegistry,
             toolRegistry = toolRegistry,
             agentMessageDao = agentMessageDao,
             chatSessionDao = chatSessionDao,
@@ -336,6 +339,62 @@ class AgentRunManagerSlashCommandTest {
 
         coVerify(timeout = 2000) {
             agentWorkflow.executeEvents("/etc/hosts", any(), any())
+        }
+    }
+
+    @Test
+    fun routeBySessionWorkflowId_usesPluginWorkflowForExecuteCompactAndTitle() {
+        val pluginWorkflow = mockk<AgentWorkflow>(relaxed = true)
+        val pluginWorkflowId = "plugin-a:custom-workflow"
+        workflowRegistry.syncPluginWorkflows(
+            "plugin-a",
+            listOf(WorkflowDescriptor(pluginWorkflowId, "自定义工作流") to pluginWorkflow)
+        )
+        every { pluginWorkflow.executeEvents(any(), any(), any()) } returns flow {
+            emit(AgentEvent.AssistantDelta("ok", "m1"))
+            emit(AgentEvent.Completed)
+        }
+        coEvery { pluginWorkflow.generateTitle(sessionId, any()) } returns "自定义标题"
+        coEvery { pluginWorkflow.compactSession(sessionId, any()) } returns true
+        coEvery { sessionUseCase.getSessionById(sessionId) } returns ChatSessionEntity(
+            id = sessionId,
+            title = "测试会话",
+            workspacePath = workspace,
+            createdAt = 1L,
+            updatedAt = 1L,
+            providerId = "p1",
+            model = "m1",
+            mode = AgentMode.BUILD.name,
+            workflowId = pluginWorkflowId
+        )
+
+        manager.enqueueAgentRequest(
+            request = "hello plugin workflow",
+            projectRoot = workspace,
+            targetSessionId = sessionId
+        )
+
+        coVerify(timeout = 2000) {
+            pluginWorkflow.executeEvents("hello plugin workflow", any(), any())
+            pluginWorkflow.generateTitle(sessionId, "hello plugin workflow")
+            sessionUseCase.updateTitle(sessionId, "自定义标题")
+        }
+        coVerify(exactly = 0) {
+            agentWorkflow.executeEvents(any(), any(), any())
+            agentWorkflow.generateTitle(any(), any())
+        }
+
+        manager.enqueueAgentRequest(
+            request = "/compress",
+            projectRoot = workspace,
+            targetSessionId = sessionId
+        )
+
+        coVerify(timeout = 2000) {
+            pluginWorkflow.compactSession(sessionId, any())
+        }
+        coVerify(exactly = 0) {
+            agentWorkflow.compactSession(any(), any())
         }
     }
 }

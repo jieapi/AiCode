@@ -1127,7 +1127,7 @@ class PluginManifestParserTest {
     }
 
     @Test
-    fun sessionSourceContribution_isParsed() {
+    fun sessionSourceContribution_isRejectedAsUnsupported() {
         val json = """
             {
               "manifestVersion": 1,
@@ -1139,18 +1139,14 @@ class PluginManifestParserTest {
               "description": "Remote sessions",
               "license": "MIT",
               "engines": {"pluginApi": "^1.0.0"},
-              "runtime": {"type": "javascript", "entry": "dist/main.js"},
               "contributes": {
                 "sessionSources": [
                   {
                     "id": "ds-harness",
-                    "title": {"default": "DS Harness Remote", "zh-CN": "DS Harness 远程"},
+                    "title": {"default": "DS Harness Remote"},
                     "handlers": {
                       "listSessions": "sessionSource.listSessions",
-                      "readSession": "sessionSource.readSession",
-                      "sendMessage": "sessionSource.sendMessage",
-                      "interruptSession": "sessionSource.interruptSession",
-                      "createSession": "sessionSource.createSession"
+                      "readSession": "sessionSource.readSession"
                     }
                   }
                 ]
@@ -1158,12 +1154,416 @@ class PluginManifestParserTest {
             }
         """.trimIndent()
 
-        val manifest = success(json)
-        val source = manifest.sessionSources.single()
-        assertEquals("ds-harness", source.id)
-        assertEquals("DS Harness 远程", source.title.resolve("zh-CN"))
-        assertEquals("sessionSource.listSessions", source.handlers.listSessions)
-        assertEquals("sessionSource.readSession", source.handlers.readSession)
-        assertEquals(1, manifest.contributionCount)
+        assertRejected(json, PluginErrorCode.UNSUPPORTED_CONTRIBUTION, "sessionSources")
+    }
+
+    @Test
+    fun executionBackendContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "name": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
+                    "description": "Run commands in cloud sandbox",
+                    "capabilities": {
+                      "filesystem": true,
+                      "command": true,
+                      "terminal": true,
+                      "fileWatch": false,
+                      "portForward": true,
+                      "isRemoteEnvironment": true,
+                      "workspaceDiscovery": "hybrid",
+                      "projectConfigLocation": "app_private_dir"
+                    },
+                    "handlers": {
+                      "fs": "backend.fs",
+                      "exec": "backend.exec",
+                      "execStream": "backend.execStream",
+                      "execHealth": "backend.health",
+                      "terminal": "backend.terminal",
+                      "workspaceList": "backend.wsList",
+                      "workspaceCreate": "backend.wsCreate",
+                      "workspaceDelete": "backend.wsDelete",
+                      "workspaceSelect": "backend.wsSelect"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.executionBackends.size)
+        val backend = m.executionBackends.single()
+        assertEquals("cloud-box", backend.id)
+        assertEquals("云沙盒", backend.name.resolve("zh-CN"))
+        assertTrue(backend.capabilities.filesystem)
+        assertTrue(backend.capabilities.command)
+        assertTrue(backend.capabilities.terminal)
+        assertTrue(backend.capabilities.isRemoteEnvironment)
+        assertEquals("hybrid", backend.capabilities.workspaceDiscovery)
+        assertEquals("app_private_dir", backend.capabilities.projectConfigLocation)
+        assertEquals("backend.fs", backend.handlers.fs)
+        assertEquals("backend.execStream", backend.handlers.execStream)
+        assertEquals("backend.terminal", backend.handlers.terminal)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun executionBackendContribution_validatesRuntimeAndHandlers() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "name": "Cloud Sandbox",
+                    "capabilities": {"filesystem": true, "command": false},
+                    "handlers": {"fs": "backend.fs"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingExecHandler = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "name": "Cloud Sandbox",
+                    "capabilities": {"filesystem": true, "command": true},
+                    "handlers": {"fs": "backend.fs"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingExecHandler, PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.exec")
+    }
+
+    @Test
+    fun workflowContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": {"default": "Codex Loop", "zh-CN": "Codex 工作流"},
+                    "description": "Delegates turns to Codex CLI",
+                    "capabilities": {
+                      "streaming": true,
+                      "tools": true,
+                      "compaction": true,
+                      "titleGeneration": false
+                    },
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn",
+                      "compact": "wf.compact",
+                      "generateTitle": "wf.title"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.workflows.size)
+        val wf = m.workflows.single()
+        assertEquals("codex-loop", wf.id)
+        assertEquals("Codex 工作流", wf.title.resolve("zh-CN"))
+        assertEquals("Delegates turns to Codex CLI", wf.description.resolve("en"))
+        assertTrue(wf.capabilities.streaming)
+        assertTrue(wf.capabilities.tools)
+        assertTrue(wf.capabilities.compaction)
+        assertEquals(false, wf.capabilities.titleGeneration)
+        assertEquals("wf.startTurn", wf.handlers.startTurn)
+        assertEquals("wf.cancelTurn", wf.handlers.cancelTurn)
+        assertEquals("wf.compact", wf.handlers.compact)
+        assertEquals("wf.title", wf.handlers.generateTitle)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun workflowContribution_validatesRequiredFieldsAndRuntime() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingIdAndTitle = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingIdAndTitle, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].id")
+        assertRejected(missingIdAndTitle, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].title")
+
+        val missingHandlers = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "handlers": {
+                      "startTurn": "wf.startTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingHandlers, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].handlers.cancelTurn")
+
+        val missingStartTurn = missingHandlers.replace("\"startTurn\": \"wf.startTurn\"", "\"cancelTurn\": \"wf.cancelTurn\"")
+        assertRejected(missingStartTurn, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].handlers.startTurn")
+
+        val unknownField = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "extra": true,
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(unknownField, PluginErrorCode.UNSUPPORTED_FIELD, "contributes.workflows[0].extra")
+    }
+
+    @Test
+    fun sessionContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": {"default": "Harness", "zh-CN": "外部会话"},
+                    "description": "Stream remote harness sessions",
+                    "handlers": {
+                      "refresh": "sessions.refresh",
+                      "readMessages": "sessions.readMessages",
+                      "createSession": "sessions.create",
+                      "deleteSession": "sessions.delete",
+                      "renameSession": "sessions.rename",
+                      "pinSession": "sessions.pin"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.sessions.size)
+        val session = m.sessions.single()
+        assertEquals("harness", session.id)
+        assertEquals("外部会话", session.title.resolve("zh-CN"))
+        assertEquals("Stream remote harness sessions", session.description.resolve("en"))
+        assertEquals("sessions.refresh", session.handlers.refresh)
+        assertEquals("sessions.readMessages", session.handlers.readMessages)
+        assertEquals("sessions.create", session.handlers.createSession)
+        assertEquals("sessions.delete", session.handlers.deleteSession)
+        assertEquals("sessions.rename", session.handlers.renameSession)
+        assertEquals("sessions.pin", session.handlers.pinSession)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun sessionContribution_validatesRequiredFieldsAndRuntime() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": "Harness",
+                    "handlers": {"readMessages": "sessions.readMessages"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingReadMessages = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": "Harness",
+                    "handlers": {"refresh": "sessions.refresh"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingReadMessages, PluginErrorCode.FIELD_MISSING, "contributes.sessions[0].handlers.readMessages")
+
+        val tooMany = (0 until 33).joinToString(",") { idx ->
+            """{"id": "s$idx", "title": "S$idx", "handlers": {"readMessages": "sessions.readMessages"}}"""
+        }
+        val overLimit = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {"sessions": [$tooMany]}
+            }
+        """.trimIndent()
+        assertRejected(overLimit, PluginErrorCode.FIELD_INVALID, "contributes.sessions")
     }
 }
