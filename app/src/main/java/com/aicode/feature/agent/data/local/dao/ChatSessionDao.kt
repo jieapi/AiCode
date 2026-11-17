@@ -92,4 +92,10 @@ interface ChatSessionDao {
 
     @Query("UPDATE chat_sessions SET lastInputTokens = :lastInputTokens WHERE id = :id")
     suspend fun updateLastInputTokens(id: String, lastInputTokens: Int)
+
+    @Query("UPDATE chat_sessions SET workflowId = :workflowId, workflowState = :workflowState WHERE id = :id")
+    suspend fun updateWorkflow(id: String, workflowId: String?, workflowState: String? = null)
+
+    @Query("UPDATE chat_sessions SET workflowState = :workflowState WHERE id = :id")
+    suspend fun updateWorkflowState(id: String, workflowState: String?)
 }

@@ -37,7 +37,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun backupTargetDao(): BackupTargetDao
 
     companion object {
-        const val SCHEMA_VERSION = 63
+        const val SCHEMA_VERSION = 64
 
         /** 数据库文件名（落在 `databases/` 下，另有 Room 默认 WAL 模式产生的 `-wal`/`-shm`）。 */
         const val DATABASE_NAME = "aicode_agent_db"

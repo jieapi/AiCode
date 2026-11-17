@@ -207,6 +207,14 @@ class SessionUseCase @Inject constructor(
         chatSessionDao.updateReasoningEffort(sessionId, effort)
     }
 
+    suspend fun updateWorkflow(id: String, workflowId: String?, workflowState: String? = null) {
+        chatSessionDao.updateWorkflow(id, workflowId, workflowState)
+    }
+
+    suspend fun updateWorkflowState(id: String, workflowState: String?) {
+        chatSessionDao.updateWorkflowState(id, workflowState)
+    }
+
     /**
      * 设定/覆盖会话 goal：重置轮次计数，并记录当前累计 token 作为消耗基线，状态置 ACTIVE。
      * [goal] 为 null/空白则清除目标。
