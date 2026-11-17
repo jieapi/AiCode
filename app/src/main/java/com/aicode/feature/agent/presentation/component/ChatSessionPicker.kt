@@ -1,9 +1,7 @@
 package com.aicode.feature.agent.presentation.component
 
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -30,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -96,8 +95,7 @@ fun ChatSessionRow(
             )
             Spacer(Modifier.width(Spacing.md))
         } else if (isExecuting) {
-            val transition = rememberInfiniteTransition(label = "tool-status-dot")
-            val alpha by transition.animateFloat(
+            val alpha by rememberChatInfiniteFloat(
                 initialValue = 1f,
                 targetValue = 0.25f,
                 animationSpec = infiniteRepeatable(animation = tween(650), repeatMode = RepeatMode.Reverse),
@@ -106,8 +104,9 @@ fun ChatSessionRow(
             Box(
                 modifier = Modifier
                     .size(8.dp)
+                    .graphicsLayer { this.alpha = alpha }
                     .clip(CircleShape)
-                    .background(MaterialTheme.semanticColors.success.copy(alpha = alpha))
+                    .background(MaterialTheme.semanticColors.success)
             )
             Spacer(Modifier.width(Spacing.md))
         }

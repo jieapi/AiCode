@@ -55,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProgressIndicatorDefaults
 import com.aicode.core.ui.AdaptiveModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -151,6 +152,24 @@ import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+
+@Composable
+private fun DrawerProgressIndicator(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    strokeWidth: Dp = ProgressIndicatorDefaults.CircularStrokeWidth
+) {
+    if (chatAnimationsEnabled()) {
+        CircularProgressIndicator(modifier = modifier, color = color, strokeWidth = strokeWidth)
+    } else {
+        CircularProgressIndicator(
+            progress = { 0.75f },
+            modifier = modifier,
+            color = color,
+            strokeWidth = strokeWidth
+        )
+    }
+}
 
 /**
  * 侧边栏内容：顶部 Tab 切换「会话」/「文件」，底部「设置」入口卡片。
@@ -892,7 +911,7 @@ private fun CollapsibleSessionGroupHeader(
             modifier = Modifier.weight(1f)
         )
         if (loading) {
-            CircularProgressIndicator(
+            DrawerProgressIndicator(
                 modifier = Modifier.size(12.dp),
                 strokeWidth = 1.5.dp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
@@ -961,7 +980,7 @@ private fun ChatSearchResults(
     when {
         state.hits.isEmpty() && state.loading -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
+                DrawerProgressIndicator(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1172,7 +1191,7 @@ private fun FileBrowserTab(
                 )
             }
             if (fileOpPaths.isNotEmpty()) {
-                CircularProgressIndicator(
+                DrawerProgressIndicator(
                     modifier = Modifier.padding(end = Spacing.xs).size(16.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
@@ -1208,7 +1227,7 @@ private fun FileBrowserTab(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    DrawerProgressIndicator(modifier = Modifier.size(24.dp))
                 }
 
                 is FileBrowseState.Error -> Box(
@@ -1651,7 +1670,7 @@ private fun FileTreeRow(
         Spacer(Modifier.width(Spacing.lg * node.depth))
         if (node.entry.isDirectory) {
             if (showExpanding) {
-                CircularProgressIndicator(
+                DrawerProgressIndicator(
                     modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
@@ -1672,7 +1691,7 @@ private fun FileTreeRow(
         }
         Spacer(Modifier.width(Spacing.xs))
         if (busy) {
-            CircularProgressIndicator(
+            DrawerProgressIndicator(
                 modifier = Modifier.size(20.dp),
                 strokeWidth = 2.dp,
                 color = MaterialTheme.colorScheme.primary

@@ -224,8 +224,22 @@ class AIAgentViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) : ViewModel(), SlashCommandContext {
 
+    private val streamingAssistantOwner = Any()
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+
+    private fun updateSelectedSessionId(sessionId: String?) {
+        agentRunManager.setSelectedLocalSession(
+            streamingAssistantOwner,
+            sessionId.takeIf { _activePluginSession.value == null }
+        )
+        _currentSessionId.value = sessionId
+    }
+
+    override fun onCleared() {
+        agentRunManager.setSelectedLocalSession(streamingAssistantOwner, null)
+        super.onCleared()
+    }
 
     // ── 插件会话（PluginSessionSourceService）──
     // 插件会话只在内存中展示：消息不写 Room，也不经过本地 AgentRunManager。
@@ -1419,6 +1433,10 @@ class AIAgentViewModel @Inject constructor(
         if (id == null) null else assistants[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    fun acknowledgeRenderedAssistant(sessionId: String, messageId: String) {
+        agentRunManager.acknowledgeRenderedAssistant(sessionId, messageId)
+    }
+
     val retryState: StateFlow<RetryState?> = combine(_currentSessionId, agentRunManager.retryStates) { id, states ->
         if (id == null) null else states[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -1593,7 +1611,7 @@ class AIAgentViewModel @Inject constructor(
                     sessionUseCase.isSessionEmpty(recent.id) -> recent.id
                     else -> createAndUpsertSession(path)
                 }
-                _currentSessionId.value = targetId
+                updateSelectedSessionId(targetId)
 
                 // 异步回收多余的空会话（保留当前 targetId），在后台执行，不卡主线程与首帧渲染。
                 if (recent != null) {
@@ -1646,7 +1664,7 @@ class AIAgentViewModel @Inject constructor(
                 if (request.sessionId != null) leavePluginSessionForLocalSwitch()
                 val target = request.sessionId ?: _currentSessionId.value ?: ensureSession()
                 if (target.isBlank() || sessionUseCase.getSessionById(target) == null) return
-                _currentSessionId.value = target
+                updateSelectedSessionId(target)
                 val next = if (request.append) {
                     val existing = _inputDrafts.value[target].orEmpty()
                     if (existing.isBlank()) request.text else existing.trimEnd() + "\n\n" + request.text
@@ -1808,14 +1826,14 @@ class AIAgentViewModel @Inject constructor(
             sessionUseCase.getEmptySessionOfWorkspace(ws)?.id
         }
         if (reusableId != null) {
-            _currentSessionId.value = reusableId
+            updateSelectedSessionId(reusableId)
             return@launch
         }
         // 新会话时异步重连未连接的 MCP server，让 manageMcp 新增的配置真正生效；
         // 不阻塞会话创建——MCP 环境未就绪/超时时不能卡住「新建会话」。
         mcpManager.reconnectUnconnectedAsync()
         val sid = createAndUpsertSession(ws)
-        _currentSessionId.value = sid
+        updateSelectedSessionId(sid)
     }
 
     fun setCurrentSessionId(id: String) {
@@ -1825,7 +1843,7 @@ class AIAgentViewModel @Inject constructor(
             if (id == pluginSession.id) return
         }
         if (_currentSessionId.value == id) return
-        _currentSessionId.value = id
+        updateSelectedSessionId(id)
     }
 
     fun setSessionMode(mode: AgentMode) {
@@ -2167,9 +2185,10 @@ class AIAgentViewModel @Inject constructor(
         pluginNextCursor = null
         _pluginSessionProviderModel.value = null to null
         _pluginSessionError.value = null
+        agentRunManager.setSelectedLocalSession(streamingAssistantOwner, null)
         _activePluginSession.value = session
         // UI 的 messagesReady 依赖 sessionId == currentSessionId；这里同步指向外部 id。
-        _currentSessionId.value = session.id
+        updateSelectedSessionId(session.id)
         _pluginStreaming.value = null
         startPluginStream(session)
         _pluginMessagesState.value = ChatMessagesState(
@@ -2422,6 +2441,9 @@ class AIAgentViewModel @Inject constructor(
         pluginLoadJob?.cancel()
         pluginLoadJob = null
         stopPluginStream()
+        if (restoreLocalSessionId) {
+            agentRunManager.setSelectedLocalSession(streamingAssistantOwner, previousLocalSessionId)
+        }
         _activePluginSession.value = null
         _pluginMessagesState.value = ChatMessagesState(null, emptyList(), loaded = false)
         _pluginSessionError.value = null
@@ -2429,7 +2451,7 @@ class AIAgentViewModel @Inject constructor(
         pluginNextCursor = null
         localSessionIdBeforePlugin = null
         if (restoreLocalSessionId) {
-            _currentSessionId.value = previousLocalSessionId
+            updateSelectedSessionId(previousLocalSessionId)
         }
     }
 
@@ -2450,7 +2472,7 @@ class AIAgentViewModel @Inject constructor(
             if (id == pluginSession.id) return
         }
         if (_currentSessionId.value == id) return
-        _currentSessionId.value = id
+        updateSelectedSessionId(id)
     }
 
     fun deleteSessions(ids: Set<String>) = viewModelScope.launch {
@@ -2473,13 +2495,13 @@ class AIAgentViewModel @Inject constructor(
         if (_currentSessionId.value in allDeletedIds) {
             val ws = _currentWorkspace.value
             if (ws.isBlank()) {
-                _currentSessionId.value = null
+                updateSelectedSessionId(null)
             } else {
                 val remaining = sessionUseCase.getFirstSessionOfWorkspace(ws)
                 if (remaining != null) {
-                    _currentSessionId.value = remaining.id
+                    updateSelectedSessionId(remaining.id)
                 } else {
-                    _currentSessionId.value = createAndUpsertSession(ws)
+                    updateSelectedSessionId(createAndUpsertSession(ws))
                 }
             }
         }
@@ -2501,13 +2523,13 @@ class AIAgentViewModel @Inject constructor(
         if (_currentSessionId.value in deletedIds) {
             val ws = _currentWorkspace.value
             if (ws.isBlank()) {
-                _currentSessionId.value = null
+                updateSelectedSessionId(null)
             } else {
                 val remaining = sessionUseCase.getFirstSessionOfWorkspace(ws)
                 if (remaining != null) {
-                    _currentSessionId.value = remaining.id
+                    updateSelectedSessionId(remaining.id)
                 } else {
-                    _currentSessionId.value = createAndUpsertSession(ws)
+                    updateSelectedSessionId(createAndUpsertSession(ws))
                 }
             }
         }
@@ -2617,7 +2639,7 @@ class AIAgentViewModel @Inject constructor(
         val ws = _currentWorkspace.value
         if (ws.isBlank()) return ""
         val id = sessionUseCase.getFirstSessionOfWorkspace(ws)?.id ?: createAndUpsertSession(ws)
-        _currentSessionId.value = id
+        updateSelectedSessionId(id)
         return id
     }
 

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -187,6 +188,198 @@ class PluginHookDispatcherTest {
             IllegalStateException("boom")
 
         dispatcher.dispatchPluginUninstalled(PLUGIN_ID)
+    }
+
+    @Test
+    fun afterToolCallWithoutHooksSkipsDataProvider() = runBlocking {
+        stubPlugin(emptyList(), emptyList())
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                JsonPrimitive("original")
+            }
+        )
+
+        assertEquals(0, dataCalls)
+        assertEquals(ToolAfterHookResult(), result)
+        coVerify(exactly = 0) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun afterToolCallWithObserveHookSkipsDataProvider() = runBlocking {
+        val observer = hook("after", PluginHookEvents.AGENT_TOOL_AFTER)
+        stubPlugin(listOf(plugin(hooks = listOf(observer))), listOf(observer))
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                JsonPrimitive("original")
+            }
+        )
+
+        assertEquals(0, dataCalls)
+        assertEquals(ToolAfterHookResult(), result)
+        coVerify(exactly = 0) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun afterToolCallWithDisabledHookSkipsDataProvider() = runBlocking {
+        val transform = hook("after", PluginHookEvents.AGENT_TOOL_AFTER)
+            .copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(
+            listOf(plugin(record = record.copy(enabled = false), hooks = listOf(transform))),
+            emptyList()
+        )
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                JsonPrimitive("original")
+            }
+        )
+
+        assertEquals(0, dataCalls)
+        assertEquals(ToolAfterHookResult(), result)
+        coVerify(exactly = 0) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun afterToolCallEvaluatesDataOnceAndChainsMutations() = runBlocking {
+        val transforms = listOf("first", "second").map {
+            hook(it, PluginHookEvents.AGENT_TOOL_AFTER).copy(mode = PluginHookModes.TRANSFORM)
+        }
+        stubPlugin(listOf(plugin(hooks = transforms)), transforms)
+        val original = JsonPrimitive("original")
+        val first = JsonPrimitive("first")
+        val second = JsonPrimitive("second")
+        val handlers = mutableListOf<String>()
+        val payloads = mutableListOf<JsonObject>()
+        coEvery {
+            runtime.invoke(any(), any(), any(), capture(handlers), capture(payloads), any(), any())
+        } returnsMany listOf(
+            JsonObject(mapOf("data" to first)),
+            JsonObject(mapOf("data" to second))
+        )
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                original
+            }
+        )
+
+        assertEquals(1, dataCalls)
+        assertEquals(listOf("hooks.first", "hooks.second"), handlers)
+        assertEquals(listOf(original, first), payloads.map { it["data"] })
+        assertEquals(ToolAfterHookResult(data = second), result)
+        coVerify(exactly = 2) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun afterToolCallWithMissingDataSkipsHooks() = runBlocking {
+        val transform = hook("after", PluginHookEvents.AGENT_TOOL_AFTER)
+            .copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(transform))), listOf(transform))
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                null
+            }
+        )
+
+        assertEquals(1, dataCalls)
+        assertEquals(ToolAfterHookResult(), result)
+        coVerify(exactly = 0) {
+            runtime.invoke(any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun afterToolCallPreservesJsonNullData() = runBlocking {
+        val transform = hook("after", PluginHookEvents.AGENT_TOOL_AFTER)
+            .copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(transform))), listOf(transform))
+        coEvery { runtime.invoke(any(), any(), any(), any(), any(), any(), any()) } returns
+            JsonObject(mapOf("data" to JsonNull))
+        var dataCalls = 0
+
+        val result = dispatcher.afterToolCall(
+            sessionId = "session",
+            runId = "run",
+            callId = "call",
+            toolName = "bash",
+            mode = "BUILD",
+            scope = "main",
+            agentName = null,
+            data = {
+                dataCalls++
+                JsonNull
+            }
+        )
+
+        assertEquals(1, dataCalls)
+        assertEquals(ToolAfterHookResult(data = JsonNull), result)
+        coVerify(exactly = 1) {
+            runtime.invoke(
+                pluginId = PLUGIN_ID,
+                version = "1.0.0",
+                runtime = runtimeRef,
+                handler = "hooks.after",
+                args = match { it["data"] == JsonNull },
+                method = "hook.invoke",
+                timeoutMs = any()
+            )
+        }
     }
 
     @Test

@@ -8,18 +8,21 @@ import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import java.io.File
-import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
@@ -48,13 +51,32 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
-class FileChangeHub @Inject constructor(
+class FileChangeHub internal constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val containerInstaller: ContainerInstaller,
     private val pathMapper: WorkspacePathMapper,
     private val executionModeHolder: ExecutionModeHolder,
-    private val remoteFileWatchHub: RemoteFileWatchHub
+    private val remoteFileWatchHub: RemoteFileWatchHub,
+    private val ioDispatcher: CoroutineDispatcher,
+    mainDispatcher: CoroutineDispatcher
 ) {
+    @Inject
+    constructor(
+        workspaceRepository: WorkspaceRepository,
+        containerInstaller: ContainerInstaller,
+        pathMapper: WorkspacePathMapper,
+        executionModeHolder: ExecutionModeHolder,
+        remoteFileWatchHub: RemoteFileWatchHub
+    ) : this(
+        workspaceRepository,
+        containerInstaller,
+        pathMapper,
+        executionModeHolder,
+        remoteFileWatchHub,
+        Dispatchers.IO,
+        Dispatchers.Main.immediate
+    )
+
     companion object {
         private const val TAG = "FileChangeHub"
 
@@ -104,13 +126,15 @@ class FileChangeHub @Inject constructor(
             FileObserver.MOVED_FROM or FileObserver.CLOSE_WRITE
     }
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     /** FileObserver 必须绑定有 Looper 的线程创建与 startWatching，故观察器起停统一走主线程。 */
-    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mainScope = CoroutineScope(SupervisorJob() + mainDispatcher)
 
     /** 宿主目录路径 → 该目录的观察器（多个订阅共享同一个）。 */
     private val dirWatches = ConcurrentHashMap<String, DirWatch>()
+    private val pendingStops = HashMap<String, Job>()
+
+    // 嵌套取锁只允许 lifecycleLock → dirLock；观察器向订阅回调前必须释放 dirLock。
+    private val dirLock = Any()
 
     /** 两个根都订阅，递归。 */
     fun watchAll(
@@ -249,7 +273,8 @@ class FileChangeHub @Inject constructor(
             recursive = recursive,
             filter = filter,
             fallbackPoll = fallbackPoll,
-            windowMs = batchWindowMs
+            windowMs = batchWindowMs,
+            parentJob = currentCoroutineContext()[Job]
         )
         try {
             subscription.start()
@@ -269,7 +294,8 @@ class FileChangeHub @Inject constructor(
         private val recursive: Boolean,
         private val filter: WatchFilter,
         private val fallbackPoll: Boolean,
-        private val windowMs: Int
+        private val windowMs: Int,
+        parentJob: Job?
     ) {
         private val events = Channel<RawEvent>(
             capacity = MAX_PENDING_EVENTS,
@@ -281,20 +307,24 @@ class FileChangeHub @Inject constructor(
         )
         val batches: Flow<FileChangeBatch> = batchesChannel.receiveAsFlow()
 
-        private val myDirs = ConcurrentHashMap.newKeySet<String>()
+        private val lifecycleLock = Any()
+        private val subscriptionJob = SupervisorJob(parentJob)
+        private val scope = CoroutineScope(subscriptionJob + ioDispatcher)
+        private val myDirs = HashMap<String, DirWatch>()
+        private var stopped = false
 
         @Volatile
         private var rules: IgnoreRules = IgnoreRules.of(filter, emptyList())
-        private var mergeJob: Job? = null
         private var pollJob: Job? = null
-        private var attachJob: Job? = null
 
         fun start() {
+            subscriptionJob.ensureActive()
             rules = IgnoreRules.of(
                 filter,
                 if (filter.followGitignore) readGitignorePatterns(rootDir) else emptyList()
             )
-            mergeJob = ioScope.launch { mergeLoop() }
+            subscriptionJob.ensureActive()
+            scope.launch { mergeLoop() }
             if (rootDir.isDirectory) {
                 attachTree()
             } else {
@@ -303,14 +333,16 @@ class FileChangeHub @Inject constructor(
         }
 
         fun stop() {
-            mergeJob?.cancel()
-            mergeJob = null
-            pollJob?.cancel()
-            pollJob = null
-            attachJob?.cancel()
-            attachJob = null
-            for (path in myDirs) dirWatches[path]?.unsubscribe(this)
-            myDirs.clear()
+            val stops = synchronized(lifecycleLock) {
+                if (stopped) return
+                stopped = true
+                synchronized(dirLock) {
+                    myDirs.values.mapNotNull { it.unsubscribe(this) }
+                }.also { myDirs.clear() }
+            }
+            subscriptionJob.cancel()
+            stops.forEach { it.start() }
+            events.cancel()
             batchesChannel.close()
         }
 
@@ -321,70 +353,95 @@ class FileChangeHub @Inject constructor(
 
         /** 订阅根暂不存在：等它出现再挂 watch，出现本身算一次变更。 */
         private fun awaitRoot() {
-            attachJob = ioScope.launch {
-                while (isActive && !rootDir.isDirectory) delay(ROOT_WAIT_INTERVAL_MS)
-                if (!isActive) return@launch
-                events.trySend(RawEvent(rootDir.absolutePath, ChangeKind.CREATED))
-                attachTree()
+            val job = synchronized(lifecycleLock) {
+                if (stopped || !subscriptionJob.isActive) return
+                scope.launch(start = CoroutineStart.LAZY) {
+                    while (isActive && !rootDir.isDirectory) delay(ROOT_WAIT_INTERVAL_MS)
+                    subscriptionJob.ensureActive()
+                    events.trySend(RawEvent(rootDir.absolutePath, ChangeKind.CREATED))
+                    attachTree()
+                }
             }
+            job.start()
         }
 
         /** 递归注册目录；剪枝只针对父路径段，故先判后注册。[reportNew] 为真时对新挂上的目录补报其存量直接子项。 */
         private fun registerTree(dir: File, reportNew: Boolean) {
+            subscriptionJob.ensureActive()
             val parts = relativePartsOf(rootDir, dir)
             if (parts.isNotEmpty() && rules.isIgnoredDir(parts)) return
             register(dir, reportNew)
             if (!recursive) return
-            dir.listFiles()?.forEach { child -> if (child.isDirectory) registerTree(child, reportNew) }
+            subscriptionJob.ensureActive()
+            dir.listFiles()?.forEach { child ->
+                subscriptionJob.ensureActive()
+                if (child.isDirectory) registerTree(child, reportNew)
+            }
         }
 
         private fun register(dir: File, reportNew: Boolean) {
-            val path = dir.absolutePath
-            if (!myDirs.add(path)) {
-                diag("目录监听已登记，跳过重复注册: $path")
-                return
+            val start = synchronized(lifecycleLock) {
+                if (stopped || !subscriptionJob.isActive) return
+                val path = dir.absolutePath
+                if (myDirs.containsKey(path)) {
+                    diag("目录监听已登记，跳过重复注册: $path")
+                    return
+                }
+                synchronized(dirLock) {
+                    if (dirWatches.size >= MAX_WATCHED_DIRS && !dirWatches.containsKey(path)) {
+                        FileLogger.w(TAG, "监听目录数达上限 $MAX_WATCHED_DIRS，停止扩展: $path")
+                        return
+                    }
+                    // 新出现目录的存量子项只能在 startWatching 后补报，初始注册不补报。
+                    val onReady: (() -> Unit)? = if (reportNew) {
+                        { scope.launch { reportExistingChildren(dir) } }
+                    } else null
+                    diag("注册目录监听: $path reportNew=$reportNew")
+                    val watch = dirWatches.computeIfAbsent(path) { DirWatch(dir) }
+                    myDirs[path] = watch
+                    watch.subscribe(this, onReady)
+                }
             }
-            if (dirWatches.size >= MAX_WATCHED_DIRS && !dirWatches.containsKey(path)) {
-                myDirs.remove(path)
-                FileLogger.w(TAG, "监听目录数达上限 $MAX_WATCHED_DIRS，停止扩展: $path")
-                return
-            }
-            // 新出现的目录在 watch 生效前，其内条目没有任何 watcher 在场、inotify 不会汇报。
-            // 补报该目录的存量直接子项来覆盖这段空洞；之后的新增仍由 inotify 汇报。初始注册不补报，
-            // 否则订阅建立时会把整棵工作区当作新增全量上报。
-            val onReady: (() -> Unit)? = if (reportNew) {
-                { ioScope.launch { reportExistingChildren(dir) } }
-            } else null
-            diag("注册目录监听: $path reportNew=$reportNew")
-            dirWatches.computeIfAbsent(path) { DirWatch(dir) }.subscribe(this, onReady)
+            start?.start()
         }
 
         /** 挂载监听后补扫子项，覆盖首次扫描与 startWatching 之间新建的目录。 */
         private fun reportExistingChildren(dir: File) {
+            subscriptionJob.ensureActive()
             val children = dir.listFiles() ?: return
             diag("补报新目录子项: ${dir.absolutePath} 数量=${children.size}")
             for (child in children) {
+                subscriptionJob.ensureActive()
                 events.trySend(RawEvent(child.absolutePath, ChangeKind.CREATED))
                 if (recursive && child.isDirectory) registerTree(child, reportNew = true)
             }
         }
 
-        fun onWatchInvalidated(path: String) {
-            if (!myDirs.remove(path)) return
-            FileLogger.w(TAG, "目录监听失效，准备重新挂载: $path")
-            val dir = File(path)
-            if (dir.isDirectory) {
-                registerTree(dir, reportNew = true)
-            } else if (path == rootDir.absolutePath) {
-                awaitRoot()
+        fun onWatchInvalidated(watch: DirWatch) {
+            val path = watch.path
+            synchronized(lifecycleLock) {
+                if (stopped || !subscriptionJob.isActive || myDirs[path] !== watch) return
+                myDirs.remove(path)
+            }
+            scope.launch {
+                FileLogger.w(TAG, "目录监听失效，准备重新挂载: $path")
+                val dir = File(path)
+                if (dir.isDirectory) {
+                    registerTree(dir, reportNew = true)
+                } else if (path == rootDir.absolutePath) {
+                    awaitRoot()
+                }
             }
         }
 
         fun onEvent(watch: DirWatch, hostPath: String, kind: ChangeKind) {
-            events.trySend(RawEvent(hostPath, kind))
+            synchronized(lifecycleLock) {
+                if (stopped || !subscriptionJob.isActive || myDirs[watch.path] !== watch) return
+                events.trySend(RawEvent(hostPath, kind))
+            }
             // 递归订阅：新出现的目录要补挂（回调在主线程，文件系统检查切到 IO）。
             if (recursive && kind == ChangeKind.CREATED) {
-                ioScope.launch {
+                scope.launch {
                     val child = File(hostPath)
                     if (child.isDirectory) registerTree(child, reportNew = true)
                 }
@@ -396,36 +453,43 @@ class FileChangeHub @Inject constructor(
          * 递归快照能发现 inotify 漏报的深层改动与「整棵子树被移动/替换」。
          */
         private fun startPolling() {
-            if (!fallbackPoll || pollJob != null) return
-            pollJob = ioScope.launch {
-                var last = snapshotOfScope()
-                while (isActive) {
-                    delay(POLL_INTERVAL_MS)
-                    val now = snapshotOfScope()
-                    val diff = diffSnapshot(last, now)
-                    last = now
-                    for ((rel, kind) in diff) {
-                        val hostPath =
-                            if (rel.isEmpty()) rootDir.absolutePath else File(rootDir, rel).absolutePath
-                        events.trySend(RawEvent(hostPath, kind))
-                        if (recursive && kind == ChangeKind.CREATED) {
-                            val child = File(hostPath)
-                            if (child.isDirectory) registerTree(child, reportNew = true)
+            val job = synchronized(lifecycleLock) {
+                if (stopped || !subscriptionJob.isActive || !fallbackPoll || pollJob != null) return
+                scope.launch(start = CoroutineStart.LAZY) {
+                    var last = snapshotOfScope()
+                    while (isActive) {
+                        delay(POLL_INTERVAL_MS)
+                        val now = snapshotOfScope()
+                        val diff = diffSnapshot(last, now)
+                        last = now
+                        for ((rel, kind) in diff) {
+                            subscriptionJob.ensureActive()
+                            val hostPath =
+                                if (rel.isEmpty()) rootDir.absolutePath else File(rootDir, rel).absolutePath
+                            events.trySend(RawEvent(hostPath, kind))
+                            if (recursive && kind == ChangeKind.CREATED) {
+                                val child = File(hostPath)
+                                if (child.isDirectory) registerTree(child, reportNew = true)
+                            }
                         }
                     }
-                }
+                }.also { pollJob = it }
             }
+            job.start()
         }
 
         /** 订阅范围快照：键为相对订阅根的路径（根自身为空串）；剪枝目录不进入。 */
         private fun snapshotOfScope(): Map<String, String> {
+            subscriptionJob.ensureActive()
             val out = HashMap<String, String>()
             if (!rootDir.isDirectory) return out
             var count = 0
 
             fun walk(dir: File, rel: String) {
+                subscriptionJob.ensureActive()
                 val children = dir.listFiles() ?: return
                 for (child in children) {
+                    subscriptionJob.ensureActive()
                     if (count >= MAX_SNAPSHOT_ENTRIES) return
                     val childRel = if (rel.isEmpty()) child.name else "$rel/${child.name}"
                     count++
@@ -489,82 +553,97 @@ class FileChangeHub @Inject constructor(
 
     /** 一个宿主目录的观察器，按订阅引用计数启停（多个订阅共享同一个）。 */
     private inner class DirWatch(private val dir: File) {
-        private val path = dir.absolutePath
-        private val subscribers: MutableSet<Subscription> =
-            Collections.newSetFromMap(ConcurrentHashMap<Subscription, Boolean>())
-        private val lock = Any()
-
+        val path = dir.absolutePath
+        private val subscribers = HashSet<Subscription>()
+        private val pendingReady = HashMap<Subscription, () -> Unit>()
         private var observer: FileObserver? = null
+        private var startJob: Job? = null
 
-        fun subscribe(sub: Subscription, onReady: (() -> Unit)? = null) {
-            val firstSubscriber = synchronized(lock) {
-                val first = subscribers.isEmpty()
-                subscribers.add(sub)
-                first
-            }
-            // watch 已生效时立即回调；否则排到主线程 startObserver 之后，保证 onReady 晚于 startWatching。
-            if (firstSubscriber) startObserver(onReady) else mainScope.launch { onReady?.invoke() }
-        }
-
-        fun unsubscribe(sub: Subscription) {
-            val empty = synchronized(lock) {
-                subscribers.remove(sub)
-                subscribers.isEmpty()
-            }
-            if (empty) {
-                stopObserver()
-                dirWatches.remove(path, this)
-            }
-        }
-
-        private fun startObserver(onReady: (() -> Unit)? = null) {
-            mainScope.launch {
-                if (observer != null) {
-                    onReady?.invoke()
-                    return@launch
-                }
-                @Suppress("DEPRECATION")
-                val created = object : FileObserver(path, MASK) {
-                    override fun onEvent(event: Int, child: String?) {
-                        diag("FileObserver.onEvent path=$path event=0x${Integer.toHexString(event)} child=$child")
-                        if (event and IN_IGNORED != 0) {
-                            invalidate(this)
-                            return
+        fun subscribe(sub: Subscription, onReady: (() -> Unit)? = null): Job? {
+            subscribers.add(sub)
+            if (onReady != null) pendingReady[sub] = onReady
+            if (observer != null && pendingReady.isEmpty()) return null
+            startJob?.let { return it }
+            val previousStop = pendingStops[path]
+            return mainScope.launch(start = CoroutineStart.LAZY) {
+                // 同一路径可能复用 inotify 句柄，必须等旧观察器停完后再启动替代实例。
+                previousStop?.join()
+                val ready = synchronized(dirLock) {
+                    if (dirWatches[path] !== this@DirWatch || subscribers.isEmpty()) return@launch
+                    if (observer == null) {
+                        @Suppress("DEPRECATION")
+                        val created = object : FileObserver(path, MASK) {
+                            override fun onEvent(event: Int, child: String?) {
+                                diag("FileObserver.onEvent path=$path event=0x${Integer.toHexString(event)} child=$child")
+                                if (event and IN_IGNORED != 0) {
+                                    invalidate(this)
+                                    return
+                                }
+                                val name = child ?: return
+                                val kind = kindOf(event) ?: return
+                                dispatch(this, name, kind)
+                            }
                         }
-                        val name = child ?: return
-                        val kind = kindOf(event) ?: return
-                        dispatch(name, kind)
+                        observer = created
+                        created.startWatching()
+                        diag("startWatching path=$path")
                     }
+                    startJob = null
+                    pendingReady.toMap().also { pendingReady.clear() }
                 }
-                created.startWatching()
-                observer = created
-                diag("startWatching path=$path")
-                // 必须在 startWatching 之后：此刻起 inotify 能捕获新增，补报只负责更早的存量，二者无缝衔接。
-                onReady?.invoke()
-            }
+                // 补报必须晚于 startWatching，且不能持有 dirLock 向订阅回调。
+                for ((sub, onReady) in ready) {
+                    val active = synchronized(dirLock) {
+                        dirWatches[path] === this@DirWatch && sub in subscribers
+                    }
+                    if (active) onReady()
+                }
+            }.also { startJob = it }
+        }
+
+        fun unsubscribe(sub: Subscription): Job? {
+            subscribers.remove(sub)
+            pendingReady.remove(sub)
+            if (subscribers.isNotEmpty()) return null
+            startJob?.cancel()
+            startJob = null
+            dirWatches.remove(path, this)
+            val current = observer ?: return null
+            observer = null
+            val previousStop = pendingStops[path]
+            return mainScope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    previousStop?.join()
+                    runCatching { current.stopWatching() }
+                } finally {
+                    val job = currentCoroutineContext()[Job]
+                    synchronized(dirLock) { pendingStops.remove(path, job) }
+                }
+            }.also { pendingStops[path] = it }
         }
 
         private fun invalidate(current: FileObserver) {
-            if (observer !== current) return
-            observer = null
-            dirWatches.remove(path, this)
-            val affected = synchronized(lock) {
+            val affected = synchronized(dirLock) {
+                if (observer !== current || dirWatches[path] !== this) return
+                observer = null
+                startJob?.cancel()
+                startJob = null
+                pendingReady.clear()
+                dirWatches.remove(path, this)
                 subscribers.toList().also { subscribers.clear() }
             }
             FileLogger.w(TAG, "目录观察器被系统移除: $path，订阅数=${affected.size}")
-            for (sub in affected) sub.onWatchInvalidated(path)
+            for (sub in affected) sub.onWatchInvalidated(this)
         }
 
-        private fun stopObserver() {
-            val current = observer ?: return
-            observer = null
-            mainScope.launch { runCatching { current.stopWatching() } }
-        }
-
-        private fun dispatch(name: String, kind: ChangeKind) {
+        private fun dispatch(current: FileObserver, name: String, kind: ChangeKind) {
+            val targets = synchronized(dirLock) {
+                if (observer !== current || dirWatches[path] !== this) return
+                subscribers.toList()
+            }
             val hostPath = File(dir, name).absolutePath
-            diag("dispatch hostPath=$hostPath kind=$kind subscribers=${subscribers.size}")
-            for (sub in subscribers) sub.onEvent(this, hostPath, kind)
+            diag("dispatch hostPath=$hostPath kind=$kind subscribers=${targets.size}")
+            for (sub in targets) sub.onEvent(this, hostPath, kind)
         }
 
         private fun kindOf(event: Int): ChangeKind? = when {

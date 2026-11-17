@@ -400,7 +400,7 @@ class PluginHookDispatcher @Inject constructor(
 
     /**
      * 工具成功结束后的可写 hook。只允许改写结果的 `data`；每个 hook 拿到上一个 hook 改写后的值，
-     * 失败或超时保持当前值。只应传入 `status=success` 的结果。
+     * 失败或超时保持当前值。只应传入 `status=success` 的结果；按需求值 [data]，避免无 hook 时解析结果。
      */
     suspend fun afterToolCall(
         sessionId: String?,
@@ -410,13 +410,13 @@ class PluginHookDispatcher @Inject constructor(
         mode: String,
         scope: String,
         agentName: String?,
-        data: JsonElement
+        data: () -> JsonElement?
     ): ToolAfterHookResult {
         if (sessionId == null) return ToolAfterHookResult()
         val targets = hooksFor(PluginHookEvents.AGENT_TOOL_AFTER, PluginHookModes.TRANSFORM)
         if (targets.isEmpty()) return ToolAfterHookResult()
+        var current = data() ?: return ToolAfterHookResult()
         val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
-        var current = data
         var changed = false
         for ((version, hook) in targets) {
             val remaining = deadline - System.currentTimeMillis()

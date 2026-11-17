@@ -211,12 +211,25 @@ fun PluginWebPanelScreen(
         }
     }
 
-    // 实例可能来自缓存：离开时只摘掉并暂停，内容和桥留给下一次打开复用。
-    DisposableEffect(webView) {
-        webView.onResume()
-        onDispose {
-            PluginWebViewCache.release(webView)
+    DisposableEffect(webView, lifecycleOwner) {
+        val lifecycle = lifecycleOwner.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> webView.onResume()
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> webView.onPause()
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            webView.onResume()
+        } else {
             webView.onPause()
+        }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            webView.onPause()
+            PluginWebViewCache.release(webView)
         }
     }
 

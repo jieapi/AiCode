@@ -30,6 +30,39 @@ class StreamingAssistantHandoffTest {
     }
 
     @Test
+    fun acknowledgementWaitsForPersistedAndSubmittedRenderedMessage() {
+        val settled = stream.copy(content = "answer", settled = true, persisted = true)
+        val message = AgentUIMessage("a1", MessageRole.ASSISTANT, "answer", reasoning = "thinking")
+
+        assertFalse(canAcknowledgeStreamingAssistant(settled, listOf(settled), listOf(user), "s1", true))
+        assertFalse(canAcknowledgeStreamingAssistant(settled, emptyList(), listOf(message), "s1", false))
+        assertFalse(canAcknowledgeStreamingAssistant(settled, emptyList(), listOf(message), "s2", true))
+        assertFalse(canAcknowledgeStreamingAssistant(settled.copy(persisted = false), emptyList(), listOf(message), "s1", true))
+        assertFalse(canAcknowledgeStreamingAssistant(settled.copy(settled = false), emptyList(), listOf(message), "s1", true))
+        assertTrue(canAcknowledgeStreamingAssistant(settled, emptyList(), listOf(message), "s1", true))
+    }
+
+    @Test
+    fun acknowledgementCannotDropAnEarlierUnsubmittedResponse() {
+        val earlier = stream.copy(messageId = "earlier", settled = true, persisted = true)
+        val latest = stream.copy(content = "answer", settled = true, persisted = true)
+        val message = AgentUIMessage("a1", MessageRole.ASSISTANT, "answer")
+
+        assertFalse(canAcknowledgeStreamingAssistant(latest, listOf(earlier), listOf(message), "s1", true))
+        val earlierMessage = AgentUIMessage("earlier", MessageRole.ASSISTANT, "", reasoning = "thinking")
+        assertTrue(canAcknowledgeStreamingAssistant(latest, listOf(earlier), listOf(earlierMessage, message), "s1", true))
+    }
+
+    @Test
+    fun persistedEmptyToolResponseCanBeAcknowledgedWithoutAnInvisibleDatabaseRow() {
+        val empty = stream.copy(content = "", reasoning = "", settled = true, persisted = true)
+
+        assertTrue(canAcknowledgeStreamingAssistant(empty, emptyList(), listOf(user), "s1", true))
+        assertFalse(canAcknowledgeStreamingAssistant(empty.copy(persisted = false), emptyList(), listOf(user), "s1", true))
+        assertFalse(canAcknowledgeStreamingAssistant(empty, listOf(stream.copy(messageId = "earlier")), listOf(user), "s1", true))
+    }
+
+    @Test
     fun identicalContentInAnOlderMessageDoesNotConsumeTheStream() {
         val previous = AgentUIMessage("older", MessageRole.ASSISTANT, "", reasoning = "thinking")
         assertEquals(listOf(stream), reconcileStreamingAssistants(emptyList(), stream, listOf(previous, user), "s1"))

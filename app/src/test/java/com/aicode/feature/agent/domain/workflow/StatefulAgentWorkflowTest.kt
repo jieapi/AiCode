@@ -194,6 +194,120 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun accumulatorDoesNotMaterializeTextOrReasoningWithinTheThrottleWindow() = runTest {
+        var now = 1_000L
+        every { SystemClock.elapsedRealtime() } answers { now }
+        var materializations = 0
+        val events = mutableListOf<AgentEvent>()
+        val stream = StatefulAgentWorkflow.StreamAccumulator(
+            callStartElapsed = now,
+            responseMessageId = "response",
+            materialize = { materializations++; it.toString() }
+        ) { events.add(it) }
+
+        stream.onChunk(AIStreamChunk.TextDelta("a"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("r"))
+        assertEquals(2, materializations)
+        repeat(59) {
+            now++
+            stream.onChunk(AIStreamChunk.TextDelta("b"))
+            stream.onChunk(AIStreamChunk.ReasoningDelta("s"))
+        }
+        assertEquals(2, materializations)
+        assertEquals(2, events.size)
+
+        now = 1_060
+        stream.onChunk(AIStreamChunk.TextDelta("c"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("t"))
+        assertEquals(4, materializations)
+        assertEquals("a" + "b".repeat(59) + "c", events.filterIsInstance<AgentEvent.AssistantDelta>().last().accumulated)
+        assertEquals("r" + "s".repeat(59) + "t", events.filterIsInstance<AgentEvent.ReasoningDelta>().last().accumulated)
+        stream.flush()
+        assertEquals(4, materializations)
+    }
+
+    @Test
+    fun finalFlushMaterializesOnlyDirtyBuffersInTextThenReasoningOrder() = runTest {
+        var now = 1_000L
+        every { SystemClock.elapsedRealtime() } answers { now }
+        var materializations = 0
+        val events = mutableListOf<AgentEvent>()
+        val stream = StatefulAgentWorkflow.StreamAccumulator(
+            now, "response", materialize = { materializations++; it.toString() }
+        ) { events.add(it) }
+        stream.onChunk(AIStreamChunk.TextDelta("a"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("r"))
+        now++
+        stream.onChunk(AIStreamChunk.ReasoningDelta("s"))
+        stream.onChunk(AIStreamChunk.TextDelta("b"))
+        stream.onChunk(AIStreamChunk.Final(AIResponse("ab")))
+        assertEquals(2, materializations)
+        stream.flush()
+        assertEquals(4, materializations)
+        assertEquals(AgentEvent.AssistantDelta("ab", "response"), events[2])
+        assertEquals(AgentEvent.ReasoningDelta("rs", "response"), events[3])
+        stream.flush()
+        assertEquals(4, materializations)
+        assertEquals("ab", stream.finalResponse?.content)
+    }
+
+    @Test
+    fun retryAndKeySwitchDiscardDirtyBuffersWithoutMaterializingThem() = runTest {
+        var now = 1_000L
+        every { SystemClock.elapsedRealtime() } answers { now }
+        var materializations = 0
+        val events = mutableListOf<AgentEvent>()
+        val stream = StatefulAgentWorkflow.StreamAccumulator(
+            now, "response", materialize = { materializations++; it.toString() }
+        ) { events.add(it) }
+        stream.onChunk(AIStreamChunk.TextDelta("old"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("old reasoning"))
+        now++
+        stream.onChunk(AIStreamChunk.TextDelta(" discarded"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta(" discarded"))
+        stream.onChunk(AIStreamChunk.Retrying(1, 3, RetryErrorInfo(RetryErrorKind.UNKNOWN)))
+        stream.flush()
+        assertEquals(2, materializations)
+        assertTrue(stream.text.isEmpty())
+        assertTrue(stream.reasoning.isEmpty())
+        stream.onChunk(AIStreamChunk.TextDelta("retry"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("retry reasoning"))
+        now++
+        stream.onChunk(AIStreamChunk.TextDelta(" discarded"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta(" discarded"))
+        stream.onChunk(AIStreamChunk.KeySwitched(2, 2))
+        stream.flush()
+        assertEquals(4, materializations)
+        stream.onChunk(AIStreamChunk.TextDelta("final"))
+        stream.onChunk(AIStreamChunk.ReasoningDelta("final reasoning"))
+        stream.flush()
+        assertEquals(6, materializations)
+        assertEquals(listOf("old", "retry", "final"), events.filterIsInstance<AgentEvent.AssistantDelta>().map { it.accumulated })
+        assertEquals(listOf("old reasoning", "retry reasoning", "final reasoning"), events.filterIsInstance<AgentEvent.ReasoningDelta>().map { it.accumulated })
+        assertEquals(1, stream.retryAttempts)
+    }
+
+    @Test
+    fun interruptedResponseUsesDirtyWindowTextAndReasoningForPartialPersistence() = runTest {
+        var now = 1_000L
+        every { SystemClock.elapsedRealtime() } answers { now }
+        every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+            emit(AIStreamChunk.ReasoningDelta("partial thinking"))
+            emit(AIStreamChunk.TextDelta("partial text"))
+            now++
+            emit(AIStreamChunk.ReasoningDelta(" tail"))
+            emit(AIStreamChunk.TextDelta(" tail"))
+            throw IllegalStateException("connection lost")
+        }
+        val events = collectEvents()
+        val partial = events.filterIsInstance<AgentEvent.AssistantText>().single()
+        assertEquals("partial text tail", partial.content)
+        assertEquals("partial thinking tail", partial.reasoning)
+        assertEquals("partial text", events.filterIsInstance<AgentEvent.AssistantDelta>().single().accumulated)
+        assertEquals("partial thinking", events.filterIsInstance<AgentEvent.ReasoningDelta>().single().accumulated)
+    }
+
+    @Test
     fun interruptedReasoningOnlyResponsePersistsWithStreamId() = runTest {
         every { provider.completeStream(any(), any(), any(), any()) } returns flow {
             emit(AIStreamChunk.ReasoningDelta("partial thinking"))

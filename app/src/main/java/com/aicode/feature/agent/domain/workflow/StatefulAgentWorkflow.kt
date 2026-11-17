@@ -911,19 +911,17 @@ class StatefulAgentWorkflow @Inject constructor(
                                 }
                             }
                             if (!isError && hookSessionId != null) {
-                                toolResultSuccessData(rawResult)?.let { data ->
-                                    val transform = pluginHookDispatcher.afterToolCall(
-                                        sessionId = hookSessionId,
-                                        runId = hookRunId,
-                                        callId = toolCall.id,
-                                        toolName = toolCall.name,
-                                        mode = currentContext.mode.name,
-                                        scope = hookScope,
-                                        agentName = hookAgentName,
-                                        data = data
-                                    )
-                                    transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
-                                }
+                                val transform = pluginHookDispatcher.afterToolCall(
+                                    sessionId = hookSessionId,
+                                    runId = hookRunId,
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    mode = currentContext.mode.name,
+                                    scope = hookScope,
+                                    agentName = hookAgentName,
+                                    data = { toolResultSuccessData(rawResult) }
+                                )
+                                transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
                             }
                             batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
                         }
@@ -1045,9 +1043,10 @@ class StatefulAgentWorkflow @Inject constructor(
      * UI 端反复重启打字机协程。按时间窗口合并，窗口内只保留最新累积文本，到窗口边界才发送，
      * 把下游事件频率压到 ~16/s；打字机渲染本身有 100ms 节流，少发中间态无感知。
      */
-    private class StreamAccumulator(
+    internal class StreamAccumulator(
         private val callStartElapsed: Long,
         private val responseMessageId: String,
+        private val materialize: (StringBuilder) -> String = { it.toString() },
         private val emit: suspend (AgentEvent) -> Unit
     ) {
         private companion object {
@@ -1064,8 +1063,8 @@ class StatefulAgentWorkflow @Inject constructor(
         var ttfbElapsed: Long? = null
         var retryAttempts = 0
 
-        private var pendingText: String? = null
-        private var pendingReasoning: String? = null
+        private var textDirty = false
+        private var reasoningDirty = false
         private var lastTextSentAt = 0L
         private var lastReasoningSentAt = 0L
 
@@ -1074,7 +1073,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 is AIStreamChunk.TextDelta -> {
                     markTtfb()
                     text.append(chunk.text)
-                    pendingText = text.toString()
+                    textDirty = true
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastTextSentAt >= DELTA_THROTTLE_MS) {
                         flushText()
@@ -1085,7 +1084,7 @@ class StatefulAgentWorkflow @Inject constructor(
                     // 思考内容也算首字（推理模型先吐思考再吐正文）
                     markTtfb()
                     reasoning.append(chunk.text)
-                    pendingReasoning = reasoning.toString()
+                    reasoningDirty = true
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastReasoningSentAt >= DELTA_THROTTLE_MS) {
                         flushReasoning()
@@ -1129,22 +1128,22 @@ class StatefulAgentWorkflow @Inject constructor(
         private fun reset() {
             text.setLength(0)
             reasoning.setLength(0)
-            pendingText = null
-            pendingReasoning = null
+            textDirty = false
+            reasoningDirty = false
             lastTextSentAt = 0L
             lastReasoningSentAt = 0L
         }
 
         private suspend fun flushText() {
-            val t = pendingText ?: return
-            pendingText = null
-            emit(AgentEvent.AssistantDelta(t, responseMessageId))
+            if (!textDirty) return
+            textDirty = false
+            emit(AgentEvent.AssistantDelta(materialize(text), responseMessageId))
         }
 
         private suspend fun flushReasoning() {
-            val t = pendingReasoning ?: return
-            pendingReasoning = null
-            emit(AgentEvent.ReasoningDelta(t, responseMessageId))
+            if (!reasoningDirty) return
+            reasoningDirty = false
+            emit(AgentEvent.ReasoningDelta(materialize(reasoning), responseMessageId))
         }
     }
 

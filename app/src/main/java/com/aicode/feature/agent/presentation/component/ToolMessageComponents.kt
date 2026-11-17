@@ -7,9 +7,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -572,17 +570,13 @@ internal fun ToolStatusIcon(running: Boolean, isError: Boolean, toolName: String
         running -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val pulseAlpha = if (running) {
-        val transition = rememberInfiniteTransition(label = "tool-status-pulse")
-        transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 0.35f,
-            animationSpec = infiniteRepeatable(animation = tween(650), repeatMode = RepeatMode.Reverse),
-            label = "tool-status-pulse-alpha"
-        ).value
-    } else {
-        1f
-    }
+    val pulseAlpha = rememberChatInfiniteFloat(
+        initialValue = 1f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(animation = tween(650), repeatMode = RepeatMode.Reverse),
+        label = "tool-status-pulse-alpha",
+        enabled = running
+    )
     val statusLabel = stringResource(
         when {
             running -> R.string.chat_tool_running
@@ -598,7 +592,7 @@ internal fun ToolStatusIcon(running: Boolean, isError: Boolean, toolName: String
             modifier = Modifier
                 // 与思考行同一格宽：两行的图标中心与后续文字左边缘才对得齐
                 .size(ChatStyle.rowIconSize)
-                .graphicsLayer { alpha = pulseAlpha }
+                .graphicsLayer { alpha = pulseAlpha.value }
         )
     }
 }

@@ -148,7 +148,8 @@ data class StreamingAssistantMessage(
     val reasoning: String = "",
     val settled: Boolean = false,
     val reasoningStartMs: Long? = null,
-    val reasoningEndMs: Long? = null
+    val reasoningEndMs: Long? = null,
+    val persisted: Boolean = false
 )
 
 @Immutable

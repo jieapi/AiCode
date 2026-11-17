@@ -209,6 +209,23 @@ internal fun reconcileStreamingAssistants(
     return pending.values.toList()
 }
 
+internal fun canAcknowledgeStreamingAssistant(
+    current: StreamingAssistantMessage?,
+    previous: List<StreamingAssistantMessage>,
+    renderedMessages: List<AgentUIMessage>,
+    sessionId: String?,
+    messagesReady: Boolean,
+): Boolean {
+    if (!messagesReady || current == null || current.sessionId != sessionId ||
+        !current.settled || !current.persisted) return false
+    val renderedIds = renderedMessages.mapTo(HashSet()) { it.id }
+    if (previous.any { it.sessionId == sessionId && it.messageId != current.messageId && it.messageId !in renderedIds }) {
+        return false
+    }
+    return current.messageId in renderedIds ||
+        (!current.content.hasVisibleContent() && !current.reasoning.hasVisibleContent())
+}
+
 /** 工具调用分组头 item 的 contentType。 */
 private const val TOOL_GROUP_CONTENT_TYPE = "tool-group"
 
@@ -818,7 +835,7 @@ fun AIChatPanel(
         (if (floatingLayerHeightPx > 0) floatingLayerHeightPx + FLOATING_LAYER_GAP_DP.toPx()
         else inputBarBottomReserveDp.toPx()).toInt()
     }
-    val markdownCache = remember { MarkdownRenderCache() }
+    val markdownCache = remember(currentSessionId) { MarkdownRenderCache() }
     // 工具调用（分组头 / 单条工具行）的手动展开态：放在 ViewModel 里，切页、滚出视口回收后仍保留。
     // key = 分组 key（`toolgroup:<组内首条消息 id>`）或单条消息 id。
     val toolExpansionOverrides = viewModel.toolExpansionOverrides
@@ -1156,6 +1173,14 @@ fun AIChatPanel(
         reconcileStreamingAssistants(retainedAssistants, streamingAssistant, renderedMessages, currentSessionId)
     }
     SideEffect { retainedAssistants = streamingAssistants }
+    LaunchedEffect(streamingAssistant, renderedMessages, currentSessionId, messagesReady, streamingAssistants) {
+        val assistant = streamingAssistant
+        if (assistant != null && canAcknowledgeStreamingAssistant(
+                assistant, streamingAssistants, renderedMessages, currentSessionId, messagesReady
+            )) {
+            viewModel.acknowledgeRenderedAssistant(assistant.sessionId, assistant.messageId)
+        }
+    }
     val lastStreamingAssistant = streamingAssistants.lastOrNull()
     val displayStreamingText = lastStreamingAssistant?.content
     val displayStreamingReasoning = lastStreamingAssistant?.reasoning
@@ -1673,6 +1698,7 @@ fun AIChatPanel(
                                         },
                                         timerStartMs = assistant.reasoningStartMs,
                                         preRendered = true,
+                                        streamingCacheKey = "${assistant.messageId}:reasoning",
                                         sessionKey = assistant.messageId,
                                         live = reasoningLive,
                                         expandedOverride = reasoningOverrideSnapshot[assistant.messageId],
@@ -1690,6 +1716,7 @@ fun AIChatPanel(
                                     StreamingBubble(
                                         text = if (assistant == lastStreamingAssistant) typewriterRenderText else assistant.content,
                                         cache = markdownCache,
+                                        streamingCacheKey = "${assistant.messageId}:content",
                                     )
                                 }
                             }
