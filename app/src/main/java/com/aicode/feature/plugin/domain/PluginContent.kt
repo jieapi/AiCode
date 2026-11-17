@@ -141,6 +141,17 @@ data class PluginProviderDefinition(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
+/** 已解析的插件会话源：宿主通过 handlers 拉取会话列表与消息。 */
+data class PluginSessionSourceDefinition(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val handlers: PluginSessionSourceHandlersRef,
+    val pluginVersion: String
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
 /** 已解析的 Shizuku 声明：仅用途说明，授权后可直接执行任意命令。 */
 data class PluginShizukuDefinition(
     val pluginId: String,
@@ -198,6 +209,7 @@ data class PluginContent(
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
     val providers: List<PluginProviderDefinition> = emptyList(),
+    val sessionSources: List<PluginSessionSourceDefinition> = emptyList(),
     val shizuku: PluginShizukuDefinition? = null,
     val overlay: PluginOverlayDefinition? = null,
     val backup: PluginBackupDefinition? = null,
@@ -235,7 +247,7 @@ object PluginContentLoader {
             loadUiEntry(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
-        if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty()) && runtime == null) {
+        if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty() || manifest.sessionSources.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
@@ -249,6 +261,15 @@ object PluginContentLoader {
                 description = provider.description,
                 format = provider.format,
                 baseUrl = provider.baseUrl,
+                pluginVersion = manifest.version.toString()
+            )
+        }
+        val sessionSources = manifest.sessionSources.map { source ->
+            PluginSessionSourceDefinition(
+                pluginId = manifest.id,
+                localId = source.id,
+                title = source.title,
+                handlers = source.handlers,
                 pluginVersion = manifest.version.toString()
             )
         }
@@ -300,6 +321,7 @@ object PluginContentLoader {
                     hooks = hooks,
                     mcp = mcp,
                     providers = providers,
+                    sessionSources = sessionSources,
                     shizuku = shizuku,
                     overlay = overlay,
                     backup = backup,

@@ -39,6 +39,7 @@
 | 直接调用已配置的模型并编排工具循环 | `modelAccess` + `model.*` | [模型句柄与流式调用](/advanced/plugin/model-handles) |
 | 创建 App 外的悬浮窗口 | `overlay` | [系统浮层](/advanced/plugin/overlay) |
 | 执行 Android 命令或接入 OpenAI 兼容服务 | `shizuku`、`providers` | [Shizuku 与插件提供商](/advanced/plugin/shizuku-providers) |
+| 在会话列表顶部展示插件提供的外部会话与消息 | `sessionSources` + `runtime` | [plugin.json 清单参考](/advanced/plugin/manifest#sessionsources) |
 
 能力声明位于 `contributes`，`runtime` 单独放在清单顶层。带 `handler` 的工具、Hook 和动作入口需要运行时，纯页面可以直接调用宿主桥。
 

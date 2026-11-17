@@ -64,6 +64,7 @@ class PluginRuntimeManager @Inject constructor(
     private val chatService: PluginChatService,
     private val modelService: PluginModelService,
     private val providerService: PluginProviderService,
+    private val sessionSourceHostService: PluginSessionHostService,
     private val secretStore: PluginSecretStore,
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
@@ -310,6 +311,10 @@ class PluginRuntimeManager @Inject constructor(
             "host.chat.resolveToolApproval" -> hostCall { chatService.resolveToolApproval(pluginId, params) }
             "host.chat.resolveQuestion" -> hostCall { chatService.resolveQuestion(pluginId, params) }
             "host.chat.resolvePlanApproval" -> hostCall { chatService.resolvePlanApproval(pluginId, params) }
+            "host.sessionSource.setSessions" -> hostCall { sessionSourceHostService.setSessions(pluginId, params) }
+            "host.sessionSource.setLoading" -> hostCall { sessionSourceHostService.setLoading(pluginId, params) }
+            "host.sessionSource.setError" -> hostCall { sessionSourceHostService.setError(pluginId, params) }
+            "host.sessionSource.setThinking" -> hostCall { sessionSourceHostService.setThinking(pluginId, params) }
             "host.model.listProviders" -> hostCall { modelService.listProviders(pluginId) }
             "host.model.listModels" -> hostCall { modelService.listModels(pluginId, params) }
             "host.model.create" -> hostCall { modelService.create(pluginId, params) }

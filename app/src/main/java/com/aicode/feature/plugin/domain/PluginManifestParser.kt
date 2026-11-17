@@ -56,6 +56,9 @@ object PluginManifestParser {
     private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "handler", "confirm", "icon")
     private val WORKSPACE_TOOL_KEYS = setOf("id", "title", "description", "icon", "category", "pageFile")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
+    private val SESSION_SOURCE_KEYS = setOf("id", "title", "handlers")
+    private val SESSION_SOURCE_HANDLER_KEYS =
+        setOf("listSessions", "readSession", "sendMessage", "interruptSession", "createSession", "refresh")
     private val SHIZUKU_KEYS = setOf("purpose")
     private val BACKUP_KEYS = setOf("purpose")
     private val MODEL_ACCESS_KEYS = setOf("purpose")
@@ -134,6 +137,7 @@ object PluginManifestParser {
 
             val needsRuntime = contributes != null && (
                 contributes.tools.isNotEmpty() || contributes.hooks.isNotEmpty() ||
+                    contributes.sessionSources.isNotEmpty() ||
                     contributes.uiEntries.any { it.handler != null }
                 )
             if (needsRuntime && runtime == null) missing("runtime")
@@ -159,6 +163,7 @@ object PluginManifestParser {
                     hooks = contributes.hooks,
                     mcp = contributes.mcp,
                     providers = contributes.providers,
+                    sessionSources = contributes.sessionSources,
                     shizuku = contributes.shizuku,
                     overlay = contributes.overlay,
                     backup = contributes.backup,
@@ -398,6 +403,7 @@ object PluginManifestParser {
             val hooks: List<PluginHookRef>,
             val mcp: List<PluginMcpRef>,
             val providers: List<PluginProviderRef>,
+            val sessionSources: List<PluginSessionSourceRef>,
             val shizuku: PluginShizukuRef?,
             val overlay: PluginOverlayRef?,
             val backup: PluginBackupRef?,
@@ -412,7 +418,7 @@ object PluginManifestParser {
             contributes.keys.filter {
                 it != "skills" && it != "agents" && it != "workspaceTools" && it != "uiEntries" &&
                     it != "tools" && it != "hooks" && it != "mcp" && it != "providers" &&
-                    it != "shizuku" && it != "overlay" && it != "backup" && it != "modelAccess" &&
+                    it != "sessionSources" && it != "shizuku" && it != "overlay" && it != "backup" && it != "modelAccess" &&
                     it != "configPage"
             }.forEach {
                 err(PluginErrorCode.UNSUPPORTED_CONTRIBUTION, it)
@@ -429,6 +435,8 @@ object PluginManifestParser {
                 ?: run { ok = false; emptyList() }
             val mcp = mcpRefs.map { PluginMcpRef(it.id, it.file) }
             val providers = readProviders(contributes["providers"], "contributes.providers")
+                ?: run { ok = false; emptyList() }
+            val sessionSources = readSessionSources(contributes["sessionSources"], "contributes.sessionSources")
                 ?: run { ok = false; emptyList() }
             val shizuku = readShizuku(contributes["shizuku"], "contributes.shizuku")
                 ?: run {
@@ -466,14 +474,14 @@ object PluginManifestParser {
             }
             val configPage = readConfigPage(contributes["configPage"], "contributes.configPage")
             if (ok && skills.isEmpty() && agents.isEmpty() && workspaceTools.isEmpty() && uiEntries.isEmpty() &&
-                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() &&
+                tools.isEmpty() && hooks.isEmpty() && mcp.isEmpty() && providers.isEmpty() && sessionSources.isEmpty() &&
                 shizuku == null && overlay == null && backup == null && modelAccess == null && configPage == null
             ) {
                 invalid("contributes")
                 ok = false
             }
             return if (ok) Contributes(
-                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers,
+                skills, agents, workspaceTools, uiEntries, tools, hooks, mcp, providers, sessionSources,
                 shizuku, overlay, backup, modelAccess, configPage
             ) else null
         }
@@ -544,6 +552,76 @@ object PluginManifestParser {
                 }
             }
             return result
+        }
+
+        /** 缺省视为空列表；每项声明一个外部会话源与五个可选 handler。 */
+        private fun readSessionSources(raw: JsonElement?, path: String): List<PluginSessionSourceRef>? {
+            if (raw == null) return emptyList()
+            val array = raw as? JsonArray ?: return null.also { invalid(path) }
+            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            val result = mutableListOf<PluginSessionSourceRef>()
+            var ok = true
+            array.forEachIndexed { index, element ->
+                val itemPath = "$path[$index]"
+                val item = element as? JsonObject
+                if (item == null) {
+                    invalid(itemPath)
+                    ok = false
+                    return@forEachIndexed
+                }
+                item.keys.filter { it !in SESSION_SOURCE_KEYS }.forEach {
+                    err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.$it")
+                    ok = false
+                }
+                val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
+                val title = item["title"]?.let { parseLocalized(it, "$itemPath.title", MAX_NAME) }
+                val handlersObj = item["handlers"] as? JsonObject
+                if (handlersObj == null) {
+                    invalid("$itemPath.handlers")
+                    ok = false
+                } else {
+                    handlersObj.keys.filter { it !in SESSION_SOURCE_HANDLER_KEYS }.forEach {
+                        err(PluginErrorCode.UNSUPPORTED_FIELD, "$itemPath.handlers.$it")
+                        ok = false
+                    }
+                }
+                val listSessions = handlersObj?.get("listSessions")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                val readSession = handlersObj?.get("readSession")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                val sendMessage = handlersObj?.get("sendMessage")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                val interruptSession = handlersObj?.get("interruptSession")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                val createSession = handlersObj?.get("createSession")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                val refresh = handlersObj?.get("refresh")?.stringOrNull()
+                    ?.takeIf { HANDLER_NAME.matches(it) }
+                if (id == null) { invalid("$itemPath.id"); ok = false }
+                if (title == null) { invalid("$itemPath.title"); ok = false }
+                if (listSessions == null) { invalid("$itemPath.handlers.listSessions"); ok = false }
+                if (readSession == null) { invalid("$itemPath.handlers.readSession"); ok = false }
+                if (id != null && title != null && listSessions != null && readSession != null) {
+                    if (result.any { it.id == id }) {
+                        err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
+                        ok = false
+                    } else {
+                        result += PluginSessionSourceRef(
+                            id = id,
+                            title = title,
+                            handlers = PluginSessionSourceHandlersRef(
+                                listSessions = listSessions,
+                                readSession = readSession,
+                                sendMessage = sendMessage,
+                                interruptSession = interruptSession,
+                                createSession = createSession,
+                                refresh = refresh
+                            )
+                        )
+                    }
+                }
+            }
+            return if (ok) result else null
         }
 
         /** 缺省视为空列表；每项声明 OpenAI 兼容服务地址与模型。 */

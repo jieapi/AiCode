@@ -2027,6 +2027,18 @@
     <!-- Plugins -->
     <string name="settings_plugins">Plugins</string>
     <string name="plugins_more_in_drawer">More plugins</string>
+    <string name="plugin_sessions_title">Plugin sessions</string>
+    <string name="plugin_sessions_refresh">Refresh</string>
+    <string name="plugin_sessions_empty">No plugin sessions available</string>
+    <string name="plugin_sessions_no_messages">No messages</string>
+    <string name="plugin_sessions_load_more">Load earlier messages</string>
+    <string name="plugin_sessions_count">%1$d remote sessions</string>
+    <string name="plugin_sessions_status_running">Running</string>
+    <string name="plugin_sessions_status_failed">Failed</string>
+    <string name="plugin_sessions_status_needs_input">Needs input</string>
+    <string name="plugin_sessions_status_idle">Idle</string>
+    <string name="plugin_sessions_retry">Retry</string>
+    <string name="plugin_sessions_readonly_hint">Read-only session · messages provided by plugin</string>
     <string name="plugins_entry_action">Action</string>
     <string name="plugins_action_confirm_title">Run plugin action</string>
     <string name="plugins_action_confirm_message">Run “%1$s”?</string>

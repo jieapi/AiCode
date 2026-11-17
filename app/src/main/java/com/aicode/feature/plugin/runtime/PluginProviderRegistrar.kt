@@ -43,7 +43,8 @@ class PluginProviderRegistrar @Inject constructor(
                         type = ProviderType.OPENAI,
                         apiKey = PLACEHOLDER_API_KEY,
                         baseUrl = provider.baseUrl,
-                        defaultModel = ""
+                        defaultModel = "",
+                        customHeaders = mapOf(SESSION_HEADER_NAME to SESSION_HEADER_VALUE)
                     )
                 )
             }
@@ -63,5 +64,9 @@ class PluginProviderRegistrar @Inject constructor(
     companion object {
         /** 插件服务自行处理上游凭据；占位值只用于通过宿主适配器的 Key 检查。 */
         const val PLACEHOLDER_API_KEY = "plugin"
+
+        /** 插件本地网关据此识别宿主当前会话；值由 provider 适配器发请求前替换。 */
+        const val SESSION_HEADER_NAME = "X-AiCode-Session-Id"
+        const val SESSION_HEADER_VALUE = "{{SESSION_ID}}"
     }
 }

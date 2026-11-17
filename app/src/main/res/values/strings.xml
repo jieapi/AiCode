@@ -2026,6 +2026,18 @@
     <!-- 插件 -->
     <string name="settings_plugins">插件</string>
     <string name="plugins_more_in_drawer">更多插件</string>
+    <string name="plugin_sessions_title">插件会话</string>
+    <string name="plugin_sessions_refresh">刷新</string>
+    <string name="plugin_sessions_empty">没有可用的插件会话</string>
+    <string name="plugin_sessions_no_messages">暂无消息</string>
+    <string name="plugin_sessions_load_more">加载更早消息</string>
+    <string name="plugin_sessions_count">%1$d 个远端会话</string>
+    <string name="plugin_sessions_status_running">运行中</string>
+    <string name="plugin_sessions_status_failed">失败</string>
+    <string name="plugin_sessions_status_needs_input">待输入</string>
+    <string name="plugin_sessions_status_idle">空闲</string>
+    <string name="plugin_sessions_retry">重试</string>
+    <string name="plugin_sessions_readonly_hint">只读会话 · 消息由插件提供</string>
     <string name="plugins_entry_action">动作</string>
     <string name="plugins_action_confirm_title">执行插件动作</string>
     <string name="plugins_action_confirm_message">要执行「%1$s」吗？</string>

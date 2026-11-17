@@ -993,6 +993,13 @@ internal fun pluginContentItems(content: PluginContent, languageTag: String): Li
     content.providers.forEach { entry ->
         items += PluginContentItem(FeatherIcons.Cloud, entry.name.resolve(languageTag), entry.baseUrl)
     }
+    content.sessionSources.forEach { entry ->
+        items += PluginContentItem(
+            FeatherIcons.Server,
+            entry.title.resolve(languageTag),
+            entry.handlers.listSessions
+        )
+    }
     content.modelAccess?.let { declaration ->
         items += PluginContentItem(
             FeatherIcons.Server,

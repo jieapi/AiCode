@@ -219,7 +219,8 @@
                   "readSession": { "$ref": "#/$defs/handlerName" },
                   "sendMessage": { "$ref": "#/$defs/handlerName" },
                   "interruptSession": { "$ref": "#/$defs/handlerName" },
-                  "createSession": { "$ref": "#/$defs/handlerName" }
+                  "createSession": { "$ref": "#/$defs/handlerName" },
+                  "refresh": { "$ref": "#/$defs/handlerName" }
                 }
               }
             }

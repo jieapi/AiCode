@@ -1125,4 +1125,45 @@ class PluginManifestParserTest {
             "icon"
         )
     }
+
+    @Test
+    fun sessionSourceContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote sessions",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "dist/main.js"},
+              "contributes": {
+                "sessionSources": [
+                  {
+                    "id": "ds-harness",
+                    "title": {"default": "DS Harness Remote", "zh-CN": "DS Harness 远程"},
+                    "handlers": {
+                      "listSessions": "sessionSource.listSessions",
+                      "readSession": "sessionSource.readSession",
+                      "sendMessage": "sessionSource.sendMessage",
+                      "interruptSession": "sessionSource.interruptSession",
+                      "createSession": "sessionSource.createSession"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val manifest = success(json)
+        val source = manifest.sessionSources.single()
+        assertEquals("ds-harness", source.id)
+        assertEquals("DS Harness 远程", source.title.resolve("zh-CN"))
+        assertEquals("sessionSource.listSessions", source.handlers.listSessions)
+        assertEquals("sessionSource.readSession", source.handlers.readSession)
+        assertEquals(1, manifest.contributionCount)
+    }
 }

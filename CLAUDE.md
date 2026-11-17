@@ -56,7 +56,7 @@ feature-based 分层 + DDD。入口 `AIEditorApp` 初始化日志 / 保活、MCP
 
 ### 插件系统（预览）
 
-- **安装与清单**：`PluginManager` 校验 `.zip` 与 `plugin.json`，包 / 数据装在容器 `~/.aicode/plugins`，安装记录在宿主 `filesDir/plugin-registry.json`；字段以 `PluginManifest.kt` 为准，`PluginApi.VERSION`（当前 1.0.0）不兼容直接拒绝。**改插件 API 必须同步改 `plugins/sdk` 与页面 SDK（`app/src/main/assets/plugin-ui/aicode.js` / `aicode-ui-vue.js`）。** 插件贡献包括技能、子代理、工作区工具、槽位页面（`uiEntries`）、AI 工具、hooks、MCP、OpenAI 兼容提供商、Shizuku、系统浮层、备份扩展、模型句柄与配置页。
+- **安装与清单**：`PluginManager` 校验 `.zip` 与 `plugin.json`，包 / 数据装在容器 `~/.aicode/plugins`，安装记录在宿主 `filesDir/plugin-registry.json`；字段以 `PluginManifest.kt` 为准，`PluginApi.VERSION`（当前 1.0.0）不兼容直接拒绝。**改插件 API 必须同步改 `plugins/sdk` 与页面 SDK（`app/src/main/assets/plugin-ui/aicode.js` / `aicode-ui-vue.js`）。** 插件贡献包括技能、子代理、工作区工具、槽位页面（`uiEntries`）、AI 工具、hooks、MCP、OpenAI 兼容提供商、外部会话源（`sessionSources`）、Shizuku、系统浮层、备份扩展、模型句柄与配置页。
 - **运行时**：`PluginRuntimeManager` 在本地容器内以子进程运行 `runtime.entry`（JavaScript / Python），工具与 hooks 通过 JSON-RPC 调宿主；`PluginToolManager` 把生效插件的工具注册进 `ToolRegistry`，`PluginHookDispatcher` 派发 `app.started`、工具前后、HTTP、审批与备份等 hooks。
 - **商店标签（分类）**：`PluginTags`（`data/index/PluginIndexModels.kt`）固定 8 类 —— `provider` / `tool` / `skill` / `agent` / `mcp` / `ui` / `integration` / `other`；每个插件最多 4 个且不可重复；增删分类必须同步 `PluginIndexParser`、`plugin-index/schema/index.schema.json` 与索引 README。
 - **页面与浮层**：插件页面是 WebView HTML，经 `presentation/PluginWebBridge` 与 `assets/plugin-ui/aicode.js`（Vue 组件库 `aicode-ui-vue.js`）访问宿主能力；`overlay/` 管理可拖拽 / 吸附的系统浮层。SSH 模式下插件仍只在手机端运行；插件进程与 Bash 同级，宿主路径限制见 `PluginHostPaths`。

@@ -217,7 +217,45 @@
 | `format` | 是 | 目前仅支持 `openai` |
 | `baseUrl` | 是 | `http`/`https` 绝对地址，不能包含账号、查询参数或片段，最长 2048 字符 |
 
-宿主按此声明注册提供商；服务启动、模型与凭据维护见[插件提供商](/advanced/plugin/shizuku-providers#插件提供商)。
+宿主按此声明注册提供商；服务启动、模型与凭据维护见[插件提供商](/advanced/plugin/shizuku-providers#插件提供商)。插件 provider 的请求会自动携带 `X-AiCode-Session-Id` 请求头，值为当前 App 会话 ID，插件网关可用它把请求路由到对应会话。
+
+### sessionSources
+
+`sessionSources` 声明一个外部会话源，让 App 会话列表顶部出现以插件名为标题的独立分组。插件启用后分组会立即出现，会话列表由插件通过 `host.sessionSource.setSessions` 异步推送，不阻塞侧栏渲染。
+
+```json
+{
+  "sessionSources": [
+    {
+      "id": "ds-harness",
+      "title": {"default": "DS Harness Remote", "zh-CN": "DS Harness 远程"},
+      "handlers": {
+        "listSessions": "sessionSource.listSessions",
+        "readSession": "sessionSource.readSession",
+        "sendMessage": "sessionSource.sendMessage",
+        "interruptSession": "sessionSource.interruptSession",
+        "createSession": "sessionSource.createSession",
+        "refresh": "sessionSource.refresh"
+      }
+    }
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `id` | 是 | 局部 ID |
+| `title` | 是 | 本地化名称，最多 80 字符 |
+| `handlers.listSessions` | 是 | 返回会话列表的 handler |
+| `handlers.readSession` | 是 | 读取会话历史的 handler |
+| `handlers.sendMessage` | 否 | 发送消息的 handler；首版只读展示可省略 |
+| `handlers.interruptSession` | 否 | 中断执行的 handler |
+| `handlers.createSession` | 否 | 新建远端会话的 handler |
+| `handlers.refresh` | 否 | 宿主请求刷新列表的 handler；应立即返回，随后通过 `host.sessionSource.setSessions` 推送结果 |
+
+handler 命名规则与工具 handler 相同，最长 64 字符。声明了 `sessionSources` 的插件必须提供 `runtime`。消息格式约定为 `role` + `blocks[]`：`text`、`reasoning`、`tool`、`attachment`、`notice`；宿主按 block 类型渲染，不把插件返回值当 HTML 执行。
+
+会话源异步推送 host API：`host.sessionSource.setSessions`（`sourceId` + `sessions[]`）、`host.sessionSource.setLoading`、`host.sessionSource.setError`；聊天页等待动画用 `host.sessionSource.setThinking`（`sessionId`、`visible`、可选 `text`）。
 
 ### workspaceTools
 

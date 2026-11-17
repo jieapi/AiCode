@@ -240,6 +240,30 @@ data class PluginProviderRef(
 )
 
 /**
+ * `contributes.sessionSources[].handlers` 声明宿主会话 UI 应调用的插件 handler。
+ * list/read 为只读必需能力；send/interrupt/create 供后续写操作逐步接入。
+ */
+data class PluginSessionSourceHandlersRef(
+    val listSessions: String,
+    val readSession: String,
+    val sendMessage: String? = null,
+    val interruptSession: String? = null,
+    val createSession: String? = null,
+    /** 可选：宿主请求插件刷新会话列表。插件应立即返回，随后通过 host API 推送结果。 */
+    val refresh: String? = null
+)
+
+/**
+ * `contributes.sessionSources` 声明一个外部会话源。宿主只读取插件返回的 session /
+ * message JSON，不要求插件把历史写进本地数据库。
+ */
+data class PluginSessionSourceRef(
+    val id: String,
+    val title: LocalizedText,
+    val handlers: PluginSessionSourceHandlersRef
+)
+
+/**
  * `contributes.shizuku` 声明插件使用 Shizuku。使用者单独授权后，插件可在 Android 系统
  * 直接执行任意命令；声明只保留用途说明。
  */
@@ -308,6 +332,7 @@ data class PluginManifest(
     val hooks: List<PluginHookRef> = emptyList(),
     val mcp: List<PluginMcpRef> = emptyList(),
     val providers: List<PluginProviderRef> = emptyList(),
+    val sessionSources: List<PluginSessionSourceRef> = emptyList(),
     val shizuku: PluginShizukuRef? = null,
     val overlay: PluginOverlayRef? = null,
     val backup: PluginBackupRef? = null,
@@ -319,7 +344,7 @@ data class PluginManifest(
     /** 清单声明的贡献总数。 */
     val contributionCount: Int
         get() = skills.size + agents.size + workspaceTools.size + uiEntries.size +
-            tools.size + hooks.size + mcp.size + providers.size + (if (shizuku != null) 1 else 0) +
+            tools.size + hooks.size + mcp.size + providers.size + sessionSources.size + (if (shizuku != null) 1 else 0) +
             (if (overlay != null) 1 + overlay.surfaces.size else 0) + (if (backup != null) 1 else 0) +
             (if (modelAccess != null) 1 else 0) + (if (configPage != null) 1 else 0)
 }

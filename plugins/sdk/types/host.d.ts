@@ -65,6 +65,8 @@ export type AicodeErrorCode =
   | 'MODE_UNSUPPORTED'
   | 'APPROVAL_NOT_FOUND'
   | 'NOT_REMEMBERABLE'
+  | 'SESSION_SOURCE_NOT_FOUND'
+  | 'SESSION_SOURCE_INVALID'
   // 模型
   | 'MODEL_ACCESS_NOT_DECLARED'
   | 'MODEL_NOT_AVAILABLE'
@@ -356,6 +358,19 @@ export interface ChatAcceptedResult {
 export interface ChatDraftAcceptedResult {
   sessionId?: string;
   accepted: boolean;
+}
+
+/** 插件会话源推送给宿主的会话摘要；sessionId 由插件生成，宿主只保存与回传。 */
+export interface SessionSourceSession {
+  sessionId: string;
+  title?: string;
+  status?: string;
+  running?: boolean;
+  updatedAt?: number | null;
+  hostName?: string;
+  workspaceTitle?: string;
+  group?: string;
+  capabilities?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -817,6 +832,25 @@ export interface HostMethodMap {
   };
   'host.chat.resolvePlanApproval': {
     params: { sessionId: string; requestId: string; choice: PlanApprovalChoice };
+    result: OkResult;
+  };
+
+  // 插件会话源（需清单声明 contributes.sessionSources）
+  'host.sessionSource.setSessions': {
+    params: { sourceId: string; sessions: SessionSourceSession[] };
+    result: OkResult;
+  };
+  'host.sessionSource.setLoading': {
+    params: { sourceId: string; loading: boolean };
+    result: OkResult;
+  };
+  'host.sessionSource.setError': {
+    params: { sourceId: string; error?: string | null };
+    result: OkResult;
+  };
+  /** 设置当前插件会话的思考气泡；visible=false 时关闭。 */
+  'host.sessionSource.setThinking': {
+    params: { sourceId: string; sessionId: string; visible: boolean; text?: string };
     result: OkResult;
   };
 
