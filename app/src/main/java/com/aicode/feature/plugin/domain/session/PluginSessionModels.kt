@@ -31,7 +31,10 @@ data class PluginSessionSummary(
     val group: String,
     val hostName: String,
     val workspaceTitle: String,
-    val capabilities: List<String> = emptyList()
+    val capabilities: List<String> = emptyList(),
+    val providerId: String? = null,
+    val model: String? = null,
+    val executionMode: String? = null
 )
 
 sealed interface PluginMessageBlock {

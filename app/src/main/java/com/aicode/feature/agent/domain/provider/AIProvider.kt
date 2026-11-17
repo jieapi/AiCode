@@ -103,9 +103,9 @@ class AllKeysFailedException(message: String, cause: Throwable? = null) : Except
  * [KeySwitched] 在多 Key 自动切换时推送，供 UI 提示本次请求已改用的 Key。
  */
 sealed class AIStreamChunk {
-    data class TextDelta(val text: String) : AIStreamChunk()
+    data class TextDelta(val text: String, val messageId: String? = null) : AIStreamChunk()
     /** 模型新吐出的一小段思考过程（增量，非累积）。仅用于 UI 实时展示，不进入上下文回放。 */
-    data class ReasoningDelta(val text: String) : AIStreamChunk()
+    data class ReasoningDelta(val text: String, val messageId: String? = null) : AIStreamChunk()
     /**
      * 模型刚开始产出一次工具调用、工具名已经确定（参数还在流式传输中）。
      *

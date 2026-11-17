@@ -435,6 +435,12 @@ class OpenAIAdapter @Inject constructor(
                                 finishReason = it
                             }
 
+                            val remoteMessageId = delta.get("aicode_message_id")
+                                ?.takeIf {
+                                    com.aicode.feature.plugin.runtime.PluginProviderIds.isPluginId(providerId) &&
+                                        it.isJsonPrimitive && it.asJsonPrimitive.isString
+                                }?.asString
+                            if (remoteMessageId != null) send(AIStreamChunk.TextDelta("", remoteMessageId))
                             // 文字增量
                             delta.get("content")?.takeIf { !it.isJsonNull }?.asString?.let { c ->
                                 if (c.isNotEmpty()) {

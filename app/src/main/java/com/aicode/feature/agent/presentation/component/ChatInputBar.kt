@@ -961,10 +961,20 @@ internal fun ToolPermissionPanel(
                             )
                         }
                     }
-                    if (sessionTitle.isNotBlank()) {
+                    if (request.origin == PendingToolPermission.ORIGIN_PLUGIN_PERMISSION) {
+                        Text(
+                            text = stringResource(R.string.chat_perm_plugin_source, request.pluginName.orEmpty(), request.pluginId.orEmpty()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    val permissionSessionTitle = sessionTitle.ifBlank {
+                        if (request.origin == PendingToolPermission.ORIGIN_PLUGIN_PERMISSION) request.sessionId else ""
+                    }
+                    if (permissionSessionTitle.isNotBlank()) {
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = stringResource(R.string.chat_perm_session_label, sessionTitle),
+                            text = stringResource(R.string.chat_perm_session_label, permissionSessionTitle),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1049,7 +1059,7 @@ internal fun ToolPermissionPanel(
                             modifier = Modifier.weight(1f),
                             tone = AgentActionTone.Danger
                         )
-                        AgentActionButton(
+                        if (request.origin != PendingToolPermission.ORIGIN_PLUGIN_PERMISSION) AgentActionButton(
                             text = stringResource(R.string.chat_perm_always_allow),
                             onClick = { onChoice(PermissionChoice.ALWAYS) },
                             modifier = Modifier.weight(1f),

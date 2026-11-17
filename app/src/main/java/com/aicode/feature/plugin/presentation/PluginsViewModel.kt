@@ -174,6 +174,8 @@ class PluginsViewModel @Inject constructor(
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
     private val toolService: PluginToolService,
+    private val permissionService: com.aicode.feature.plugin.runtime.PluginPermissionService,
+    private val sessionSourceService: com.aicode.feature.plugin.runtime.PluginSessionHostService,
     private val httpService: PluginHttpService
 ) : ViewModel() {
 
@@ -743,6 +745,8 @@ class PluginsViewModel @Inject constructor(
             systemService = systemService,
             introspectionService = introspectionService,
             toolService = toolService,
+            permissionService = permissionService,
+            sessionSourceService = sessionSourceService,
             httpService = httpService,
             environment = pageEnvironment,
             theme = theme,

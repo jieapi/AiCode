@@ -88,6 +88,8 @@ class PluginWebBridge(
     private val systemService: PluginSystemService,
     private val introspectionService: PluginIntrospectionService,
     private val toolService: PluginToolService,
+    private val permissionService: com.aicode.feature.plugin.runtime.PluginPermissionService,
+    private val sessionSourceService: com.aicode.feature.plugin.runtime.PluginSessionHostService,
     private val httpService: PluginHttpService,
     private val environment: PluginPageEnvironment,
     @Volatile private var theme: () -> String,
@@ -497,6 +499,10 @@ class PluginWebBridge(
                 handler = handler,
                 args = args,
                 method = "ui.invoke",
+        "sessionSource.setMessages" -> sessionSourceService.setMessages(page.pluginId, params)
+        "sessionSource.pushEvent" -> sessionSourceService.pushEvent(page.pluginId, params)
+        "permissions.request" -> permissionService.request(page.pluginId, params)
+        "permissions.cancel" -> permissionService.cancel(page.pluginId, params)
                 timeoutMs = UI_INVOKE_TIMEOUT_MS
             )
         } catch (e: PluginProcessException) {

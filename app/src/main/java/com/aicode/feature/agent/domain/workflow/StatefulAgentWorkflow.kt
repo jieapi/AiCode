@@ -11,6 +11,7 @@ import com.aicode.feature.agent.data.local.entity.LlmCallRecordEntity
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.plugin.runtime.PermissionReviewDecision
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
+import com.aicode.feature.plugin.runtime.ToolDelegation
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
@@ -458,6 +459,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val hookAgentName = context.agentDefinition?.name
 
         return channelFlow {
+            val delegations = mutableMapOf<String, ToolDelegation>()
             if (hookSessionId != null) {
                 hookRunId = UUID.randomUUID().toString()
                 hookStarted = true
@@ -795,10 +797,15 @@ class StatefulAgentWorkflow @Inject constructor(
                                 sessionId = currentContext.sessionId,
                                 runId = hookRunId,
                                 scope = hookScope,
-                                agentName = hookAgentName
+                                agentName = hookAgentName,
+                                excludedPluginId = hookDecision?.delegation?.hook?.pluginId
                             )
                         }
 
+                        delegations.remove(toolCall.id)
+                        if (checkResult.approved) {
+                            hookDecision?.delegation?.let { delegations[toolCall.id] = it }
+                        }
                         if (!checkResult.approved) {
                             val rawResult = ToolResult.Error(checkResult.denyReason, checkResult.errorCode).toTransportString()
                             send(AgentEvent.ToolCallFinished(toolCall.id, toolCall.name, rawResult, true, argsPreview))
@@ -811,6 +818,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 整批取消：已批准未执行的工具补发完成事件（内容为未执行），
                         // 让 ViewModel 清理 runningTool 并 REPLACE 掉「执行中」占位消息。
                         effect.toolCalls.forEach { toolCall ->
+                            delegations.remove(toolCall.id)
                             send(
                                 AgentEvent.ToolCallFinished(
                                     id = toolCall.id,
@@ -830,7 +838,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         val toolCalls = effect.toolCalls
                         val toolStartedAt = ConcurrentHashMap<String, Long>()
                         toolCalls.forEach { toolCall ->
-                            if (toolCall.name == "editFile" || toolCall.name == "writeFile") {
+                            if (toolCall.id !in delegations && (toolCall.name == "editFile" || toolCall.name == "writeFile")) {
                                 (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
                                     currentContext.sessionId?.let { sid ->
                                         checkpointManager.beforeFileModified(sid, path)
@@ -857,8 +865,11 @@ class StatefulAgentWorkflow @Inject constructor(
                                             agentName = hookAgentName
                                         )
                                         val run: suspend () -> ToolRunResult = {
+                                            val delegation = delegations[toolCall.id]
                                             val tool = toolRegistry.getTool(toolCall.name)
-                                            if (tool is StreamingAgentTool) {
+                                            if (delegation != null) {
+                                                runToolDelegate(delegation, hookRunId, toolCall) { send(it) }
+                                            } else if (tool is StreamingAgentTool) {
                                                 runToolStream(tool, toolCall, currentContext) { send(it) }
                                             } else {
                                                 runToolSync(tool, toolCall, currentContext)
@@ -877,6 +888,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         // 串行处理 mode 切换并组装批量结果。
                         val batchResults = mutableListOf<ToolBatchResult>()
                         toolCalls.forEachIndexed { index, toolCall ->
+                            delegations.remove(toolCall.id)
                             val runResult = runResults.getOrNull(index)
                                 ?: ToolRunResult(ToolResult.Error("工具未执行", "TOOL_NOT_EXECUTED").toTransportString(), true)
                             var rawResult = runResult.raw
@@ -1176,6 +1188,29 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (e: Exception) {
             ToolRunResult(ToolResult.Error("工具执行失败: ${e.message}", "TOOL_EXECUTION_FAILED").toTransportString(), true)
         }
+    private suspend fun runToolDelegate(
+        delegation: ToolDelegation,
+        runId: String,
+        toolCall: ToolCall,
+        onEvent: suspend (AgentEvent) -> Unit
+    ): ToolRunResult = withContext(Dispatchers.IO) {
+        val live = StringBuilder()
+        var lastEmitMs = 0L
+        val result = pluginHookDispatcher.executeDelegatedTool(
+            delegation, runId, toolCall.id, toolCall.name, JsonObject(toolCall.arguments)
+        ) { chunk ->
+            live.append(chunk).append('\n')
+            if (live.length > LIVE_TAIL_CHARS) live.delete(0, live.length - LIVE_TAIL_CHARS)
+            val now = System.currentTimeMillis()
+            if (now - lastEmitMs >= PROGRESS_INTERVAL_MS) {
+                lastEmitMs = now
+                onEvent(AgentEvent.ToolCallProgress(toolCall.id, toolCall.name, live.toString()))
+            }
+        }
+        val processed = toolOutputStore.process(toolCall.name, toolCall.id, result)
+        ToolRunResult(processed.toTransportString(), processed is ToolResult.Error)
+    }
+
     }
 
     private suspend fun activeModelSupportsVision(sessionId: String?): Boolean {
@@ -1516,7 +1551,8 @@ class StatefulAgentWorkflow @Inject constructor(
         sessionId: String?,
         runId: String,
         scope: String,
-        agentName: String?
+        agentName: String?,
+        excludedPluginId: String? = null
     ): PermissionCheckResult {
         if (tool == null) {
             return PermissionCheckResult(true)
@@ -1557,7 +1593,8 @@ class StatefulAgentWorkflow @Inject constructor(
                         agentName = agentName,
                         callId = callId,
                         toolName = tool.name,
-                        arguments = JsonObject(arguments)
+                        arguments = JsonObject(arguments),
+                        excludedPluginId = excludedPluginId
                     )
                     when (review.decision) {
                         PermissionReviewDecision.ALLOW -> return PermissionCheckResult(true)

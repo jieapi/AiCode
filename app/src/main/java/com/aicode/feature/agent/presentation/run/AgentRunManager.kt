@@ -745,7 +745,7 @@ class AgentRunManager @Inject constructor(
             }
         }
         val runningTools = _runningTools.value[sessionId]?.values?.toList() ?: emptyList()
-        val pendingPermission = toolPermissionManager.pendingForSession(sessionId)
+        val pendingPermission = toolPermissionManager.pendingChatForSession(sessionId)
         val stoppedText = context.getString(R.string.agent_stopped_by_user)
         val pendingNotifs = agentNotificationCenter.pendingCount(sessionId)
         FileLogger.d(

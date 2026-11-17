@@ -27,6 +27,30 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 
 export type JsonObject = { [key: string]: JsonValue };
 
+export interface ToolBeforeHookResult {
+  decision?: 'allow' | 'deny';
+  reason?: string;
+  arguments?: JsonObject;
+  /** 只选择执行方；宿主完成最终参数权限检查后才调用此 handler。 */
+  delegate?: { handler: string };
+  logs?: string[];
+}
+
+export interface ToolDelegateContext {
+  executionId: string;
+  runId: string;
+  callId: string;
+  toolName: string;
+  arguments: JsonObject;
+  signal: AbortSignal;
+}
+
+export type ToolDelegateEvent =
+  | { executionId: string; type: 'pending' }
+  | { executionId: string; type: 'progress'; chunk: string }
+  | { executionId: string; type: 'completed'; data: JsonValue }
+  | { executionId: string; type: 'error'; message: string };
+
 /** 无参方法在 {@link HostMethodMap} 里的占位类型；调用时可省略 `params`。 */
 export type NoParams = Record<string, never>;
 
@@ -371,6 +395,40 @@ export interface SessionSourceSession {
   workspaceTitle?: string;
   group?: string;
   capabilities?: string[];
+  /** 本插件声明的提供商局部 ID。 */
+  providerId?: string;
+  model?: string;
+  executionMode?: 'remote';
+}
+
+export interface SessionSourceMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'tool';
+  createdAt?: number;
+  status?: string;
+  blocks: Array<Record<string, unknown> & {type: string}>;
+}
+
+export interface SessionSourcePage {
+  sessionId?: string;
+  title?: string;
+  status?: string;
+  messages: SessionSourceMessage[];
+  hasMore?: boolean;
+  nextCursor?: unknown;
+}
+
+export interface SessionSourceEvent {
+  sourceId: string;
+  sessionId: string;
+  type: 'tool-start' | 'tool-output' | 'tool-end' | 'message' | 'turn-end';
+  callId?: string;
+  name?: string;
+  input?: unknown;
+  output?: unknown;
+  isError?: boolean;
+  message?: SessionSourceMessage;
+  revision?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,6 +658,20 @@ export interface HttpRequestOptions {
   body?: string;
   /** 单位秒，默认 60。 */
   timeout?: number;
+}
+
+export interface PermissionRequest {
+  sessionId: string;
+  requestId: string;
+  title: string;
+  description: string;
+  operation: { kind: string; command?: string; workingDirectory?: string; [key: string]: JsonValue | undefined };
+  timeoutMs?: number;
+}
+
+export interface PermissionDecision {
+  decision: 'allow' | 'deny' | 'cancel';
+  reason?: 'timeout';
 }
 
 export interface HttpResponse {
@@ -840,6 +912,14 @@ export interface HostMethodMap {
     params: { sourceId: string; sessions: SessionSourceSession[] };
     result: OkResult;
   };
+  'host.sessionSource.setMessages': {
+    params: {sourceId: string; sessionId: string; page: SessionSourcePage; revision?: number};
+    result: OkResult;
+  };
+  'host.sessionSource.pushEvent': {
+    params: SessionSourceEvent;
+    result: OkResult;
+  };
   'host.sessionSource.setLoading': {
     params: { sourceId: string; loading: boolean };
     result: OkResult;
@@ -914,6 +994,8 @@ export interface HostMethodMap {
     params: { includeSchema?: boolean };
     result: ToolsListResult;
   };
+  'host.permissions.request': { params: PermissionRequest; result: PermissionDecision };
+  'host.permissions.cancel': { params: { requestId: string }; result: { cancelled: boolean } };
   'host.tools.execute': {
     params: {
       name: string;

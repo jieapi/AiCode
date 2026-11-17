@@ -16,6 +16,8 @@ import type {
   MethodOptions,
 } from 'vue';
 
+export type { PermissionRequest, PermissionDecision } from './host';
+
 type AicodeOption = { label: string; value: string };
 
 type AicodeComponent<Props, Emits extends EmitsOptions> = DefineComponent<

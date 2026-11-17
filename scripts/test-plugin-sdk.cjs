@@ -47,6 +47,22 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('permissions forwards bound request and cancellation without changing decisions', async () => {
+  const harness = loadSdk();
+  const options = { sessionId: 'source|opaque', requestId: 'r1', title: 'Confirm', description: 'Run',
+    operation: { kind: 'shell', command: 'pwd' }, timeoutMs: 1000 };
+  const pending = harness.sdk.permissions.request(options);
+  assert.equal(harness.requests[0].method, 'permissions.request');
+  assert.deepEqual(harness.requests[0].params, options);
+  harness.resolve(harness.requests[0], { decision: 'allow' });
+  assert.deepEqual(plain(await pending), { decision: 'allow' });
+  const cancelled = harness.sdk.permissions.cancel('r1');
+  assert.equal(harness.requests[1].method, 'permissions.cancel');
+  assert.deepEqual(harness.requests[1].params, { requestId: 'r1' });
+  harness.resolve(harness.requests[1], { cancelled: true });
+  assert.deepEqual(plain(await cancelled), { cancelled: true });
+});
+
 function changed(request, extra = {}) {
   return {
     subscriptionId: request.params.subscriptionId,

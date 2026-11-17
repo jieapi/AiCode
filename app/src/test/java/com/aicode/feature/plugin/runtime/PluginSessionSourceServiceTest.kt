@@ -79,6 +79,9 @@ class PluginSessionSourceServiceTest {
                 add(buildJsonObject {
                     put("sessionId", "session-1")
                     put("title", "Session 1")
+                    put("providerId", "gateway")
+                    put("model", "remote/model")
+                    put("executionMode", "remote")
                     put("status", "idle")
                     put("updatedAt", 123L)
                     put("hostName", "Host")
@@ -119,6 +122,9 @@ class PluginSessionSourceServiceTest {
         assertEquals(1, listed.sessions.size)
         assertEquals("test.remote:remote", listed.sessions.single().sourceKey)
         assertEquals("Session 1", listed.sessions.single().title)
+        assertEquals("gateway", listed.sessions.single().providerId)
+        assertEquals("remote/model", listed.sessions.single().model)
+        assertEquals("remote", listed.sessions.single().executionMode)
 
         val page = service.readSession("test.remote:remote", "session-1")
         assertEquals(1, page.messages.size)

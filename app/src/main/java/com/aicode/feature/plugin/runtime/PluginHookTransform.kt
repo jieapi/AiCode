@@ -1,5 +1,6 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.plugin.domain.PluginHook
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -9,7 +10,21 @@ import kotlinx.serialization.json.JsonPrimitive
 data class ToolBeforeHookResult(
     val denied: Boolean = false,
     val denyReason: String? = null,
-    val arguments: JsonObject? = null
+    val arguments: JsonObject? = null,
+    val delegate: ToolDelegateDescriptor? = null,
+    val delegation: ToolDelegation? = null
+)
+
+data class ToolDelegateDescriptor(val handler: String)
+
+data class ToolDelegation internal constructor(
+    val hook: PluginHook,
+    val version: String,
+    val handler: String,
+    val runId: String,
+    val callId: String,
+    val toolName: String,
+    val executionId: String
 )
 
 /** `agent.tool.after` 返回的受限变更；[data] 为 null 表示不改结果。 */
@@ -65,10 +80,18 @@ object PluginHookTransform {
         } else {
             null
         }
+        val delegate = if (obj.containsKey("delegate")) {
+            val value = obj["delegate"] as? JsonObject ?: return null
+            val handler = value.stringField("handler") ?: return null
+            if (handler.isBlank() || handler.length > 256 || handler.any { it.isISOControl() }) return null
+            if (value.keys != setOf("handler")) return null
+            ToolDelegateDescriptor(handler)
+        } else null
         return ToolBeforeHookResult(
             denied = decision == "deny",
             denyReason = reason?.trim()?.take(MAX_REASON_CHARS)?.takeIf { it.isNotEmpty() },
-            arguments = arguments
+            arguments = arguments,
+            delegate = delegate
         )
     }
 

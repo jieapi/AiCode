@@ -127,6 +127,10 @@ class PluginSessionSourceService @Inject constructor(
                 put("maxMessages", maxMessages.coerceIn(1, 100))
             }
         )
+        return parsePage(response, sessionId)
+    }
+
+    internal fun parsePage(response: JsonElement, sessionId: String): PluginSessionPage {
         val root = response as? JsonObject ?: throw IllegalStateException("PLUGIN_SESSION_INVALID_RESPONSE")
         val messages = (root["messages"] as? JsonArray).orEmpty()
             .mapNotNull { parseMessage(it as? JsonObject) }
@@ -167,6 +171,13 @@ class PluginSessionSourceService @Inject constructor(
                 put("operationId", UUID.randomUUID().toString().replace("-", "").take(32))
             }
         )
+    }
+
+    suspend fun interruptSession(sourceKey: String, sessionId: String) {
+        val source = activeSources().firstOrNull { it.key == sourceKey }
+            ?: error("PLUGIN_SESSION_SOURCE_NOT_FOUND")
+        val handler = source.handlers.interruptSession ?: error("PLUGIN_SESSION_INTERRUPT_UNSUPPORTED")
+        invoke(source, handler, buildJsonObject { put("sessionId", sessionId) })
     }
 
     /**
@@ -264,7 +275,10 @@ class PluginSessionSourceService @Inject constructor(
                 hostName = hostName,
                 workspaceTitle = workspaceTitle,
                 capabilities = (row["capabilities"] as? JsonArray).orEmpty()
-                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+                providerId = row.string("providerId"),
+                model = row.string("model"),
+                executionMode = row.string("executionMode")
             )
         }
     }
@@ -280,7 +294,7 @@ class PluginSessionSourceService @Inject constructor(
         }
     }
 
-    private fun parseMessage(row: JsonObject?): PluginSessionMessage? {
+    internal fun parseMessage(row: JsonObject?): PluginSessionMessage? {
         if (row == null) return null
         val id = row.string("id") ?: return null
         val role = row.string("role") ?: "assistant"

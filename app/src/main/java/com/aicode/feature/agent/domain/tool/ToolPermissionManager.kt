@@ -46,12 +46,20 @@ class ToolPermissionManager @Inject constructor() {
     /** UI 回传用户选择，唤醒对应 id 的挂起请求。 */
     fun resolve(id: String, choice: PermissionChoice) {
         val entry = synchronized(lock) { pending[id] } ?: return
+        if (entry.request.origin == PendingToolPermission.ORIGIN_PLUGIN_PERMISSION && choice == PermissionChoice.ALWAYS) return
         entry.decision.complete(choice)
     }
 
     /** 取某会话当前的待决请求（stopAgent 停止单个会话时用，避免误取其它会话的弹窗）。 */
     fun pendingForSession(sessionId: String): PendingToolPermission? =
         synchronized(lock) { pending.values.firstOrNull { it.request.sessionId == sessionId }?.request }
+
+    fun pendingChatForSession(sessionId: String): PendingToolPermission? =
+        synchronized(lock) {
+            pending.values.firstOrNull {
+                it.request.sessionId == sessionId && it.request.origin == PendingToolPermission.ORIGIN_CHAT
+            }?.request
+        }
 
     /**
      * 在持锁区内调用：把内部表投影到两个对外 StateFlow。

@@ -1,6 +1,7 @@
 package com.aicode.feature.plugin.runtime
 
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHook
 import com.aicode.feature.plugin.domain.PluginHookEvents
@@ -12,6 +13,8 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -368,6 +371,7 @@ class PluginHookDispatcher @Inject constructor(
         if (targets.isEmpty()) return ToolBeforeHookResult(arguments = arguments)
         val deadline = System.currentTimeMillis() + TRANSFORM_TOTAL_TIMEOUT_MS
         var current = arguments
+        var delegation: ToolDelegation? = null
         for ((version, hook) in targets) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
@@ -394,8 +398,101 @@ class PluginHookDispatcher @Inject constructor(
                 )
             }
             mutation.arguments?.let { current = it }
+            if (delegation == null) {
+                mutation.delegate?.let { descriptor ->
+                    delegation = ToolDelegation(
+                        hook, version, descriptor.handler, runId, callId, toolName,
+                        UUID.randomUUID().toString()
+                    )
+                }
+            }
         }
-        return ToolBeforeHookResult(arguments = current)
+        return ToolBeforeHookResult(arguments = current, delegation = delegation)
+    }
+
+    suspend fun executeDelegatedTool(
+        delegation: ToolDelegation,
+        runId: String,
+        callId: String,
+        toolName: String,
+        arguments: JsonObject,
+        onProgress: suspend (String) -> Unit
+    ): ToolResult {
+        val hook = delegation.hook
+        require(delegation.runId == runId && delegation.callId == callId && delegation.toolName == toolName)
+        suspend fun call(operation: String): JsonObject {
+            val plugin = findPlugin(hook.pluginId)
+            if (plugin == null || !plugin.isActive || plugin.record.version != delegation.version ||
+                plugin.content.hooks.none { it == hook }) {
+                throw PluginProcessException("PLUGIN_DELEGATE_INACTIVE", "Tool delegate is no longer active")
+            }
+            return runtime.invoke(
+                pluginId = hook.pluginId,
+                version = delegation.version,
+                runtime = hook.runtime,
+                handler = delegation.handler,
+                args = buildJsonObject {
+                    put("operation", operation)
+                    put("executionId", delegation.executionId)
+                    put("runId", runId)
+                    put("callId", callId)
+                    put("toolName", toolName)
+                    if (operation == "start") put("arguments", arguments)
+                },
+                method = "tool.invoke",
+                timeoutMs = if (operation == "cancel") 2_000L else 35_000L
+            ) as? JsonObject ?: throw PluginProcessException("PLUGIN_DELEGATE_PROTOCOL", "Invalid delegate response")
+        }
+        var completed = false
+        try {
+            return withTimeoutOrNull(30 * 60_000L) {
+                var response = call("start")
+                while (true) {
+                    if (response["executionId"] != JsonPrimitive(delegation.executionId)) {
+                        throw PluginProcessException("PLUGIN_DELEGATE_PROTOCOL", "Mismatched delegate execution")
+                    }
+                    when ((response["type"] as? JsonPrimitive)?.contentOrNull) {
+                        "progress" -> {
+                            val chunk = (response["chunk"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                                ?: throw PluginProcessException("PLUGIN_DELEGATE_PROTOCOL", "Invalid progress")
+                            if (chunk.length > 64 * 1024) throw PluginProcessException("PLUGIN_DELEGATE_PROTOCOL", "Progress too large")
+                            onProgress(chunk)
+                        }
+                        "completed" -> {
+                            val data = response["data"] ?: JsonNull
+                            completed = true
+                            return@withTimeoutOrNull ToolResult.Success(data)
+                        }
+                        "error" -> {
+                            completed = true
+                            return@withTimeoutOrNull ToolResult.Error(
+                                (response["message"] as? JsonPrimitive)?.contentOrNull ?: "Delegate failed",
+                                "PLUGIN_DELEGATE_FAILED"
+                            )
+                        }
+                        "pending" -> delay(100)
+                        else -> throw PluginProcessException("PLUGIN_DELEGATE_PROTOCOL", "Invalid delegate event")
+                    }
+                    response = call("next")
+                }
+                @Suppress("UNREACHABLE_CODE")
+                error("unreachable")
+            } ?: ToolResult.Error("Tool delegate timed out", "PLUGIN_DELEGATE_TIMEOUT")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return ToolResult.Error(
+                e.message ?: "Tool delegate failed", (e as? PluginProcessException)?.code ?: "PLUGIN_DELEGATE_FAILED"
+            )
+        } finally {
+            if (!completed) {
+                withContext(NonCancellable) {
+                    withTimeoutOrNull(2_000L) {
+                        try { call("cancel") } catch (_: Exception) { }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -525,7 +622,8 @@ class PluginHookDispatcher @Inject constructor(
         agentName: String?,
         callId: String,
         toolName: String,
-        arguments: JsonObject
+        arguments: JsonObject,
+        excludedPluginId: String? = null
     ): PermissionReviewHookResult {
         if (sessionId == null) return PermissionReviewHookResult(PermissionReviewDecision.PASS)
         val targets = hooksFor(PluginHookEvents.AGENT_PERMISSION_REVIEW, PluginHookModes.REVIEW)
@@ -538,7 +636,7 @@ class PluginHookDispatcher @Inject constructor(
                 break
             }
             if (!isActiveHook(hook, PluginHookModes.REVIEW)) continue
-            if (isOwnPluginTool(hook.pluginId, toolName)) {
+            if (hook.pluginId == excludedPluginId || isOwnPluginTool(hook.pluginId, toolName)) {
                 FileLogger.d(TAG, "跳过自身工具代审核: ${hook.pluginId}/$toolName")
                 continue
             }

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -232,6 +233,101 @@ class PluginHookDispatcherTest {
         coVerify(exactly = 3) {
             runtime.invoke(any(), any(), any(), any(), any(), any(), any())
         }
+    }
+
+    @Test
+    fun firstDelegateWinsWithoutExecutingAndLaterArgumentsApply() = runBlocking {
+        val first = hook("first", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        val second = hook("second", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(first, second))), listOf(first, second))
+        coEvery { runtime.invoke(any(), any(), any(), "hooks.first", any(), any(), any()) } returns
+            JsonObject(mapOf("delegate" to JsonObject(mapOf("handler" to JsonPrimitive("remote.first")))))
+        val finalArgs = JsonObject(mapOf("path" to JsonPrimitive("final")))
+        coEvery { runtime.invoke(any(), any(), any(), "hooks.second", any(), any(), any()) } returns
+            JsonObject(mapOf("delegate" to JsonObject(mapOf("handler" to JsonPrimitive("remote.second"))), "arguments" to finalArgs))
+        val result = dispatcher.beforeToolCall("session", "run", "call", "readFile", "BUILD", "main", null, JsonObject(emptyMap()))
+        assertEquals("remote.first", result.delegation!!.handler)
+        assertEquals(PLUGIN_ID, result.delegation!!.hook.pluginId)
+        assertEquals(finalArgs, result.arguments)
+        coVerify(exactly = 0) { runtime.invoke(any(), any(), any(), any(), any(), "tool.invoke", any()) }
+    }
+
+    @Test
+    fun laterDenyDiscardsSelectedDelegationWithoutStartingIt() = runBlocking {
+        val first = hook("first", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        val second = hook("second", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(first, second))), listOf(first, second))
+        coEvery { runtime.invoke(any(), any(), any(), "hooks.first", any(), any(), any()) } returns
+            JsonObject(mapOf("delegate" to JsonObject(mapOf("handler" to JsonPrimitive("remote")))))
+        coEvery { runtime.invoke(any(), any(), any(), "hooks.second", any(), any(), any()) } returns
+            JsonObject(mapOf("decision" to JsonPrimitive("deny")))
+        val result = dispatcher.beforeToolCall("session", "run", "call", "writeFile", "PLAN", "main", null, JsonObject(emptyMap()))
+        assertTrue(result.denied)
+        assertEquals(null, result.delegation)
+        coVerify(exactly = 0) { runtime.invoke(any(), any(), any(), any(), any(), "tool.invoke", any()) }
+    }
+
+    @Test
+    fun delegatedStreamUsesFinalArgumentsAndBoundIdentity() = runBlocking {
+        val hook = hook("route", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(hook))), listOf(hook))
+        val delegation = ToolDelegation(hook, "1.0.0", "remote", "run", "call", "readFile", "execution")
+        val args = JsonObject(mapOf("path" to JsonPrimitive("final")))
+        coEvery { runtime.invoke(any(), any(), any(), "remote", any(), "tool.invoke", any()) } answers {
+            val request = arg<JsonObject>(4)
+            assertEquals(JsonPrimitive("execution"), request["executionId"])
+            val start = request["operation"] == JsonPrimitive("start")
+            if (start) assertEquals(args, request["arguments"])
+            JsonObject(mapOf("executionId" to JsonPrimitive("execution"),
+                "type" to JsonPrimitive(if (start) "progress" else "completed"),
+                "chunk" to JsonPrimitive("reading"), "data" to JsonPrimitive("done")))
+        }
+        val progress = mutableListOf<String>()
+        val result = dispatcher.executeDelegatedTool(delegation, "run", "call", "readFile", args) { progress += it }
+        assertEquals(listOf("reading"), progress)
+        assertTrue(result is com.aicode.feature.agent.domain.tool.ToolResult.Success)
+        coVerify(exactly = 2) { runtime.invoke(any(), any(), any(), "remote", any(), "tool.invoke", any()) }
+    }
+
+    @Test
+    fun delegatedCancellationPropagatesAndSendsBoundCancel() = runBlocking {
+        val hook = hook("route", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(hook))), listOf(hook))
+        val delegation = ToolDelegation(hook, "1.0.0", "remote", "run", "call", "readFile", "execution")
+        coEvery { runtime.invoke(any(), any(), any(), "remote", match { it["operation"] == JsonPrimitive("start") }, any(), any()) } throws
+            kotlinx.coroutines.CancellationException("cancelled")
+        try {
+            dispatcher.executeDelegatedTool(delegation, "run", "call", "readFile", JsonObject(emptyMap())) { }
+            org.junit.Assert.fail("Cancellation must propagate")
+        } catch (_: kotlinx.coroutines.CancellationException) { }
+        coVerify(exactly = 1) {
+            runtime.invoke(PLUGIN_ID, "1.0.0", runtimeRef, "remote", match {
+                it["operation"] == JsonPrimitive("cancel") && it["executionId"] == JsonPrimitive("execution")
+            }, "tool.invoke", 2_000L)
+        }
+    }
+
+    @Test
+    fun delegatePluginCannotReviewItsOwnNativeToolExecution() = runBlocking {
+        val reviewer = hook("review", PluginHookEvents.AGENT_PERMISSION_REVIEW).copy(mode = PluginHookModes.REVIEW)
+        stubPlugin(listOf(plugin(hooks = listOf(reviewer))), listOf(reviewer))
+        val result = dispatcher.reviewPermission(
+            "run", "session", "BUILD", "main", null, "call", "writeFile", JsonObject(emptyMap()), PLUGIN_ID
+        )
+        assertEquals(PermissionReviewDecision.PASS, result.decision)
+        coVerify(exactly = 0) { runtime.invoke(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun delegatedFailureCancelsAndNeverReturnsLocalRoute() = runBlocking {
+        val hook = hook("route", PluginHookEvents.AGENT_TOOL_BEFORE).copy(mode = PluginHookModes.TRANSFORM)
+        stubPlugin(listOf(plugin(hooks = listOf(hook))), listOf(hook))
+        val delegation = ToolDelegation(hook, "1.0.0", "remote", "run", "call", "readFile", "execution")
+        coEvery { runtime.invoke(any(), any(), any(), "remote", any(), "tool.invoke", any()) } throws
+            PluginProcessException("PLUGIN_TIMEOUT", "timeout")
+        val result = dispatcher.executeDelegatedTool(delegation, "run", "call", "readFile", JsonObject(emptyMap())) { }
+        assertTrue(result is com.aicode.feature.agent.domain.tool.ToolResult.Error)
+        coVerify(exactly = 1) { runtime.invoke(any(), any(), any(), "remote", match { it["operation"] == JsonPrimitive("cancel") }, "tool.invoke", 2_000L) }
     }
 
     private companion object {

@@ -113,6 +113,8 @@ import com.aicode.feature.agent.presentation.run.ReasoningDurationEvent
 import com.aicode.feature.plugin.domain.session.PluginSessionGroup
 import com.aicode.feature.plugin.domain.session.PluginSessionSummary
 import com.aicode.feature.plugin.runtime.PluginSessionSourceService
+import com.aicode.feature.plugin.runtime.PluginRemoteRunManager
+import com.aicode.feature.plugin.runtime.PluginSessionEventBus
 import com.aicode.feature.plugin.runtime.PluginSessionRegistry
 import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager.ApprovalKind
@@ -159,6 +161,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.io.OutputStream
 import java.nio.file.FileAlreadyExistsException
@@ -221,6 +225,8 @@ class AIAgentViewModel @Inject constructor(
     private val pluginSessionSourceService: PluginSessionSourceService,
     private val pluginSessionRegistry: PluginSessionRegistry,
     private val pluginEventBus: PluginEventBus,
+    private val pluginRemoteRunManager: PluginRemoteRunManager,
+    private val pluginSessionEventBus: PluginSessionEventBus,
     @param:ApplicationContext private val context: Context
 ) : ViewModel(), SlashCommandContext {
 
@@ -278,6 +284,8 @@ class AIAgentViewModel @Inject constructor(
     private var pluginStreamSessionId: String? = null
     /** 当前跟随会话所属的 sourceKey（用于 unfollow）。 */
     private var pluginStreamSourceKey: String? = null
+    private var pluginGenericEventJob: Job? = null
+    private var pluginSnapshotRevision: Long? = null
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val currentSessionTodoItems: StateFlow<List<TodoItem>> = _currentSessionId
@@ -297,11 +305,13 @@ class AIAgentViewModel @Inject constructor(
         _activePluginSession,
         _currentSessionId,
         agentRunManager.agentStates,
-        _pluginSessionError
-    ) { pluginSession, id, states, pluginError ->
+        _pluginSessionError,
+        pluginRemoteRunManager.states
+    ) { pluginSession, id, states, pluginError, remoteStates ->
         if (pluginSession != null) {
-            // 插件会话没有本地 workflow：只把加载/发送错误投影到现有 StatusBanner。
-            pluginError?.let { AgentUIState.Error(it) } ?: AgentUIState.Idle
+            val remote = remoteStates[pluginSession.id]
+            (pluginError ?: remote?.error)?.let { AgentUIState.Error(it) }
+                ?: if (remote?.running == true) AgentUIState.Streaming else AgentUIState.Idle
         } else if (id == null) {
             AgentUIState.Idle
         } else {
@@ -1354,7 +1364,7 @@ class AIAgentViewModel @Inject constructor(
     }
         .flatMapLatest { (pluginSession, id, limit) ->
             if (pluginSession != null) {
-                combine(_pluginMessagesState, _pluginStreaming) { state, stream ->
+                combine(_pluginMessagesState, _pluginStreaming, pluginRemoteRunManager.states) { state, stream, remoteStates ->
                     val base = state.messages
                     val overlay = if (stream != null && stream.active
                         && stream.sessionId == pluginSession.sessionId
@@ -1369,7 +1379,9 @@ class AIAgentViewModel @Inject constructor(
                     } else {
                         base
                     }
-                    state.copy(messages = overlay)
+                    val settled = remoteStates[pluginSession.id]?.settled.orEmpty()
+                    val ids = overlay.mapTo(HashSet()) { it.id }
+                    state.copy(messages = overlay + settled.filterNot { it.id in ids })
                 }
             } else if (id == null) {
                 flowOf(ChatMessagesState(null, emptyList(), loaded = false))
@@ -1397,8 +1409,8 @@ class AIAgentViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, ChatMessagesState(null, emptyList(), loaded = false))
 
 
-    val runningTool: StateFlow<List<RunningToolOutput>> = combine(_currentSessionId, agentRunManager.runningTools) { id, tools ->
-        if (id == null) emptyList() else tools[id]?.values?.toList() ?: emptyList()
+    val runningTool: StateFlow<List<RunningToolOutput>> = combine(_currentSessionId, agentRunManager.runningTools, pluginRemoteRunManager.states) { id, tools, remote ->
+        if (id == null) emptyList() else remote[id]?.tools?.values?.toList() ?: tools[id]?.values?.toList() ?: emptyList()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val preparingTool: StateFlow<String?> = combine(_currentSessionId, agentRunManager.preparingTools) { id, tools ->
@@ -1414,13 +1426,13 @@ class AIAgentViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val streamingAssistant: StateFlow<StreamingAssistantMessage?> = combine(
-        _currentSessionId, agentRunManager.streamingAssistants
-    ) { id, assistants ->
-        if (id == null) null else assistants[id]
+        _currentSessionId, agentRunManager.streamingAssistants, pluginRemoteRunManager.states
+    ) { id, assistants, remote ->
+        if (id == null) null else remote[id]?.assistant ?: assistants[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val retryState: StateFlow<RetryState?> = combine(_currentSessionId, agentRunManager.retryStates) { id, states ->
-        if (id == null) null else states[id]
+    val retryState: StateFlow<RetryState?> = combine(_currentSessionId, agentRunManager.retryStates, pluginRemoteRunManager.states) { id, states, remote ->
+        if (id == null) null else remote[id]?.retry ?: states[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val keySwitchState: StateFlow<KeySwitchState?> = combine(_currentSessionId, agentRunManager.keySwitchStates) { id, states ->
@@ -1778,6 +1790,21 @@ class AIAgentViewModel @Inject constructor(
      * 取消 job 并把未完成的流式内容落库为「已停止」；队列下一条照常执行。
      */
     fun stopAgentSession(sessionId: String) {
+        val plugin = _activePluginSession.value?.takeIf { it.id == sessionId }
+        if (plugin != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    pluginSessionSourceService.interruptSession(plugin.sourceKey, plugin.sessionId)
+                    pluginRemoteRunManager.stop(sessionId)
+                    loadPluginPage(plugin, null, false)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _pluginSessionError.value = e.message ?: e.javaClass.simpleName
+                }
+            }
+            return
+        }
         agentRunManager.stopAgentSession(sessionId)
     }
 
@@ -1867,7 +1894,12 @@ class AIAgentViewModel @Inject constructor(
     fun setSessionProviderModel(providerId: String, model: String) {
         val pluginSession = _activePluginSession.value
         if (pluginSession != null) {
+            val expected = pluginSession.providerId?.let {
+                com.aicode.feature.plugin.runtime.PluginProviderIds.idOf(pluginSession.pluginId, it)
+            }
+            if (pluginSession.executionMode == "remote" && providerId != expected) return
             _pluginSessionProviderModel.value = providerId to model
+            _activePluginSession.value = pluginSession.copy(model = model)
             return
         }
         val sid = _currentSessionId.value ?: return
@@ -2165,13 +2197,15 @@ class AIAgentViewModel @Inject constructor(
         }
         pluginLoadJob?.cancel()
         pluginNextCursor = null
-        _pluginSessionProviderModel.value = null to null
+        pluginSnapshotRevision = null
+        _pluginSessionProviderModel.value = session.providerId?.let {
+            com.aicode.feature.plugin.runtime.PluginProviderIds.idOf(session.pluginId, it)
+        } to session.model
         _pluginSessionError.value = null
         _activePluginSession.value = session
         // UI 的 messagesReady 依赖 sessionId == currentSessionId；这里同步指向外部 id。
         _currentSessionId.value = session.id
         _pluginStreaming.value = null
-        startPluginStream(session)
         _pluginMessagesState.value = ChatMessagesState(
             sessionId = session.id,
             messages = emptyList(),
@@ -2180,8 +2214,14 @@ class AIAgentViewModel @Inject constructor(
             isLoadingMore = true,
             limit = 0
         )
+        startPluginStream(session)
         pluginLoadJob = viewModelScope.launch(Dispatchers.IO) {
             loadPluginPage(session, cursor = null, append = false)
+            if (_activePluginSession.value?.id == session.id && session.executionMode == "remote" && session.running) {
+                pluginRemoteRunManager.start(session, null) {
+                    if (_activePluginSession.value?.id == session.id) loadPluginPage(session, null, false)
+                }
+            }
         }
     }
 
@@ -2223,6 +2263,7 @@ class AIAgentViewModel @Inject constructor(
                     limit = current.limit + 1
                 )
             }
+            pluginRemoteRunManager.retainMessages(session.id, converted.mapTo(HashSet()) { it.id })
             _pluginSessionError.value = null
         } catch (e: CancellationException) {
             throw e
@@ -2248,6 +2289,14 @@ class AIAgentViewModel @Inject constructor(
     private fun sendPluginMessage(session: PluginSessionSummary, rawMessage: String) {
         val message = rawMessage.trim()
         if (message.isEmpty()) return
+        if (session.executionMode == "remote") {
+            if (pluginRemoteRunManager.states.value[session.id]?.running == true) return
+            appendOptimisticUserMessage(session, message)
+            pluginRemoteRunManager.start(session, message) {
+                if (_activePluginSession.value?.id == session.id) loadPluginPage(session, null, false)
+            }
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             _pluginStreaming.value = null
             appendOptimisticUserMessage(session, message)
@@ -2302,6 +2351,13 @@ class AIAgentViewModel @Inject constructor(
         pluginSessionRegistry.clearThinking(session.id)
         pluginStreamSessionId = session.sessionId
         pluginStreamSourceKey = session.sourceKey
+        pluginGenericEventJob = viewModelScope.launch {
+            pluginSessionEventBus.events.collect { event ->
+                if (event.sessionId == session.id && _activePluginSession.value?.id == session.id) {
+                    handleGenericPluginEvent(session, event.payload)
+                }
+            }
+        }
         pluginEventUnsubscribe = pluginEventBus.subscribe(session.pluginId) { event ->
             handlePluginStreamEvent(session, event)
         }
@@ -2311,6 +2367,8 @@ class AIAgentViewModel @Inject constructor(
     }
 
     private fun stopPluginStream() {
+        pluginGenericEventJob?.cancel()
+        pluginGenericEventJob = null
         pluginEventUnsubscribe?.invoke()
         pluginEventUnsubscribe = null
         _activePluginSession.value?.let { pluginSessionRegistry.clearThinking(it.id) }
@@ -2322,6 +2380,58 @@ class AIAgentViewModel @Inject constructor(
         if (sourceKey != null && sessionId != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching { pluginSessionSourceService.unfollowSession(sourceKey, sessionId) }
+            }
+        }
+    }
+
+    private fun handleGenericPluginEvent(session: PluginSessionSummary, event: JsonObject) {
+        val revision = event["revision"]?.jsonPrimitive?.longOrNull
+        if (revision != null && pluginSnapshotRevision?.let { revision < it } == true) return
+        when (event["type"]?.jsonPrimitive?.contentOrNull) {
+            "snapshot" -> {
+                val page = event["page"] as? JsonObject ?: return
+                val parsed = pluginSessionSourceService.parsePage(page, session.sessionId)
+                val messages = PluginSessionUiMapper.toUiMessages(parsed.messages)
+                pluginNextCursor = parsed.nextCursor
+                pluginSnapshotRevision = revision ?: pluginSnapshotRevision
+                _pluginMessagesState.update {
+                    it.copy(messages = messages, loaded = true, hasMore = parsed.hasMore, isLoadingMore = false)
+                }
+                pluginRemoteRunManager.retainMessages(session.id, messages.mapTo(HashSet()) { it.id })
+            }
+            "message" -> {
+                val parsed = pluginSessionSourceService.parseMessage(event["message"] as? JsonObject) ?: return
+                val messages = PluginSessionUiMapper.toUiMessages(parsed)
+                val ids = messages.mapTo(HashSet()) { it.id }
+                _pluginMessagesState.update { state ->
+                    state.copy(messages = state.messages.filterNot { it.id in ids || it.id.startsWith("plugin-optimistic-") && parsed.role == "user" } + messages)
+                }
+                pluginRemoteRunManager.retainMessages(session.id, _pluginMessagesState.value.messages.mapTo(HashSet()) { it.id })
+            }
+            "tool-start", "tool-output", "tool-end" -> {
+                val callId = event["callId"]?.jsonPrimitive?.contentOrNull ?: return
+                val type = event["type"]?.jsonPrimitive?.contentOrNull
+                val previous = pluginRemoteRunManager.states.value[session.id]?.tools?.get(callId)
+                val name = event["name"]?.jsonPrimitive?.contentOrNull ?: previous?.toolName.orEmpty()
+                val input = event["input"]?.let { if (it is kotlinx.serialization.json.JsonPrimitive) it.contentOrNull else it.toString() }
+                    ?: previous?.toolArgs.orEmpty()
+                val output = event["output"]?.let { if (it is kotlinx.serialization.json.JsonPrimitive) it.contentOrNull else it.toString() }.orEmpty()
+                val messageId = "remote-tool-$callId"
+                val message = AgentUIMessage(
+                    id = messageId, role = MessageRole.TOOL, content = output,
+                    toolName = name, toolArgs = input,
+                    isError = event["isError"]?.jsonPrimitive?.booleanOrNull == true
+                )
+                _pluginMessagesState.update { state ->
+                    val index = state.messages.indexOfFirst { it.id == messageId }
+                    state.copy(messages = if (index < 0) state.messages + message
+                        else state.messages.toMutableList().also { it[index] = message })
+                }
+                pluginRemoteRunManager.updateTool(session.id, callId,
+                    if (type == "tool-end") null else RunningToolOutput(messageId, output, name, input))
+            }
+            "turn-end" -> {
+                if (session.executionMode != "remote") reloadPluginSnapshot(session, true)
             }
         }
     }

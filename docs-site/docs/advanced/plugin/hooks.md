@@ -71,7 +71,7 @@ const handlers = {
 
 | 事件 | 时机 | 可返回的变更 |
 | --- | --- | --- |
-| `agent.tool.before` | 工具执行前、权限判定前 | `decision: "deny"` 阻止执行；`arguments` 改写参数 |
+| `agent.tool.before` | 工具执行前、权限判定前 | `decision: "deny"` 阻止执行；`arguments` 改写参数；`delegate: {handler}` 选择插件执行方 |
 | `agent.tool.after` | 工具成功结束后 | `data` 改写成功结果的数据 |
 | `agent.http.before` | 每次实际发出 provider HTTP 请求前 | `url`、`headers`、`body` 改写请求 |
 
@@ -87,6 +87,32 @@ const handlers = {
 payload 仍包含完整请求体（可能含对话内容），仅应安装可信来源的插件。
 :::
 
+### 委托工具执行
+
+声明 `agent.tool.before`、`mode: "transform"` 的插件可以返回 `delegate: {handler: "tools.remote"}`。before handler 只能选择执行方，不应在这里执行工具或产生工具副作用。宿主收齐最终参数并重新完成权限与模式检查后，才调用选中的执行 handler；`decision: "allow"` 也不能跳过检查。委托执行受原工具相同的权限边界约束，不扩大 PLAN 或 DENY 的权限。
+
+多个 hook 按原顺序处理，首个合法委托固定归属其插件、版本与 handler；后续 hook 仍可改参数或拒绝，但不能抢占执行方。执行时使用最终参数。宿主生成独立执行标识并绑定运行、工具调用与插件，不能指定其他插件。插件停用、更新、执行错误、超时或取消均不会回退本地工具。委托保留原工具卡片、进度与 started/finished 通知，但不创建本地文件修改检查点。
+
+使用 SDK 的 `toolDelegate` 包装执行 handler：异步生成器 `yield` 进度文本，`return` 最终 JSON 数据，抛异常表示失败。需要取消的网络请求、子进程等应监听 `signal` 并终止实际工作；宿主取消等待不等于能强制终止插件的任意外部副作用。
+
+```ts
+import { definePlugin, toolDelegate } from '@jieapi/plugin-sdk';
+
+definePlugin({ handlers: {
+  'hooks.route': (payload) => payload.toolName === 'readFile'
+    ? { delegate: { handler: 'tools.remote' } }
+    : {},
+  'tools.remote': toolDelegate(async function* ({ arguments: args, signal }) {
+    yield 'Reading remote file';
+    const response = await fetch(String(args.path), { signal });
+    if (!response.ok) throw new Error(`Read failed: ${response.status}`);
+    return { content: await response.text() };
+  })
+} });
+```
+
+非 SDK 实现使用同一 handler 的 `start` / `next` / `cancel` 操作：请求包含 `executionId`、`runId`、`callId`、`toolName`，只有 start 包含最终 `arguments`。响应必须回传相同 executionId，格式为 `{type: "progress", chunk}`、`{type: "pending"}`、`{type: "completed", data}` 或 `{type: "error", message}`。next 应长轮询约 25 秒，单次 RPC 上限 35 秒；同一 executionId 不得重复启动或并发读取。SDK 每次只拉取一个增量，限制单条进度为 64 Ki 字符，避免无界队列。完成、失败或取消后的执行标识在当前进程内保留 31 分钟用于拒绝重复启动；进程重启不保证跨进程去重，执行方仍应对外部副作用使用业务幂等标识。宿主总执行上限 30 分钟，异常或取消后最多等待 2 秒发送 cancel；SDK 通过 AbortSignal 通知执行方并清理状态。
+
 ## 代审核事件
 
 | 事件 | 时机 | 可返回的决定 |
@@ -97,7 +123,7 @@ payload 仍包含完整请求体（可能含对话内容），仅应安装可信
 - `deny` 仅拒绝当前工具调用，返回错误码 `PLUGIN_REVIEW_DENIED`，其他工具继续审批与执行；
 - `pass` 继续询问下一个代审核插件，全部不处理才进入原有用户确认界面；
 - 插件不得修改工具参数，也不得覆盖宿主已做出的 DENY、ALLOW/自动放行或 PLAN 模式限制；
-- 全部 ASK 均已开放：Shizuku、`elevate` 提权、配置修改、删除子代理、危险 rm 均可代审；`planMode` 模式切换仍由使用者本人处理；插件不得代审自身提供的工具。
+- 全部 ASK 均已开放：Shizuku、`elevate` 提权、配置修改、删除子代理、危险 rm 均可代审；`planMode` 模式切换仍由使用者本人处理；插件不得代审自身提供的工具，也不得代审已委托给自身执行的原生工具调用。
 
 ## 事件内容
 

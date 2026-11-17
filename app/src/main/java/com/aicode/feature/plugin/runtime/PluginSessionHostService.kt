@@ -29,7 +29,8 @@ import kotlinx.serialization.json.put
 @Singleton
 class PluginSessionHostService @Inject constructor(
     private val pluginManager: PluginManager,
-    private val registry: PluginSessionRegistry
+    private val registry: PluginSessionRegistry,
+    private val eventBus: PluginSessionEventBus
 ) {
 
     fun setSessions(pluginId: String, params: JsonObject): JsonElement {
@@ -78,6 +79,39 @@ class PluginSessionHostService @Inject constructor(
         }
         val sourceKey = pluginContributionName(pluginId, source.localId)
         registry.setThinking(sourceKey, sessionId, text)
+        return ok()
+    }
+
+    suspend fun setMessages(pluginId: String, params: JsonObject): JsonElement {
+        val (_, source) = requireSource(pluginId, params)
+        val sessionId = PluginHostPaths.requireString(params, "sessionId")
+        val page = params["page"] as? JsonObject
+            ?: throw PluginHostException("PARAM_INVALID", "page is required")
+        val messages = page["messages"] as? JsonArray
+            ?: throw PluginHostException("PARAM_INVALID", "page.messages is required")
+        if (messages.size > 100 || page.toString().length > 4 * 1024 * 1024) {
+            throw PluginHostException("PARAM_INVALID", "page is too large")
+        }
+        eventBus.publish("${pluginContributionName(pluginId, source.localId)}|$sessionId", buildJsonObject {
+            put("type", "snapshot")
+            put("page", page)
+            params["revision"]?.let { put("revision", it) }
+        })
+        return ok()
+    }
+
+    suspend fun pushEvent(pluginId: String, params: JsonObject): JsonElement {
+        val (_, source) = requireSource(pluginId, params)
+        val sessionId = PluginHostPaths.requireString(params, "sessionId")
+        val type = PluginHostPaths.requireString(params, "type")
+        if (type !in setOf("tool-start", "tool-output", "tool-end", "message", "turn-end")) {
+            throw PluginHostException("PARAM_INVALID", "unsupported session event")
+        }
+        if (params.toString().length > 1024 * 1024) {
+            throw PluginHostException("PARAM_INVALID", "event is too large")
+        }
+        if (type.startsWith("tool-")) PluginHostPaths.requireString(params, "callId")
+        eventBus.publish("${pluginContributionName(pluginId, source.localId)}|$sessionId", params)
         return ok()
     }
 
@@ -138,7 +172,10 @@ class PluginSessionHostService @Inject constructor(
             hostName = hostName.take(MAX_GROUP_CHARS),
             workspaceTitle = workspaceTitle.take(MAX_GROUP_CHARS),
             capabilities = (row["capabilities"] as? JsonArray).orEmpty()
-                .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                .mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+            providerId = row.string("providerId"),
+            model = row.string("model"),
+            executionMode = row.string("executionMode")
         )
     }
 

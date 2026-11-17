@@ -181,7 +181,15 @@ class PluginOverlayManagerTest {
         val foreground = mockk<AppForegroundMonitor>()
         every { foreground.isForeground } returns MutableStateFlow(false)
         every { foreground.current() } returns false
-        return PluginOverlayManager(context, pluginManager, permissions, positions, foreground)
+        return PluginOverlayManager(
+            context = context,
+            pluginManager = pluginManager,
+            permissionService = mockk(relaxed = true),
+            sessionSourceService = mockk(relaxed = true),
+            permissionRepository = permissions,
+            positionRepository = positions,
+            appForegroundMonitor = foreground
+        )
     }
 
     private fun windowsOf(manager: PluginOverlayManager): ConcurrentHashMap<String, PluginOverlayWindow> =

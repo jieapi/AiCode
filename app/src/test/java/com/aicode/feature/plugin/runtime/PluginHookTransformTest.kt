@@ -49,6 +49,21 @@ class PluginHookTransformTest {
     }
 
     @Test
+    fun beforeDelegate_parsesOnlyHandler() {
+        val result = PluginHookTransform.parseBefore(json("""{"decision":"allow","delegate":{"handler":"tools.remote"}}"""))!!
+        assertEquals(ToolDelegateDescriptor("tools.remote"), result.delegate)
+        assertNull(result.delegation)
+        assertFalse(result.denied)
+        listOf(
+            """{"delegate":null}""",
+            """{"delegate":{"handler":" "}}""",
+            """{"delegate":{"handler":1}}""",
+            """{"delegate":{"handler":"x","pluginId":"other"}}""",
+            """{"delegate":{"handler":"x","executionId":"foreign"}}"""
+        ).forEach { assertNull(PluginHookTransform.parseBefore(json(it))) }
+    }
+
+    @Test
     fun afterMissingData_isNoop() {
         assertEquals(ToolAfterHookResult(), PluginHookTransform.parseAfter(json("""{"logs":["ok"]}""")))
     }

@@ -24,6 +24,7 @@
 - 清单里形如 `<插件ID>:<名称>` 的技能由用户安装的插件提供：只读，没有同目录脚本，也不在 skills 目录里；由用户在「设置 → 插件」管理，不要修改或重新安装。可用子代理清单里同样形态的名称也来自插件。
 - 工具名以 `plugin__` 开头的是插件 AI 工具，由插件运行时执行；调用仍按普通工具走权限与授权，不要把它当成内置工具或 MCP 工具。
 - 插件还可以声明生命周期 hooks，分只读、可写与代审核三种。只读事件为 `app.started`、`plugin.installed` / `plugin.uninstalled` / `plugin.enabled` / `plugin.disabled`、`agent.run.started` / `agent.run.finished`、`agent.request.started` / `agent.request.finished`、`agent.tool.started` / `agent.tool.finished` 与 `agent.compaction`，宿主异步通知，payload 只有运行元数据，不含消息正文、工具参数或结果；`plugin.uninstalled` 与 `plugin.disabled` 在状态变更前同步等待最多 10 秒，让插件清理自身数据；`runtime.resident` 为 true 的插件进程不参与空闲回收。可写事件为 `agent.tool.before`（可拒绝调用或改写参数，改写后重新走完整权限判断）、`agent.tool.after`（只能改写成功结果的 `data`）与 `agent.http.before`（每次实际发出 provider HTTP 请求前改写 URL、headers、body，敏感鉴权头在 payload 中为 `{{Token}}` 占位符）。代审核事件 `agent.permission.review`（`mode: "review"`）只在宿主判定为 ASK 后运行，返回 allow/deny/pass；allow 仅批准当前调用且不能覆盖宿主 DENY/PLAN，高危不可记忆请求与插件自身工具不代审。所有等待型 hook 失败、超时或格式不合法时按未改动/不处理继续。
+- 插件可以通过 `host.permissions.request` 请求 App 原生单次授权卡片；请求绑定来源插件与会话，不产生永久授权，也不能覆盖宿主工具的 DENY/PLAN。`agent.tool.before` 可返回 `delegate: {handler}` 选择本插件执行方，宿主按最终参数批准后才调用委托；已委托失败或超时不回退本地，委托插件不能自审该调用。远端编排会话的工具事件只用于展示，不能再执行一次或启动本地模型续轮。
 - 插件还可以在设置页注册 HTML 页面入口（`uiEntries` 的 `settings.general` / `settings.ai` / `settings.environment` / `settings.permissions` / `settings.data` / `settings.help` 槽位）：装好后入口出现在对应设置分组，页面里的文件读写通过宿主桥执行。它不是 AI 可调用的工具，不要尝试用工具打开或操作设置页；用户问入口在哪时，引导到设置里对应的分组。
 
 ## 安装技能

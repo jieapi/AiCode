@@ -56,7 +56,7 @@ object PluginSessionUiMapper {
         }
         message.blocks.filterIsInstance<PluginMessageBlock.Tool>().forEachIndexed { index, tool ->
             result += AgentUIMessage(
-                id = "${message.id}-tool-$index",
+                id = tool.callId?.let { "remote-tool-$it" } ?: "${message.id}-tool-$index",
                 role = MessageRole.TOOL,
                 content = tool.output.orEmpty(),
                 timestamp = timestamp,

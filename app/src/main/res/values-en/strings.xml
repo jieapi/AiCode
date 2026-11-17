@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="chat_perm_plugin_source">Plugin request: %1$s (%2$s)</string>
     <string name="app_name">AiCode</string>
     <string name="common_tool_missing_argument">Missing parameter: %1$s.</string>
     <string name="plan_mode_invalid_action">Invalid action: %1$s. Supported values: enter or exit.</string>

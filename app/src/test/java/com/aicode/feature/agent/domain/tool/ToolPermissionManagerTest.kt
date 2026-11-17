@@ -124,6 +124,27 @@ class ToolPermissionManagerTest {
     }
 
     @Test
+    fun proactivePluginPermissionIsVisibleButCannotBeRememberedOrPersistedAsChat() = runTest {
+        val mgr = ToolPermissionManager()
+        val request = req("explicit", "source|opaque").copy(
+            origin = PendingToolPermission.ORIGIN_PLUGIN_PERMISSION,
+            pluginId = "demo",
+            pluginName = "Demo"
+        )
+        val decision = async { mgr.awaitApproval(request) }
+        runCurrent()
+        assertEquals(request, mgr.pendingRequest.value)
+        assertEquals(setOf("source|opaque"), mgr.awaitingSessionIds.value)
+        assertNull(mgr.pendingChatForSession(request.sessionId))
+        mgr.resolve(request.id, PermissionChoice.ALWAYS)
+        runCurrent()
+        assertTrue(decision.isActive)
+        mgr.resolve(request.id, PermissionChoice.ONCE)
+        assertEquals(PermissionChoice.ONCE, decision.await())
+        assertNull(mgr.pendingRequest.value)
+    }
+
+    @Test
     fun resolveUnknownId_isNoop() = runBlocking {
         val mgr = ToolPermissionManager()
         val d1 = async { mgr.awaitApproval(req("id1", "s1")) }

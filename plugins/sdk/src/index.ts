@@ -6,7 +6,9 @@ import type {
   HostMethodMap,
   HostParamsOf,
   HostResultOf,
-  JsonValue
+  JsonValue,
+  ToolDelegateContext,
+  ToolDelegateEvent
 } from '../types/host';
 
 // 宿主方法表与共用结构统一从 types/host.d.ts 导出，避免与页面桥两份定义各自漂移。
@@ -17,11 +19,123 @@ export type PluginArgs = Record<string, unknown>;
 
 export type HostParams = Record<string, unknown>;
 
+export const permissions = {
+  request: (options: import('../types/host').PermissionRequest) => hostCall('host.permissions.request', options),
+  cancel: (requestId: string) => hostCall('host.permissions.cancel', { requestId })
+};
+
+export const sessionSource = {
+  setMessages: (options: HostParamsOf<'host.sessionSource.setMessages'>) => hostCall('host.sessionSource.setMessages', options),
+  pushEvent: (options: HostParamsOf<'host.sessionSource.pushEvent'>) => hostCall('host.sessionSource.pushEvent', options)
+};
+
 export type PluginHandler = (args: PluginArgs) => unknown | Promise<unknown>;
 
 export interface PluginDefinition {
   /** 键与插件清单中的 handler 字段一致；返回 undefined 时宿主收到 null。 */
   handlers: Record<string, PluginHandler>;
+}
+
+/** 将异步生成器注册为委托 handler；yield 进度文本，return 最终 JSON 数据。 */
+export function toolDelegate(
+  execute: (context: ToolDelegateContext) => AsyncGenerator<string, JsonValue, void>
+): PluginHandler {
+  type Execution = {
+    controller: AbortController;
+    iterator: AsyncGenerator<string, JsonValue, void>;
+    pending?: Promise<IteratorResult<string, JsonValue>>;
+    reading: boolean;
+    timer: ReturnType<typeof setTimeout>;
+    runId: string;
+    callId: string;
+    toolName: string;
+  };
+  const executions = new Map<string, Execution>();
+  const retired = new Map<string, number>();
+  function retire(id: string): void {
+    retired.set(id, Date.now() + 31 * 60_000);
+  }
+  function release(id: string, execution: Execution): void {
+    executions.delete(id);
+    retire(id);
+    clearTimeout(execution.timer);
+    execution.controller.abort();
+    void execution.iterator.return(null).catch(() => undefined);
+  }
+  return async (args): Promise<ToolDelegateEvent> => {
+    const { executionId, runId, callId, toolName, operation } = args;
+    if (typeof executionId !== 'string' || !executionId ||
+        typeof runId !== 'string' || typeof callId !== 'string' || typeof toolName !== 'string') {
+      throw new Error('Invalid tool delegation identity');
+    }
+    let execution = executions.get(executionId);
+    if (operation === 'start') {
+      const now = Date.now();
+      for (const [id, until] of retired) {
+        if (until <= now) retired.delete(id);
+      }
+      if (execution || retired.has(executionId)) throw new Error('Duplicate tool delegation');
+      if (retired.size >= 4096) throw new Error('Too many recent tool delegations');
+      if (executions.size >= 64) throw new Error('Too many tool delegations');
+      if (!args.arguments || typeof args.arguments !== 'object' || Array.isArray(args.arguments)) {
+        throw new Error('Invalid tool delegation arguments');
+      }
+      const controller = new AbortController();
+      execution = {
+        controller,
+        iterator: execute({ executionId, runId, callId, toolName,
+          arguments: args.arguments as ToolDelegateContext['arguments'], signal: controller.signal }),
+        reading: false,
+        timer: setTimeout(() => {
+          const current = executions.get(executionId);
+          if (current) release(executionId, current);
+        }, 31 * 60_000),
+        runId, callId, toolName
+      };
+      execution.timer.unref();
+      executions.set(executionId, execution);
+    }
+    if (!execution || execution.runId !== runId || execution.callId !== callId || execution.toolName !== toolName) {
+      throw new Error('Unknown tool delegation');
+    }
+    if (operation === 'cancel') {
+      release(executionId, execution);
+      return { executionId, type: 'completed', data: null };
+    }
+    if (operation !== 'start' && operation !== 'next') throw new Error('Invalid delegation operation');
+    if (execution.reading) throw new Error('Concurrent delegation read');
+    execution.reading = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      execution.pending ??= Promise.resolve().then(() => {
+        if (execution!.controller.signal.aborted) throw new Error('Tool delegation cancelled');
+        return execution!.iterator.next();
+      });
+      const result = await Promise.race([
+        execution.pending,
+        new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 25_000); })
+      ]);
+      if (execution.controller.signal.aborted) throw new Error('Tool delegation cancelled');
+      if (result === null) return { executionId, type: 'pending' };
+      execution.pending = undefined;
+      if (result.done) {
+        executions.delete(executionId);
+        retire(executionId);
+        clearTimeout(execution.timer);
+        return { executionId, type: 'completed', data: result.value ?? null };
+      }
+      if (typeof result.value !== 'string' || result.value.length > 64 * 1024) {
+        throw new Error('Invalid delegation progress');
+      }
+      return { executionId, type: 'progress', chunk: result.value };
+    } catch (error) {
+      release(executionId, execution);
+      return { executionId, type: 'error', message: errorMessage(error) };
+    } finally {
+      if (timer) clearTimeout(timer);
+      execution.reading = false;
+    }
+  };
 }
 
 interface RpcError {

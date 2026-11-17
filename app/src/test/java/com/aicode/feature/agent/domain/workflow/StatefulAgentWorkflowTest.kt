@@ -45,28 +45,33 @@ class StatefulAgentWorkflowTest {
     private val defaultSettings = mockk<DefaultModelSettingsRepository>()
     private val provider = mockk<AIProvider>(relaxed = true)
     private val context = AgentContext(null, null, "/workspace", null)
+    private val hooks = mockk<com.aicode.feature.plugin.runtime.PluginHookDispatcher>(relaxed = true)
+    private val checkpoints = mockk<com.aicode.feature.agent.domain.checkpoint.CheckpointManager>(relaxed = true)
+    private val outputStore = mockk<com.aicode.feature.agent.domain.tool.ToolOutputStore>(relaxed = true)
+    private val policy = mockk<com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine>(relaxed = true)
+    private val sessions = mockk<com.aicode.feature.agent.domain.session.SessionUseCase>(relaxed = true)
     private val workflow = StatefulAgentWorkflow(
         toolRegistry = tools,
         aiProviderRepository = providers,
         providerFactory = factory,
         promptProvider = prompts,
         permissionManager = mockk(relaxed = true),
-        policyEngine = mockk(relaxed = true),
+        policyEngine = policy,
         contextCompactor = compactor,
         planApprovalManager = mockk(relaxed = true),
-        toolOutputStore = mockk(relaxed = true),
+        toolOutputStore = outputStore,
         modelMetadataService = metadata,
         compactionModelSettingsRepository = compactionSettings,
         titleModelSettingsRepository = mockk(relaxed = true),
         defaultModelSettingsRepository = defaultSettings,
-        sessionUseCase = mockk(relaxed = true),
+        sessionUseCase = sessions,
         messagePersistenceUseCase = mockk(relaxed = true),
-        checkpointManager = mockk(relaxed = true),
+        checkpointManager = checkpoints,
         llmCallRecordDao = mockk(relaxed = true),
         agentNotificationCenter = mockk(relaxed = true),
         eventInjector = mockk(relaxed = true),
         fileAccess = mockk(relaxed = true),
-        pluginHookDispatcher = mockk(relaxed = true),
+        pluginHookDispatcher = hooks,
         appContext = mockk(relaxed = true)
     )
 
@@ -98,9 +103,9 @@ class StatefulAgentWorkflowTest {
         unmockkStatic(SystemClock::class)
     }
 
-    private suspend fun collectEvents(): List<AgentEvent> {
+    private suspend fun collectEvents(runContext: AgentContext = context): List<AgentEvent> {
         val events = mutableListOf<AgentEvent>()
-        workflow.executeEvents("request", context, emptyList()).collect { event ->
+        workflow.executeEvents("request", runContext, emptyList()).collect { event ->
             events.add(event)
             when (event) {
                 is AgentEvent.AssistantText -> event.persisted?.complete(Unit)
@@ -109,6 +114,40 @@ class StatefulAgentWorkflowTest {
             }
         }
         return events
+    }
+
+    @Test
+    fun delegatedWriteUsesFinalPermissionsAndSkipsLocalExecutionAndCheckpoint() = runTest {
+        val tool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { tool.name } returns "writeFile"
+        every { tools.getTool("writeFile") } returns tool
+        coEvery { sessions.getSessionById(any()) } returns null
+        val finalArgs = kotlinx.serialization.json.JsonObject(mapOf("path" to kotlinx.serialization.json.JsonPrimitive("remote.txt")))
+        coEvery { hooks.beforeToolCall(any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            com.aicode.feature.plugin.runtime.ToolBeforeHookResult(
+                arguments = finalArgs,
+                delegation = com.aicode.feature.plugin.runtime.ToolDelegation(
+                    mockk(relaxed = true), "1", "remote", arg(1), arg(2), "writeFile", "execution"
+                )
+            )
+        }
+        coEvery { policy.evaluate(tool, "writeFile", any(), any()) } returns
+            com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList()
+            )
+        coEvery { hooks.executeDelegatedTool(any(), any(), any(), any(), any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Error("remote failed", "REMOTE_FAILED")
+        every { outputStore.process(any(), any(), any()) } answers { thirdArg() }
+        every { provider.completeStream(any(), any(), any(), any()) } returnsMany listOf(
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("call", "writeFile", emptyMap()))))),
+            flowOf(AIStreamChunk.Final(AIResponse("done")))
+        )
+        val events = collectEvents(context.copy(sessionId = "session"))
+        assertTrue(events.filterIsInstance<AgentEvent.ToolCallFinished>().single().isError)
+        io.mockk.coVerify(exactly = 1) { policy.evaluate(tool, "writeFile", finalArgs, any()) }
+        io.mockk.coVerify(exactly = 1) { hooks.executeDelegatedTool(any(), any(), "call", "writeFile", finalArgs, any()) }
+        io.mockk.coVerify(exactly = 0) { tool.executeWithContext(any(), any()) }
+        io.mockk.coVerify(exactly = 0) { checkpoints.beforeFileModified(any(), any()) }
     }
 
     @Test

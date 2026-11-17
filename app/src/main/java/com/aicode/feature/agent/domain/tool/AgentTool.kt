@@ -94,11 +94,14 @@ data class PendingToolPermission(
      * 发起方：[ORIGIN_CHAT] 为聊天页 Agent 循环，[ORIGIN_PLUGIN] 为插件工具调用。
      * 插件发起的请求不进入聊天页弹窗队列，只通过插件侧的 pending/resolve 处理。
      */
-    val origin: String = ORIGIN_CHAT
+    val origin: String = ORIGIN_CHAT,
+    val pluginId: String? = null,
+    val pluginName: String? = null
 ) {
     companion object {
         const val ORIGIN_CHAT = "chat"
         const val ORIGIN_PLUGIN = "plugin"
+        const val ORIGIN_PLUGIN_PERMISSION = "plugin_permission"
     }
 }
 
