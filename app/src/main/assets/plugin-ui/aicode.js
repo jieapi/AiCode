@@ -563,10 +563,6 @@
     },
     // 宿主工具目录与执行：只允许内置 / MCP 工具，插件工具（plugin__）不能经此调用。
     // 执行受宿主授权策略约束：需要确认时 execute 会挂起，用 pending / resolve 处理。
-    sessionSource: {
-      setMessages: function (options) { return call('sessionSource.setMessages', options); },
-      pushEvent: function (options) { return call('sessionSource.pushEvent', options); }
-    },
     permissions: {
       request: function (options) { return call('permissions.request', options); },
       cancel: function (requestId) { return call('permissions.cancel', { requestId: String(requestId) }); }
