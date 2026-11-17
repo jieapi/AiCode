@@ -1,5 +1,6 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.provider.AIProvider
@@ -18,7 +19,6 @@ import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.settings.data.remote.ModelMetadataService
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelContextPolicy
@@ -938,13 +938,21 @@ class PluginModelService internal constructor(
         is AgentMessage.ToolResultMessage -> images
     }
 
-    /** 当前工作区在插件可见路径空间里的根：远程用远端绝对路径，本地用容器内 `$HOME/workspace`。 */
-    private fun workspaceRoot(): String =
-        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
-            workspaceRepository.currentPath()
-        } else {
-            homeResolver.home().trimEnd('/') + "/workspace"
+    /** 当前工作区在插件可见路径空间里的根：远程用远端绝对路径，本地容器用 `$HOME/workspace`。 */
+    private fun workspaceRoot(): String {
+        val backend = executionModeHolder.currentBackend()
+        val currentPath = workspaceRepository.currentPath()
+        return when {
+            backend.capabilities.isRemoteEnvironment ->
+                currentPath.ifBlank { backend.workspaceRootDisplay(currentPath) }
+            backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID ->
+                homeResolver.home().trimEnd('/') + "/workspace"
+            else ->
+                backend.workspaceRootDisplay(currentPath).ifBlank {
+                    homeResolver.home().trimEnd('/') + "/workspace"
+                }
         }
+    }
 
     private fun parseParams(raw: JsonElement?): ModelParams {
         if (raw == null || raw is JsonNull) return ModelParams()

@@ -1,7 +1,19 @@
 package com.aicode.feature.git.domain
 
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.BuiltinLocalProotBackend
+import com.aicode.feature.agent.domain.container.BuiltinRemoteSshBackend
 import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.container.CommandResult
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.LinuxContainerEngine
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
+import com.aicode.feature.agent.domain.container.RemoteSshEngine
+import com.aicode.feature.terminal.domain.RemoteTerminalSessionManager
+import com.aicode.feature.terminal.domain.TerminalSessionManager
+import com.aicode.feature.workspace.domain.LocalFileAccess
+import com.aicode.feature.workspace.domain.RemoteSftpFileAccess
 import com.aicode.feature.git.domain.model.GitBranch
 import com.aicode.feature.git.domain.model.GitCommit
 import com.aicode.feature.git.domain.model.GitFileChange
@@ -11,7 +23,9 @@ import com.aicode.feature.git.domain.model.GitTag
 import com.aicode.feature.git.domain.model.GraphCommit
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -54,6 +68,37 @@ class GitRepositoryTest {
         coEvery { engine.runCommandSyncUnbounded(any(), any(), any()) } returns CommandResult("true", 0)
         val mode = ExecutionModeHolder().apply { setMode(ExecutionMode.REMOTE_SSH) }
         val repo = GitRepository(engine, workspace, mode)
+
+        assertEquals(listOf(workPath), repo.discoverRepos())
+        assertTrue(repo.listSubdirectories().isEmpty())
+    }
+
+    @Test
+    fun discoverRepos_remotePluginBackend_doesNotScanLocalFileSystem() = runTest {
+        val engine = mockk<CommandEngine>()
+        val workspace = mockk<WorkspaceRepository>()
+        every { workspace.currentPath() } returns workPath
+        coEvery { engine.runCommandSyncUnbounded(any(), any(), any()) } returns CommandResult("true", 0)
+
+        val localBackend = BuiltinLocalProotBackend(mockk<LinuxContainerEngine>(relaxed = true), mockk<LocalFileAccess>(relaxed = true), mockk<TerminalSessionManager>(relaxed = true))
+        val remoteBackend = BuiltinRemoteSshBackend(mockk<RemoteSshEngine>(relaxed = true), mockk<RemoteSftpFileAccess>(relaxed = true), mockk<RemoteTerminalSessionManager>(relaxed = true), mockk<RemoteSshConnection>(relaxed = true))
+        val registry = ExecutionBackendRegistry(localBackend, remoteBackend)
+        val pluginBackend = object : ExecutionBackend {
+            override val id: String = "demo.cloud:sandbox"
+            override val displayName: String = "Cloud Sandbox"
+            override val capabilities: BackendCapabilities = BackendCapabilities(isRemoteEnvironment = true)
+            override fun environmentDescription(): String = displayName
+            override fun environmentCacheKey(): String = id
+            override fun workspaceRootDisplay(workspacePath: String): String = workspacePath
+            override fun projectConfigKey(workspacePath: String): String = workspacePath
+            override val commandEngine: CommandEngine = engine
+            override val fileAccess: FileAccessProvider = mockk(relaxed = true)
+            override val terminalSessionProvider: TerminalSessionProvider? = null
+        }
+        registry.register(pluginBackend)
+        registry.setActiveBackend(pluginBackend.id)
+
+        val repo = GitRepository(engine, workspace, ExecutionModeHolder(registry))
 
         assertEquals(listOf(workPath), repo.discoverRepos())
         assertTrue(repo.listSubdirectories().isEmpty())

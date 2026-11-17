@@ -1,8 +1,19 @@
 package com.aicode.feature.workspace.domain
 
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.BuiltinLocalProotBackend
+import com.aicode.feature.agent.domain.container.BuiltinRemoteSshBackend
+import com.aicode.feature.agent.domain.container.CommandEngine
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
+import com.aicode.feature.agent.domain.container.RemoteSshEngine
+import com.aicode.feature.terminal.domain.RemoteTerminalSessionManager
+import com.aicode.feature.terminal.domain.TerminalSessionManager
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
@@ -54,6 +65,34 @@ class PathHomeResolverTest {
         val resolver = newResolver(ExecutionMode.REMOTE_SSH)
         every { remoteSshConnection.remoteHome } returns "/home/dev"
         assertEquals("/home/dev", resolver.home())
+    }
+
+    @Test
+    fun home_remotePluginBackend_ignoresLocalAndSshHomeWithoutCrashing() {
+        val localBackend = BuiltinLocalProotBackend(mockk<LinuxContainerEngine>(relaxed = true), mockk<LocalFileAccess>(relaxed = true), mockk<TerminalSessionManager>(relaxed = true))
+        val remoteBackend = BuiltinRemoteSshBackend(mockk<RemoteSshEngine>(relaxed = true), mockk<RemoteSftpFileAccess>(relaxed = true), mockk<RemoteTerminalSessionManager>(relaxed = true), remoteSshConnection)
+        val registry = ExecutionBackendRegistry(localBackend, remoteBackend)
+        val pluginBackend = object : ExecutionBackend {
+            override val id: String = "demo.cloud:sandbox"
+            override val displayName: String = "Cloud Sandbox"
+            override val capabilities: BackendCapabilities = BackendCapabilities(isRemoteEnvironment = true)
+            override fun environmentDescription(): String = displayName
+            override fun environmentCacheKey(): String = id
+            override fun workspaceRootDisplay(workspacePath: String): String = workspacePath
+            override fun projectConfigKey(workspacePath: String): String = workspacePath
+            override val commandEngine: CommandEngine = mockk(relaxed = true)
+            override val fileAccess: FileAccessProvider = mockk(relaxed = true)
+            override val terminalSessionProvider: TerminalSessionProvider? = null
+        }
+        registry.register(pluginBackend)
+        registry.setActiveBackend(pluginBackend.id)
+        every { remoteSshConnection.remoteHome } returns "/home/stale-ssh"
+
+        val resolver = PathHomeResolver(ExecutionModeHolder(registry), remoteSshConnection).apply {
+            containerHome = "/data/local-proot"
+        }
+
+        assertEquals("/root", resolver.home())
     }
 
     // ---------- aicodeRoot()：执行环境 AI 配置根 ----------

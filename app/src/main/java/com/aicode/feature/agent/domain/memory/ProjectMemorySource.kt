@@ -2,7 +2,7 @@ package com.aicode.feature.agent.domain.memory
 
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerInstaller
-import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.agent.domain.container.ProjectConfigLocation
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.domain.ProjectAicodeRoot
 import java.io.File
@@ -24,7 +24,7 @@ class ProjectMemorySource(
 ) : MemorySource {
 
     private val memoryRoot: File by lazy {
-        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+        if (executionModeHolder.capabilities().projectConfigLocation == ProjectConfigLocation.APP_PRIVATE_DIR) {
             File(File(containerInstaller.aicodeDir, "memory/projects"), projectAicodeRoot.projectKey(projectRoot))
         } else {
             File(projectRoot, ".aicode/memory")

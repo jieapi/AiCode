@@ -1,8 +1,20 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.BuiltinLocalProotBackend
+import com.aicode.feature.agent.domain.container.BuiltinRemoteSshBackend
+import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.container.ConnectionState
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.container.RemoteConnectionConfig
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
+import com.aicode.feature.agent.domain.container.RemoteSshEngine
+import com.aicode.feature.terminal.domain.RemoteTerminalSessionManager
+import com.aicode.feature.terminal.domain.TerminalSessionManager
+import com.aicode.feature.workspace.domain.LocalFileAccess
+import com.aicode.feature.workspace.domain.RemoteSftpFileAccess
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMode
@@ -21,7 +33,9 @@ import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.model.Workspace
 import com.aicode.feature.workspace.domain.remote.RemoteAuth
 import io.mockk.coEvery
@@ -91,6 +105,7 @@ class PluginToolServiceTest {
         val project: PermissionRulesRepository.ProjectContext,
         val workspaces: MutableStateFlow<Workspace?>,
         val plugins: MutableStateFlow<List<InstalledPlugin>>,
+        val backendRegistry: ExecutionBackendRegistry,
         val modeHolder: ExecutionModeHolder,
         val servers: MutableStateFlow<RemoteConnectionConfig?>,
         val connectionState: MutableStateFlow<ConnectionState>
@@ -136,12 +151,16 @@ class PluginToolServiceTest {
         every { policyEngine.captureProject(any()) } returns project
         coEvery { policyEngine.evaluate(any(), any(), any(), any(), any()) } returns eval
         val permissionManager = ToolPermissionManager()
-        val modeHolder = ExecutionModeHolder().apply { setMode(mode) }
         val servers = MutableStateFlow(server)
         val connectionState = MutableStateFlow(ConnectionState.CONNECTED)
         val sshConnection = mockk<RemoteSshConnection>()
         every { sshConnection.config } answers { servers.value }
         every { sshConnection.connectionState } returns connectionState
+        every { sshConnection.remoteHome } returns null
+        val localBackend = BuiltinLocalProotBackend(mockk<LinuxContainerEngine>(relaxed = true), mockk<LocalFileAccess>(relaxed = true), mockk<TerminalSessionManager>(relaxed = true))
+        val remoteBackend = BuiltinRemoteSshBackend(mockk<RemoteSshEngine>(relaxed = true), mockk<RemoteSftpFileAccess>(relaxed = true), mockk<RemoteTerminalSessionManager>(relaxed = true), sshConnection)
+        val backendRegistry = ExecutionBackendRegistry(localBackend, remoteBackend)
+        val modeHolder = ExecutionModeHolder(backendRegistry).apply { setMode(mode) }
         val service = PluginToolService(
             pluginManager = pluginManager,
             workspaceRepository = workspaceRepository,
@@ -151,7 +170,7 @@ class PluginToolServiceTest {
             executionModeHolder = modeHolder,
             remoteSshConnection = sshConnection
         )
-        return Env(service, permissionManager, policyEngine, project, workspaces, plugins, modeHolder, servers, connectionState)
+        return Env(service, permissionManager, policyEngine, project, workspaces, plugins, backendRegistry, modeHolder, servers, connectionState)
     }
 
     private fun server(
@@ -418,6 +437,39 @@ class PluginToolServiceTest {
         assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
 
         env.modeHolder.setMode(ExecutionMode.REMOTE_SSH)
+        env.modeHolder.setMode(ExecutionMode.LOCAL_PROOT)
+        runCurrent()
+
+        assertTrue(job.isCompleted)
+        assertEquals("STALE_CONTEXT", job.await()!!.code)
+        assertNull(tool.lastContext)
+        assertNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+        coVerify(exactly = 0) { env.policyEngine.remember(any(), any(), env.project) }
+    }
+
+    @Test
+    fun execute_pluginBackendChangeInvalidatesPendingApproval() = runTest {
+        val tool = FakeTool(name = "writeFile", permissionPolicy = ToolPermissionPolicy.ASK)
+        val env = env(tools = listOf(tool), eval = ask())
+        val pluginBackend = object : ExecutionBackend {
+            override val id: String = "demo.cloud:sandbox"
+            override val displayName: String = "Cloud Sandbox"
+            override val capabilities: BackendCapabilities = BackendCapabilities(isRemoteEnvironment = true)
+            override fun environmentDescription(): String = displayName
+            override fun environmentCacheKey(): String = "plugin:demo.cloud:sandbox:1.0.0"
+            override fun workspaceRootDisplay(workspacePath: String): String = workspacePath
+            override fun projectConfigKey(workspacePath: String): String = workspacePath
+            override val commandEngine: CommandEngine = mockk(relaxed = true)
+            override val fileAccess: FileAccessProvider = mockk(relaxed = true)
+            override val terminalSessionProvider: TerminalSessionProvider? = null
+        }
+        env.backendRegistry.register(pluginBackend)
+
+        val job = async { errorOf { env.service.execute(pluginId, executeParams("writeFile")) } }
+        runCurrent()
+        assertNotNull(env.permissionManager.pendingForSession("plugin:$pluginId"))
+
+        env.modeHolder.setActiveBackend(pluginBackend.id)
         env.modeHolder.setMode(ExecutionMode.LOCAL_PROOT)
         runCurrent()
 

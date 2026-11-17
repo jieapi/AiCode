@@ -4,15 +4,29 @@ import com.aicode.core.watch.ChangeKind
 import com.aicode.core.watch.ChangeRoot
 import com.aicode.core.watch.FileChange
 import com.aicode.core.watch.FileChangeBatch
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.BuiltinLocalProotBackend
+import com.aicode.feature.agent.domain.container.BuiltinRemoteSshBackend
+import com.aicode.feature.agent.domain.container.CommandEngine
 import com.aicode.feature.agent.domain.container.ConnectionState
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.container.RemoteConnectionConfig
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
+import com.aicode.feature.agent.domain.container.RemoteSshEngine
+import com.aicode.feature.terminal.domain.RemoteTerminalSessionManager
+import com.aicode.feature.terminal.domain.TerminalSessionManager
+import com.aicode.feature.workspace.domain.LocalFileAccess
+import com.aicode.feature.workspace.domain.RemoteSftpFileAccess
 import com.aicode.feature.plugin.domain.PluginFileWatchSource
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginWatchTarget
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.domain.model.Workspace
@@ -41,7 +55,6 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PluginPageEnvironmentTest {
     private val workspace = mockk<WorkspaceRepository>()
-    private val mode = ExecutionModeHolder()
     private val connection = mockk<RemoteSshConnection>()
     private val mapper = mockk<WorkspacePathMapper>()
     private val homeResolver = mockk<PathHomeResolver>()
@@ -51,6 +64,8 @@ class PluginPageEnvironmentTest {
     private val connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     private var path = "/projects/first"
     private var config: RemoteConnectionConfig? = null
+    private lateinit var backendRegistry: ExecutionBackendRegistry
+    private lateinit var mode: ExecutionModeHolder
 
     @Before
     fun setUp() {
@@ -58,7 +73,12 @@ class PluginPageEnvironmentTest {
         every { workspace.currentPath() } answers { path }
         every { connection.connectionState } returns connectionState
         every { connection.config } answers { config }
+        every { connection.remoteHome } returns null
         every { homeResolver.home() } returns "/root"
+        val localBackend = BuiltinLocalProotBackend(mockk<LinuxContainerEngine>(relaxed = true), mockk<LocalFileAccess>(relaxed = true), mockk<TerminalSessionManager>(relaxed = true))
+        val remoteBackend = BuiltinRemoteSshBackend(mockk<RemoteSshEngine>(relaxed = true), mockk<RemoteSftpFileAccess>(relaxed = true), mockk<RemoteTerminalSessionManager>(relaxed = true), connection)
+        backendRegistry = ExecutionBackendRegistry(localBackend, remoteBackend)
+        mode = ExecutionModeHolder(backendRegistry)
     }
 
     private fun environment() = PluginPageEnvironment(workspace, mode, connection, mapper, homeResolver, source)
@@ -172,5 +192,36 @@ class PluginPageEnvironmentTest {
         every { source.watch(PluginWatchTarget.Local(root), false) } returns flowOf(FileChangeBatch(emptyList()))
         val payload = environment().watch(paths, "~/workspace/config", false).single()
         assertTrue(payload["changes"]!!.jsonArray.isEmpty())
+    }
+
+    @Test
+    fun pluginBackend_updatesContextKeyChangesAndWorkspaceRoot() = runTest {
+        val pluginBackend = object : ExecutionBackend {
+            override val id: String = "demo.cloud:sandbox"
+            override val displayName: String = "Cloud Sandbox"
+            override val capabilities: BackendCapabilities = BackendCapabilities(isRemoteEnvironment = true)
+            override fun environmentDescription(): String = displayName
+            override fun environmentCacheKey(): String = "plugin:demo.cloud:sandbox:1.0.0"
+            override fun workspaceRootDisplay(workspacePath: String): String = workspacePath.trim()
+            override fun projectConfigKey(workspacePath: String): String = "sandbox-key"
+            override val commandEngine: CommandEngine = mockk(relaxed = true)
+            override val fileAccess: FileAccessProvider = mockk(relaxed = true)
+            override val terminalSessionProvider: TerminalSessionProvider? = null
+        }
+        backendRegistry.register(pluginBackend)
+
+        val environment = environment()
+        val keys = mutableListOf<String>()
+        backgroundScope.launch { environment.changes.collect { keys += it } }
+        runCurrent()
+        val localKey = environment.contextKey()
+
+        mode.setActiveBackend(pluginBackend.id)
+        path = "/sandbox/repo-1"
+        runCurrent()
+
+        assertEquals(2, keys.size)
+        assertNotEquals(localKey, environment.contextKey())
+        assertEquals("/sandbox/repo-1", environment.workspaceRoot())
     }
 }

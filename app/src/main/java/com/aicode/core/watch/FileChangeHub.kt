@@ -3,7 +3,6 @@ package com.aicode.core.watch
 import android.os.FileObserver
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerInstaller
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
@@ -170,7 +169,8 @@ class FileChangeHub internal constructor(
         .map { workspaceRepository.currentPath() }
         .distinctUntilChanged()
         .flatMapLatest {
-            if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+            val caps = executionModeHolder.capabilities()
+            if (!caps.fileWatch || caps.isRemoteEnvironment) {
                 emptyFlow()
             } else {
                 watchHostDir(
@@ -214,7 +214,7 @@ class FileChangeHub internal constructor(
      */
     fun watchRemoteDir(rootPath: String, recursive: Boolean = false): Flow<FileChangeBatch> {
         val root = trimRemotePath(rootPath)
-        val workspaceRoot = if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
+        val workspaceRoot = if (executionModeHolder.capabilities().isRemoteEnvironment) {
             trimRemotePath(workspaceRepository.currentPath()).takeIf { it.isNotEmpty() && it != "/" }
         } else {
             null
