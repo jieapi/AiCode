@@ -18,6 +18,8 @@ import com.aicode.feature.agent.domain.container.ContainerImageEntry
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.agent.domain.container.ContainerOsDetector
 import com.aicode.feature.agent.domain.container.ContainerProfile
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.container.RootfsSource
 import com.aicode.feature.agent.domain.container.displayLabel
@@ -394,6 +396,7 @@ class SettingsViewModel @Inject constructor(
     private val containerOsDetector: ContainerOsDetector,
     private val executionModeRepository: ExecutionModeRepository,
     private val executionModeHolder: ExecutionModeHolder,
+    private val executionBackendRegistry: ExecutionBackendRegistry,
     private val remoteSshConnection: RemoteSshConnection,
     private val remoteRepository: RemoteRepository,
     private val llmCallRecordDao: LlmCallRecordDao,
@@ -782,6 +785,22 @@ class SettingsViewModel @Inject constructor(
 
     /** 当前执行模式（本地 PRoot / 远程 SSH），供 UI 判断是否显示远程连接指示器。 */
     val executionMode: StateFlow<ExecutionMode> = executionModeHolder.mode
+
+    /** 当前激活的执行后端（内置 PRoot / 内置 SSH / 插件执行后端）。 */
+    val activeBackend: StateFlow<ExecutionBackend> = executionBackendRegistry.activeBackend
+
+    /** 当前激活的执行后端 ID。 */
+    val activeBackendId: StateFlow<String> = executionBackendRegistry.activeBackendId
+
+    /** 插件注册的非内置执行后端列表。 */
+    val pluginExecutionBackends: StateFlow<List<ExecutionBackend>> = executionBackendRegistry.backends
+        .map { backends ->
+            backends.filter {
+                it.id != ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID &&
+                    it.id != ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** 远程 SSH 连接状态，供 UI 显示指示器。 */
     val connectionState: StateFlow<ConnectionState> = remoteSshConnection.connectionState
@@ -2304,6 +2323,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** 切换到指定执行后端（内置或插件后端），并持久化 activeBackendId。 */
+    fun setActiveExecutionBackend(id: String) {
+        viewModelScope.launch {
+            executionBackendRegistry.setActiveBackend(id)
+            executionModeRepository.setActiveBackendId(executionBackendRegistry.currentBackend().id)
+        }
+    }
+
     /** 把 [id] 应用为当前激活 profile：持久化 + 按 mode 切执行模式。找不到时回退列表第一个，再兜底内置。 */
     private suspend fun applyProfile(id: String) {
         val profile = _customProfiles.value.firstOrNull { it.id == id }
@@ -2313,15 +2340,15 @@ class SettingsViewModel @Inject constructor(
         containerSettingsRepository.setActiveProfile(profile.id)
         when (profile.mode) {
             ExecutionMode.LOCAL_PROOT -> {
-                executionModeRepository.setExecutionMode(ExecutionMode.LOCAL_PROOT)
-                executionModeHolder.setMode(ExecutionMode.LOCAL_PROOT)
+                executionModeRepository.setActiveBackendId(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)
+                executionBackendRegistry.setActiveBackend(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)
             }
 
             ExecutionMode.REMOTE_SSH -> {
                 if (profile.rootfsSource !is RootfsSource.RemoteSsh) return
                 // 连接参数由 ActiveRemoteConnectionResolver 按激活 profile 实时解析，AIEditorApp 的常驻订阅据此重连。
-                executionModeRepository.setExecutionMode(ExecutionMode.REMOTE_SSH)
-                executionModeHolder.setMode(ExecutionMode.REMOTE_SSH)
+                executionModeRepository.setActiveBackendId(ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID)
+                executionBackendRegistry.setActiveBackend(ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID)
             }
         }
     }

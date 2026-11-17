@@ -90,6 +90,8 @@ import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.feature.agent.domain.container.ContainerProfile
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RootfsSource
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.DEFAULT_REMOTE_WORKSPACE_ROOT
@@ -98,6 +100,7 @@ import com.aicode.feature.workspace.domain.model.RemoteConnection
 import com.aicode.feature.workspace.domain.model.RemoteProtocol
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
+import compose.icons.feathericons.Cpu
 import compose.icons.feathericons.Edit3
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.Plus
@@ -127,6 +130,9 @@ internal fun ContainerSection(
     showAddSheetExternal: Boolean = false,
     onDismissAddSheet: () -> Unit = {},
     onSelect: (String) -> Unit,
+    pluginBackends: List<ExecutionBackend> = emptyList(),
+    activeBackendId: String = ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID,
+    onSelectPluginBackend: (String) -> Unit = {},
     onSetDefaultContainer: (String) -> Unit = {},
     onSaveCustom: (ContainerProfile) -> Unit,
     onEditCustom: (ContainerProfile) -> Unit,
@@ -148,9 +154,10 @@ internal fun ContainerSection(
     var editingProfile by remember { mutableStateOf<ContainerProfile?>(null) }
     var deletingProfile by remember { mutableStateOf<ContainerProfile?>(null) }
     var pendingSwitch by remember { mutableStateOf<ContainerProfile?>(null) }
+    var pendingPluginSwitch by remember { mutableStateOf<ExecutionBackend?>(null) }
     var pendingReset by remember { mutableStateOf<ContainerProfile?>(null) }
 
-    if (profiles.isEmpty()) {
+    if (profiles.isEmpty() && pluginBackends.isEmpty()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -188,54 +195,138 @@ internal fun ContainerSection(
             contentPadding = PaddingValues(top = Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            itemsIndexed(
-                items = profiles,
-                key = { _, profile -> profile.id }
-            ) { _, profile ->
-                ReorderableItem(
-                    state = reorderableState,
-                    key = profile.id
-                ) { isDragging ->
-                    val dragScale by animateFloatAsState(
-                        targetValue = if (isDragging) 0.95f else 1f,
-                        animationSpec = tween(durationMillis = if (isDragging) 120 else 220),
-                        label = "containerDragScale"
-                    )
-                    val dragElevation by animateDpAsState(
-                        targetValue = if (isDragging) 8.dp else 0.dp,
-                        animationSpec = tween(durationMillis = if (isDragging) 120 else 220),
-                        label = "containerDragElevation"
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(Radius.lg),
-                        color = MaterialTheme.semanticColors.cardSurface,
-                        shadowElevation = dragElevation,
+            if (profiles.isEmpty()) {
+                item(key = "container-empty") {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .zIndex(if (isDragging) 1f else 0f)
-                            .graphicsLayer {
-                                scaleX = dragScale
-                                scaleY = dragScale
-                            }
+                            .padding(vertical = Spacing.lg),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        ContainerRow(
-                            profile = profile,
-                            active = profile.id == activeProfileId,
-                            defaultContainerId = defaultContainerId,
-                            osId = osMap[profile.id],
-                            subtitle = profileSubtitle(context, profile, remoteConnections),
-                            onSelect = { if (profile.id != activeProfileId) pendingSwitch = profile },
-                            onEdit = { editingProfile = profile },
-                            onDelete = { deletingProfile = profile },
-                            dragModifier = Modifier.longPressDraggableHandle(
-                                onDragStarted = {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                                },
-                                onDragStopped = {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                }
-                            )
+                        Text(
+                            text = stringResource(R.string.container_empty),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
+                        Text(
+                            text = stringResource(R.string.container_empty_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.md)
+                        )
+                        Button(onClick = onRestoreBuiltin) {
+                            Text(stringResource(R.string.container_restore_builtin))
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(
+                    items = profiles,
+                    key = { _, profile -> profile.id }
+                ) { _, profile ->
+                    ReorderableItem(
+                        state = reorderableState,
+                        key = profile.id
+                    ) { isDragging ->
+                        val dragScale by animateFloatAsState(
+                            targetValue = if (isDragging) 0.95f else 1f,
+                            animationSpec = tween(durationMillis = if (isDragging) 120 else 220),
+                            label = "containerDragScale"
+                        )
+                        val dragElevation by animateDpAsState(
+                            targetValue = if (isDragging) 8.dp else 0.dp,
+                            animationSpec = tween(durationMillis = if (isDragging) 120 else 220),
+                            label = "containerDragElevation"
+                        )
+                        val expectedBackendId = when (profile.mode) {
+                            ExecutionMode.LOCAL_PROOT -> ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+                            ExecutionMode.REMOTE_SSH -> ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+                        }
+                        val isProfileActive = profile.id == activeProfileId && activeBackendId == expectedBackendId
+                        Surface(
+                            shape = RoundedCornerShape(Radius.lg),
+                            color = MaterialTheme.semanticColors.cardSurface,
+                            shadowElevation = dragElevation,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .graphicsLayer {
+                                    scaleX = dragScale
+                                    scaleY = dragScale
+                                }
+                        ) {
+                            ContainerRow(
+                                profile = profile,
+                                active = isProfileActive,
+                                defaultContainerId = defaultContainerId,
+                                osId = osMap[profile.id],
+                                subtitle = profileSubtitle(context, profile, remoteConnections),
+                                onSelect = { if (!isProfileActive) pendingSwitch = profile },
+                                onEdit = { editingProfile = profile },
+                                onDelete = { deletingProfile = profile },
+                                dragModifier = Modifier.longPressDraggableHandle(
+                                    onDragStarted = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                    },
+                                    onDragStopped = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (pluginBackends.isNotEmpty()) {
+                item(key = "plugin-execution-backends") {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SettingsGroupHeader(stringResource(R.string.container_plugin_backends))
+                        SettingsGroup {
+                            pluginBackends.forEachIndexed { index, backend ->
+                                val isActive = backend.id == activeBackendId
+                                val envLabel = stringResource(
+                                    if (backend.capabilities.isRemoteEnvironment) {
+                                        R.string.container_plugin_backend_remote
+                                    } else {
+                                        R.string.container_plugin_backend_local
+                                    }
+                                )
+                                val pluginId = backend.id.substringBefore(':')
+                                SettingsRow(
+                                    icon = if (backend.capabilities.isRemoteEnvironment) {
+                                        FeatherIcons.Server
+                                    } else {
+                                        FeatherIcons.Cpu
+                                    },
+                                    title = backend.displayName,
+                                    subtitle = stringResource(
+                                        R.string.container_plugin_backend_subtitle,
+                                        envLabel,
+                                        pluginId
+                                    ),
+                                    onClick = if (isActive) null else {
+                                        { pendingPluginSwitch = backend }
+                                    },
+                                    trailing = if (isActive) {
+                                        {
+                                            Icon(
+                                                imageVector = FeatherIcons.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    modifier = Modifier.semantics { selected = isActive }
+                                )
+                                if (index < pluginBackends.lastIndex) {
+                                    SettingsDivider()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -317,6 +408,22 @@ internal fun ContainerSection(
                 }) { Text(stringResource(R.string.common_switch)) }
             },
             dismissButton = { TextButton(onClick = { pendingSwitch = null }) { Text(stringResource(R.string.common_cancel)) } }
+        )
+    }
+
+    pendingPluginSwitch?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingPluginSwitch = null },
+            title = { Text(stringResource(R.string.container_switch_backend_title)) },
+            text = { Text(stringResource(R.string.container_switch_confirm, target.displayName)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onSwitchConfirmed()
+                    onSelectPluginBackend(target.id)
+                    pendingPluginSwitch = null
+                }) { Text(stringResource(R.string.common_switch)) }
+            },
+            dismissButton = { TextButton(onClick = { pendingPluginSwitch = null }) { Text(stringResource(R.string.common_cancel)) } }
         )
     }
 

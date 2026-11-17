@@ -17,10 +17,14 @@ import com.aicode.core.util.TombstoneParser
 import net.schmizz.sshj.common.SecurityUtils
 import com.aicode.feature.agent.domain.container.BuiltinDocsSync
 import com.aicode.feature.agent.domain.container.ContainerInstaller
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.mcp.McpManager
+import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.plugin.runtime.PluginExecutionBackendRegistrar
 import com.aicode.feature.plugin.runtime.PluginHookDispatcher
 import com.aicode.feature.plugin.runtime.PluginToolManager
+import com.aicode.feature.plugin.runtime.PluginWorkflowRegistrar
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.LanguageSettingsRepository
 import com.aicode.feature.settings.data.repository.LogSettingsRepository
@@ -37,7 +41,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -217,6 +223,26 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var executionModeHolder: com.aicode.feature.settings.data.repository.ExecutionModeHolder
 
+    /** 全局执行后端注册表：维护内置与插件动态注册的执行后端及当前激活项。 */
+    @Inject
+    lateinit var executionBackendRegistry: ExecutionBackendRegistry
+
+    /** 插件执行后端注册器：负责将已激活插件声明的执行后端同步到注册表。 */
+    @Inject
+    lateinit var pluginExecutionBackendRegistrar: PluginExecutionBackendRegistrar
+
+    /** 插件工作流注册器：负责将已激活插件声明的工作流同步到注册表。 */
+    @Inject
+    lateinit var pluginWorkflowRegistrar: PluginWorkflowRegistrar
+
+    /** 插件外部会话服务：负责同步已激活插件声明的外部会话源到内存存储。 */
+    @Inject
+    lateinit var externalSessionService: com.aicode.feature.plugin.runtime.ExternalSessionService
+
+    /** 插件管理器：用于监听插件启停、安装与卸载变化并同步执行后端。 */
+    @Inject
+    lateinit var pluginManager: PluginManager
+
     /** 远程 SSH 连接管理器：远程模式下启动即用配置建立连接。 */
     @Inject
     lateinit var remoteSshConnection: com.aicode.feature.agent.domain.container.RemoteSshConnection
@@ -333,22 +359,44 @@ class AIEditorApp : Application(), Configuration.Provider {
         appScope.launch {
             logSettings.levelFlow.collectLatest { FileLogger.setMinLevel(it) }
         }
-        // 启动即同步从 DataStore 读首帧执行模式缓存到 ExecutionModeHolder，供 DI @Provides 同步读取。
-        // 异步读首帧模式写入 ExecutionModeHolder。委托层（DelegatingCommandEngine/DelegatingFileAccess）
-        // 每次方法调用时才按 holder.currentMode() 转发，不依赖注入时机，故 holder 晚几毫秒写入无妨——
-        // 首次命令/文件操作一定在 UI 启动之后，那时 holder 早已就绪。
-        // SSH 连接放后台，失败不阻塞 UI（连接失败时首次命令会触发 ensureInstalled 重试）。
+        // 启动时先同步已安装插件声明的执行后端，再从 DataStore 恢复上次激活的后端 ID
+        //（ExecutionModeHolder 会跟随 ExecutionBackendRegistry.activeBackendId 自动同步）。
+        // 之后持续监听插件启停/安装/卸载变化，刷新后端列表并在当前后端失效回退时回写持久化。
         appScope.launch {
-            val mode = executionModeRepository.executionModeFlow.first()
-            executionModeHolder.setMode(mode)
+            pluginExecutionBackendRegistrar.syncAll()
+            val savedBackendId = executionModeRepository.activeBackendIdFlow.first()
+            val applied = executionBackendRegistry.setActiveBackend(savedBackendId)
+            if (!applied) {
+                executionModeRepository.setActiveBackendId(executionBackendRegistry.currentBackend().id)
+            }
+            pluginManager.plugins.drop(1).collect {
+                val activeBefore = executionBackendRegistry.currentBackend().id
+                pluginExecutionBackendRegistrar.syncAll()
+                val activeAfter = executionBackendRegistry.currentBackend().id
+                if (activeBefore != activeAfter) {
+                    executionModeRepository.setActiveBackendId(activeAfter)
+                }
+            }
         }
-        // 当前激活 profile 的连接配置变化（编辑连接/编辑 profile/切 profile/切模式）即重连，改连接即时生效。
+        // 启动时同步已安装插件声明的工作流与外部会话源，并持续监听插件启停/安装/卸载变化。
+        appScope.launch {
+            pluginWorkflowRegistrar.syncAll()
+            externalSessionService.syncDeclaredSources()
+            pluginManager.plugins.drop(1).collect {
+                pluginWorkflowRegistrar.syncAll()
+                externalSessionService.syncDeclaredSources()
+            }
+        }
+        // 仅内置远程 SSH 后端需要监督 SSH 连接并在连接后同步内置文档与 assets；
+        // 其余后端（本地 PRoot 或插件执行后端）停掉 SSH 监督并断开残留连接。
         appScope.launch {
             combine(
                 activeRemoteConnectionResolver.activeConfigFlow,
-                executionModeHolder.mode
-            ) { config, mode -> config to mode }.collect { (config, mode) ->
-                if (mode != com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+                executionBackendRegistry.activeBackend.map {
+                    it.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+                }.distinctUntilChanged()
+            ) { config, isRemoteSsh -> config to isRemoteSsh }.collect { (config, isRemoteSsh) ->
+                if (!isRemoteSsh) {
                     cancelDocsSync()
                     remoteSshConnection.stopSupervisor()
                     remoteTerminalSessionManager.tabs.value.map { it.id }.forEach {
@@ -363,7 +411,7 @@ class AIEditorApp : Application(), Configuration.Provider {
                 }
                 if (config != remoteSshConnection.config || !remoteSshConnection.isConnected()) cancelDocsSync()
                 remoteSshConnection.startSupervisor(appScope) {
-                    if (executionModeHolder.currentMode() != com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+                    if (executionBackendRegistry.currentBackend().id != ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID) {
                         return@startSupervisor
                     }
                     runCatching { workspaceRepository.initialize() }
@@ -438,10 +486,10 @@ class AIEditorApp : Application(), Configuration.Provider {
         // 权限规则由 App 启动即常驻订阅（AI 评估随时要读到最新规则）；MCP 配置与技能列表
         // 改由各自消费方（McpManager / 设置页）按需订阅，无需在这里拉起。
         appScope.launch { permissionRulesRepository.startWatching() }
-        // 持续同步工作区模式缓存，崩溃时随报告带出
+        // 持续同步工作区后端缓存，崩溃时随报告带出
         appScope.launch {
-            executionModeRepository.executionModeFlow.collect { mode ->
-                currentWorkspaceMode = mode.name
+            executionBackendRegistry.activeBackend.collect { backend ->
+                currentWorkspaceMode = backend.id
             }
         }
         // 主进程健康启动 10 秒后，自动清零连续崩溃计数与错误页显示标志，恢复健康状态
@@ -484,7 +532,7 @@ class AIEditorApp : Application(), Configuration.Provider {
             docsSyncJob = appScope.launch {
                 try {
                     val snapshot = cachedDocsSnapshot()
-                    if (executionModeHolder.currentMode() == com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+                    if (executionBackendRegistry.currentBackend().id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID) {
                         remoteSshConnection.uploadDocs(snapshot, target)
                     }
                 } catch (error: CancellationException) {

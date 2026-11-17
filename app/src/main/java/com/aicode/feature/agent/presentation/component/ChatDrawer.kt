@@ -105,7 +105,10 @@ import com.aicode.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicode.feature.settings.presentation.component.SettingsRow
 import com.aicode.feature.settings.presentation.component.settingsPageBackground
 import com.aicode.feature.agent.domain.model.ChatSession
+import com.aicode.feature.agent.presentation.ExternalSessionUiMapper
 import com.aicode.feature.agent.presentation.AgentUIState
+import com.aicode.feature.plugin.domain.session.ExternalSessionGroup
+import com.aicode.feature.plugin.domain.session.ExternalSessionSummary
 import com.aicode.feature.agent.presentation.ChatSearchHit
 import com.aicode.feature.agent.presentation.ChatSearchState
 import com.aicode.feature.agent.presentation.BrowseClipboard
@@ -113,8 +116,6 @@ import com.aicode.feature.agent.presentation.FileBrowseState
 import com.aicode.feature.agent.presentation.FileTreeNode
 import com.aicode.feature.agent.presentation.FileTreeRoot
 import com.aicode.feature.plugin.domain.PluginUiEntry
-import com.aicode.feature.plugin.domain.session.PluginSessionGroup
-import com.aicode.feature.plugin.domain.session.PluginSessionSummary
 import com.aicode.feature.plugin.presentation.pluginPageIcon
 import com.aicode.feature.workspace.domain.WorkspacePathMapper
 import com.aicode.feature.workspace.domain.isValidFileEntryName
@@ -179,9 +180,12 @@ private fun DrawerProgressIndicator(
 @Composable
 fun ChatDrawerContent(
     sessions: List<ChatSession>,
-    pluginSessionGroups: List<PluginSessionGroup> = emptyList(),
-    currentPluginSessionId: String? = null,
-    onSelectPluginSession: (PluginSessionSummary) -> Unit = {},
+    externalSessionGroups: List<ExternalSessionGroup> = emptyList(),
+    currentExternalSessionId: String? = null,
+    onSelectExternalSession: (ExternalSessionSummary) -> Unit = {},
+    onDeleteExternalSession: (ExternalSessionSummary) -> Unit = {},
+    onRenameExternalSession: (ExternalSessionSummary, String) -> Unit = { _, _ -> },
+    onTogglePinExternalSession: (ExternalSessionSummary) -> Unit = {},
     currentSessionId: String?,
     agentStates: Map<String, AgentUIState>,
     awaitingPermissionSessionIds: Set<String> = emptySet(),
@@ -241,6 +245,9 @@ fun ChatDrawerContent(
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
     var pendingRename by remember { mutableStateOf<ChatSession?>(null) }
     var menuSession by remember { mutableStateOf<ChatSession?>(null) }
+    var pendingExternalDelete by remember { mutableStateOf<ExternalSessionSummary?>(null) }
+    var pendingExternalRename by remember { mutableStateOf<ExternalSessionSummary?>(null) }
+    var menuExternalSession by remember { mutableStateOf<ExternalSessionSummary?>(null) }
     var showAllPlugins by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -377,9 +384,10 @@ fun ChatDrawerContent(
             when (selectedTab) {
                 0 -> SessionListTab(
                     sessions = sessions,
-                    pluginSessionGroups = pluginSessionGroups,
-                    currentPluginSessionId = currentPluginSessionId,
-                    onSelectPluginSession = onSelectPluginSession,
+                    externalSessionGroups = externalSessionGroups,
+                    currentExternalSessionId = currentExternalSessionId,
+                    onSelectExternalSession = onSelectExternalSession,
+                    onLongClickExternalSession = { menuExternalSession = it },
                     currentSessionId = currentSessionId,
                     agentStates = agentStates,
                     awaitingPermissionSessionIds = awaitingPermissionSessionIds,
@@ -598,6 +606,78 @@ fun ChatDrawerContent(
         )
     }
 
+    menuExternalSession?.let { ext ->
+        SessionActionSheet(
+            session = ExternalSessionUiMapper.toChatSession(ext),
+            onTogglePin = {
+                menuExternalSession = null
+                onTogglePinExternalSession(ext)
+            },
+            onRename = {
+                menuExternalSession = null
+                pendingExternalRename = ext
+            },
+            onExport = {},
+            onBatchSelect = {},
+            onDelete = {
+                menuExternalSession = null
+                pendingExternalDelete = ext
+            },
+            pluginEntries = emptyList(),
+            pluginLanguageTag = pluginLanguageTag,
+            onPluginEntry = {},
+            onDismiss = { menuExternalSession = null },
+            isExternal = true
+        )
+    }
+
+    pendingExternalDelete?.let { ext ->
+        AlertDialog(
+            onDismissRequest = { pendingExternalDelete = null },
+            title = { Text(stringResource(R.string.chat_delete_session)) },
+            text = { Text(stringResource(R.string.chat_delete_session_confirm, ext.title)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteExternalSession(ext)
+                    pendingExternalDelete = null
+                }) { Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingExternalDelete = null }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    pendingExternalRename?.let { ext ->
+        var renameText by remember(ext.id) { mutableStateOf(ext.title) }
+        AlertDialog(
+            onDismissRequest = { pendingExternalRename = null },
+            title = { Text(stringResource(R.string.chat_rename_session)) },
+            text = {
+                AppTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = stringResource(R.string.chat_session_name),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = dialogTextFieldColors()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRenameExternalSession(ext, renameText)
+                        pendingExternalRename = null
+                    },
+                    enabled = renameText.isNotBlank() && renameText != ext.title
+                ) { Text(stringResource(R.string.common_rename)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingExternalRename = null }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
+
     pendingRename?.let { session ->
         var renameText by remember(session.id) { mutableStateOf(session.title) }
         AlertDialog(
@@ -635,9 +715,10 @@ fun ChatDrawerContent(
 @Composable
 private fun SessionListTab(
     sessions: List<ChatSession>,
-    pluginSessionGroups: List<PluginSessionGroup>,
-    currentPluginSessionId: String?,
-    onSelectPluginSession: (PluginSessionSummary) -> Unit,
+    externalSessionGroups: List<ExternalSessionGroup>,
+    currentExternalSessionId: String?,
+    onSelectExternalSession: (ExternalSessionSummary) -> Unit,
+    onLongClickExternalSession: (ExternalSessionSummary) -> Unit,
     currentSessionId: String?,
     agentStates: Map<String, AgentUIState>,
     awaitingPermissionSessionIds: Set<String>,
@@ -655,9 +736,10 @@ private fun SessionListTab(
     if (searchQuery.isBlank()) {
         SessionListContent(
             sessions = sessions,
-            pluginSessionGroups = pluginSessionGroups,
-            currentPluginSessionId = currentPluginSessionId,
-            onSelectPluginSession = onSelectPluginSession,
+            externalSessionGroups = externalSessionGroups,
+            currentExternalSessionId = currentExternalSessionId,
+            onSelectExternalSession = onSelectExternalSession,
+            onLongClickExternalSession = onLongClickExternalSession,
             currentSessionId = currentSessionId,
             agentStates = agentStates,
             awaitingPermissionSessionIds = awaitingPermissionSessionIds,
@@ -675,15 +757,15 @@ private fun SessionListTab(
 }
 
 /**
- * Tab0 的会话列表本体。插件会话分组固定在最上方（分组名 = 插件名），
- * 下面是本机会话的置顶与时间分组；所有分组头都可以点击折叠/展开。
+ * Tab0 的会话列表本体：置顶与时间分组；所有分组头都可以点击折叠/展开。
  */
 @Composable
 private fun SessionListContent(
     sessions: List<ChatSession>,
-    pluginSessionGroups: List<PluginSessionGroup>,
-    currentPluginSessionId: String?,
-    onSelectPluginSession: (PluginSessionSummary) -> Unit,
+    externalSessionGroups: List<ExternalSessionGroup>,
+    currentExternalSessionId: String?,
+    onSelectExternalSession: (ExternalSessionSummary) -> Unit,
+    onLongClickExternalSession: (ExternalSessionSummary) -> Unit,
     currentSessionId: String?,
     agentStates: Map<String, AgentUIState>,
     awaitingPermissionSessionIds: Set<String>,
@@ -695,7 +777,7 @@ private fun SessionListContent(
     onSelect: (ChatSession) -> Unit,
     onLongClick: (ChatSession) -> Unit
 ) {
-    if (sessions.isEmpty() && pluginSessionGroups.isEmpty()) {
+    if (sessions.isEmpty() && externalSessionGroups.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -743,38 +825,46 @@ private fun SessionListContent(
         state = listState,
         modifier = Modifier.fillMaxSize()
     ) {
-        // 插件会话：不混入时间分组，固定放在置顶之上；组内顺序保持插件返回顺序。
-        pluginSessionGroups.forEach { pluginGroup ->
-            val groupKey = "plugin:${pluginGroup.pluginId}"
+        externalSessionGroups.forEach { extGroup ->
+            val groupKey = "external:${extGroup.pluginId}"
             val expanded = groupKey !in collapsedGroupKeys
             item(key = "group-$groupKey", contentType = "group-header") {
                 CollapsibleSessionGroupHeader(
-                    text = pluginGroup.pluginName,
-                    count = pluginGroup.sessions.size,
-                    loading = pluginGroup.loading,
+                    text = extGroup.pluginName.ifBlank { extGroup.pluginId },
+                    count = extGroup.sessions.size,
                     expanded = expanded,
+                    loading = extGroup.loading,
                     onClick = { toggleGroup(groupKey) }
                 )
             }
             if (expanded) {
-                items(
-                    items = pluginGroup.sessions,
-                    key = { pluginSession -> "plugin-session-${pluginSession.id}" },
-                    contentType = { "plugin-session" }
-                ) { pluginSession ->
-                    ChatSessionRow(
-                        session = pluginSession.asChatSession(),
-                        selected = !selectionMode && currentPluginSessionId == pluginSession.id,
-                        isExecuting = pluginSession.running,
-                        pinned = false,
-                        selectionMode = false,
-                        onClick = { onSelectPluginSession(pluginSession) },
-                        onLongClick = {}
-                    )
+                itemsIndexed(
+                    items = extGroup.sessions,
+                    key = { _, extSession -> "ext-${extSession.id}" },
+                    contentType = { _, _ -> "session" }
+                ) { index, extSession ->
+                    Column {
+                        if (index > 0) SettingsDivider()
+                        val extState = agentStates[extSession.id]
+                        val isExecuting = extSession.running ||
+                            extState is AgentUIState.Loading ||
+                            extState is AgentUIState.Streaming
+                        ChatSessionRow(
+                            session = ExternalSessionUiMapper.toChatSession(extSession),
+                            selected = !selectionMode && currentExternalSessionId == extSession.id,
+                            isExecuting = isExecuting,
+                            awaitingPermission = extSession.id in awaitingPermissionSessionIds,
+                            pinned = extSession.isPinned,
+                            selectionMode = false,
+                            checked = false,
+                            onCheckedChange = {},
+                            onClick = { onSelectExternalSession(extSession) },
+                            onLongClick = { onLongClickExternalSession(extSession) }
+                        )
+                    }
                 }
             }
         }
-
         // 本机会话：每个分组占一个 item、组内 forEach 全量渲染会让 LazyColumn 失去惰性：
         // 「最近 30 天」这种分组有上百个会话时，一个 item 就要组合上百行。分组头与会话各自成 item。
         groups.forEach { group ->
@@ -803,8 +893,7 @@ private fun SessionListContent(
                         val expanded = session.id in expandedIds
                         ChatSessionRow(
                             session = session,
-                            selected = if (selectionMode) false
-                            else currentPluginSessionId == null && session.id == currentSessionId,
+                            selected = !selectionMode && currentExternalSessionId == null && session.id == currentSessionId,
                             isExecuting = isExecuting,
                             awaitingPermission = session.id in awaitingPermissionSessionIds,
                             pinned = session.isPinned,
@@ -852,8 +941,7 @@ private fun SessionListContent(
                                     Row(modifier = Modifier.padding(start = Spacing.lg)) {
                                         ChatSessionRow(
                                             session = sub,
-                                            selected = if (selectionMode) false
-                                            else currentPluginSessionId == null && sub.id == currentSessionId,
+                                            selected = !selectionMode && currentExternalSessionId == null && sub.id == currentSessionId,
                                             isExecuting = subState is AgentUIState.Loading ||
                                                 subState is AgentUIState.Streaming,
                                             awaitingPermission = sub.id in awaitingPermissionSessionIds,
@@ -931,17 +1019,6 @@ private fun CollapsibleSessionGroupHeader(
             modifier = Modifier.size(14.dp)
         )
     }
-}
-
-private fun PluginSessionSummary.asChatSession(): ChatSession {
-    val time = updatedAt ?: 0L
-    return ChatSession(
-        id = "plugin:$id",
-        title = title,
-        createdAt = time,
-        updatedAt = time,
-        workspacePath = ""
-    )
 }
 
 /** Tab0 底部搜索框：复用设置页的胶囊搜索框，非空时带清除按钮。 */
@@ -1785,7 +1862,8 @@ private fun SessionActionSheet(
     pluginEntries: List<PluginUiEntry>,
     pluginLanguageTag: String,
     onPluginEntry: (PluginUiEntry) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isExternal: Boolean = false
 ) {
     val sheetState = rememberModalBottomSheetState()
     AdaptiveModalBottomSheet(
@@ -1826,24 +1904,26 @@ private fun SessionActionSheet(
                     onRename()
                 }
             )
-            SheetActionRow(
-                icon = FeatherIcons.Download,
-                label = stringResource(R.string.chat_export_session),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onExport()
-                }
-            )
-            SheetActionRow(
-                icon = FeatherIcons.CheckSquare,
-                label = stringResource(R.string.chat_batch_select),
-                tint = MaterialTheme.colorScheme.onSurface,
-                onClick = {
-                    onDismiss()
-                    onBatchSelect()
-                }
-            )
+            if (!isExternal) {
+                SheetActionRow(
+                    icon = FeatherIcons.Download,
+                    label = stringResource(R.string.chat_export_session),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        onDismiss()
+                        onExport()
+                    }
+                )
+                SheetActionRow(
+                    icon = FeatherIcons.CheckSquare,
+                    label = stringResource(R.string.chat_batch_select),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        onDismiss()
+                        onBatchSelect()
+                    }
+                )
+            }
             if (pluginEntries.isNotEmpty()) {
                 Text(
                     text = stringResource(R.string.settings_plugins),
