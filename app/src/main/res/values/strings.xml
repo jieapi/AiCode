@@ -529,6 +529,8 @@
     <!-- About -->
     <string name="about_version">版本</string>
     <string name="about_github_repo">GitHub 仓库</string>
+    <string name="about_star_prompt">支持 AiCode</string>
+    <string name="about_star_prompt_desc">在 GitHub 为项目点亮 Star</string>
     <string name="about_license">开源许可证</string>
     <string name="about_description">Android 上的通用 AI Coding Agent · Linux 开发环境 · 支持本地与远程 SSH</string>
     <string name="about_check_update">检查更新</string>
@@ -558,6 +560,13 @@
     <string name="about_update_mirror_invalid">地址需以 http:// 或 https:// 开头</string>
     <string name="about_update_mirror_default">恢复默认</string>
     <string name="about_update_download_install">下载并安装</string>
+
+    <!-- Star Prompt -->
+    <string name="star_prompt_title">喜欢 AiCode 吗？</string>
+    <string name="star_prompt_message">AiCode 完全开源免费。如果它帮到了你的日常开发，欢迎去 GitHub 点个 Star 支持，让更多开发者看到这个项目。</string>
+    <string name="star_prompt_action_star">前往 GitHub 点 Star</string>
+    <string name="star_prompt_action_later">下次一定</string>
+    <string name="star_prompt_action_dismiss">不再提示</string>
     <string name="about_update_install">安装</string>
     <string name="about_update_browser">浏览器下载</string>
     <string name="about_update_background">后台继续</string>

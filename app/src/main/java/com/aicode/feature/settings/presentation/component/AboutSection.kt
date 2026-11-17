@@ -60,6 +60,7 @@ import compose.icons.feathericons.Download
 import compose.icons.feathericons.Github
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.RefreshCw
+import compose.icons.feathericons.Star
 import compose.icons.feathericons.Tag
 
 /**
@@ -76,7 +77,8 @@ internal fun AboutSection(
     onToggleUpdateCheck: (Boolean) -> Unit,
     onSelectChannel: (UpdateChannel) -> Unit,
     onSelectMirror: (String) -> Unit,
-    onCheckUpdate: () -> Unit
+    onCheckUpdate: () -> Unit,
+    onShowStarPrompt: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showChannelSheet by remember { mutableStateOf(false) }
@@ -185,6 +187,14 @@ internal fun AboutSection(
                 icon = FeatherIcons.Github,
                 title = stringResource(R.string.about_github_repo),
                 onClick = { openUrl(context, GITHUB_REPO_URL) }
+            )
+            SettingsDivider()
+            // 支持 AiCode：手动唤起求 Star 弹窗
+            SettingsRow(
+                icon = FeatherIcons.Star,
+                title = stringResource(R.string.about_star_prompt),
+                subtitle = stringResource(R.string.about_star_prompt_desc),
+                onClick = onShowStarPrompt
             )
             SettingsDivider()
             // 许可证

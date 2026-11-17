@@ -143,6 +143,9 @@ import com.aicode.feature.settings.presentation.component.UpdateCheckDialog
 import com.aicode.feature.settings.presentation.component.decodeBackgroundBitmap
 import com.aicode.feature.settings.presentation.component.openUrl
 import com.aicode.feature.settings.presentation.component.settingsPageBackground
+import com.aicode.feature.starprompt.domain.StarPromptCoordinator
+import com.aicode.feature.starprompt.domain.StarPromptUiGate
+import com.aicode.feature.starprompt.presentation.StarPromptDialog
 import com.aicode.feature.terminal.domain.TerminalKeepaliveService
 import com.aicode.feature.terminal.presentation.TerminalViewModel
 import com.aicode.feature.terminal.presentation.component.TerminalScreen
@@ -194,6 +197,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var agreementRepository: com.aicode.feature.agreement.data.AgreementRepository
+
+    @Inject
+    lateinit var starPromptCoordinator: StarPromptCoordinator
 
     @Inject
     lateinit var browserManager: com.aicode.feature.agent.domain.tool.browser.BrowserManager
@@ -302,6 +308,7 @@ class MainActivity : ComponentActivity() {
                         AgreementGate(repository = agreementRepository) { agreementAccepted ->
                             AppNavigation(
                                 onboardingRepository = onboardingRepository,
+                                starPromptCoordinator = starPromptCoordinator,
                                 agreementAccepted = agreementAccepted
                             )
                             if (agreementAccepted) {
@@ -367,6 +374,7 @@ private const val MAX_PANE_SPLIT = 0.7f
 @Composable
 fun AppNavigation(
     onboardingRepository: com.aicode.feature.onboarding.data.OnboardingRepository,
+    starPromptCoordinator: StarPromptCoordinator,
     agreementAccepted: Boolean
 ) {
     val navController = rememberNavController()
@@ -442,11 +450,16 @@ fun AppNavigation(
             scope = onboardingScope
         )
     }
+    var onboardingChecked by remember { mutableStateOf(false) }
     // 启动判断：IN_PROGRESS 则激活引导。
     LaunchedEffect(agreementAccepted) {
-        if (!agreementAccepted) return@LaunchedEffect
+        if (!agreementAccepted) {
+            onboardingChecked = false
+            return@LaunchedEffect
+        }
         val status = onboardingRepository.status()
         onboardingCoordinator.initialize(status ?: OnboardingStatus.IN_PROGRESS)
+        onboardingChecked = true
     }
 
     // 自动检查更新：进入主页时异步检测（开关开启且每天最多一次，失败静默）
@@ -968,6 +981,7 @@ fun AppNavigation(
                             }
                         }
                     },
+                    onShowStarPrompt = { starPromptCoordinator.showManual() },
                     onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
                     onOnboardingModelAdded = {
                         if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
@@ -1265,7 +1279,8 @@ fun AppNavigation(
     // 检查更新弹窗（全局宿主：自动检测与关于页手动检查共用，覆盖所有页面）
     val updateCheckState by settingsViewModel.updateCheckState.collectAsStateWithLifecycle()
     val updateCheckVisible by settingsViewModel.updateCheckVisible.collectAsStateWithLifecycle()
-    if (agreementAccepted && updateCheckVisible && updateCheckState != UpdateCheckUiState.Idle) {
+    val updateDialogShowing = agreementAccepted && updateCheckVisible && updateCheckState != UpdateCheckUiState.Idle
+    if (updateDialogShowing) {
         val version = remember {
             runCatching {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
@@ -1281,6 +1296,32 @@ fun AppNavigation(
                 settingsViewModel.dismissUpdateCheck()
             },
             onDownload = { settingsViewModel.downloadAndInstall() }
+        )
+    }
+
+    // 求 Star 弹窗（全局宿主：累计前台满 3 小时后触发，点击「下次一定」按 3/7/14 天推迟，仅在 AI 空闲且聊天主界面无抽屉/弹窗时展示）
+    val uiGate = StarPromptUiGate(
+        agreementAccepted = agreementAccepted,
+        onboardingActive = !onboardingChecked || onboardingUiState.active,
+        updateDialogVisible = updateDialogShowing,
+        pluginActionPending = pendingPluginAction != null,
+        activeSlotPageOpen = activeSlotPage != null,
+        drawerOpen = (!permanentDrawer && drawerState.isOpen) || rightDrawerState.isOpen,
+        currentRoute = currentRoute
+    )
+    LaunchedEffect(uiGate) {
+        starPromptCoordinator.updateUiGate(uiGate)
+    }
+    val starPromptVisible by starPromptCoordinator.dialogVisible.collectAsStateWithLifecycle()
+    val starPromptManual by starPromptCoordinator.isManualPrompt.collectAsStateWithLifecycle()
+    if (starPromptVisible && uiGate.allowsPrompt(manual = starPromptManual)) {
+        StarPromptDialog(
+            onGoToStar = {
+                starPromptCoordinator.onGoToStar()
+                openUrl(context, StarPromptCoordinator.GITHUB_REPO_URL)
+            },
+            onSnooze = { starPromptCoordinator.onSnooze() },
+            onDismissForever = { starPromptCoordinator.onDismissForever() }
         )
     }
 

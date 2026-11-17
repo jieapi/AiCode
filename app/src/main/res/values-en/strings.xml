@@ -529,6 +529,8 @@
     <!-- About -->
     <string name="about_version">Version</string>
     <string name="about_github_repo">GitHub Repository</string>
+    <string name="about_star_prompt">Support AiCode</string>
+    <string name="about_star_prompt_desc">Star the project on GitHub</string>
     <string name="about_license">Open Source License</string>
     <string name="about_description">Universal AI Coding Agent for Android · Linux dev environment · Local &amp; remote SSH</string>
     <string name="about_check_update">Check for updates</string>
@@ -558,6 +560,13 @@
     <string name="about_update_mirror_invalid">Address must start with http:// or https://</string>
     <string name="about_update_mirror_default">Restore default</string>
     <string name="about_update_download_install">Download &amp; install</string>
+
+    <!-- Star Prompt -->
+    <string name="star_prompt_title">Enjoying AiCode?</string>
+    <string name="star_prompt_message">AiCode is free and open source. If it has been helpful in your workflow, please consider giving it a Star on GitHub so more developers can discover it.</string>
+    <string name="star_prompt_action_star">Star on GitHub</string>
+    <string name="star_prompt_action_later">Maybe later</string>
+    <string name="star_prompt_action_dismiss">Don\'t ask again</string>
     <string name="about_update_install">Install</string>
     <string name="about_update_browser">Download in browser</string>
     <string name="about_update_background">Continue in background</string>

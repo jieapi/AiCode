@@ -241,6 +241,7 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onStopAllAndCloseTerminal: () -> Unit = {},
     onRerunOnboarding: () -> Unit = {},
+    onShowStarPrompt: () -> Unit = {},
     onboardingStep: OnboardingStep? = null,
     onOnboardingModelAdded: (() -> Unit)? = null,
     onOnboardingDismissFetchDialog: (() -> Unit)? = null
@@ -1548,7 +1549,8 @@ fun SettingsScreen(
                     onToggleUpdateCheck = { viewModel.setUpdateCheckEnabled(it) },
                     onSelectChannel = { viewModel.setUpdateCheckChannel(it) },
                     onSelectMirror = { viewModel.setUpdateCheckMirror(it) },
-                    onCheckUpdate = { viewModel.checkUpdate(manual = true) }
+                    onCheckUpdate = { viewModel.checkUpdate(manual = true) },
+                    onShowStarPrompt = onShowStarPrompt
                 )
                 SettingsSection.PluginPage -> {} // 已在外层全屏分支处理
             }
