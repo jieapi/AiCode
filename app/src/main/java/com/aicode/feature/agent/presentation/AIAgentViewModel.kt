@@ -18,12 +18,10 @@ import com.aicode.R
 import com.aicode.core.util.FileLogger
 import com.aicode.core.util.GitIgnoreMatcher
 import com.aicode.core.util.toUserMessage
-import com.aicode.core.util.formatCostUsd
 import com.aicode.feature.agent.data.local.dao.AgentMessageDao
 import com.aicode.feature.agent.domain.checkpoint.CheckpointManager
 import com.aicode.feature.agent.data.local.dao.CheckpointDao
 import com.aicode.feature.agent.data.local.dao.ChatSessionDao
-import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aicode.feature.agent.data.local.dao.TodoItemDao
 import com.aicode.feature.agent.domain.model.TodoItem
 import com.aicode.feature.agent.data.local.entity.AgentMessageEntity
@@ -31,9 +29,6 @@ import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicode.feature.agent.domain.container.ContainerInitState
 import com.aicode.feature.agent.domain.container.ContainerOsDetector
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
-import com.aicode.feature.settings.domain.model.ProviderType
-import com.aicode.feature.settings.domain.service.ModelCostCalculator
-import com.aicode.feature.settings.domain.repository.AIProviderRepository
 import com.aicode.feature.settings.data.repository.AgentSoundSettingsRepository
 import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
 import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepository
@@ -101,7 +96,6 @@ import com.aicode.feature.backup.domain.BackupManager
 import com.aicode.feature.agent.domain.command.SlashCommand
 import com.aicode.feature.agent.domain.command.SlashCommandContext
 import com.aicode.feature.agent.domain.command.SlashCommandRegistry
-import com.aicode.feature.agent.domain.command.SlashCommandRegistry.ResolvedCommand
 import com.aicode.feature.agent.domain.mention.FileMentionRepository
 import com.aicode.feature.agent.domain.mention.FileMentionState
 import com.aicode.feature.agent.domain.skill.Skill
@@ -120,7 +114,6 @@ import com.aicode.feature.plugin.runtime.PluginEventBus
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager.ApprovalKind
 import com.aicode.feature.agent.presentation.component.RewindOption
 import com.aicode.feature.agent.presentation.component.toolRunningLabelRes
-import com.aicode.feature.agent.presentation.component.formatTokenCount
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -166,7 +159,6 @@ import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.io.OutputStream
 import java.nio.file.FileAlreadyExistsException
-import java.util.Calendar
 import java.util.UUID
 import javax.inject.Inject
 
@@ -185,9 +177,6 @@ class AIAgentViewModel @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val agentMessageDao: AgentMessageDao,
     private val chatSessionDao: ChatSessionDao,
-    private val llmCallRecordDao: LlmCallRecordDao,
-    private val modelCostCalculator: ModelCostCalculator,
-    private val aiProviderRepository: AIProviderRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val modelReasoningEffortRepository: ModelReasoningEffortRepository,
     private val toolPermissionManager: ToolPermissionManager,
@@ -1542,9 +1531,6 @@ class AIAgentViewModel @Inject constructor(
         /** PluginSessionPage.status 的运行中取值。 */
         const val PLUGIN_STATUS_RUNNING = "running"
 
-        /** 会话目标文本长度上限，避免 system 提示词过长。 */
-        const val MAX_GOAL_CHARS = 2000
-
         /** 当前容器在容器内的根路径，对应宿主上的 rootfs 目录（随当前 profile 变化）。 */
         const val CONTAINER_FS_ROOT = "/"
 
@@ -1752,27 +1738,6 @@ class AIAgentViewModel @Inject constructor(
      */
     fun interjectQueuedRequest(id: String) {
         _currentSessionId.value?.let { agentRunManager.interjectQueuedRequest(it, id) }
-    }
-
-    /**
-     * 执行斜杠命令：先把命令文本作为用户消息落库（进入对话上下文），再按类型派发——
-     * 内置命令走本地动作，技能则把其正文作为本轮指令触发 agent 回合。
-     * 执行期间标记为命令占用（防新消息并行执行），结束后接续队列中排队的下一条。
-     */
-    private fun runResolvedCommand(resolved: ResolvedCommand, input: String, sessionId: String) {
-        viewModelScope.launch {
-            agentRunManager.markCommandStarted(sessionId)
-            try {
-                messagePersistenceUseCase.persist(sessionId, MessageRole.USER, input)
-                sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
-                when (resolved) {
-                    is ResolvedCommand.Action -> resolved.handler.execute(this@AIAgentViewModel, resolved.args)
-                    is ResolvedCommand.SkillCommand -> runSkill(resolved.skill, resolved.args)
-                }
-            } finally {
-                agentRunManager.onCommandFinished(sessionId)
-            }
-        }
     }
 
     fun resolveToolPermission(id: String, choice: PermissionChoice) {
@@ -2001,166 +1966,25 @@ class AIAgentViewModel @Inject constructor(
     /** /usage —— 以 Markdown 表格输出今日与累计的调用次数、token 用量与预估费用。 */
     override fun showUsage() {
         val sid = _currentSessionId.value ?: return
-        viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val todayStart = Calendar.getInstance().apply {
-                timeInMillis = now
-                set(Calendar.HOUR_OF_DAY, 0)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-            val today = loadUsageSummary(todayStart)
-            val allTime = loadUsageSummary(0L)
-            val table = buildString {
-                appendLine("| 项目 | 今日 | 累计 |")
-                appendLine("|---|---|---|")
-                appendLine("| 调用次数 | ${today.calls} | ${allTime.calls} |")
-                appendLine("| 输入 tokens | ${formatTokenCount(today.inputTokens)} | ${formatTokenCount(allTime.inputTokens)} |")
-                appendLine("| 输出 tokens | ${formatTokenCount(today.outputTokens)} | ${formatTokenCount(allTime.outputTokens)} |")
-                appendLine("| 缓存命中 tokens | ${formatTokenCount(today.cachedInputTokens)} | ${formatTokenCount(allTime.cachedInputTokens)} |")
-                appendLine("| 预估费用 | ${formatCostUsd(today.costUsd)} | ${formatCostUsd(allTime.costUsd)} |")
-            }
-            sessionUseCase.touch(sid, messagePersistenceUseCase.nextTimestamp())
-            messagePersistenceUseCase.persist(sid, MessageRole.ASSISTANT, table.trimEnd(), isContextExcluded = true)
-        }
+        agentRunManager.showUsage(sid)
     }
 
     /** /goal —— 管理当前会话的持续目标。 */
     override fun setSessionGoal(rawArgs: String) {
         val sid = _currentSessionId.value ?: return
-        viewModelScope.launch {
-            val session = sessionUseCase.getSessionById(sid) ?: return@launch
-            val arg = rawArgs.trim()
-            when {
-                arg.isEmpty() -> persistGoalNotice(sid, goalSummary(session))
-                arg.equals("clear", ignoreCase = true) || arg.equals("off", ignoreCase = true) -> clearGoal(sid)
-                arg.equals("pause", ignoreCase = true) -> pauseGoal(sid)
-                arg.equals("resume", ignoreCase = true) -> resumeGoal(sid)
-                else -> setGoalText(sid, session, arg)
-            }
-        }
+        agentRunManager.setSessionGoal(sid, rawArgs, _currentWorkspace.value)
     }
 
     /** UI：暂停/恢复当前会话的 goal 自主循环。 */
     fun setGoalPaused(paused: Boolean) {
         val sid = _currentSessionId.value ?: return
-        viewModelScope.launch { if (paused) pauseGoal(sid) else resumeGoal(sid) }
+        agentRunManager.setGoalPaused(sid, paused)
     }
 
     /** UI：清除当前会话的 goal。 */
     fun clearGoal() {
         val sid = _currentSessionId.value ?: return
-        viewModelScope.launch { clearGoal(sid) }
-    }
-
-    private fun goalSummary(session: ChatSessionEntity): String {
-        val goal = session.goal?.takeIf { it.isNotBlank() }
-            ?: return "当前会话未设定目标。用 `/goal <目标>` 设定后，AI 会自主循环推进直到达成、受阻或预算耗尽。"
-        val status = session.goalStatus
-            ?.let { runCatching { GoalStatus.valueOf(it) }.getOrNull() }
-            ?: GoalStatus.ACTIVE
-        val statusLabel = when (status) {
-            GoalStatus.ACTIVE -> "进行中"
-            GoalStatus.PAUSED -> "已暂停"
-            GoalStatus.COMPLETED -> "已完成"
-            GoalStatus.BLOCKED -> "受阻"
-            GoalStatus.EXHAUSTED -> "预算耗尽"
-        }
-        return "当前目标（$statusLabel，已续跑 ${session.goalTurnCount} 轮）：\n$goal"
-    }
-
-    private suspend fun setGoalText(sid: String, session: ChatSessionEntity, text: String) {
-        val goalText = text.trim().take(MAX_GOAL_CHARS)
-        if (goalText.isEmpty()) return
-        agentRunManager.resetGoalEmptyTurns(sid)
-        sessionUseCase.setGoal(sid, goalText, session.totalInputTokens, session.totalOutputTokens)
-        // goal 与 PLAN 互斥：自主循环期间 PLAN 退出门禁需人工审查，故设定 goal 时若处于 PLAN 则强制退出。
-        if (runCatching { AgentMode.valueOf(session.mode) }.getOrNull() == AgentMode.PLAN) {
-            sessionUseCase.updateMode(sid, AgentMode.BUILD.name)
-        }
-        persistGoalNotice(
-            sid,
-            "已设定目标：$goalText\nAI 将自主循环推进（工具自动放行、PLAN 停用），直到达成、受阻或预算耗尽。" +
-                "可随时 `/goal pause` / `/goal resume` / `/goal clear`。"
-        )
-        enqueueGoalTurn(sid, session.workspacePath, buildGoalPrompt(goalText, 1))
-    }
-
-    private suspend fun clearGoal(sid: String) {
-        agentRunManager.resetGoalEmptyTurns(sid)
-        sessionUseCase.setGoal(sid, null, 0, 0)
-        persistGoalNotice(sid, "已清除当前目标。")
-    }
-
-    private suspend fun pauseGoal(sid: String) {
-        val session = sessionUseCase.getSessionById(sid) ?: return
-        if (session.goal.isNullOrBlank()) {
-            persistGoalNotice(sid, "当前会话未设定目标。")
-            return
-        }
-        sessionUseCase.updateGoalStatus(sid, GoalStatus.PAUSED)
-        persistGoalNotice(sid, "目标已暂停。用 `/goal resume` 继续。")
-    }
-
-    private suspend fun resumeGoal(sid: String) {
-        val session = sessionUseCase.getSessionById(sid) ?: return
-        val goal = session.goal?.takeIf { it.isNotBlank() }
-        if (goal == null) {
-            persistGoalNotice(sid, "当前会话未设定目标。")
-            return
-        }
-        sessionUseCase.updateGoalStatus(sid, GoalStatus.ACTIVE)
-        persistGoalNotice(sid, "目标已恢复，继续自主循环。")
-        enqueueGoalTurn(sid, session.workspacePath, buildGoalPrompt(goal, session.goalTurnCount + 1))
-    }
-
-    /** 把一轮 goal 续跑/启动请求交给会话：空闲则立即执行，忙则入队（用户消息优先）。不落库。 */
-    private fun enqueueGoalTurn(sessionId: String, workspacePath: String, prompt: String) {
-        enqueueAgentRequest(
-            request = prompt,
-            modelRequest = prompt,
-            projectRoot = workspacePath,
-            isAutoTrigger = true,
-            persistUserMessage = false,
-            targetSessionId = sessionId
-        )
-    }
-
-    private fun buildGoalPrompt(goal: String, turn: Int): String =
-        "【目标自主循环 · 第 $turn 轮】继续推进目标：$goal\n" +
-            "按系统提示中的完成审计与受阻审计规则决定是否调用 goalStatus；未达成则直接继续下一步。"
-
-    private suspend fun persistGoalNotice(sid: String, text: String) {
-        sessionUseCase.touch(sid, messagePersistenceUseCase.nextTimestamp())
-        messagePersistenceUseCase.persist(sid, MessageRole.ASSISTANT, text, isContextExcluded = true)
-    }
-
-    private data class UsageSummary(
-        val calls: Int,
-        val inputTokens: Long,
-        val outputTokens: Long,
-        val cachedInputTokens: Long,
-        val costUsd: Double
-    )
-
-    /** 汇总自 [start] 起的调用次数、token 与预估费用；费用按「渠道 + 模型」分组逐组估算，才取得到自定义单价。 */
-    private suspend fun loadUsageSummary(start: Long): UsageSummary = withContext(Dispatchers.IO) {
-        val summary = llmCallRecordDao.getSummary(start).first()
-        val providerTypes = aiProviderRepository.getAllProviders().first().associate { it.id to it.type }
-        val cost = llmCallRecordDao.getModelProviderCostStats(start).first().sumOf { stat ->
-            val model = stat.model ?: return@sumOf 0.0
-            modelCostCalculator.costUsd(
-                providerId = stat.providerId.orEmpty(),
-                providerType = stat.providerId?.let { providerTypes[it] } ?: ProviderType.OPENAI,
-                model = model,
-                inputTokens = stat.inputTokens,
-                cachedInputTokens = stat.cachedInputTokens,
-                outputTokens = stat.outputTokens,
-                cacheCreationTokens = stat.cacheCreationTokens
-            ) ?: 0.0
-        }
-        UsageSummary(summary.calls, summary.inputTokens, summary.outputTokens, summary.cachedInputTokens, cost)
+        agentRunManager.clearGoal(sid)
     }
 
     /** /compress —— 手动触发当前会话的上下文压缩。 */

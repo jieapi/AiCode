@@ -11,10 +11,16 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.aicode.MainActivity
 import com.aicode.R
 import com.aicode.core.util.FileLogger
+import com.aicode.core.util.formatCostUsd
 import com.aicode.core.util.toUserMessage
 import com.aicode.feature.agent.data.local.dao.AgentMessageDao
 import com.aicode.feature.agent.data.local.dao.ChatSessionDao
+import com.aicode.feature.agent.data.local.dao.LlmCallRecordDao
+import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
 import com.aicode.feature.agent.domain.checkpoint.CheckpointManager
+import com.aicode.feature.agent.domain.command.SlashCommandContext
+import com.aicode.feature.agent.domain.command.SlashCommandRegistry
+import com.aicode.feature.agent.domain.command.SlashCommandRegistry.ResolvedCommand
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
@@ -25,6 +31,7 @@ import com.aicode.feature.agent.domain.notification.AgentNotificationFormatter
 import com.aicode.feature.agent.domain.notification.AgentNotificationKind
 import com.aicode.feature.agent.domain.notification.NotificationOutcome
 import com.aicode.feature.agent.domain.notification.PendingNotification
+import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aicode.feature.agent.domain.subagent.SubAgentDigest
@@ -58,6 +65,7 @@ import com.aicode.feature.agent.presentation.RunningToolOutput
 import com.aicode.feature.agent.presentation.StreamingAssistantMessage
 import com.aicode.feature.agent.presentation.SubAgentCardState
 import com.aicode.feature.agent.presentation.SubAgentCardStatus
+import com.aicode.feature.agent.presentation.component.formatTokenCount
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager.ApprovalKind
 import com.aicode.feature.agent.presentation.notification.AgentLiveNotificationManager
@@ -68,6 +76,9 @@ import com.aicode.feature.settings.data.repository.DefaultModelSettingsRepositor
 import com.aicode.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicode.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aicode.feature.settings.data.repository.LiveNotificationSettingsRepository
+import com.aicode.feature.settings.domain.model.ProviderType
+import com.aicode.feature.settings.domain.repository.AIProviderRepository
+import com.aicode.feature.settings.domain.service.ModelCostCalculator
 import com.aicode.feature.terminal.domain.TabFinishedEvent
 import com.aicode.feature.terminal.domain.TerminalKeepaliveService
 import com.aicode.feature.terminal.domain.TerminalSessionManager
@@ -92,11 +103,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -117,12 +130,16 @@ class AgentRunManager @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val agentMessageDao: AgentMessageDao,
     private val chatSessionDao: ChatSessionDao,
+    private val llmCallRecordDao: LlmCallRecordDao,
+    private val aiProviderRepository: AIProviderRepository,
+    private val modelCostCalculator: ModelCostCalculator,
     private val toolPermissionManager: ToolPermissionManager,
     private val askUserQuestionManager: AskUserQuestionManager,
     private val containerEngine: LinuxContainerEngine,
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
+    private val slashCommandRegistry: SlashCommandRegistry,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val agentChatRequestBus: AgentChatRequestBus,
     private val agentRunStateStore: AgentRunStateStore,
@@ -145,6 +162,7 @@ class AgentRunManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val sessionJobs = mutableMapOf<String, Job>()
+    private val commandJobs = mutableMapOf<String, Job>()
     private val chatRequestConsumerId = UUID.randomUUID().toString()
     private val goalEmptyTurnCounts = mutableMapOf<String, Int>()
 
@@ -648,17 +666,26 @@ class AgentRunManager @Inject constructor(
         )
     }
 
-    /** 命令执行结束后的接续（斜杠命令在聊天页执行，结束后通知运行器消费队列）。 */
+    /** 命令执行结束后的接续：清理命令占用并按需启动后续动作或消费队列。 */
     fun onCommandFinished(sessionId: String) {
-        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
-        streamingAssistantStore.setCommandRunning(sessionId, false)
-        flushPendingNotifications(sessionId)
-        processNextInQueue(sessionId)
+        finishCommand(sessionId, cancelled = false, followUp = null)
     }
 
     fun markCommandStarted(sessionId: String) {
         streamingAssistantStore.setCommandRunning(sessionId, true)
         _runningCommandSessions.value = _runningCommandSessions.value + sessionId
+    }
+
+    private fun finishCommand(sessionId: String, cancelled: Boolean, followUp: (() -> Unit)?) {
+        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
+        streamingAssistantStore.setCommandRunning(sessionId, false)
+        if (cancelled) return
+        if (followUp != null) {
+            followUp()
+        } else {
+            flushPendingNotifications(sessionId)
+            processNextInQueue(sessionId)
+        }
     }
 
     /** 回滚前停止会话任务并清空运行态（队列、运行中工具、流式内容、压缩与重试提示）。 */
@@ -668,6 +695,9 @@ class AgentRunManager @Inject constructor(
         agentNotificationCenter.clear(sessionId)
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
+        commandJobs[sessionId]?.cancel()
+        commandJobs.remove(sessionId)
+        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
         setAgentState(sessionId, AgentUIState.Idle)
         _runningTools.value = _runningTools.value - sessionId
         setCompacting(sessionId, false)
@@ -678,54 +708,319 @@ class AgentRunManager @Inject constructor(
 
     /** /compress：手动压缩当前会话上下文；结束后续跑队列。 */
     fun compactSession(sessionId: String) {
-        if (isSessionRunning(sessionId)) return
-        scope.launch {
-            clearStreamingAssistant(sessionId)
-            setCompacting(sessionId, true)
-            var failed = false
+        if (isSessionRunning(sessionId) || sessionId in _runningCommandSessions.value) return
+        markCommandStarted(sessionId)
+        val job = scope.launch {
+            var cancelled = false
             try {
-                val changed = agentWorkflow.compactSession(sessionId) { event ->
-                    when (event) {
-                        is AgentEvent.CompactionStarted -> setCompacting(sessionId, true)
-                        AgentEvent.CompactionFinished -> {
-                            setCompacting(sessionId, false)
-                            if (!failed) _contextUsages.value = _contextUsages.value - sessionId
-                        }
-                        is AgentEvent.CompactionFailed -> {
-                            failed = true
-                            setCompacting(sessionId, false)
-                            messagePersistenceUseCase.persist(
-                                sessionId = sessionId,
-                                role = MessageRole.TOOL,
-                                content = event.reason,
-                                toolName = COMPACTION_FAILURE_TOOL_NAME,
-                                isError = true
-                            )
-                        }
-                        else -> {}
-                    }
-                }
-                if (!failed && !changed) {
-                    messagePersistenceUseCase.persist(
-                        sessionId = sessionId,
-                        role = MessageRole.ASSISTANT,
-                        content = context.getString(R.string.agent_context_no_compaction)
-                    )
-                }
+                runCompaction(sessionId)
             } catch (e: CancellationException) {
+                cancelled = true
                 throw e
-            } catch (e: Exception) {
-                FileLogger.e(TAG, "手动压缩失败: session=$sessionId", e)
+            } finally {
+                if (commandJobs[sessionId] == coroutineContext[Job]) {
+                    commandJobs.remove(sessionId)
+                }
+                finishCommand(sessionId, cancelled = cancelled, followUp = null)
+            }
+        }
+        commandJobs[sessionId] = job
+    }
+
+    private suspend fun runCompaction(sessionId: String) {
+        clearStreamingAssistant(sessionId)
+        setCompacting(sessionId, true)
+        var failed = false
+        try {
+            val changed = agentWorkflow.compactSession(sessionId) { event ->
+                when (event) {
+                    is AgentEvent.CompactionStarted -> setCompacting(sessionId, true)
+                    AgentEvent.CompactionFinished -> {
+                        setCompacting(sessionId, false)
+                        if (!failed) _contextUsages.value = _contextUsages.value - sessionId
+                    }
+                    is AgentEvent.CompactionFailed -> {
+                        failed = true
+                        setCompacting(sessionId, false)
+                        messagePersistenceUseCase.persist(
+                            sessionId = sessionId,
+                            role = MessageRole.TOOL,
+                            content = event.reason,
+                            toolName = COMPACTION_FAILURE_TOOL_NAME,
+                            isError = true
+                        )
+                    }
+                    else -> {}
+                }
+            }
+            if (!failed && !changed) {
                 messagePersistenceUseCase.persist(
                     sessionId = sessionId,
                     role = MessageRole.ASSISTANT,
-                    content = context.getString(R.string.agent_compaction_failed, e.message)
+                    content = context.getString(R.string.agent_context_no_compaction)
                 )
-            } finally {
-                setCompacting(sessionId, false)
-                processNextInQueue(sessionId)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "手动压缩失败: session=$sessionId", e)
+            messagePersistenceUseCase.persist(
+                sessionId = sessionId,
+                role = MessageRole.ASSISTANT,
+                content = context.getString(R.string.agent_compaction_failed, e.message)
+            )
+        } finally {
+            setCompacting(sessionId, false)
+        }
+    }
+
+    /** /usage：输出今日与累计调用次数、token 用量与预估费用。 */
+    fun showUsage(sessionId: String) {
+        scope.launch { persistUsageTable(sessionId) }
+    }
+
+    /** /goal：管理指定会话的持续目标。 */
+    fun setSessionGoal(sessionId: String, rawArgs: String, workspacePath: String = "") {
+        scope.launch {
+            var followUp: (() -> Unit)? = null
+            handleSetSessionGoal(sessionId, rawArgs, workspacePath) { goalPrompt, root ->
+                followUp = { enqueueGoalTurn(sessionId, root, goalPrompt) }
+            }
+            followUp?.invoke()
+        }
+    }
+
+    fun setGoalPaused(sessionId: String, paused: Boolean) {
+        scope.launch {
+            if (paused) {
+                pauseGoal(sessionId)
+            } else {
+                var followUp: (() -> Unit)? = null
+                resumeGoal(sessionId) { goalPrompt, root ->
+                    followUp = { enqueueGoalTurn(sessionId, root, goalPrompt) }
+                }
+                followUp?.invoke()
             }
         }
+    }
+
+    fun clearGoal(sessionId: String) {
+        scope.launch { clearGoalInternal(sessionId) }
+    }
+
+    private data class UsageSummary(
+        val calls: Int,
+        val inputTokens: Long,
+        val outputTokens: Long,
+        val cachedInputTokens: Long,
+        val costUsd: Double
+    )
+
+    private suspend fun persistUsageTable(sessionId: String) {
+        val now = System.currentTimeMillis()
+        val todayStart = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val today = loadUsageSummary(todayStart)
+        val allTime = loadUsageSummary(0L)
+        val table = buildString {
+            appendLine("| 项目 | 今日 | 累计 |")
+            appendLine("|---|---|---|")
+            appendLine("| 调用次数 | ${today.calls} | ${allTime.calls} |")
+            appendLine("| 输入 tokens | ${formatTokenCount(today.inputTokens)} | ${formatTokenCount(allTime.inputTokens)} |")
+            appendLine("| 输出 tokens | ${formatTokenCount(today.outputTokens)} | ${formatTokenCount(allTime.outputTokens)} |")
+            appendLine("| 缓存命中 tokens | ${formatTokenCount(today.cachedInputTokens)} | ${formatTokenCount(allTime.cachedInputTokens)} |")
+            appendLine("| 预估费用 | ${formatCostUsd(today.costUsd)} | ${formatCostUsd(allTime.costUsd)} |")
+        }
+        sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
+        messagePersistenceUseCase.persist(sessionId, MessageRole.ASSISTANT, table.trimEnd(), isContextExcluded = true)
+    }
+
+    private suspend fun loadUsageSummary(start: Long): UsageSummary = withContext(Dispatchers.IO) {
+        val summary = llmCallRecordDao.getSummary(start).first()
+        val providerTypes = aiProviderRepository.getAllProviders().first().associate { it.id to it.type }
+        val cost = llmCallRecordDao.getModelProviderCostStats(start).first().sumOf { stat ->
+            val model = stat.model ?: return@sumOf 0.0
+            modelCostCalculator.costUsd(
+                providerId = stat.providerId.orEmpty(),
+                providerType = stat.providerId?.let { providerTypes[it] } ?: ProviderType.OPENAI,
+                model = model,
+                inputTokens = stat.inputTokens,
+                cachedInputTokens = stat.cachedInputTokens,
+                outputTokens = stat.outputTokens,
+                cacheCreationTokens = stat.cacheCreationTokens
+            ) ?: 0.0
+        }
+        UsageSummary(summary.calls, summary.inputTokens, summary.outputTokens, summary.cachedInputTokens, cost)
+    }
+
+    private suspend fun handleSetSessionGoal(
+        sessionId: String,
+        rawArgs: String,
+        workspacePath: String = "",
+        onStartTurn: (prompt: String, workspacePath: String) -> Unit
+    ) {
+        val session = sessionUseCase.getSessionById(sessionId) ?: return
+        val resolvedRoot = workspacePath.ifBlank { session.workspacePath }
+        val arg = rawArgs.trim()
+        when {
+            arg.isEmpty() -> persistGoalNotice(sessionId, goalSummary(session))
+            arg.equals("clear", ignoreCase = true) || arg.equals("off", ignoreCase = true) -> clearGoalInternal(sessionId)
+            arg.equals("pause", ignoreCase = true) -> pauseGoal(sessionId)
+            arg.equals("resume", ignoreCase = true) -> resumeGoal(sessionId) { prompt, _ ->
+                onStartTurn(prompt, resolvedRoot)
+            }
+            else -> setGoalText(sessionId, session, arg) { prompt, _ ->
+                onStartTurn(prompt, resolvedRoot)
+            }
+        }
+    }
+
+    private fun goalSummary(session: ChatSessionEntity): String {
+        val goal = session.goal?.takeIf { it.isNotBlank() }
+            ?: return "当前会话未设定目标。用 `/goal <目标>` 设定后，AI 会自主循环推进直到达成、受阻或预算耗尽。"
+        val status = session.goalStatus
+            ?.let { runCatching { GoalStatus.valueOf(it) }.getOrNull() }
+            ?: GoalStatus.ACTIVE
+        val statusLabel = when (status) {
+            GoalStatus.ACTIVE -> "进行中"
+            GoalStatus.PAUSED -> "已暂停"
+            GoalStatus.COMPLETED -> "已完成"
+            GoalStatus.BLOCKED -> "受阻"
+            GoalStatus.EXHAUSTED -> "预算耗尽"
+        }
+        return "当前目标（$statusLabel，已续跑 ${session.goalTurnCount} 轮）：\n$goal"
+    }
+
+    private suspend fun setGoalText(
+        sid: String,
+        session: ChatSessionEntity,
+        text: String,
+        onStartTurn: (prompt: String, workspacePath: String) -> Unit
+    ) {
+        val goalText = text.trim().take(MAX_GOAL_CHARS)
+        if (goalText.isEmpty()) return
+        resetGoalEmptyTurns(sid)
+        sessionUseCase.setGoal(sid, goalText, session.totalInputTokens, session.totalOutputTokens)
+        if (runCatching { AgentMode.valueOf(session.mode) }.getOrNull() == AgentMode.PLAN) {
+            sessionUseCase.updateMode(sid, AgentMode.BUILD.name)
+        }
+        persistGoalNotice(
+            sid,
+            "已设定目标：$goalText\nAI 将自主循环推进（工具自动放行、PLAN 停用），直到达成、受阻或预算耗尽。" +
+                "可随时 `/goal pause` / `/goal resume` / `/goal clear`。"
+        )
+        onStartTurn(buildGoalPrompt(goalText, 1), session.workspacePath)
+    }
+
+    private suspend fun clearGoalInternal(sid: String) {
+        resetGoalEmptyTurns(sid)
+        sessionUseCase.setGoal(sid, null, 0, 0)
+        persistGoalNotice(sid, "已清除当前目标。")
+    }
+
+    private suspend fun pauseGoal(sid: String) {
+        val session = sessionUseCase.getSessionById(sid) ?: return
+        if (session.goal.isNullOrBlank()) {
+            persistGoalNotice(sid, "当前会话未设定目标。")
+            return
+        }
+        sessionUseCase.updateGoalStatus(sid, GoalStatus.PAUSED)
+        persistGoalNotice(sid, "目标已暂停。用 `/goal resume` 继续。")
+    }
+
+    private suspend fun resumeGoal(
+        sid: String,
+        onStartTurn: (prompt: String, workspacePath: String) -> Unit
+    ) {
+        val session = sessionUseCase.getSessionById(sid) ?: return
+        val goal = session.goal?.takeIf { it.isNotBlank() }
+        if (goal == null) {
+            persistGoalNotice(sid, "当前会话未设定目标。")
+            return
+        }
+        sessionUseCase.updateGoalStatus(sid, GoalStatus.ACTIVE)
+        persistGoalNotice(sid, "目标已恢复，继续自主循环。")
+        onStartTurn(buildGoalPrompt(goal, session.goalTurnCount + 1), session.workspacePath)
+    }
+
+    private fun launchResolvedCommand(
+        resolved: ResolvedCommand,
+        input: String,
+        sessionId: String,
+        projectRoot: String
+    ): Job {
+        markCommandStarted(sessionId)
+        val job = scope.launch {
+            var cancelled = false
+            var followUp: (() -> Unit)? = null
+            var suspendAction: (suspend () -> Unit)? = null
+            try {
+                messagePersistenceUseCase.persist(sessionId, MessageRole.USER, input)
+                sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
+                val workspacePath = projectRoot.ifBlank {
+                    sessionUseCase.getSessionById(sessionId)?.workspacePath.orEmpty()
+                }
+                val commandContext = object : SlashCommandContext {
+                    override fun compactCurrentSession() {
+                        suspendAction = { runCompaction(sessionId) }
+                    }
+
+                    override fun showUsage() {
+                        suspendAction = { persistUsageTable(sessionId) }
+                    }
+
+                    override fun initProject(prompt: String) {
+                        followUp = {
+                            executeAgentRequestStream(
+                                request = prompt,
+                                projectRoot = workspacePath,
+                                targetSessionId = sessionId,
+                                isAutoTrigger = true
+                            )
+                        }
+                    }
+
+                    override fun runSkill(skill: Skill, args: String) {
+                        followUp = {
+                            executeAgentRequestStream(
+                                request = SlashCommandRegistry.buildSkillPrompt(skill, args),
+                                projectRoot = workspacePath,
+                                targetSessionId = sessionId,
+                                isAutoTrigger = true
+                            )
+                        }
+                    }
+
+                    override fun setSessionGoal(rawArgs: String) {
+                        suspendAction = {
+                            handleSetSessionGoal(sessionId, rawArgs, workspacePath) { goalPrompt, root ->
+                                followUp = { enqueueGoalTurn(sessionId, root, goalPrompt) }
+                            }
+                        }
+                    }
+                }
+                when (resolved) {
+                    is ResolvedCommand.Action -> resolved.handler.execute(commandContext, resolved.args)
+                    is ResolvedCommand.SkillCommand -> commandContext.runSkill(resolved.skill, resolved.args)
+                }
+                suspendAction?.invoke()
+            } catch (e: CancellationException) {
+                cancelled = true
+                throw e
+            } finally {
+                if (commandJobs[sessionId] == coroutineContext[Job]) {
+                    commandJobs.remove(sessionId)
+                }
+                finishCommand(sessionId, cancelled = cancelled, followUp = followUp)
+            }
+        }
+        commandJobs[sessionId] = job
+        return job
     }
 
     fun stopAgentSession(sessionId: String) {
@@ -842,6 +1137,8 @@ class AgentRunManager @Inject constructor(
         }
         jobs.forEach { it.cancel() }
         sessionJobs.clear()
+        commandJobs.values.forEach { it.cancel() }
+        commandJobs.clear()
         _runningCommandSessions.value = emptySet()
         _agentStates.value = _agentStates.value.mapValues { AgentUIState.Idle }
         streamingAssistantStore.clearAll()
@@ -857,6 +1154,9 @@ class AgentRunManager @Inject constructor(
         _queuedRequests.value = _queuedRequests.value - sessionId
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
+        commandJobs[sessionId]?.cancel()
+        commandJobs.remove(sessionId)
+        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
         _agentStates.value = _agentStates.value - sessionId
         _runningTools.value = _runningTools.value - sessionId
         _retryStates.value = _retryStates.value - sessionId
@@ -1117,15 +1417,24 @@ class AgentRunManager @Inject constructor(
         skipTitleUpdate: Boolean = false,
         notificationSeqs: List<Long> = emptyList()
     ): Job {
+        val resolvedCommand = if (
+            !isAutoTrigger && persistUserMessage && notificationSeqs.isEmpty() &&
+            request.trimStart().startsWith("/")
+        ) {
+            slashCommandRegistry.resolve(request)
+        } else {
+            null
+        }
+        if (resolvedCommand != null) {
+            val sessionId = targetSessionId ?: return Job().apply { complete() }
+            return launchResolvedCommand(resolvedCommand, request, sessionId, projectRoot)
+        }
         val runToken = Any()
-        if (targetSessionId != null && !request.startsWith("/")) {
+        if (targetSessionId != null) {
             streamingAssistantStore.startRun(targetSessionId, runToken)
         }
         return scope.launch {
         val sessionId = targetSessionId ?: return@launch
-        if (request.startsWith("/")) {
-            return@launch
-        }
         coroutineContext[Job]?.let { sessionJobs[sessionId] = it }
         val currentSession = sessionUseCase.getSessionById(sessionId)
         if (currentSession != null && (currentSession.providerId.isNullOrBlank() || currentSession.model.isNullOrBlank())) {
@@ -1681,6 +1990,7 @@ class AgentRunManager @Inject constructor(
         const val AGENT_COMPLETE_NOTIFICATION_ID = 100
         const val MAX_SUBAGENT_CARDS = 50
         const val MAX_GOAL_EMPTY_TURNS = 3
+        const val MAX_GOAL_CHARS = 2000
         const val KEEPALIVE_TIMEOUT_MS = 60 * 60 * 1000L
         const val WAKE_LOCK_RENEW_MARGIN_MS = 10 * 60 * 1000L
         val TASK_NOTIFICATION_TITLE_REGEX = Regex("<title>([^<]+)</title>")
