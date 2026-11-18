@@ -1358,40 +1358,37 @@ private fun AddModelSheet(
                     }
                 }
 
-                if (supportsReasoning) {
-                    SectionLabel(stringResource(R.string.provider_model_section_reasoning))
-                    Text(
-                        text = stringResource(R.string.provider_model_reasoning_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.semanticColors.mutedSurface
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column {
-                            CapabilitySwitchRow(
-                                title = stringResource(R.string.provider_model_reasoning_can_disable),
-                                checked = reasoningCanDisable,
-                                onCheckedChange = { reasoningCanDisable = it }
-                            )
-                            EDITABLE_REASONING_LEVELS.forEach { level ->
-                                SettingsDivider()
-                                ReasoningLevelRow(
-                                    title = level.reasoningLabel(),
-                                    checked = level.apiValue in reasoningLevels,
-                                    onToggle = {
-                                        reasoningLevels = if (level.apiValue in reasoningLevels) {
-                                            reasoningLevels - level.apiValue
-                                        } else {
-                                            reasoningLevels + level.apiValue
-                                        }
-                                    }
-                                )
+                SectionLabel(stringResource(R.string.provider_model_section_reasoning))
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.semanticColors.mutedSurface
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
+                        CapabilitySwitchRow(
+                            title = stringResource(R.string.provider_model_reasoning_can_disable),
+                            checked = reasoningCanDisable,
+                            onCheckedChange = {
+                                reasoningCanDisable = it
+                                if (it) supportsReasoning = true
                             }
+                        )
+                        EDITABLE_REASONING_LEVELS.forEach { level ->
+                            SettingsDivider()
+                            ReasoningLevelRow(
+                                title = level.reasoningLabel(),
+                                checked = level.apiValue in reasoningLevels,
+                                onToggle = {
+                                    reasoningLevels = if (level.apiValue in reasoningLevels) {
+                                        reasoningLevels - level.apiValue
+                                    } else {
+                                        supportsReasoning = true
+                                        reasoningLevels + level.apiValue
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -1426,7 +1423,10 @@ private fun AddModelSheet(
                             supportsImageOutput = supportsImageOutput,
                             supportsTools = supportsTools,
                             supportsReasoning = supportsReasoning,
-                            reasoningLevels = reasoningLevels.toList().takeIf { it.isNotEmpty() },
+                            reasoningLevels = EDITABLE_REASONING_LEVELS
+                                .map { it.apiValue }
+                                .filter { it in reasoningLevels }
+                                .takeIf { it.isNotEmpty() },
                             reasoningCanDisable = reasoningCanDisable,
                             // 预算范围与默认档沿用自动识别值，避免手填档位时丢掉预算型信息。
                             reasoningBudgetMin = initial?.reasoningBudgetMin,

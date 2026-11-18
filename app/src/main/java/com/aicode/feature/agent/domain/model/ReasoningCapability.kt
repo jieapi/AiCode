@@ -72,7 +72,10 @@ data class ReasoningCapability(
 
     /** UI 可选档位：能关闭时把「关闭」排在最前。 */
     val selectableLevels: List<ReasoningEffort>
-        get() = if (canDisable) listOf(ReasoningEffort.NONE) + levels else levels
+        get() {
+            val sorted = levels.distinct().sortedBy { it.ordinal }
+            return if (canDisable) listOf(ReasoningEffort.NONE) + sorted else sorted
+        }
 
     companion object {
         /** 未知能力的兜底：不做任何断言，供 UI 标「可能不生效」。 */

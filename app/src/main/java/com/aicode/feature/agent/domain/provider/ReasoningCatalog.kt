@@ -47,7 +47,7 @@ fun ReasoningCapability.preferredOnLevel(): ReasoningEffort? =
  * - 能力未知（中转站改名 / 自定义模型）：退回全部档位由用户判断，UI 会同时给出「可能不生效」提示。
  */
 fun ReasoningCapability.selectableLevelsForUi(): List<ReasoningEffort> =
-    if (isKnown) levels else ReasoningEffort.entries.filter { it != ReasoningEffort.NONE }
+    if (isKnown) levels.distinct().sortedBy { it.ordinal } else ReasoningEffort.entries.filter { it != ReasoningEffort.NONE }
 
 /** 是否给「思考」总开关：能关闭，或能力未知（交给用户试）。 */
 fun ReasoningCapability.showsThinkingToggle(): Boolean = canDisable || !isKnown

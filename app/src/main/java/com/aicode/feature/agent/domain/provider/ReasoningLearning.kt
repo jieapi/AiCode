@@ -67,6 +67,7 @@ object ReasoningLearning {
             .map { it.trim().trim('\'', '"', '.', '`') }
             .mapNotNull { ReasoningEffort.fromApiValue(it) }
             .distinct()
+            .sortedBy { it.ordinal }
         return levels.takeIf { it.isNotEmpty() }
     }
 

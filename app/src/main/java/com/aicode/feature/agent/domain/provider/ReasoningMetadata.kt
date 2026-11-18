@@ -13,7 +13,7 @@ import com.aicode.feature.settings.domain.model.ModelMetadata
  */
 fun ModelMetadata.toReasoningCapability(): ReasoningCapability? {
     val declared = reasoningLevels.orEmpty().mapNotNull { ReasoningEffort.fromApiValue(it) }
-    val levels = declared.filter { it != ReasoningEffort.NONE }
+    val levels = declared.filter { it != ReasoningEffort.NONE }.distinct().sortedBy { it.ordinal }
     val canDisable = reasoningCanDisable || declared.contains(ReasoningEffort.NONE)
     if (levels.isEmpty() && !canDisable && reasoningBudgetMin == null) return null
     return ReasoningCapability(

@@ -125,8 +125,8 @@ internal fun SubAgentEditorScreen(
         val capability = provider?.let { reasoningCapabilityOf(it, model, modelMetadata) }
         when {
             capability == null || !capability.isKnown -> ReasoningEffort.entries
-            capability.canDisable -> listOf(ReasoningEffort.NONE) + capability.levels
-            else -> capability.levels.ifEmpty { ReasoningEffort.entries }
+            capability.canDisable -> listOf(ReasoningEffort.NONE) + capability.levels.distinct().sortedBy { it.ordinal }
+            else -> capability.levels.ifEmpty { ReasoningEffort.entries }.distinct().sortedBy { it.ordinal }
         }
     }
 
