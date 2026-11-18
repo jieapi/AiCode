@@ -81,4 +81,30 @@ class AILoggerRedactTest {
         assertTrue(out.contains("https://example.com/a.png"))
         assertFalse(out.contains("base64 omitted"))
     }
+
+    @Test
+    fun logsOnlyAtDebugOrVerbose() {
+        val prev = AILogger.minLevel
+        try {
+            AILogger.setMinLevel(LogLevel.VERBOSE)
+            assertTrue(AILogger.isLoggingEnabled())
+
+            AILogger.setMinLevel(LogLevel.DEBUG)
+            assertTrue(AILogger.isLoggingEnabled())
+
+            AILogger.setMinLevel(LogLevel.INFO)
+            assertFalse(AILogger.isLoggingEnabled())
+
+            AILogger.setMinLevel(LogLevel.WARN)
+            assertFalse(AILogger.isLoggingEnabled())
+
+            AILogger.setMinLevel(LogLevel.ERROR)
+            assertFalse(AILogger.isLoggingEnabled())
+
+            AILogger.setMinLevel(LogLevel.NONE)
+            assertFalse(AILogger.isLoggingEnabled())
+        } finally {
+            AILogger.setMinLevel(prev)
+        }
+    }
 }

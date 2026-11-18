@@ -2,6 +2,7 @@ package com.aicode.feature.settings.presentation.component
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -135,6 +138,7 @@ import compose.icons.feathericons.Info
 import compose.icons.feathericons.Lock
 import compose.icons.feathericons.Moon
 import compose.icons.feathericons.MessageSquare
+import compose.icons.feathericons.MoreVertical
 import compose.icons.feathericons.Package
 import compose.icons.feathericons.Edit2
 import compose.icons.feathericons.PieChart
@@ -144,6 +148,7 @@ import compose.icons.feathericons.RotateCcw
 import compose.icons.feathericons.Save
 import compose.icons.feathericons.Server
 import compose.icons.feathericons.Settings
+import compose.icons.feathericons.Share2
 import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Terminal
@@ -538,6 +543,11 @@ fun SettingsScreen(
     var showBackgroundSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     var showResetTokenStats by remember { mutableStateOf(false) }
+    var showLogLevelSheet by remember { mutableStateOf(false) }
+    var showLogShareMenu by remember { mutableStateOf(false) }
+    var showLogMoreMenu by remember { mutableStateOf(false) }
+    var showLogPathDialog by remember { mutableStateOf(false) }
+    var clearLogsConfirmCurrentOnly by remember { mutableStateOf<Boolean?>(null) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
     val expanded = maxWidth >= SettingsTwoPaneMinWidth
@@ -1076,8 +1086,123 @@ fun SettingsScreen(
                             }
                         }
                         SettingsSection.Log -> {
+                            Box {
+                                IconButton(onClick = { showLogShareMenu = true }) {
+                                    Icon(
+                                        FeatherIcons.Share2,
+                                        contentDescription = stringResource(R.string.log_share),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showLogShareMenu,
+                                    onDismissRequest = { showLogShareMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.log_share_current)) },
+                                        leadingIcon = {
+                                            Icon(FeatherIcons.FileText, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        },
+                                        enabled = logViewerState.selectedFileName != null,
+                                        onClick = {
+                                            showLogShareMenu = false
+                                            viewModel.prepareShareCurrentLog(
+                                                onReady = { intent ->
+                                                    context.startActivity(
+                                                        Intent.createChooser(intent, context.getString(R.string.log_share_chooser))
+                                                    )
+                                                },
+                                                onError = { msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.log_share_all_zip)) },
+                                        leadingIcon = {
+                                            Icon(FeatherIcons.Package, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        },
+                                        onClick = {
+                                            showLogShareMenu = false
+                                            viewModel.prepareShareAllLogs(
+                                                onReady = { intent ->
+                                                    context.startActivity(
+                                                        Intent.createChooser(intent, context.getString(R.string.log_share_chooser))
+                                                    )
+                                                },
+                                                onError = { msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                             IconButton(onClick = { viewModel.refreshLogs() }) {
-                                Icon(FeatherIcons.RefreshCw, contentDescription = stringResource(R.string.settings_refresh_logs))
+                                Icon(
+                                    FeatherIcons.RefreshCw,
+                                    contentDescription = stringResource(R.string.settings_refresh_logs),
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Box {
+                                IconButton(onClick = { showLogMoreMenu = true }) {
+                                    Icon(
+                                        FeatherIcons.MoreVertical,
+                                        contentDescription = stringResource(R.string.log_more_actions),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showLogMoreMenu,
+                                    onDismissRequest = { showLogMoreMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.log_path_info)) },
+                                        leadingIcon = {
+                                            Icon(FeatherIcons.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        },
+                                        onClick = {
+                                            showLogMoreMenu = false
+                                            showLogPathDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.log_clear_current)) },
+                                        leadingIcon = {
+                                            Icon(FeatherIcons.Trash2, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        },
+                                        enabled = logViewerState.files.isNotEmpty(),
+                                        onClick = {
+                                            showLogMoreMenu = false
+                                            clearLogsConfirmCurrentOnly = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = stringResource(R.string.log_clear_all),
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                FeatherIcons.Trash2,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            showLogMoreMenu = false
+                                            clearLogsConfirmCurrentOnly = false
+                                        }
+                                    )
+                                }
                             }
                         }
                         SettingsSection.TokenStats -> {
@@ -1410,10 +1535,16 @@ fun SettingsScreen(
                 )
                 SettingsSection.Log -> LogSection(
                     current = logLevel,
-                    onSelect = { viewModel.setLogLevel(it) },
+                    onOpenLevelSheet = { showLogLevelSheet = true },
                     state = logViewerState,
+                    onSelectSource = { viewModel.selectLogSource(it) },
                     onSelectFile = { viewModel.selectLogFile(it) },
-                    onClearFilter = { viewModel.refreshLogs(filterServerName = null) },
+                    onDeleteFile = { viewModel.deleteLogFile(it) },
+                    onSelectLevelFilter = { viewModel.setLogLevelFilter(it) },
+                    onSelectTagFilter = { viewModel.setLogTagFilter(it) },
+                    onClearMcpFilter = { viewModel.refreshLogs(filterServerName = null) },
+                    onLoadEarlier = { viewModel.loadEarlierLogs() },
+                    onLoadAiDetail = { viewModel.loadAiBlockDetail(it) },
                     onRefresh = { viewModel.refreshLogs(silent = true) }
                 )
                 SettingsSection.Permissions -> PermissionsSection(
@@ -1738,6 +1869,67 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showResetTokenStats = false }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    if (showLogLevelSheet) {
+        LogLevelSheet(
+            current = logLevel,
+            onSelect = {
+                viewModel.setLogLevel(it)
+                showLogLevelSheet = false
+            },
+            onDismiss = { showLogLevelSheet = false }
+        )
+    }
+
+    if (showLogPathDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogPathDialog = false },
+            title = { Text(stringResource(R.string.log_path_info)) },
+            text = { Text(stringResource(R.string.log_path_info_body, context.packageName)) },
+            confirmButton = {
+                TextButton(onClick = { showLogPathDialog = false }) {
+                    Text(stringResource(R.string.common_got_it))
+                }
+            }
+        )
+    }
+
+    clearLogsConfirmCurrentOnly?.let { currentOnly ->
+        AlertDialog(
+            onDismissRequest = { clearLogsConfirmCurrentOnly = null },
+            title = {
+                Text(
+                    stringResource(
+                        if (currentOnly) R.string.log_clear_current else R.string.log_clear_all
+                    )
+                )
+            },
+            text = {
+                Text(
+                    stringResource(
+                        if (currentOnly) R.string.log_clear_current_confirm else R.string.log_clear_all_confirm
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearLogs(currentSourceOnly = currentOnly)
+                    clearLogsConfirmCurrentOnly = null
+                    Toast.makeText(context, R.string.log_cleared, Toast.LENGTH_SHORT).show()
+                }) {
+                    Text(
+                        text = stringResource(R.string.common_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearLogsConfirmCurrentOnly = null }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
             }
         )
     }

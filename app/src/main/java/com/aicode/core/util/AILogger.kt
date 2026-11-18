@@ -71,12 +71,32 @@ object AILogger {
     @Volatile
     private var logDir: File? = null
 
+    /**
+     * 最低记录等级阈值：与 [FileLogger] 同步，仅在 [LogLevel.DEBUG] 及以下（VERBOSE / DEBUG）
+     * 时落盘完整 AI 请求/响应/SSE；INFO 及以上跳过写入，零磁盘与序列化开销。
+     */
+    @Volatile
+    var minLevel: LogLevel = LogLevel.VERBOSE
+        private set
+
     /** 每会话的调用计数：用于把同一次交互的 REQUEST / RESPONSE 配上同一序号。 */
     private val counters = ConcurrentHashMap<String, AtomicInteger>()
+
+    /** 同步全局日志等级（由 `AIEditorApp` 在启动与设置变更时调用）。 */
+    fun setMinLevel(level: LogLevel) {
+        minLevel = level
+    }
+
+    /** 是否允许记录 AI 请求日志：仅 DEBUG / VERBOSE 开启，INFO 及以上关闭。 */
+    fun isLoggingEnabled(): Boolean = minLevel.ordinal <= LogLevel.DEBUG.ordinal
 
     /** 初始化日志目录。重复调用安全。 */
     fun init(context: Context) {
         if (logDir != null) return
+        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (minLevel == LogLevel.VERBOSE) {
+            minLevel = if (debuggable) LogLevel.VERBOSE else LogLevel.INFO
+        }
         // 优先外部私有目录，便于（root 或 adb 下）取出；不可用时回退内部存储。
         val base = context.getExternalFilesDir(null) ?: context.filesDir
         val dir = File(base, "ai-logs").apply { mkdirs() }
@@ -93,6 +113,7 @@ object AILogger {
      *   会让 REQUEST 与 RESPONSE/ERROR 的编号错配——响应晚到时读到的是最新计数器值。
      */
     fun logRequest(sessionId: String?, provider: String, model: String, method: String, url: String, body: Any?): Int {
+        if (!isLoggingEnabled()) return 0
         val n = counter(sessionId).incrementAndGet()
         appendToSession(sessionId) { w ->
             w.write("\n")
@@ -109,6 +130,7 @@ object AILogger {
 
     /** 记录一次非流式响应对象（用 Gson 序列化为 JSON）。[seq] 必须来自对应 [logRequest] 的返回值。 */
     fun logResponse(sessionId: String?, provider: String, body: Any?, seq: Int) {
+        if (!isLoggingEnabled() || seq <= 0) return
         appendToSession(sessionId) { w ->
             w.write("${now()}  RESPONSE #$seq   [$provider]\n")
             w.write("--- response body ---\n")
@@ -124,6 +146,7 @@ object AILogger {
      * 追加 `--- error response body ---` 段落记录完整原文（脱敏后），不截断。
      */
     fun logError(sessionId: String?, provider: String, throwable: Throwable, seq: Int) {
+        if (!isLoggingEnabled() || seq <= 0) return
         appendToSession(sessionId) { w ->
             w.write("${now()}  ERROR #$seq   [$provider]\n")
             w.write("${throwable.javaClass.name}: ${throwable.message ?: ""}\n")
@@ -143,23 +166,26 @@ object AILogger {
      * @param seq 必须来自对应 [logRequest] 的返回值。
      */
     fun beginRawSse(sessionId: String?, provider: String, seq: Int): RawSseLog =
-        RawSseLog(sessionId, provider, seq)
+        RawSseLog(sessionId, provider, seq, enabled = isLoggingEnabled() && seq > 0)
 
     /** 一次流式响应的原始 SSE 日志缓冲句柄，累积到阈值即分批落盘。 */
     class RawSseLog internal constructor(
         private val sessionId: String?,
         private val provider: String,
-        private val seq: Int
+        private val seq: Int,
+        private val enabled: Boolean
     ) {
         private val buffer = StringBuilder()
         private var headerWritten = false
 
         fun append(line: String) {
+            if (!enabled) return
             buffer.append(redactString(line, null)).append('\n')
             if (buffer.length >= SSE_FLUSH_CHARS) flush()
         }
 
         fun finish() {
+            if (!enabled) return
             if (buffer.isEmpty() && !headerWritten) {
                 headerWritten = true
                 writeChunk(header() + "(空响应)\n")
@@ -190,12 +216,38 @@ object AILogger {
     private fun counter(sessionId: String?): AtomicInteger =
         counters.getOrPut(sessionId ?: "unknown") { AtomicInteger(0) }
 
+    /** AI 会话日志目录（未初始化时为 null）。供导出与诊断界面读取。 */
+    fun logDirectory(): File? = logDir
+
     /** 返回当前所有会话日志文件，按文件名排序，供占用统计与清理使用。 */
     fun listLogFiles(): List<File> {
         val dir = logDir ?: return emptyList()
         return dir.listFiles { f -> f.isFile && f.name.startsWith("session-") }
             ?.sortedBy { it.name }
             ?: emptyList()
+    }
+
+    /** 删除指定名称的单个会话日志文件（排到 [ioExecutor] 避免与追加写冲突）。 */
+    fun deleteLogFile(fileName: String): Boolean {
+        val dir = logDir ?: return false
+        if (fileName.contains('/') || fileName.contains('\\') || !fileName.startsWith("session-")) return false
+        val target = File(dir, fileName)
+        val deleted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        ioExecutor.execute {
+            runCatching {
+                if (target.exists() && target.isFile) {
+                    deleted.set(target.delete())
+                }
+                if (fileName.endsWith(".log")) {
+                    val id = fileName.removePrefix("session-").removeSuffix(".log")
+                    counters.remove(id)
+                }
+            }.onFailure { Log.e(TAG, "删除 AI 会话日志失败: $fileName", it) }
+            latch.countDown()
+        }
+        runCatching { latch.await(5, java.util.concurrent.TimeUnit.SECONDS) }
+        return deleted.get()
     }
 
     /**

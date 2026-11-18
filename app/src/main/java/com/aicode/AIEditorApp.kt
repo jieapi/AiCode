@@ -331,7 +331,10 @@ class AIEditorApp : Application(), Configuration.Provider {
         }
         // 启动即加载持久化等级，并随设置页改动实时生效（唯一同步点）。
         appScope.launch {
-            logSettings.levelFlow.collectLatest { FileLogger.setMinLevel(it) }
+            logSettings.levelFlow.collectLatest {
+                FileLogger.setMinLevel(it)
+                AILogger.setMinLevel(it)
+            }
         }
         // 启动即同步从 DataStore 读首帧执行模式缓存到 ExecutionModeHolder，供 DI @Provides 同步读取。
         // 异步读首帧模式写入 ExecutionModeHolder。委托层（DelegatingCommandEngine/DelegatingFileAccess）

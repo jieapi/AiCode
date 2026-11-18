@@ -149,6 +149,66 @@ object FileLogger {
     }
 
     /**
+     * 删除指定名称的单个日志文件。
+     *
+     * 同样排到 [ioExecutor] 上执行：若目标恰好是当天正在写入的文件，必须先关闭并重置 [writer]，
+     * 否则后续日志会继续写入已删除的 inode。
+     */
+    fun deleteLogFile(fileName: String): Boolean {
+        val dir = logDir ?: return false
+        if (fileName.contains('/') || fileName.contains('\\') || !fileName.startsWith("log-")) return false
+        val target = File(dir, fileName)
+        val deleted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        ioExecutor.execute {
+            runCatching {
+                val activeFileName = writerDate?.let { "log-$it.txt" }
+                if (activeFileName == fileName) {
+                    writer?.close()
+                    writer = null
+                    writerDate = null
+                    flushScheduled = false
+                }
+                if (target.exists() && target.isFile) {
+                    deleted.set(target.delete())
+                }
+            }.onFailure { Log.e(TAG, "删除日志文件失败: $fileName", it) }
+            latch.countDown()
+        }
+        runCatching { latch.await(5, java.util.concurrent.TimeUnit.SECONDS) }
+        return deleted.get()
+    }
+
+    /** 返回崩溃追踪目录（`logs/crash-traces/`）下的全部文件，按最近修改时间降序。 */
+    fun listCrashTraceFiles(): List<File> {
+        val dir = logDir?.let { File(it, "crash-traces") } ?: return emptyList()
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+        return dir.listFiles { f -> f.isFile }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+    }
+
+    /** 删除单个崩溃追踪文件。 */
+    fun deleteCrashTraceFile(fileName: String): Boolean {
+        val dir = logDir?.let { File(it, "crash-traces") } ?: return false
+        if (fileName.contains('/') || fileName.contains('\\')) return false
+        val target = File(dir, fileName)
+        return target.exists() && target.isFile && runCatching { target.delete() }.getOrDefault(false)
+    }
+
+    /** 清空全部崩溃追踪文件，返回释放字节数。 */
+    fun clearCrashTraces(): Long {
+        val dir = logDir?.let { File(it, "crash-traces") } ?: return 0L
+        if (!dir.exists() || !dir.isDirectory) return 0L
+        var freed = 0L
+        dir.listFiles { f -> f.isFile }?.forEach { file ->
+            val size = file.length()
+            if (runCatching { file.delete() }.getOrDefault(false)) freed += size
+        }
+        return freed
+    }
+
+    /**
      * 删除全部日志文件，返回释放的字节数。
      *
      * 删除动作必须排到 [ioExecutor] 上：当天的文件正被 [writer] 持有句柄，不先关闭并清掉日期标记，
