@@ -47,9 +47,9 @@ import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AppSwitch
 import com.aicode.core.ui.BatchDeleteConfirmDialog
+import com.aicode.core.ui.FloatingSelectionBar
 import com.aicode.core.ui.ListSelectionState
-import com.aicode.core.ui.SelectionActionBar
-import com.aicode.core.ui.SelectionActionIconButton
+import com.aicode.core.ui.SelectionActionDangerButton
 import com.aicode.core.ui.SwipeToDeleteRow
 import com.aicode.feature.agent.domain.prompt.PromptFragment
 import com.aicode.feature.agent.domain.prompt.PromptFragmentSource
@@ -57,7 +57,6 @@ import com.aicode.feature.settings.presentation.PromptsUiState
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.FileText
-import compose.icons.feathericons.Trash2
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -102,57 +101,56 @@ internal fun PromptsSection(
 
     val allSelected = selection.selectedCount > 0 && selection.selectedCount == selectableKeys.size
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        SettingsGroup(
-            modifier = Modifier
-                .padding(horizontal = Spacing.lg)
-                .padding(top = Spacing.sm)
-        ) {
-            SettingsRow(
-                icon = null,
-                title = stringResource(R.string.prompts_disable_builtin),
-                subtitle = stringResource(R.string.prompts_disable_builtin_hint),
-                trailing = {
-                    AppSwitch(checked = state.builtinDisabled, onCheckedChange = onToggleBuiltinDisabled)
-                }
-            )
-        }
-
-        if (selection.isActive) {
-            SelectionActionBar(
-                selectedCount = selection.selectedCount,
-                allSelected = allSelected,
-                onToggleSelectAll = {
-                    if (allSelected) selection.clear() else selection.replaceAll(selectableKeys)
-                },
-                onExit = { selection.exit() }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            SettingsGroup(
+                modifier = Modifier
+                    .padding(horizontal = Spacing.lg)
+                    .padding(top = Spacing.sm)
             ) {
-                val enabled = selection.selectedCount > 0
-                SelectionActionIconButton(
-                    icon = FeatherIcons.Trash2,
-                    contentDescription = stringResource(R.string.common_batch_delete),
-                    enabled = enabled,
-                    onClick = { showBatchDeleteConfirm = true },
-                    tint = MaterialTheme.colorScheme.error
+                SettingsRow(
+                    icon = null,
+                    title = stringResource(R.string.prompts_disable_builtin),
+                    subtitle = stringResource(R.string.prompts_disable_builtin_hint),
+                    trailing = {
+                        AppSwitch(checked = state.builtinDisabled, onCheckedChange = onToggleBuiltinDisabled)
+                    }
+                )
+            }
+
+            if (state.fragments.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.prompts_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 12.dp)
+                )
+            } else {
+                PromptList(
+                    fragments = state.fragments,
+                    selection = selection,
+                    onOpenFragment = onOpenFragment,
+                    onDeleteFragment = onDeleteFragment,
+                    onReorder = onReorder,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
 
-        if (state.fragments.isEmpty()) {
-            Text(
-                text = stringResource(R.string.prompts_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 12.dp)
-            )
-        } else {
-            PromptList(
-                fragments = state.fragments,
-                selection = selection,
-                onOpenFragment = onOpenFragment,
-                onDeleteFragment = onDeleteFragment,
-                onReorder = onReorder,
-                modifier = Modifier.weight(1f)
+        FloatingSelectionBar(
+            visible = selection.isActive,
+            selectedCount = selection.selectedCount,
+            allSelected = allSelected,
+            onToggleSelectAll = {
+                if (allSelected) selection.clear() else selection.replaceAll(selectableKeys)
+            },
+            onExit = { selection.exit() },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            SelectionActionDangerButton(
+                text = stringResource(R.string.common_batch_delete),
+                enabled = selection.selectedCount > 0,
+                onClick = { showBatchDeleteConfirm = true }
             )
         }
     }
@@ -198,9 +196,11 @@ private fun PromptList(
         state = listState,
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.xl),
-        contentPadding = PaddingValues(top = Spacing.xs),
+            .padding(horizontal = Spacing.lg),
+        contentPadding = PaddingValues(
+            top = Spacing.xs,
+            bottom = if (selection.isActive) 88.dp else Spacing.xl
+        ),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         itemsIndexed(

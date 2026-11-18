@@ -101,7 +101,7 @@ fun SwipeToDeleteRow(
                         checkedColor = MaterialTheme.colorScheme.primary,
                         uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
                     ),
-                    modifier = Modifier.padding(horizontal = Spacing.xs)
+                    modifier = Modifier.padding(start = Spacing.lg)
                 )
             }
             Box(modifier = Modifier.weight(1f)) {

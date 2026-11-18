@@ -233,12 +233,30 @@ internal fun ProviderModelRow(
                         }
                     }
                 }
-                result?.let { r ->
-                    ModelTestResultLine(
-                        model = model,
-                        result = r,
+                if (testing) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = Spacing.xs, start = ModelContentStart)
-                    )
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.8.dp
+                        )
+                        Spacer(Modifier.width(Spacing.xs))
+                        Text(
+                            text = stringResource(R.string.proxy_testing),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else {
+                    result?.let { r ->
+                        ModelTestResultLine(
+                            model = model,
+                            result = r,
+                            modifier = Modifier.padding(top = Spacing.xs, start = ModelContentStart)
+                        )
+                    }
                 }
             }
             if (showDivider) {

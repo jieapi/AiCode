@@ -1,6 +1,17 @@
 package com.aicode.core.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,36 +22,49 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aicode.R
+import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
+import com.aicode.core.theme.semanticColors
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.CheckSquare
 import compose.icons.feathericons.X
 
 /**
- * 列表多选状态。key 由各页面自定义（提供商 id / `作用域:名称` / 提示词编号 / 镜像 id），
+ * 列表多选状态。key 由各页面自定义（提供商 id / `作用域:名称` / 提示词编号 / 镜像 id / 会话 id），
  * 这样一套组件能服务所有「可批量操作的字符串键列表」，页面侧只需提供 key 映射。
  *
  * 约定：
@@ -71,6 +95,13 @@ class ListSelectionState {
         isActive = true
     }
 
+    /** 进入多选并默认选中单个条目（如长按某条打开批量选择）。 */
+    fun enterWith(key: String) {
+        isActive = true
+        _selected.clear()
+        _selected.add(key)
+    }
+
     fun exit() {
         isActive = false
         _selected.clear()
@@ -90,6 +121,18 @@ class ListSelectionState {
     fun retainOnly(keys: Set<String>) {
         _selected.retainAll(keys)
     }
+
+    companion object {
+        val Saver: Saver<ListSelectionState, Any> = listSaver(
+            save = { listOf(it.isActive) + it._selected },
+            restore = { saved ->
+                ListSelectionState().apply {
+                    if (saved.firstOrNull() == true) enter()
+                    saved.drop(1).filterIsInstance<String>().forEach { _selected.add(it) }
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -99,115 +142,214 @@ class ListSelectionState {
 @Composable
 fun rememberListSelectionState(): ListSelectionState = remember { ListSelectionState() }
 
+/** 跨配置与组合重建持久化多选状态（供侧边抽屉等会离开组合树的场景使用）。 */
+@Composable
+fun rememberSaveableListSelectionState(): ListSelectionState =
+    rememberSaveable(saver = ListSelectionState.Saver) { ListSelectionState() }
+
 /**
- * 顶部栏右上角的多选开关：与模型页同一套图标与配色（`FeatherIcons.CheckSquare`）。
- * 列表为空时调用方不显示它；[enabled] = false 时置灰不可点（如提示词全部为只读来源，
- * 进多选也无项可勾）。
+ * 顶部栏右上角的多选开关：激活态带圆形浅底高亮，未激活态为常规图标按钮。
+ * 列表为空时调用方不显示它；[enabled] = false 时置灰不可点。
  */
 @Composable
 fun SelectionToggleAction(selection: ListSelectionState, enabled: Boolean = true) {
+    SelectionToggleAction(
+        active = selection.isActive,
+        onToggle = { if (selection.isActive) selection.exit() else selection.enter() },
+        enabled = enabled
+    )
+}
+
+/** 无状态版多选开关，供自持选区状态的页面（如模型列表）复用一致的顶栏样式。 */
+@Composable
+fun SelectionToggleAction(
+    active: Boolean,
+    onToggle: () -> Unit,
+    enabled: Boolean = true,
+    contentDescription: String = stringResource(R.string.common_select_mode)
+) {
     IconButton(
-        onClick = { if (selection.isActive) selection.exit() else selection.enter() },
+        onClick = onToggle,
         enabled = enabled
     ) {
-        Icon(
-            FeatherIcons.CheckSquare,
-            contentDescription = stringResource(R.string.common_select_mode),
-            tint = if (selection.isActive) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onBackground.copy(alpha = if (enabled) 1f else 0.38f),
-            modifier = Modifier.size(22.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                FeatherIcons.CheckSquare,
+                contentDescription = contentDescription,
+                tint = when {
+                    active -> MaterialTheme.colorScheme.primary
+                    enabled -> MaterialTheme.colorScheme.onBackground
+                    else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.38f)
+                },
+                modifier = Modifier.size(22.dp)
+            )
+        }
     }
 }
 
 /**
- * 列表顶部操作条：左侧「已选 N 项」，中间「全选 / 取消全选」，右侧页面自己的批量动作，最右退出。
+ * 底部悬浮多选操作条：左侧（可选关闭按钮 +）「已选 N 项」，右侧「全选 / 取消全选」胶囊按钮 + 页面批量动作。
  *
- * 与模型页（ProviderEditorScreen 的模型 Tab）视觉一致：13sp 主色计数、labelMedium 文本按钮、36dp 图标按钮。
- * [actions] 里的按钮建议用 [SelectionActionButton] 保持同一套尺寸与配色。
+ * 与前端 `.aicode-selection-bar` 保持同一套卡片、描边与阴影规范；默认由顶栏开关或系统返回键退出，
+ * 无顶栏开关的容器（如侧边抽屉）可通过 [showCloseButton] 开启左侧关闭按钮。
  */
 @Composable
-fun SelectionActionBar(
+fun FloatingSelectionBar(
+    visible: Boolean,
     selectedCount: Int,
     allSelected: Boolean,
     onToggleSelectAll: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
+    showCloseButton: Boolean = false,
+    selectedCountText: String = stringResource(R.string.common_selected_count, selectedCount),
+    selectAllText: String = stringResource(
+        if (allSelected) R.string.common_deselect_all else R.string.common_select_all
+    ),
+    outerPadding: PaddingValues = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.md),
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    // 操作条只在多选模式出现：顺手把返回键接管成「退出多选」，与模型页行为一致。
-    BackHandler { onExit() }
+    BackHandler(enabled = visible) { onExit() }
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = slideInVertically { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut()
     ) {
-        Text(
-            text = stringResource(R.string.common_selected_count, selectedCount),
-            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        TextButton(
-            onClick = onToggleSelectAll,
-            contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = 0.dp),
-            modifier = Modifier.height(36.dp)
+        val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+        val shape = RoundedCornerShape(Radius.lg)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(outerPadding)
+                .shadow(
+                    elevation = 6.dp,
+                    shape = shape,
+                    ambientColor = if (isLight) Color.Black.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.36f),
+                    spotColor = if (isLight) Color.Black.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.50f)
+                )
+                .clip(shape)
+                .background(MaterialTheme.semanticColors.cardSurface)
+                .border(1.dp, MaterialTheme.semanticColors.subtleBorder, shape)
+                .padding(horizontal = Spacing.md, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            Text(
-                text = stringResource(
-                    if (allSelected) R.string.common_deselect_all else R.string.common_select_all
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1
-            )
-        }
-        actions()
-        IconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
-            Icon(
-                FeatherIcons.X,
-                contentDescription = stringResource(R.string.common_cancel),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
-            )
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                if (showCloseButton) {
+                    IconButton(onClick = onExit, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            FeatherIcons.X,
+                            contentDescription = stringResource(R.string.common_cancel),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = selectedCountText,
+                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                SelectionActionButton(
+                    text = selectAllText,
+                    onClick = onToggleSelectAll
+                )
+                actions()
+            }
         }
     }
 }
 
-/**
- * 操作条上的紧凑动作按钮。窄屏要在一行里放下「全选 + 两三个动作 + 退出」，
- * 所以内边距压到 [Spacing.sm]、文字用 labelMedium、图标 16dp。
- */
+/** 底部悬浮条内的紧凑圆角填充按钮（用于「全选 / 取消全选」及常规批量操作）。 */
 @Composable
 fun SelectionActionButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    tint: Color = MaterialTheme.colorScheme.primary,
+    loading: Boolean = false,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
     icon: ImageVector? = null
+) {
+    val shape = RoundedCornerShape(Radius.sm)
+    val bgAlpha = if (enabled) 1f else 0.5f
+    val contentColor = if (enabled) tint else tint.copy(alpha = 0.45f)
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = bgAlpha),
+        contentColor = contentColor,
+        border = BorderStroke(1.dp, MaterialTheme.semanticColors.subtleBorder.copy(alpha = bgAlpha)),
+        modifier = modifier.height(36.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = contentColor
+                )
+                Spacer(Modifier.width(Spacing.xs))
+            } else if (icon != null) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(Spacing.xs))
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** 底部悬浮条内的危险文本按钮（无填充底，红色高亮，用于单个危险动作如「删除」）。 */
+@Composable
+fun SelectionActionDangerButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     TextButton(
         onClick = onClick,
         enabled = enabled,
         contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = 0.dp),
-        colors = ButtonDefaults.textButtonColors(contentColor = tint),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = MaterialTheme.colorScheme.error,
+            disabledContentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.38f)
+        ),
         modifier = modifier.height(36.dp)
     ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(Spacing.xs))
-        }
-        Text(text = text, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+            maxLines = 1
+        )
     }
 }
 
 /**
- * 操作条上的图标按钮：动作多于两个时（如 MCP 的启用/停用/重连/删除），
- * 全部用文字会在窄屏上挤掉计数与全选，所以次要动作用图标并配 contentDescription。
+ * 底部悬浮条上的图标按钮：动作多于两个时（如启用/停用/重连/删除），
+ * 避免窄屏上文字过长挤掉计数与全选按钮。
  */
 @Composable
 fun SelectionActionIconButton(

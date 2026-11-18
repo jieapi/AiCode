@@ -41,8 +41,8 @@ import androidx.compose.ui.res.stringResource
 import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.ui.BatchDeleteConfirmDialog
+import com.aicode.core.ui.FloatingSelectionBar
 import com.aicode.core.ui.ListSelectionState
-import com.aicode.core.ui.SelectionActionBar
 import com.aicode.core.ui.SelectionActionButton
 import com.aicode.core.ui.SelectionActionIconButton
 import com.aicode.core.ui.SwipeToDeleteRow
@@ -124,49 +124,14 @@ internal fun McpSection(
     LaunchedEffect(visibleKeys) { selection.retainOnly(visibleKeys.toSet()) }
     val allSelected = selection.selectedCount > 0 && selection.selectedCount == visibleKeys.size
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (selection.isActive) {
-            SelectionActionBar(
-                selectedCount = selection.selectedCount,
-                allSelected = allSelected,
-                onToggleSelectAll = {
-                    if (allSelected) selection.clear() else selection.replaceAll(visibleKeys)
-                },
-                onExit = { selection.exit() }
-            ) {
-                val enabled = selection.selectedCount > 0
-                val targets = selection.selectedKeys.mapNotNull { keyToTarget[it] }
-                SelectionActionButton(
-                    text = stringResource(R.string.common_batch_enable),
-                    enabled = enabled,
-                    onClick = { onBatchSetEnabled(targets, true) }
-                )
-                SelectionActionButton(
-                    text = stringResource(R.string.common_batch_disable),
-                    enabled = enabled,
-                    onClick = { onBatchSetEnabled(targets, false) }
-                )
-                SelectionActionIconButton(
-                    icon = FeatherIcons.RefreshCw,
-                    contentDescription = stringResource(R.string.common_batch_reconnect),
-                    enabled = enabled,
-                    onClick = { onBatchReconnect(targets.map { it.first }) }
-                )
-                SelectionActionIconButton(
-                    icon = FeatherIcons.Trash2,
-                    contentDescription = stringResource(R.string.common_batch_delete),
-                    enabled = enabled,
-                    onClick = { showBatchDeleteConfirm = true },
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
-        }
-
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = Spacing.lg,
+                end = Spacing.lg,
+                bottom = if (selection.isActive) 88.dp else Spacing.xl
+            ),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             if (entries.size >= 3) {
@@ -226,6 +191,44 @@ internal fun McpSection(
                     }
                 }
             }
+        }
+
+        FloatingSelectionBar(
+            visible = selection.isActive,
+            selectedCount = selection.selectedCount,
+            allSelected = allSelected,
+            onToggleSelectAll = {
+                if (allSelected) selection.clear() else selection.replaceAll(visibleKeys)
+            },
+            onExit = { selection.exit() },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            val enabled = selection.selectedCount > 0
+            val targets = selection.selectedKeys.mapNotNull { keyToTarget[it] }
+            SelectionActionButton(
+                text = stringResource(R.string.common_batch_enable),
+                enabled = enabled,
+                tint = MaterialTheme.colorScheme.primary,
+                onClick = { onBatchSetEnabled(targets, true) }
+            )
+            SelectionActionButton(
+                text = stringResource(R.string.common_batch_disable),
+                enabled = enabled,
+                onClick = { onBatchSetEnabled(targets, false) }
+            )
+            SelectionActionIconButton(
+                icon = FeatherIcons.RefreshCw,
+                contentDescription = stringResource(R.string.common_batch_reconnect),
+                enabled = enabled,
+                onClick = { onBatchReconnect(targets.map { it.first }) }
+            )
+            SelectionActionIconButton(
+                icon = FeatherIcons.Trash2,
+                contentDescription = stringResource(R.string.common_batch_delete),
+                enabled = enabled,
+                onClick = { showBatchDeleteConfirm = true },
+                tint = MaterialTheme.colorScheme.error
+            )
         }
     }
 

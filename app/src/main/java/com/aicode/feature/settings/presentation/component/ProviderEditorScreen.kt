@@ -18,6 +18,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -117,8 +121,12 @@ import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
 import com.aicode.core.ui.AppTextField
+import com.aicode.core.ui.FloatingSelectionBar
 import com.aicode.core.ui.FloatingTabBar
 import com.aicode.core.ui.FloatingTabItem
+import com.aicode.core.ui.SelectionActionButton
+import com.aicode.core.ui.SelectionActionDangerButton
+import com.aicode.core.ui.SelectionToggleAction
 import com.aicode.feature.settings.data.local.CustomModelMetadataStore
 import com.aicode.feature.settings.data.local.ProviderPreset
 import com.aicode.feature.settings.data.remote.ModelTestResult
@@ -143,7 +151,6 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.AlertCircle
 import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Check
-import compose.icons.feathericons.CheckSquare
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ChevronUp
@@ -441,16 +448,14 @@ fun ProviderEditorScreen(
                 },
                 actions = {
                     if (pagerState.currentPage == 1 && models.isNotEmpty()) {
-                        IconButton(onClick = {
-                            isSelectionMode = !isSelectionMode
-                            if (!isSelectionMode) selectedModels.clear()
-                        }) {
-                            Icon(
-                                FeatherIcons.CheckSquare,
-                                contentDescription = stringResource(R.string.provider_models_select),
-                                tint = if (isSelectionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        SelectionToggleAction(
+                            active = isSelectionMode,
+                            onToggle = {
+                                isSelectionMode = !isSelectionMode
+                                if (!isSelectionMode) selectedModels.clear()
+                            },
+                            contentDescription = stringResource(R.string.provider_models_select)
+                        )
                     }
                     IconButton(onClick = {
                         scope.launch { pagerState.animateScrollToPage(1) }
@@ -469,6 +474,7 @@ fun ProviderEditorScreen(
         ) {
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = !isSelectionMode,
                 modifier = Modifier.fillMaxSize()
             ) { tab ->
                 if (tab == 0) {
@@ -780,85 +786,25 @@ fun ProviderEditorScreen(
                             .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isSelectionMode) {
-                            Text(
-                                stringResource(R.string.provider_models_selected_count, selectedModels.size),
-                                style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            val allSelected = models.isNotEmpty() && selectedModels.size == models.size
-                            TextButton(
-                                onClick = {
-                                    if (allSelected) {
-                                        selectedModels.clear()
-                                    } else {
-                                        selectedModels.clear()
-                                        selectedModels.addAll(models)
-                                    }
-                                },
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            ) {
-                                Text(stringResource(if (allSelected) R.string.provider_models_deselect_all else R.string.provider_models_select_all))
-                            }
-                            TextButton(
-                                onClick = {
-                                    selectedModels.forEach { m -> viewModel.testModel(currentConfig(), m) }
-                                },
-                                enabled = selectedModels.isNotEmpty(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.primary
-                                )
-                            ) {
-                                Icon(FeatherIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(Spacing.xs))
-                                Text(stringResource(R.string.provider_models_batch_test))
-                            }
-                            TextButton(
-                                onClick = { showBatchDeleteConfirm = true },
-                                enabled = selectedModels.isNotEmpty(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Icon(FeatherIcons.Trash2, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(Spacing.xs))
-                                Text(stringResource(R.string.provider_models_batch_delete))
-                            }
-                            TextButton(
-                                onClick = {
-                                    isSelectionMode = false
-                                    selectedModels.clear()
-                                },
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            ) {
-                                Text(stringResource(R.string.common_cancel))
-                            }
-                        } else {
-                            Text(
-                                stringResource(R.string.provider_models_count, models.size),
-                                style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(
-                                onClick = {
-                                    fetchDialogKey++
-                                    showFetchDialog = true
-                                },
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_FETCH_MODELS)
-                            ) {
-                                Icon(FeatherIcons.DownloadCloud, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(Spacing.xs))
-                                Text(stringResource(R.string.provider_fetch_models))
-                            }
+                        Text(
+                            stringResource(R.string.provider_models_count, models.size),
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                fetchDialogKey++
+                                showFetchDialog = true
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_FETCH_MODELS)
+                        ) {
+                            Icon(FeatherIcons.DownloadCloud, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(Spacing.xs))
+                            Text(stringResource(R.string.provider_fetch_models))
                         }
                     }
                     if (models.isEmpty()) {
@@ -889,7 +835,7 @@ fun ProviderEditorScreen(
                         LazyColumn(
                             state = modelsListState,
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(bottom = 70.dp)
+                            contentPadding = PaddingValues(bottom = if (isSelectionMode) 88.dp else 70.dp)
                         ) {
                             itemsIndexed(
                                 items = models,
@@ -984,16 +930,65 @@ fun ProviderEditorScreen(
             }
             }
 
-            FloatingTabBar(
-                pagerState = pagerState,
-                items = listOf(
-                    FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.provider_config)),
-                    FloatingTabItem(FeatherIcons.Cpu, stringResource(R.string.common_model))
+            AnimatedVisibility(
+                visible = !isSelectionMode,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut()
+            ) {
+                FloatingTabBar(
+                    pagerState = pagerState,
+                    items = listOf(
+                        FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.provider_config)),
+                        FloatingTabItem(FeatherIcons.Cpu, stringResource(R.string.common_model))
+                    ),
+                    maskColor = settingsPageBackground(),
+                    isScrolling = tabsScrolling
+                )
+            }
+
+            val allModelsSelected = models.isNotEmpty() && selectedModels.size == models.size
+            FloatingSelectionBar(
+                visible = isSelectionMode,
+                selectedCount = selectedModels.size,
+                allSelected = allModelsSelected,
+                onToggleSelectAll = {
+                    if (allModelsSelected) {
+                        selectedModels.clear()
+                    } else {
+                        selectedModels.clear()
+                        selectedModels.addAll(models)
+                    }
+                },
+                onExit = {
+                    isSelectionMode = false
+                    selectedModels.clear()
+                },
+                selectedCountText = stringResource(R.string.provider_models_selected_count, selectedModels.size),
+                selectAllText = stringResource(
+                    if (allModelsSelected) R.string.provider_models_deselect_all else R.string.provider_models_select_all
                 ),
-                maskColor = settingsPageBackground(),
-                isScrolling = tabsScrolling,
                 modifier = Modifier.align(Alignment.BottomCenter)
-            )
+            ) {
+                val anySelectedTesting = selectedModels.any { it in testing }
+                SelectionActionButton(
+                    text = stringResource(R.string.provider_models_batch_test),
+                    icon = FeatherIcons.Play,
+                    enabled = selectedModels.isNotEmpty(),
+                    loading = anySelectedTesting,
+                    tint = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        selectedModels.filterNot { it in testing }.forEach { m ->
+                            viewModel.testModel(currentConfig(), m)
+                        }
+                    }
+                )
+                SelectionActionDangerButton(
+                    text = stringResource(R.string.provider_models_batch_delete),
+                    enabled = selectedModels.isNotEmpty(),
+                    onClick = { showBatchDeleteConfirm = true }
+                )
+            }
         }
     }
 

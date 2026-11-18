@@ -1,6 +1,5 @@
 package com.aicode.feature.agent.presentation.component
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
@@ -53,7 +52,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProgressIndicatorDefaults
 import com.aicode.core.ui.AdaptiveModalBottomSheet
@@ -66,10 +64,8 @@ import com.aicode.core.ui.dialogTextFieldColors
 import com.aicode.feature.onboarding.domain.OnboardingStep
 import com.aicode.feature.onboarding.presentation.onboardingTarget
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
@@ -96,8 +92,11 @@ import androidx.compose.ui.unit.sp
 import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
+import com.aicode.core.ui.FloatingSelectionBar
 import com.aicode.core.ui.SegmentedTabs
+import com.aicode.core.ui.SelectionActionDangerButton
 import com.aicode.core.ui.rememberImeBottomInset
+import com.aicode.core.ui.rememberSaveableListSelectionState
 import com.aicode.feature.settings.presentation.component.ModelSearchField
 import com.aicode.feature.settings.presentation.component.SettingsDivider
 import com.aicode.feature.settings.presentation.component.SettingsGroup
@@ -235,8 +234,7 @@ fun ChatDrawerContent(
     // tab 与展开状态进 saveable：大屏下侧栏收起后整棵子树会离开组合（见 MainActivity 的
     // SaveableStateProvider），用 remember 存会让每次回到聊天页都重置回「会话」页。
     var selectedTab by rememberSaveable { mutableStateOf(0) }
-    var isSelectionMode by rememberSaveable { mutableStateOf(false) }
-    val selectedSessionIds = remember { mutableStateListOf<String>() }
+    val selection = rememberSaveableListSelectionState()
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
     var pendingRename by remember { mutableStateOf<ChatSession?>(null) }
@@ -244,9 +242,20 @@ fun ChatDrawerContent(
     var showAllPlugins by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    BackHandler(enabled = isSelectionMode) {
-        isSelectionMode = false
-        selectedSessionIds.clear()
+    val allSessionIds: List<String> = remember(sessions, subSessionsByParent) {
+        buildList {
+            sessions.forEach { s ->
+                add(s.id)
+                subSessionsByParent[s.id]?.forEach { sub -> add(sub.id) }
+            }
+        }
+    }
+    LaunchedEffect(allSessionIds, selection.isActive) {
+        selection.retainOnly(allSessionIds.toSet())
+        if (selection.isActive && allSessionIds.isEmpty()) selection.exit()
+    }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != 0 && selection.isActive) selection.exit()
     }
 
     // 点击会话/重开侧边栏保持原滚动位置；仅当同一会话的最后回复时间变化（发消息/收到回复）时滚回顶部。
@@ -286,86 +295,7 @@ fun ChatDrawerContent(
         )
 
         // 聊天记录搜索框放在 Tab 栏正下方，仅「会话」Tab 可见。
-        if (selectedTab == 0 && isSelectionMode) {
-            Surface(
-                color = MaterialTheme.semanticColors.cardSurface,
-                shape = RoundedCornerShape(Radius.mdLarge),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                CompositionLocalProvider(
-                    LocalMinimumInteractiveComponentSize provides 0.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .padding(horizontal = Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = {
-                                isSelectionMode = false
-                                selectedSessionIds.clear()
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = FeatherIcons.X,
-                                contentDescription = stringResource(R.string.common_cancel),
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        Spacer(Modifier.width(Spacing.sm))
-                        Text(
-                            text = stringResource(R.string.chat_sessions_selected_count, selectedSessionIds.size),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                        val allSessionIds: List<String> = remember(sessions, subSessionsByParent) {
-                            val ids = mutableListOf<String>()
-                            sessions.forEach { s ->
-                                ids.add(s.id)
-                                subSessionsByParent[s.id]?.forEach { sub -> ids.add(sub.id) }
-                            }
-                            ids
-                        }
-                        val allSelected = allSessionIds.isNotEmpty() && selectedSessionIds.size == allSessionIds.size
-                        TextButton(
-                            onClick = {
-                                if (allSelected) {
-                                    selectedSessionIds.clear()
-                                } else {
-                                    selectedSessionIds.clear()
-                                    selectedSessionIds.addAll(allSessionIds)
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = Spacing.sm, vertical = 0.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text(
-                                text = stringResource(if (allSelected) R.string.provider_models_deselect_all else R.string.provider_models_select_all),
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                        Spacer(Modifier.width(Spacing.xs))
-                        IconButton(
-                            onClick = { showBatchDeleteConfirm = true },
-                            enabled = selectedSessionIds.isNotEmpty(),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = FeatherIcons.Trash2,
-                                contentDescription = stringResource(R.string.chat_batch_delete_title),
-                                modifier = Modifier.size(18.dp),
-                                tint = if (selectedSessionIds.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-                            )
-                        }
-                    }
-                }
-            }
-        } else if (selectedTab == 0) {
+        if (selectedTab == 0) {
             ChatSearchField(
                 query = searchQuery,
                 onQueryChange = onSearchQueryChange,
@@ -387,15 +317,9 @@ fun ChatDrawerContent(
                     listState = listState,
                     searchQuery = searchQuery,
                     searchState = searchState,
-                    selectionMode = isSelectionMode,
-                    selectedSessionIds = selectedSessionIds,
-                    onToggleSelectSession = { s ->
-                        if (s.id in selectedSessionIds) {
-                            selectedSessionIds.remove(s.id)
-                        } else {
-                            selectedSessionIds.add(s.id)
-                        }
-                    },
+                    selectionMode = selection.isActive,
+                    selectedSessionIds = selection.selectedKeys,
+                    onToggleSelectSession = { s -> selection.toggle(s.id) },
                     onSelect = onSelect,
                     onLongClick = { menuSession = it },
                     onOpenSearchHit = onOpenSearchHit
@@ -425,6 +349,30 @@ fun ChatDrawerContent(
                     filePluginEntries = filePluginEntries,
                     pluginLanguageTag = pluginLanguageTag,
                     onFilePluginEntry = onFilePluginEntry
+                )
+            }
+
+            val allSelected = allSessionIds.isNotEmpty() && selection.selectedCount == allSessionIds.size
+            FloatingSelectionBar(
+                visible = selectedTab == 0 && selection.isActive,
+                selectedCount = selection.selectedCount,
+                allSelected = allSelected,
+                onToggleSelectAll = {
+                    if (allSelected) selection.clear() else selection.replaceAll(allSessionIds)
+                },
+                onExit = { selection.exit() },
+                showCloseButton = true,
+                selectedCountText = stringResource(R.string.chat_sessions_selected_count, selection.selectedCount),
+                selectAllText = stringResource(
+                    if (allSelected) R.string.provider_models_deselect_all else R.string.provider_models_select_all
+                ),
+                outerPadding = PaddingValues(bottom = Spacing.xs),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                SelectionActionDangerButton(
+                    text = stringResource(R.string.common_batch_delete),
+                    enabled = selection.selectedCount > 0,
+                    onClick = { showBatchDeleteConfirm = true }
                 )
             }
         }
@@ -551,9 +499,7 @@ fun ChatDrawerContent(
             },
             onBatchSelect = {
                 menuSession = null
-                isSelectionMode = true
-                selectedSessionIds.clear()
-                selectedSessionIds.add(session.id)
+                selection.enterWith(session.id)
             },
             onDelete = {
                 menuSession = null
@@ -571,14 +517,13 @@ fun ChatDrawerContent(
             onDismissRequest = { showBatchDeleteConfirm = false },
             title = { Text(stringResource(R.string.chat_batch_delete_title)) },
             text = {
-                Text(stringResource(R.string.chat_batch_delete_confirm, selectedSessionIds.size))
+                Text(stringResource(R.string.chat_batch_delete_confirm, selection.selectedCount))
             },
             confirmButton = {
                 TextButton(onClick = {
                     showBatchDeleteConfirm = false
-                    val toDelete = selectedSessionIds.toSet()
-                    selectedSessionIds.clear()
-                    isSelectionMode = false
+                    val toDelete = selection.selectedKeys.toSet()
+                    selection.exit()
                     if (onDeleteSessions != null) {
                         onDeleteSessions(toDelete)
                     } else {
@@ -741,7 +686,8 @@ private fun SessionListContent(
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = if (selectionMode) 80.dp else 0.dp)
     ) {
         // 插件会话：不混入时间分组，固定放在置顶之上；组内顺序保持插件返回顺序。
         pluginSessionGroups.forEach { pluginGroup ->
