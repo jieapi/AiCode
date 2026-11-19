@@ -208,6 +208,38 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["id", "title", "handlers"],
+            "allOf": [
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["filesystem"], "properties": { "filesystem": { "const": false } } } }
+                },
+                "else": { "properties": { "handlers": { "required": ["fs"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["command"], "properties": { "command": { "const": false } } } }
+                },
+                "else": { "properties": { "handlers": { "required": ["exec"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["terminal"], "properties": { "terminal": { "const": true } } } }
+                },
+                "then": { "properties": { "handlers": { "required": ["terminal"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["projectConfigLocation"], "properties": { "projectConfigLocation": { "const": "workspaceDir" } } } }
+                },
+                "then": {
+                  "properties": { "capabilities": { "required": ["isRemoteEnvironment"], "properties": { "isRemoteEnvironment": { "const": false } } } }
+                }
+              }
+            ],
             "properties": {
               "id": { "$ref": "#/$defs/localId" },
               "title": { "$ref": "#/$defs/localizedText80" },
@@ -219,8 +251,8 @@
                   "filesystem": { "type": "boolean", "default": true },
                   "command": { "type": "boolean", "default": true },
                   "terminal": { "type": "boolean", "default": false },
-                  "fileWatch": { "type": "boolean", "default": false },
-                  "portForward": { "type": "boolean", "default": false },
+                  "fileWatch": { "const": false, "default": false, "description": "插件文件监听当前未开放，只能为 false。" },
+                  "portForward": { "const": false, "default": false, "description": "插件端口转发当前未开放，只能为 false。" },
                   "isRemoteEnvironment": { "type": "boolean", "default": true },
                   "workspaceDiscovery": {
                     "enum": ["scan", "register", "hybrid"],

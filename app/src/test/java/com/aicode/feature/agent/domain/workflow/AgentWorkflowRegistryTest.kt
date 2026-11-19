@@ -4,6 +4,7 @@ import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class AgentWorkflowRegistryTest {
@@ -23,7 +24,7 @@ class AgentWorkflowRegistryTest {
         assertSame(defaultWorkflow, registry.resolve(""))
         assertSame(defaultWorkflow, registry.resolve("   "))
         assertSame(defaultWorkflow, registry.resolve(AgentWorkflowRegistry.BUILTIN_WORKFLOW_ID))
-        assertSame(defaultWorkflow, registry.resolve("unknown:workflow"))
+        assertThrows(WorkflowNotFoundException::class.java) { registry.resolve("unknown:workflow") }
         assertNull(registry.findDescriptor(null))
         assertNull(registry.findDescriptor(""))
         assertNull(registry.findDescriptor("unknown:workflow"))
@@ -73,8 +74,8 @@ class AgentWorkflowRegistryTest {
             listOf(WorkflowDescriptor(id = "plugin-a:wf3", displayName = "WF 3") to wf3)
         )
 
-        assertSame(defaultWorkflow, registry.resolve("plugin-a:wf1"))
-        assertSame(defaultWorkflow, registry.resolve("plugin-a:wf2"))
+        assertThrows(WorkflowNotFoundException::class.java) { registry.resolve("plugin-a:wf1") }
+        assertThrows(WorkflowNotFoundException::class.java) { registry.resolve("plugin-a:wf2") }
         assertSame(wf3, registry.resolve("plugin-a:wf3"))
         assertNull(registry.findDescriptor("plugin-a:wf1"))
         assertEquals(
@@ -93,18 +94,18 @@ class AgentWorkflowRegistryTest {
             "plugin-a",
             listOf(
                 WorkflowDescriptor(AgentWorkflowRegistry.BUILTIN_WORKFLOW_ID, "Fake Builtin") to maliciousWf,
-                WorkflowDescriptor("shared:wf", "Plugin A WF") to wfA
+                WorkflowDescriptor("plugin-a:shared", "Plugin A WF") to wfA
             )
         )
         registry.syncPluginWorkflows(
             "plugin-b",
-            listOf(WorkflowDescriptor("shared:wf", "Plugin B WF") to wfB)
+            listOf(WorkflowDescriptor("plugin-b:shared", "Plugin B WF") to wfB)
         )
 
         assertSame(defaultWorkflow, registry.resolve(AgentWorkflowRegistry.BUILTIN_WORKFLOW_ID))
         assertEquals("内置 Agent 工作流", registry.findDescriptor(AgentWorkflowRegistry.BUILTIN_WORKFLOW_ID)?.displayName)
-        assertSame(wfA, registry.resolve("shared:wf"))
-        assertEquals("plugin-a", registry.findDescriptor("shared:wf")?.pluginId)
+        assertSame(wfA, registry.resolve("plugin-a:shared"))
+        assertEquals("plugin-a", registry.findDescriptor("plugin-a:shared")?.pluginId)
     }
 
     @Test
@@ -117,7 +118,7 @@ class AgentWorkflowRegistryTest {
 
         registry.unregisterPlugin("plugin-a")
 
-        assertSame(defaultWorkflow, registry.resolve("plugin-a:wf"))
+        assertThrows(WorkflowNotFoundException::class.java) { registry.resolve("plugin-a:wf") }
         assertNull(registry.findDescriptor("plugin-a:wf"))
         assertSame(wfB, registry.resolve("plugin-b:wf"))
         assertEquals(

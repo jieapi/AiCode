@@ -121,7 +121,7 @@ class ExternalSessionService @Inject constructor(
     suspend fun readMessages(
         sourceKey: String,
         sessionId: String,
-        cursor: String? = null,
+        cursor: JsonElement? = null,
         maxMessages: Int = DEFAULT_MAX_MESSAGES
     ): ExternalSessionPage {
         val source = requireSource(sourceKey)
@@ -135,7 +135,7 @@ class ExternalSessionService @Inject constructor(
                 put("sourceId", localIdOf(source))
                 put("sourceKey", source.key)
                 put("sessionId", rawSessionId)
-                cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
+                cursor?.let { put("cursor", it) }
                 put("maxMessages", maxMessages)
             },
             method = SESSIONS_INVOKE_METHOD
@@ -163,7 +163,7 @@ class ExternalSessionService @Inject constructor(
             method = SESSIONS_INVOKE_METHOD
         )
         val obj = result as? JsonObject
-            ?: throw PluginHostException("INVALID_RESPONSE", "createSession must return an object")
+            ?: throw PluginHostException("SESSION_SOURCE_INVALID", "createSession must return an object")
         val sessionObj = (obj["session"] as? JsonObject) ?: obj
         val summary = ExternalSessionHostService.parseSummaryObject(
             obj = sessionObj,
@@ -308,7 +308,7 @@ class ExternalSessionService @Inject constructor(
         store.findSource(sourceKey)?.let { return it }
         syncDeclaredSources()
         return store.findSource(sourceKey)
-            ?: throw PluginHostException("SOURCE_NOT_FOUND", "external session source not found: $sourceKey")
+            ?: throw PluginHostException("SESSION_SOURCE_NOT_FOUND", "external session source not found: $sourceKey")
     }
 
     private fun localIdOf(source: ExternalSessionSource): String {
@@ -323,7 +323,7 @@ class ExternalSessionService @Inject constructor(
 
     private fun parsePage(element: JsonElement, source: ExternalSessionSource): ExternalSessionPage {
         val obj = element as? JsonObject
-            ?: throw PluginHostException("INVALID_RESPONSE", "readMessages must return an object")
+            ?: throw PluginHostException("SESSION_SOURCE_INVALID", "readMessages must return an object")
         val session = (obj["session"] as? JsonObject)?.let { sessionObj ->
             ExternalSessionHostService.parseSummaryObject(
                 obj = sessionObj,
@@ -339,8 +339,8 @@ class ExternalSessionService @Inject constructor(
             val msgObj = msgElement as? JsonObject ?: return@mapIndexedNotNull null
             parseMessage(msgObj, index)
         }
-        val nextCursor = obj["nextCursor"]?.stringVal() ?: obj["cursor"]?.stringVal()
-        val hasMore = obj["hasMore"]?.booleanVal() ?: (nextCursor != null)
+        val nextCursor = obj["nextCursor"]
+        val hasMore = obj["hasMore"]?.booleanVal() ?: (nextCursor != null && nextCursor != JsonNull)
         return ExternalSessionPage(
             session = session,
             messages = messages,
@@ -352,7 +352,7 @@ class ExternalSessionService @Inject constructor(
     private fun parseMessage(obj: JsonObject, index: Int): ExternalSessionMessage {
         val id = obj["id"]?.stringVal() ?: "msg-$index"
         val role = obj["role"]?.stringVal() ?: "assistant"
-        val timestamp = obj["timestamp"]?.longVal() ?: 0L
+        val timestamp = obj["createdAt"]?.longVal() ?: 0L
         val rawBlocks = obj["blocks"] as? JsonArray
         val blocks = if (rawBlocks != null) {
             rawBlocks.mapNotNull { blockElement ->

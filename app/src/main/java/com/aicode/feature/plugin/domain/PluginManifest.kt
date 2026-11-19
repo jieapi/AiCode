@@ -287,14 +287,14 @@ data class PluginOverlayRef(
 
 /** `contributes.executionBackends[].capabilities` 声明执行后端具备的能力与工作区行为。 */
 data class PluginExecutionBackendCapabilitiesRef(
-    val filesystem: Boolean = false,
-    val command: Boolean = false,
+    val filesystem: Boolean = true,
+    val command: Boolean = true,
     val terminal: Boolean = false,
     val fileWatch: Boolean = false,
     val portForward: Boolean = false,
-    val isRemoteEnvironment: Boolean = false,
+    val isRemoteEnvironment: Boolean = true,
     val workspaceDiscovery: String = PluginBackendDiscoveryModes.SCAN,
-    val projectConfigLocation: String = PluginBackendConfigLocations.WORKSPACE_DIR
+    val projectConfigLocation: String = PluginBackendConfigLocations.APP_PRIVATE_DIR
 )
 
 object PluginBackendDiscoveryModes {
@@ -306,8 +306,8 @@ object PluginBackendDiscoveryModes {
 }
 
 object PluginBackendConfigLocations {
-    const val WORKSPACE_DIR = "workspace_dir"
-    const val APP_PRIVATE_DIR = "app_private_dir"
+    const val WORKSPACE_DIR = "workspaceDir"
+    const val APP_PRIVATE_DIR = "appPrivateDir"
 
     val ALL = setOf(WORKSPACE_DIR, APP_PRIVATE_DIR)
 }
@@ -330,7 +330,7 @@ data class PluginExecutionBackendRef(
     val id: String,
     val name: LocalizedText,
     val description: LocalizedText = LocalizedText.single(""),
-    val capabilities: PluginExecutionBackendCapabilitiesRef,
+    val capabilities: PluginExecutionBackendCapabilitiesRef = PluginExecutionBackendCapabilitiesRef(),
     val handlers: PluginExecutionBackendHandlersRef
 )
 

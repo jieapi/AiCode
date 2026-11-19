@@ -1,11 +1,60 @@
 package com.aicode.feature.agent.domain.workflow
 
+import com.aicode.feature.agent.domain.container.ExecutionBackend
 import com.aicode.feature.agent.domain.model.AgentContext
+import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.provider.RetryErrorInfo
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
 import kotlinx.coroutines.flow.Flow
+
+data class WorkflowTurnContext(
+    val runId: String,
+    val sessionRef: SessionRef,
+    val providerId: String?,
+    val model: String?,
+    val workflowState: String?,
+    val permissionMode: AgentMode,
+    val persistence: TurnPersistence,
+    val backend: ExecutionBackend? = null
+)
+
+sealed interface SessionRef {
+    val opaqueId: String
+    data class Room(override val opaqueId: String) : SessionRef
+    data class External(val owner: String, override val opaqueId: String, val sourceKey: String? = null) : SessionRef
+}
+
+data class LlmCallStats(
+    val providerId: String?,
+    val model: String?,
+    val kind: String,
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val cachedInputTokens: Int,
+    val durationMillis: Int?,
+    val status: String,
+    val errorMessage: String? = null,
+    val stopReason: String? = null,
+    val createdAt: Long
+)
+
+interface TurnPersistence {
+    object Noop : TurnPersistence {
+        override suspend fun persistWorkflowState(state: String?) = Unit
+        override suspend fun persistUserContinuation(message: AgentMessage.UserMessage) = Unit
+        override suspend fun publishTransientInstruction(messageId: String, text: String) = Unit
+        override suspend fun persistMode(mode: AgentMode, modeBeforePlan: AgentMode?) = Unit
+        override suspend fun recordLlmCall(stats: LlmCallStats) = Unit
+    }
+
+    suspend fun persistWorkflowState(state: String?)
+    suspend fun persistUserContinuation(message: AgentMessage.UserMessage)
+    suspend fun publishTransientInstruction(messageId: String, text: String)
+    suspend fun persistMode(mode: AgentMode, modeBeforePlan: AgentMode?)
+    suspend fun recordLlmCall(stats: LlmCallStats)
+}
 
 /**
  * Agent 执行过程中向 UI 推送的分步事件。
@@ -75,6 +124,8 @@ sealed class AgentEvent {
     object CompactionFinished : AgentEvent()
 
     data class ContextUsage(val inputTokens: Int, val inputBudget: Int, val estimated: Boolean) : AgentEvent()
+    data class WorkflowStateChanged(val state: String?) : AgentEvent()
+    data class TransientInstruction(val messageId: String, val text: String) : AgentEvent()
 
     /** 上下文压缩失败（如压缩模型不可用）。携带失败原因，UI 展示为可展开的失败卡片；不落库。 */
     data class CompactionFailed(val reason: String) : AgentEvent()
@@ -112,12 +163,18 @@ interface AgentWorkflow {
      */
     suspend fun compactSession(sessionId: String, onEvent: suspend (AgentEvent) -> Unit = {}): Boolean
 
+    suspend fun compactSession(context: AgentContext, onEvent: suspend (AgentEvent) -> Unit = {}): Boolean =
+        compactSession(requireNotNull((context.turn?.sessionRef as? SessionRef.Room)?.opaqueId), onEvent)
+
     /**
      * 为新建会话生成标题（供首条用户消息后异步调用）。
      * 默认跟随当前聊天模型；若配置了标题总结专用模型且可用则用之。
      * 生成失败或取不到标题时返回 null（调用方保留临时标题）。
      */
     suspend fun generateTitle(sessionId: String, request: String): String?
+
+    suspend fun generateTitle(context: AgentContext, request: String): String? =
+        generateTitle(requireNotNull((context.turn?.sessionRef as? SessionRef.Room)?.opaqueId), request)
 
     /**
      * 根据 Git 差异文本生成符合 Conventional Commits 规范的提交信息。

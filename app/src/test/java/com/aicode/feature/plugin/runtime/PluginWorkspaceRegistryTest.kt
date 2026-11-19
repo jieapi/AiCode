@@ -121,7 +121,7 @@ class PluginWorkspaceRegistryTest {
                         put("name", "Workspace 1")
                         put("path", "/remote/ws-1")
                         put("group", "Team A")
-                        put("canCreateChild", false)
+                        put("capabilities", buildJsonObject { put("createChild", false) })
                     })
                 })
             }
@@ -138,19 +138,20 @@ class PluginWorkspaceRegistryTest {
                 put("backendId", "demo.cloud:sandbox")
                 put("items", buildJsonArray {
                     add(buildJsonObject {
+                        put("id", "ws-2")
                         put("name", "Workspace 2")
                         put("path", "/remote/ws-2")
                     })
                 })
             }
         )
-        assertEquals(listOf("/remote/ws-2"), registry.workspacesFor("demo.cloud:sandbox").map { it.id })
+        assertEquals(listOf("ws-2"), registry.workspacesFor("demo.cloud:sandbox").map { it.id })
 
         service.remove(
             "demo.cloud",
             buildJsonObject {
                 put("backendId", "demo.cloud:sandbox")
-                put("ids", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("/remote/ws-2")) })
+                put("workspaceIds", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("ws-2")) })
             }
         )
         assertTrue(registry.workspacesFor("demo.cloud:sandbox").isEmpty())

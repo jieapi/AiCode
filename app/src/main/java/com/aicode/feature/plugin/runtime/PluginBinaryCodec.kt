@@ -18,7 +18,8 @@ enum class BinaryFrameType(val code: Byte) {
     STREAM_END(5),
     EVENT(6),
     PING(7),
-    PONG(8);
+    PONG(8),
+    WINDOW_UPDATE(9);
 
     companion object {
         private val byCode = entries.associateBy { it.code }
@@ -63,7 +64,7 @@ data class BinaryFrame(
  * 16 字节大端帧头格式：
  * - magic: Short = 0x4143 ('A','C')
  * - version: Byte = 1
- * - type: Byte (1..8)
+ * - type: Byte (1..9)
  * - streamId: UInt (4B)
  * - metaLen: UInt (4B)
  * - payloadLen: UInt (4B)
@@ -75,7 +76,13 @@ object PluginBinaryCodec {
     const val HEADER_BYTES: Int = 16
     const val MAX_META_BYTES: Int = 1 * 1024 * 1024
     const val MAX_PAYLOAD_BYTES: Int = 16 * 1024 * 1024
+    const val MAX_STREAM_BYTES: Long = 64L * 1024 * 1024
     const val DEFAULT_CHUNK_BYTES: Int = 64 * 1024
+    const val STREAM_WINDOW_BYTES: Int = 256 * 1024
+    const val MIN_STREAM_FRAME_COST: Int = 4 * 1024
+
+    fun streamFrameCost(metaBytes: Int, payloadBytes: Int): Int =
+        maxOf(MIN_STREAM_FRAME_COST, HEADER_BYTES + metaBytes + payloadBytes)
 
     private const val SMALL_FRAME_COALESCE_BYTES = 4 * 1024
     private val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }

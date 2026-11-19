@@ -376,6 +376,11 @@ test('PluginIpcServer streams >4 MiB binary and AsyncIterable payloads in 64 KiB
       if (method === 'fs.echoLargeReq') {
         return { size: ctx.payload.length, head: ctx.payload.subarray(0, 4).toString('hex') };
       }
+      if (method === 'fs.uploadStream') {
+        let bytes = 0;
+        for await (const chunk of ctx.payloadStream ?? []) bytes += chunk.byteLength;
+        return { ok: true, bytesWritten: bytes };
+      }
       if (method === 'json.large') {
         return { text: 'x'.repeat(150 * 1024) };
       }
@@ -541,6 +546,89 @@ test('PluginIpcServer streams >4 MiB binary and AsyncIterable payloads in 64 KiB
     assert.equal(cancelledSignal, true);
     assert.equal(cancelledCleanup, true);
 
+    client.close();
+  } finally {
+    await server.close();
+    removeDir(tmpDir);
+  }
+});
+
+test('PluginIpcServer keeps a 20 MiB stream bounded and preserves terminal metadata', async () => {
+  const tmpDir = makeTempDir('aicode-ipc-20m-');
+  const socketPath = path.join(tmpDir, 'stream.sock');
+  const total = 20 * 1024 * 1024;
+  const source = Buffer.alloc(total, 0x5a);
+  const server = new PluginIpcServer({
+    socketPath,
+    token: 'tok-20m',
+    onRequest: async (method) => {
+      if (method !== 'stream.20m') return null;
+      return (async function* () {
+        for (let offset = 0; offset < source.length; offset += DEFAULT_CHUNK_BYTES) {
+          yield source.subarray(offset, Math.min(offset + DEFAULT_CHUNK_BYTES, source.length));
+        }
+        return { status: 'completed', bytes: total };
+      })();
+    }
+  });
+  try {
+    await server.start();
+    const client = await connectUdsClient(socketPath);
+    client.send({ type: FrameType.PING, streamId: 17, meta: { token: 'tok-20m' } });
+    assert.equal((await client.nextFrame()).type, FrameType.PONG);
+    client.send({ type: FrameType.REQ, streamId: 1, meta: { method: 'stream.20m', stream: true } });
+    const chunks = [];
+    let end;
+    while (!end) {
+      const frame = await client.nextFrame(10000);
+      assert.equal(frame.streamId, 1);
+      if (frame.type === FrameType.STREAM_DATA) {
+        assert.ok(frame.payload.length <= DEFAULT_CHUNK_BYTES);
+        chunks.push(frame.payload);
+      } else if (frame.type === FrameType.STREAM_END) {
+        end = frame;
+      }
+    }
+    const payload = Buffer.concat(chunks);
+    assert.equal(payload.length, total);
+    assert.equal(payload[0], 0x5a);
+    assert.equal(payload[payload.length - 1], 0x5a);
+    assert.deepEqual(end.meta, { ok: true, result: { status: 'completed', bytes: total } });
+    client.close();
+  } finally {
+    await server.close();
+    removeDir(tmpDir);
+  }
+});
+
+test('PluginIpcServer exposes upload payloadStream and returns bytesWritten after EOF', async () => {
+  const tmpDir = makeTempDir('aicode-ipc-upload-');
+  const socketPath = path.join(tmpDir, 'upload.sock');
+  const server = new PluginIpcServer({
+    socketPath,
+    token: 'tok-upload',
+    onRequest: async (method, params, ctx) => {
+      if (method !== 'fs.uploadStream') return null;
+      let bytes = 0;
+      for await (const chunk of ctx.payloadStream ?? []) bytes += chunk.byteLength;
+      return { ok: true, bytesWritten: bytes };
+    }
+  });
+  try {
+    await server.start();
+    const client = await connectUdsClient(socketPath);
+    client.send({ type: FrameType.PING, streamId: 3, meta: { token: 'tok-upload', window: 256 * 1024 } });
+    assert.equal((await client.nextFrame()).type, FrameType.PONG);
+    client.send({ type: FrameType.REQ, streamId: 1, meta: { method: 'fs.uploadStream', upload: true } });
+    client.send({ type: FrameType.STREAM_DATA, streamId: 1, payload: Buffer.alloc(120 * 1024, 0x31) });
+    client.send({ type: FrameType.STREAM_END, streamId: 1, meta: { ok: true } });
+    let response;
+    while (!response) {
+      const frame = await client.nextFrame();
+      if (frame.type === FrameType.RESP) response = frame;
+      else assert.equal(frame.type, FrameType.WINDOW_UPDATE);
+    }
+    assert.deepEqual(response.meta.result, { ok: true, bytesWritten: 120 * 1024 });
     client.close();
   } finally {
     await server.close();
@@ -775,7 +863,7 @@ test('definePlugin supports backend.invoke dispatch and sdk.workspaces host call
       handlers: {
         'backend.fs': async (args) => ({ op: args.op, path: args.path }),
         syncWorkspaces: async (args) => {
-          const items = [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', capabilities: { git: true } }];
+          const items = [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', group: 'remote', available: true, capabilities: { createChild: true, delete: false, git: true } }, { id: 'ws-default', name: 'Defaults', path: '/srv/defaults' }];
           const r1 = await sdk.workspaces.upsert(args.backendId, items);
           const r2 = await sdk.workspaces.remove(args.backendId, ['ws-old']);
           const r3 = await sdk.workspaces.set(args.backendId, items);
@@ -853,7 +941,7 @@ test('definePlugin supports backend.invoke dispatch and sdk.workspaces host call
         method: 'host.workspaces.upsert',
         params: {
           backendId: 'ssh-dev',
-          workspaces: [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', capabilities: { git: true } }]
+          workspaces: [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', group: 'remote', available: true, capabilities: { createChild: true, delete: false, git: true } }, { id: 'ws-default', name: 'Defaults', path: '/srv/defaults' }]
         }
       },
       {
@@ -864,7 +952,7 @@ test('definePlugin supports backend.invoke dispatch and sdk.workspaces host call
         method: 'host.workspaces.set',
         params: {
           backendId: 'ssh-dev',
-          workspaces: [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', capabilities: { git: true } }]
+          workspaces: [{ id: 'ws-1', name: 'Demo', path: '/srv/demo', group: 'remote', available: true, capabilities: { createChild: true, delete: false, git: true } }, { id: 'ws-default', name: 'Defaults', path: '/srv/defaults' }]
         }
       }
     ];
@@ -896,6 +984,27 @@ test('definePlugin supports backend.invoke dispatch and sdk.workspaces host call
   }
 });
 
+test('shared complete manifest fixtures validate against the real schema and API version', () => {
+  const { checkFixtures, validateManifest } = require('../../schema/check-manifests.cjs');
+  const { fixtures, errors } = checkFixtures();
+  assert.deepEqual(errors, []);
+  const base = fixtures.validManifests[0];
+  for (const range of ['^1.0.0', '~1.0.0', '>=1.0.0 <2.0.0', '1.0.0', '=1.0.0']) {
+    assert.deepEqual(validateManifest({ ...base, engines: { pluginApi: range } }), []);
+  }
+  for (const range of ['^2.0.0', '^0.1.1', '^0.2.0', '~2.0.0', '>=2.0.0', '2.x', '*']) {
+    assert.notEqual(validateManifest({ ...base, engines: { pluginApi: range } }).length, 0, range);
+  }
+  const backend = base.contributes.executionBackends[0];
+  const withBackends = (count) => ({ ...base, contributes: { executionBackends: Array.from({ length: count }, (_, i) => ({ ...backend, id: `backend${i}` })) } });
+  assert.deepEqual(validateManifest(withBackends(32)), []);
+  assert.notEqual(validateManifest(withBackends(33)).length, 0);
+  for (const isRemoteEnvironment of [undefined, true]) {
+    const remoteWorkspaceConfig = { ...backend, capabilities: { projectConfigLocation: 'workspaceDir', ...(isRemoteEnvironment === undefined ? {} : { isRemoteEnvironment }) } };
+    assert.notEqual(validateManifest({ ...base, contributes: { executionBackends: [remoteWorkspaceConfig] } }).length, 0);
+  }
+});
+
 test('plugin.schema.json defines contributes.executionBackends with expected fields and defaults', () => {
   const schemaPath = path.join(__dirname, '..', '..', 'schema', 'plugin.schema.json');
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
@@ -919,7 +1028,10 @@ test('plugin.schema.json defines contributes.executionBackends with expected fie
   assert.equal(caps.properties.command.default, true);
   assert.equal(caps.properties.terminal.default, false);
   assert.equal(caps.properties.fileWatch.default, false);
+  assert.equal(caps.properties.fileWatch.const, false);
   assert.equal(caps.properties.portForward.default, false);
+  assert.equal(caps.properties.portForward.const, false);
+  assert.equal(item.allOf.length, 4);
   assert.equal(caps.properties.isRemoteEnvironment.default, true);
   assert.deepEqual(caps.properties.workspaceDiscovery.enum, ['scan', 'register', 'hybrid']);
   assert.equal(caps.properties.workspaceDiscovery.default, 'scan');
@@ -1316,8 +1428,9 @@ test('definePlugin supports sessions.invoke dispatch and sdk.sessions host calls
       handlers: {
         'sessions.readMessages': async (args) => ({
           sessionId: args.sessionId,
-          messages: [{ id: 'm1', role: 'assistant', blocks: [{ type: 'text', text: 'hi' }] }],
-          hasMore: false
+          messages: [{ id: 'm1', role: 'assistant', createdAt: 1700000000000, blocks: [{ type: 'text', text: 'hi' }] }],
+          hasMore: true,
+          nextCursor: args.cursor
         }),
         'sessions.sync': async (args) => {
           const summary = [{ sessionId: 's-1', title: 'Task 1', running: true }];
@@ -1368,16 +1481,26 @@ test('definePlugin supports sessions.invoke dispatch and sdk.sessions host calls
       streamId: 1,
       meta: {
         method: 'sessions.invoke',
-        params: { handler: 'sessions.readMessages', args: { sessionId: 's-1' } }
+        params: { handler: 'sessions.readMessages', args: { sessionId: 's-1', cursor: { page: 2, boundary: ['m1', 123, null, true] } } }
       }
     });
     const okResp = await client.nextFrame();
     assert.equal(okResp.type, FrameType.RESP);
     assert.deepEqual(okResp.meta.result, {
       sessionId: 's-1',
-      messages: [{ id: 'm1', role: 'assistant', blocks: [{ type: 'text', text: 'hi' }] }],
-      hasMore: false
+      messages: [{ id: 'm1', role: 'assistant', createdAt: 1700000000000, blocks: [{ type: 'text', text: 'hi' }] }],
+      hasMore: true,
+      nextCursor: { page: 2, boundary: ['m1', 123, null, true] }
     });
+
+    for (const cursor of [null, false, 42, 'opaque', [1, { offset: 2 }]]) {
+      client.send({ type: FrameType.REQ, streamId: 9, meta: {
+        method: 'sessions.invoke', params: { handler: 'sessions.readMessages', args: { sessionId: 's-1', cursor } }
+      } });
+      const response = await client.nextFrame();
+      assert.equal(response.type, FrameType.RESP);
+      assert.deepEqual(response.meta.result.nextCursor, cursor);
+    }
 
     // 2) sessions.invoke without handler returns HANDLER_NOT_FOUND
     client.send({

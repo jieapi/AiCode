@@ -1,6 +1,8 @@
 package com.aicode.feature.backup.domain
 
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,6 +32,18 @@ class BackupMetadataTest {
         assertFalse(json.decodeFromString<BackupMetadata>(
             """{"schemaVersion":55,"createdAt":0,"themeMode":"DARK","includesAppSettings":false}"""
         ).includesAppSettings)
+    }
+
+    @Test
+    fun chatSessionIdentityIsOptionalAndRoundTrips() {
+        val legacy = json.decodeFromString<ChatSessionDto>(
+            """{"id":"s","title":"old","createdAt":0,"updatedAt":0,"workspacePath":"/example"}"""
+        )
+        assertNull(legacy.backendInstanceId)
+        assertNull(legacy.workspaceId)
+        val bound = legacy.copy(backendInstanceId = "instance", workspaceId = "workspace")
+        val restored = json.decodeFromString<ChatSessionDto>(json.encodeToString(ChatSessionDto.serializer(), bound))
+        assertEquals(bound, restored)
     }
 
     @Test

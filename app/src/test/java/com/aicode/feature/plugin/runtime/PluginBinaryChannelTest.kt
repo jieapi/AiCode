@@ -3,8 +3,11 @@ package com.aicode.feature.plugin.runtime
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
+import com.aicode.feature.workspace.domain.FileAccessProvider
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.Called
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -94,7 +97,7 @@ class PluginBinaryChannelTest {
         }.use {
             val channel = createChannel(sockErr, "wrong-token")
             val ex = runCatching { channel.connect() }.exceptionOrNull() as? PluginProcessException
-            assertEquals("UNAUTHORIZED", ex?.code)
+            assertEquals("PLUGIN_IPC_HANDSHAKE_FAILED", ex?.code)
             channel.close()
         }
 
@@ -361,7 +364,10 @@ class PluginBinaryChannelTest {
             serverWriteRef.set { f -> synchronized(clientOutLock) { writeFrame(f) } }
             when (frame.type) {
                 BinaryFrameType.PING -> {
-                    writeFrame(BinaryFrame(BinaryFrameType.PONG, frame.streamId))
+                    writeFrame(BinaryFrame(BinaryFrameType.PONG, frame.streamId, PluginBinaryCodec.encodeMeta(buildJsonObject {
+                        put("ok", true)
+                        put("window", PluginBinaryCodec.STREAM_WINDOW_BYTES)
+                    })))
                 }
                 BinaryFrameType.RESP -> {
                     val meta = PluginBinaryCodec.decodeMeta(frame.meta)
@@ -376,6 +382,13 @@ class PluginBinaryChannelTest {
                 }
                 BinaryFrameType.STREAM_DATA -> {
                     respBuffers[frame.streamId]?.write(frame.payload)
+                    writeFrame(BinaryFrame(
+                        BinaryFrameType.WINDOW_UPDATE,
+                        frame.streamId,
+                        PluginBinaryCodec.encodeMeta(buildJsonObject {
+                            put("bytes", frame.payload.size)
+                        })
+                    ))
                 }
                 BinaryFrameType.STREAM_END -> {
                     val buf = respBuffers.remove(frame.streamId)
@@ -433,7 +446,7 @@ class PluginBinaryChannelTest {
                 sendFromPeer(
                     BinaryFrame(
                         BinaryFrameType.REQ,
-                        2u,
+                        0x80000001u,
                         PluginBinaryCodec.encodeMeta(buildJsonObject { put("method", "host.bigRead") })
                     )
                 )
@@ -444,7 +457,7 @@ class PluginBinaryChannelTest {
                 sendFromPeer(
                     BinaryFrame(
                         BinaryFrameType.REQ,
-                        4u,
+                        0x80000003u,
                         PluginBinaryCodec.encodeMeta(buildJsonObject { put("method", "host.fail") })
                     )
                 )
@@ -660,13 +673,33 @@ class PluginBinaryChannelTest {
         assertEquals(null, managerLong.createIpcConfig("demo"))
     }
 
-    private fun createRuntimeManager(installer: ContainerInstaller): PluginRuntimeManager =
+    @Test
+    fun runtimeDataDirectory_isLocalAndDoesNotCallTheActiveBackend() = runBlocking {
+        val root = Files.createTempDirectory("plugin-data-").toFile()
+        val installer = mockk<ContainerInstaller>()
+        every { installer.aicodeDir } returns root
+        every { installer.containerPathFor(any()) } answers {
+            "/root/.aicode/" + firstArg<File>().relativeTo(root).invariantSeparatorsPath
+        }
+        val backendFiles = mockk<FileAccessProvider>()
+        val manager = createRuntimeManager(installer, backendFiles)
+
+        assertEquals("/root/.aicode/plugins/data/demo.cloud", manager.dataDirectory("demo.cloud"))
+        assertTrue(File(root, "plugins/data/demo.cloud").isDirectory)
+        assertEquals("/root/.aicode/plugins/data/demo.cloud", manager.dataDirectory("demo.cloud"))
+        verify { backendFiles wasNot Called }
+    }
+
+    private fun createRuntimeManager(
+        installer: ContainerInstaller,
+        backendFiles: FileAccessProvider = mockk(relaxed = true)
+    ): PluginRuntimeManager =
         PluginRuntimeManager(
             pluginManager = mockk(relaxed = true),
             installer = installer,
             engine = mockk(relaxed = true),
             containerSettingsRepository = mockk(relaxed = true),
-            fileAccess = mockk(relaxed = true),
+            fileAccess = backendFiles,
             homeResolver = mockk(relaxed = true),
             commandEngine = mockk(relaxed = true),
             workspaceRepository = mockk(relaxed = true),

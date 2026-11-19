@@ -1,6 +1,12 @@
 package com.aicode.feature.plugin.domain
 
 import com.aicode.feature.plugin.PluginFixtures
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,7 +36,7 @@ class PluginManifestParserTest {
         )
     }
 
-    private val base = PluginFixtures.manifest()
+    private val base = PluginFixtures.manifest(pluginApi = "^1.0.0")
 
     @Test
     fun valid_manifestIsParsed() {
@@ -187,7 +193,7 @@ class PluginManifestParserTest {
     @Test
     fun unknownTopLevelField_isRejectedNotIgnored() {
         assertRejected(base.replace("\"license\"", "\"official\": true, \"license\""), PluginErrorCode.UNSUPPORTED_FIELD, "official")
-        assertRejected(PluginFixtures.manifest(extra = ",\"autoUpdate\": true"), PluginErrorCode.UNSUPPORTED_FIELD, "autoUpdate")
+        assertRejected(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\"autoUpdate\": true"), PluginErrorCode.UNSUPPORTED_FIELD, "autoUpdate")
     }
 
     @Test
@@ -226,6 +232,7 @@ class PluginManifestParserTest {
     @Test
     fun apiRange_mustContainHostVersion() {
         assertRejected(PluginFixtures.manifest(pluginApi = "^2.0.0"), PluginErrorCode.API_INCOMPATIBLE, "^2.0.0")
+        assertRejected(PluginFixtures.manifest(pluginApi = "^3.0.0"), PluginErrorCode.API_INCOMPATIBLE, "^3.0.0")
         assertRejected(PluginFixtures.manifest(pluginApi = "1.x"), PluginErrorCode.FIELD_INVALID, "engines.pluginApi")
         assertEquals("^1.0.0", success(base).pluginApi)
     }
@@ -1097,30 +1104,30 @@ class PluginManifestParserTest {
 
     @Test
     fun icon_acceptsBuiltinNameAndPackageImage() {
-        val builtin = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"terminal\""))
+        val builtin = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"terminal\""))
         assertEquals("terminal", builtin.icon)
 
-        val png = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.png\""))
+        val png = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.png\""))
         assertEquals("icons/logo.png", png.icon)
 
-        val webp = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.WEBP\""))
+        val webp = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.WEBP\""))
         assertEquals("icons/logo.WEBP", webp.icon)
     }
 
     @Test
     fun icon_rejectsUnsupportedImageAndUnsafePath() {
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.svg\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.svg\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"../logo.png\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"../logo.png\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
@@ -1175,17 +1182,17 @@ class PluginManifestParserTest {
                 "executionBackends": [
                   {
                     "id": "cloud-box",
-                    "name": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
+                    "title": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
                     "description": "Run commands in cloud sandbox",
                     "capabilities": {
                       "filesystem": true,
                       "command": true,
                       "terminal": true,
                       "fileWatch": false,
-                      "portForward": true,
+                      "portForward": false,
                       "isRemoteEnvironment": true,
                       "workspaceDiscovery": "hybrid",
-                      "projectConfigLocation": "app_private_dir"
+                      "projectConfigLocation": "appPrivateDir"
                     },
                     "handlers": {
                       "fs": "backend.fs",
@@ -1214,7 +1221,7 @@ class PluginManifestParserTest {
         assertTrue(backend.capabilities.terminal)
         assertTrue(backend.capabilities.isRemoteEnvironment)
         assertEquals("hybrid", backend.capabilities.workspaceDiscovery)
-        assertEquals("app_private_dir", backend.capabilities.projectConfigLocation)
+        assertEquals("appPrivateDir", backend.capabilities.projectConfigLocation)
         assertEquals("backend.fs", backend.handlers.fs)
         assertEquals("backend.execStream", backend.handlers.execStream)
         assertEquals("backend.terminal", backend.handlers.terminal)
@@ -1238,7 +1245,7 @@ class PluginManifestParserTest {
                 "executionBackends": [
                   {
                     "id": "cloud-box",
-                    "name": "Cloud Sandbox",
+                    "title": "Cloud Sandbox",
                     "capabilities": {"filesystem": true, "command": false},
                     "handlers": {"fs": "backend.fs"}
                   }
@@ -1264,7 +1271,7 @@ class PluginManifestParserTest {
                 "executionBackends": [
                   {
                     "id": "cloud-box",
-                    "name": "Cloud Sandbox",
+                    "title": "Cloud Sandbox",
                     "capabilities": {"filesystem": true, "command": true},
                     "handlers": {"fs": "backend.fs"}
                   }
@@ -1565,5 +1572,96 @@ class PluginManifestParserTest {
             }
         """.trimIndent()
         assertRejected(overLimit, PluginErrorCode.FIELD_INVALID, "contributes.sessions")
+    }
+
+    private fun backendManifest(backends: String): String {
+        val root = Json.parseToJsonElement(base) as JsonObject
+        return buildJsonObject {
+            root.forEach { (key, value) -> put(key, value) }
+            put("runtime", buildJsonObject {
+                put("type", "javascript")
+                put("entry", "index.js")
+            })
+            put("contributes", buildJsonObject {
+                put("executionBackends", Json.parseToJsonElement("[$backends]"))
+            })
+        }.toString()
+    }
+
+    @Test
+    fun executionBackend_defaultsMatchApiContract() {
+        assertEquals(SemVer(1, 0, 0), PluginApi.VERSION)
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        val expected = PluginExecutionBackendCapabilitiesRef(
+            filesystem = true,
+            command = true,
+            terminal = false,
+            fileWatch = false,
+            portForward = false,
+            isRemoteEnvironment = true,
+            workspaceDiscovery = "scan",
+            projectConfigLocation = "appPrivateDir"
+        )
+        assertEquals(expected, success(backendManifest(backend)).executionBackends.single().capabilities)
+        assertEquals(expected, success(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{},\"handlers\"")))
+            .executionBackends.single().capabilities)
+        assertEquals("workspaceDir", success(backendManifest(backend.replace(
+            "\"handlers\"", "\"capabilities\":{\"isRemoteEnvironment\":false,\"projectConfigLocation\":\"workspaceDir\"},\"handlers\""
+        ))).executionBackends.single().capabilities.projectConfigLocation)
+        success(backendManifest("""{"id":"cloud","title":"Cloud","capabilities":{"filesystem":false,"command":false},"handlers":{}}"""))
+    }
+
+    @Test
+    fun executionBackend_rejectsNameUnsupportedCapabilitiesAndConfigAliases() {
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        assertRejected(backendManifest(backend.replace("\"title\"", "\"name\"")),
+            PluginErrorCode.UNSUPPORTED_FIELD, "contributes.executionBackends[0].name")
+        listOf("fileWatch", "portForward").forEach { capability ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"$capability\":true},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.$capability")
+        }
+        listOf("", "\"isRemoteEnvironment\":true,").forEach { remote ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{$remote\"projectConfigLocation\":\"workspaceDir\"},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.projectConfigLocation")
+        }
+        listOf("workspace_dir", "app_private_dir", "workspacedir", "appprivatedir").forEach { location ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"projectConfigLocation\":\"$location\"},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.projectConfigLocation")
+        }
+    }
+
+    @Test
+    fun executionBackend_requiresCapabilityHandlersAndLimitsEntriesTo32() {
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        assertRejected(backendManifest(backend.replace("\"fs\":\"fs\",", "")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.fs")
+        assertRejected(backendManifest(backend.replace(",\"exec\":\"exec\"", "")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.exec")
+        assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"terminal\":true},\"handlers\"")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.terminal")
+        val entries = (0 until 33).map { backend.replace("\"cloud\"", "\"cloud$it\"") }
+        assertEquals(32, success(backendManifest(entries.take(32).joinToString(","))).executionBackends.size)
+        assertRejected(backendManifest(entries.joinToString(",")),
+            PluginErrorCode.FIELD_INVALID, "contributes.executionBackends")
+    }
+
+    @Test
+    fun sharedSdkContractFixtures_areParsedByHost() {
+        val relativePath = "plugins/sdk/test/fixtures/contracts.json"
+        val fixtureFile = listOf(File(relativePath), File("../$relativePath")).firstOrNull { it.isFile }
+            ?: error("Missing shared contract fixtures: $relativePath")
+        val fixtures = Json.parseToJsonElement(fixtureFile.readText()) as JsonObject
+        val valid = fixtures.getValue("validManifests") as JsonArray
+        val invalid = fixtures.getValue("invalidManifests") as JsonArray
+        assertTrue("validManifests must not be empty", valid.isNotEmpty())
+        assertTrue("invalidManifests must not be empty", invalid.isNotEmpty())
+        valid.forEachIndexed { index, manifest ->
+            val result = parse(manifest.toString())
+            assertTrue("validManifests[$index]: $result", result is ManifestParseResult.Success)
+            assertEquals("^1.0.0", (result as ManifestParseResult.Success).manifest.pluginApi)
+        }
+        invalid.forEachIndexed { index, manifest ->
+            assertTrue("invalidManifests[$index]", parse(manifest.toString()) is ManifestParseResult.Failure)
+        }
     }
 }

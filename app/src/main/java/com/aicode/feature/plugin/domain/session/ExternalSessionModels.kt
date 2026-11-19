@@ -76,7 +76,7 @@ data class ExternalSessionMessage(
 data class ExternalSessionPage(
     val session: ExternalSessionSummary? = null,
     val messages: List<ExternalSessionMessage>,
-    val nextCursor: String? = null,
+    val nextCursor: kotlinx.serialization.json.JsonElement? = null,
     val hasMore: Boolean = false
 )
 

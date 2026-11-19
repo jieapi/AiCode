@@ -20,6 +20,8 @@ import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -171,7 +173,8 @@ class ExternalSessionServiceTest {
                 add(buildJsonObject {
                     put("id", "m1")
                     put("role", "assistant")
-                    put("timestamp", 1000L)
+                    put("createdAt", 1000L)
+                    put("timestamp", 9999L)
                     put("blocks", buildJsonArray {
                         add(buildJsonObject { put("type", "reasoning"); put("text", "plan step") })
                         add(buildJsonObject { put("type", "text"); put("text", "Hello") })
@@ -196,18 +199,132 @@ class ExternalSessionServiceTest {
         }
 
         val service = ExternalSessionService(pluginManager, runtimeManager, store)
-        val page = service.readMessages("demo.remote:harness", "s1", cursor = "c-1", maxMessages = 20)
+        val page = service.readMessages("demo.remote:harness", "s1", cursor = JsonPrimitive("c-1"), maxMessages = 20)
 
-        assertEquals("c-2", page.nextCursor)
+        assertEquals(JsonPrimitive("c-2"), page.nextCursor)
+        coVerify {
+            runtimeManager.invoke("demo.remote", "1.0.0", runtime, "sessions.readMessages",
+                match { it["cursor"] == JsonPrimitive("c-1") && it["maxMessages"] == JsonPrimitive(20) },
+                "sessions.invoke", any())
+        }
         assertTrue(page.hasMore)
         val msg = page.messages.single()
         assertEquals("m1", msg.id)
+        assertEquals(1000L, msg.timestamp)
         assertEquals(5, msg.blocks.size)
         assertTrue(msg.blocks[0] is ExternalMessageBlock.Reasoning)
         assertTrue(msg.blocks[1] is ExternalMessageBlock.Text)
         assertTrue(msg.blocks[2] is ExternalMessageBlock.Tool)
         assertTrue(msg.blocks[3] is ExternalMessageBlock.Attachment)
         assertTrue(msg.blocks[4] is ExternalMessageBlock.Notice)
+    }
+
+    @Test
+    fun readMessages_preservesEveryJsonCursorType() = runTest {
+        val runtimeManager = mockk<PluginRuntimeManager>()
+        val service = ExternalSessionService(buildManager(), runtimeManager, ExternalSessionStore())
+        val cursors = listOf(
+            buildJsonObject { put("offset", 20); put("token", "opaque") },
+            buildJsonArray { add(JsonPrimitive(2)); add(JsonPrimitive("page")) },
+            JsonPrimitive(0),
+            JsonPrimitive(false),
+            JsonPrimitive(""),
+            JsonNull
+        )
+        cursors.forEach { cursor ->
+            coEvery {
+                runtimeManager.invoke("demo.remote", "1.0.0", runtime, "sessions.readMessages", any(), "sessions.invoke", any())
+            } returns buildJsonObject {
+                put("messages", buildJsonArray {})
+                put("nextCursor", cursor)
+            }
+            val page = service.readMessages("demo.remote:harness", "s1", cursor)
+            assertEquals(cursor, page.nextCursor)
+            assertEquals(cursor != JsonNull, page.hasMore)
+            coVerify {
+                runtimeManager.invoke("demo.remote", "1.0.0", runtime, "sessions.readMessages",
+                    match { it["cursor"] == cursor }, "sessions.invoke", any())
+            }
+        }
+    }
+
+    @Test
+    fun readMessages_missingCursorAndCreatedAtDoNotUseLegacyFields() = runTest {
+        val runtimeManager = mockk<PluginRuntimeManager>()
+        coEvery {
+            runtimeManager.invoke("demo.remote", "1.0.0", runtime, "sessions.readMessages", any(), "sessions.invoke", any())
+        } returns buildJsonObject {
+            put("cursor", "legacy")
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("timestamp", 123L) })
+            })
+        }
+        val service = ExternalSessionService(buildManager(), runtimeManager, ExternalSessionStore())
+        val page = service.readMessages("demo.remote:harness", "s1")
+        assertNull(page.nextCursor)
+        assertFalse(page.hasMore)
+        assertEquals(0L, page.messages.single().timestamp)
+        coVerify {
+            runtimeManager.invoke("demo.remote", "1.0.0", runtime, "sessions.readMessages",
+                match { "cursor" !in it }, "sessions.invoke", any())
+        }
+    }
+
+    @Test
+    fun sourceFailures_useStableErrorCodes() = runTest {
+        val runtimeManager = mockk<PluginRuntimeManager>()
+        val service = ExternalSessionService(buildManager(), runtimeManager, ExternalSessionStore())
+        try {
+            service.readMessages("demo.remote:missing", "s1")
+            fail("expected missing source")
+        } catch (e: PluginHostException) {
+            assertEquals("SESSION_SOURCE_NOT_FOUND", e.code)
+        }
+        coEvery {
+            runtimeManager.invoke("demo.remote", "1.0.0", runtime, any(), any(), "sessions.invoke", any())
+        } returns JsonArray(emptyList())
+        try {
+            service.readMessages("demo.remote:harness", "s1")
+            fail("expected invalid page")
+        } catch (e: PluginHostException) {
+            assertEquals("SESSION_SOURCE_INVALID", e.code)
+        }
+        try {
+            service.createSession("demo.remote:harness")
+            fail("expected invalid session")
+        } catch (e: PluginHostException) {
+            assertEquals("SESSION_SOURCE_INVALID", e.code)
+        }
+    }
+
+    @Test
+    fun thinking_requiresVisibleBooleanAndUsesStableDefault() {
+        val store = ExternalSessionStore()
+        val host = ExternalSessionHostService(buildManager(), store)
+        val params = buildJsonObject { put("sourceId", "harness"); put("sessionId", "s1") }
+        listOf(null, JsonNull, JsonPrimitive("true"), JsonPrimitive(1)).forEach { invalid ->
+            try {
+                host.setThinking("demo.remote", buildJsonObject {
+                    params.forEach { (key, value) -> put(key, value) }
+                    if (invalid != null) put("visible", invalid)
+                    put("text", "text alone is insufficient")
+                })
+                fail("expected invalid visible: $invalid")
+            } catch (e: PluginHostException) {
+                assertEquals("PARAM_INVALID", e.code)
+            }
+        }
+        host.setThinking("demo.remote", buildJsonObject {
+            params.forEach { (key, value) -> put(key, value) }
+            put("visible", true)
+        })
+        assertEquals("Thinking…", store.thinking.value["demo.remote:harness|s1"])
+        host.setThinking("demo.remote", buildJsonObject {
+            params.forEach { (key, value) -> put(key, value) }
+            put("visible", false)
+            put("text", "ignored")
+        })
+        assertFalse(store.thinking.value.containsKey("demo.remote:harness|s1"))
     }
 
     @Test
@@ -280,6 +397,7 @@ class ExternalSessionServiceTest {
             buildJsonObject {
                 put("sourceId", "harness")
                 put("sessionId", "s1")
+                put("visible", true)
                 put("text", "Analyzing...")
             }
         )
@@ -303,9 +421,9 @@ class ExternalSessionServiceTest {
                     put("sessions", buildJsonArray {})
                 }
             )
-            fail("expected FORBIDDEN")
+            fail("expected SESSION_SOURCE_NOT_FOUND")
         } catch (e: PluginHostException) {
-            assertEquals("FORBIDDEN", e.code)
+            assertEquals("SESSION_SOURCE_NOT_FOUND", e.code)
         }
     }
 }

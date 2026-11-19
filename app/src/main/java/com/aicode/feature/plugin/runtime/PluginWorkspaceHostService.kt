@@ -97,15 +97,24 @@ class PluginWorkspaceHostService @Inject constructor(
                 ?: throw PluginHostException("PARAM_INVALID", "items[$index].path is required")
             val id = (obj["id"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()
                 ?.takeIf { it.isNotEmpty() }
-                ?: path
+                ?: throw PluginHostException("WORKSPACE_INVALID", "items[$index].id is required")
             val available = (obj["available"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
                 ?: true
             val group = (obj["group"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()
                 .orEmpty()
-            val canCreateChild = (obj["canCreateChild"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-                ?: true
-            val canDelete = (obj["canDelete"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-                ?: true
+            val caps = when (val raw = obj["capabilities"]) {
+                null -> JsonObject(emptyMap())
+                is JsonObject -> raw
+                else -> throw PluginHostException("PARAM_INVALID", "items[$index].capabilities must be an object")
+            }
+            fun capability(key: String): Boolean {
+                val raw = caps[key] ?: return true
+                return (raw as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+                    ?: throw PluginHostException("PARAM_INVALID", "items[$index].capabilities.$key must be a boolean")
+            }
+            val canCreateChild = capability("createChild")
+            val canDelete = capability("delete")
+            capability("git")
             val type = when ((obj["type"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()?.lowercase()) {
                 null, "" -> defaultType
                 "internal" -> WorkspaceType.INTERNAL
@@ -128,15 +137,15 @@ class PluginWorkspaceHostService @Inject constructor(
     }
 
     private fun parseIds(params: JsonObject): List<String> {
-        val rawArray = params["ids"] as? JsonArray
-            ?: throw PluginHostException("PARAM_INVALID", "ids must be an array")
+        val rawArray = params["workspaceIds"] as? JsonArray
+            ?: throw PluginHostException("PARAM_INVALID", "workspaceIds must be an array")
         if (rawArray.size > MAX_ITEMS) {
-            throw PluginHostException("PARAM_INVALID", "too many ids (max $MAX_ITEMS)")
+            throw PluginHostException("PARAM_INVALID", "too many workspaceIds (max $MAX_ITEMS)")
         }
         return rawArray.mapIndexed { index, element ->
             (element as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.trim()
                 ?.takeIf { it.isNotEmpty() }
-                ?: throw PluginHostException("PARAM_INVALID", "ids[$index] must be a non-empty string")
+                ?: throw PluginHostException("PARAM_INVALID", "workspaceIds[$index] must be a non-empty string")
         }
     }
 

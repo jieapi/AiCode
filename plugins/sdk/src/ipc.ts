@@ -8,7 +8,15 @@ export const IPC_VERSION = 1;
 export const IPC_HEADER_BYTES = 16;
 export const MAX_META_BYTES = 1024 * 1024;
 export const MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+export const STREAM_WINDOW_BYTES = 256 * 1024;
 export const DEFAULT_CHUNK_BYTES = 64 * 1024;
+
+const MIN_STREAM_FRAME_COST = 4 * 1024;
+const MAX_CALLS = 8;
+const BUFFER_BUDGET = 48 * 1024 * 1024;
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_REQUEST_TIMEOUT_MS = 1_800_000;
+const WRITE_TIMEOUT_MS = 10_000;
 
 export const FrameType = {
   REQ: 1,
@@ -18,7 +26,8 @@ export const FrameType = {
   STREAM_END: 5,
   EVENT: 6,
   PING: 7,
-  PONG: 8
+  PONG: 8,
+  WINDOW_UPDATE: 9
 } as const;
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType];
@@ -52,6 +61,7 @@ export type StreamChunk<M = Record<string, unknown>> =
 export interface PluginRequestContext {
   signal: AbortSignal;
   payload: Buffer;
+  payloadStream?: AsyncIterable<Uint8Array>;
   streamId: number;
   method: string;
 }
@@ -98,7 +108,7 @@ const EMPTY_BUFFER = Buffer.alloc(0);
 const TEXT_MERGE_FIELDS = ['text', 'delta', 'chunk', 'content', 'data'] as const;
 
 function isValidFrameType(type: number): type is FrameTypeValue {
-  return Number.isInteger(type) && type >= FrameType.REQ && type <= FrameType.PONG;
+  return Number.isInteger(type) && type >= FrameType.REQ && type <= FrameType.WINDOW_UPDATE;
 }
 
 function toBuffer(data: Uint8Array): Buffer {
@@ -174,6 +184,8 @@ export function encodeFrame(frame: IpcFrame): Buffer {
   if (payloadBuf.length > 0) payloadBuf.copy(out, IPC_HEADER_BYTES + metaBuf.length);
   return out;
 }
+
+const frameMetadataSizes = new WeakMap<DecodedFrame, number>();
 
 interface ParsedHeader {
   type: FrameTypeValue;
@@ -256,7 +268,9 @@ export class FrameDecoder {
       let meta: Record<string, unknown> | undefined;
       if (metaBuf.length > 0) {
         try {
-          meta = JSON.parse(metaBuf.toString('utf8')) as Record<string, unknown>;
+          const decoded: unknown = JSON.parse(metaBuf.toString('utf8'));
+          if (!isPlainObject(decoded)) throw new Error('Metadata must be a JSON object');
+          meta = decoded;
         } catch (error) {
           this.reset();
           throw new IpcError(
@@ -266,12 +280,14 @@ export class FrameDecoder {
         }
       }
 
-      frames.push({
+      const frame = {
         type: this.header.type,
         streamId: this.header.streamId,
         ...(meta !== undefined ? { meta } : {}),
         payload
-      });
+      };
+      frameMetadataSizes.set(frame, metaBuf.length);
+      frames.push(frame);
       this.header = null;
     }
 
@@ -315,811 +331,674 @@ export class FrameDecoder {
 interface OutboundPending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
-  timer?: ReturnType<typeof setTimeout>;
-  streamChunks: Buffer[];
-  streamBytes: number;
-  streamMeta?: Record<string, unknown>;
+  timer: ReturnType<typeof setTimeout>;
+  chunks: Buffer[];
+  bytes: number;
+  reserved: number;
+  meta?: Record<string, unknown>;
+  sent: boolean;
 }
 
-interface InboundPendingRequest {
+interface InboundCall {
   method: string;
   params: Record<string, unknown>;
-  chunks: Buffer[];
-  totalBytes: number;
+  controller: AbortController;
+  timer: ReturnType<typeof setTimeout>;
+  responseStream: boolean;
+  running: boolean;
+  reserved: number;
+  fragments?: Buffer[];
+  fragmentBytes: number;
+  upload?: UploadBody;
+  credit: number;
+  wakeCredit?: () => void;
 }
 
-interface InboundStreamState {
-  controller: AbortController;
-  cancelled: boolean;
-  ended: boolean;
+interface WritePacket {
+  bytes: Buffer;
+  resolve?: () => void;
+  reject?: (error: Error) => void;
+  live?: () => boolean;
+}
+
+const MAX_WRITE_BYTES = 4 * 1024 * 1024;
+const MAX_EVENT_WRITE_BYTES = 2 * 1024 * 1024;
+
+function frameCost(bytes: number): number {
+  return Math.max(MIN_STREAM_FRAME_COST, bytes);
+}
+
+function limitError(): IpcError {
+  return new IpcError('IPC_LIMIT', 'IPC concurrency or buffer budget exceeded');
+}
+
+function terminalError(meta?: Record<string, unknown>): IpcError | undefined {
+  const result = isPlainObject(meta?.result) ? meta.result : undefined;
+  const statuses = [meta?.status, result?.status, result?.type];
+  if (meta?.cancelled === true || meta?.cancel === true || result?.cancelled === true ||
+      statuses.some((status) => status === 'cancelled' || status === 'canceled' || status === 'aborted')) {
+    return new IpcError('IPC_CANCELLED', 'IPC stream cancelled');
+  }
+  const error = meta?.error ?? result?.error;
+  if (error != null || meta?.ok === false || result?.ok === false || statuses.some((status) => status === 'failed' || status === 'error')) {
+    const detail = isPlainObject(error) ? error : result ?? meta;
+    return new IpcError(typeof detail?.code === 'string' ? detail.code : 'IPC_STREAM_FAILED',
+      typeof detail?.message === 'string' ? detail.message : typeof error === 'string' ? error : 'IPC stream failed');
+  }
+}
+
+class UploadBody implements AsyncIterable<Uint8Array> {
+  private queue: Array<{ payload: Buffer; cost: number }> = [];
+  private credit = STREAM_WINDOW_BYTES;
+  private wake?: () => void;
+  private ended = false;
+  private error?: Error;
+  private claimed = false;
+  consumed = false;
+
+  constructor(private readonly update: (cost: number) => void) {}
+
+  push(frame: DecodedFrame): void {
+    if (this.ended || frame.meta !== undefined || frame.payload.length === 0) {
+      throw new IpcError('IPC_PROTOCOL_ERROR', 'Invalid upload data frame');
+    }
+    const cost = frameCost(IPC_HEADER_BYTES + frame.payload.length);
+    if (cost > this.credit) throw limitError();
+    this.credit -= cost;
+    this.queue.push({ payload: frame.payload, cost });
+    this.wake?.();
+  }
+
+  finish(error?: Error): void {
+    this.ended = true;
+    if (error) {
+      this.error = error;
+      this.queue = [];
+    }
+    this.wake?.();
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+    if (this.claimed) throw new IpcError('IPC_PROTOCOL_ERROR', 'Upload body can only be consumed once');
+    this.claimed = true;
+    while (true) {
+      if (this.error) throw this.error;
+      const entry = this.queue.shift();
+      if (entry) {
+        yield entry.payload;
+        this.credit += entry.cost;
+        if (!this.ended) this.update(entry.cost);
+      } else if (this.ended) {
+        this.consumed = true;
+        return;
+      } else {
+        await new Promise<void>((resolve) => { this.wake = resolve; });
+        this.wake = undefined;
+      }
+    }
+  }
+}
+
+class SocketWriter {
+  private readonly control: WritePacket[] = [];
+  private readonly data: WritePacket[] = [];
+  private current?: WritePacket;
+  private timer?: ReturnType<typeof setTimeout>;
+  private bytes = 0;
+  private closed?: Error;
+
+  constructor(private readonly socket: Socket) {}
+
+  send(bytes: Buffer, data: boolean, live?: () => boolean): Promise<void> {
+    return new Promise((resolve, reject) => this.enqueue({ bytes, resolve, reject, live }, data));
+  }
+
+  immediate(bytes: Buffer, event = false): void {
+    if (event && this.bytes + bytes.length > MAX_EVENT_WRITE_BYTES) throw limitError();
+    this.enqueue({ bytes }, false);
+  }
+
+  private enqueue(packet: WritePacket, data: boolean): void {
+    if (this.closed || this.socket.destroyed) throw this.closed ?? new IpcError('IPC_CLOSED', 'IPC socket closed');
+    if (this.control.length + this.data.length >= 64 || this.bytes + packet.bytes.length > MAX_WRITE_BYTES) {
+      throw limitError();
+    }
+    this.bytes += packet.bytes.length;
+    (data ? this.data : this.control).push(packet);
+    this.pump();
+  }
+
+  private pump(): void {
+    if (this.closed || this.current) return;
+    while (true) {
+      const packet = this.control.shift() ?? this.data.shift();
+      if (!packet) return;
+      if (packet.live && !packet.live()) {
+        this.bytes -= packet.bytes.length;
+        packet.reject?.(new IpcError('IPC_CANCELLED', 'IPC write cancelled'));
+        continue;
+      }
+      this.current = packet;
+      this.timer = setTimeout(() => this.socket.destroy(new IpcError('IPC_TIMEOUT', 'IPC socket write timed out')), WRITE_TIMEOUT_MS);
+      this.timer.unref?.();
+      this.socket.write(packet.bytes, (error) => {
+        if (this.current !== packet) return;
+        clearTimeout(this.timer);
+        this.current = undefined;
+        this.bytes -= packet.bytes.length;
+        if (error) {
+          packet.reject?.(error);
+          this.socket.destroy(error);
+        } else {
+          packet.resolve?.();
+          this.pump();
+        }
+      });
+      return;
+    }
+  }
+
+  close(error: Error): void {
+    this.closed = error;
+    clearTimeout(this.timer);
+    this.current?.reject?.(error);
+    this.current = undefined;
+    for (const packet of [...this.control.splice(0), ...this.data.splice(0)]) packet.reject?.(error);
+    this.bytes = 0;
+  }
 }
 
 export class PluginIpcServer {
-  private readonly socketPath: string;
-  private readonly token: string;
-  private readonly onRequest?: IpcRequestHandler;
-  private readonly onEvent?: (name: string, payload: unknown, rawPayload: Buffer) => void;
-  private readonly onReady?: () => void;
-  private readonly onClose?: () => void;
-  private readonly onError?: (error: Error) => void;
   private readonly chunkBytes: number;
-
   private server: Server | null = null;
   private activeSocket: Socket | null = null;
-  private ready = false;
+  private readonly sockets = new Map<Socket, SocketWriter>();
   private closed = false;
+  private windowNegotiated = false;
   private nextStreamId = 0x80000001;
-  private readonly outboundPending = new Map<number, OutboundPending>();
-  private readonly inboundPendingRequests = new Map<number, InboundPendingRequest>();
-  private readonly inboundStreams = new Map<number, InboundStreamState>();
+  private bufferedBytes = 0;
+  private runningHandlers = 0;
+  private readonly outbound = new Map<number, OutboundPending>();
+  private readonly inbound = new Map<number, InboundCall>();
 
-  constructor(options: PluginIpcServerOptions) {
+  constructor(private readonly options: PluginIpcServerOptions) {
     if (!options.socketPath) throw new IpcError('PARAM_MISSING', 'socketPath is required');
     if (!options.token) throw new IpcError('PARAM_MISSING', 'token is required');
-    this.socketPath = options.socketPath;
-    this.token = options.token;
-    this.onRequest = options.onRequest;
-    this.onEvent = options.onEvent;
-    this.onReady = options.onReady;
-    this.onClose = options.onClose;
-    this.onError = options.onError;
-    this.chunkBytes =
-      options.chunkBytes && options.chunkBytes > 0
-        ? Math.min(options.chunkBytes, MAX_PAYLOAD_BYTES)
-        : DEFAULT_CHUNK_BYTES;
+    this.chunkBytes = Math.max(1, Math.min(DEFAULT_CHUNK_BYTES, Math.floor(options.chunkBytes || DEFAULT_CHUNK_BYTES)));
   }
 
   get isReady(): boolean {
-    return this.ready && this.activeSocket !== null && !this.activeSocket.destroyed;
+    return this.activeSocket !== null && !this.activeSocket.destroyed;
+  }
+
+  get activeRequests(): number {
+    return this.outbound.size + this.inbound.size;
   }
 
   async start(): Promise<void> {
     if (this.server) return;
     this.closed = false;
-
-    fs.mkdirSync(path.dirname(this.socketPath), { recursive: true });
+    const { socketPath } = this.options;
+    fs.mkdirSync(path.dirname(socketPath), { recursive: true });
     try {
-      fs.unlinkSync(this.socketPath);
+      fs.unlinkSync(socketPath);
     } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
     }
-
     const server = createServer((socket) => this.handleConnection(socket));
     this.server = server;
-
     await new Promise<void>((resolve, reject) => {
-      const onErr = (err: Error) => {
-        server.off('listening', onListen);
-        reject(err);
-      };
+      const onError = (error: Error) => { server.off('listening', onListen); reject(error); };
       const onListen = () => {
-        server.off('error', onErr);
-        try {
-          fs.chmodSync(this.socketPath, 0o600);
-          resolve();
-        } catch (err) {
-          reject(err);
-        }
+        server.off('error', onError);
+        try { fs.chmodSync(socketPath, 0o600); resolve(); } catch (error) { reject(error); }
       };
-      server.once('error', onErr);
+      server.once('error', onError);
       server.once('listening', onListen);
-      server.listen(this.socketPath);
+      server.listen(socketPath);
     });
-
-    server.on('error', (error) => {
-      this.onError?.(error);
-    });
+    server.on('error', (error) => this.options.onError?.(error));
   }
 
   async close(): Promise<void> {
-    if (this.closed && !this.server) return;
     this.closed = true;
-    this.ready = false;
-
-    for (const entry of this.inboundStreams.values()) {
-      entry.cancelled = true;
-      entry.controller.abort();
-    }
-    this.inboundStreams.clear();
-    this.rejectAllOutbound(new IpcError('IPC_CLOSED', 'IPC server closed'));
-
-    if (this.activeSocket) {
-      const sock = this.activeSocket;
-      this.activeSocket = null;
-      sock.destroy();
-    }
-
+    if (this.activeSocket) this.disconnect(this.activeSocket, new IpcError('IPC_CLOSED', 'IPC server closed'));
+    for (const socket of this.sockets.keys()) socket.destroy();
     const server = this.server;
     this.server = null;
-    if (server) {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
-    }
-
-    try {
-      fs.unlinkSync(this.socketPath);
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code !== 'ENOENT') {
-        // Ignore cleanup errors on already-removed socket paths.
-      }
-    }
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
-  sendRequest<T = unknown>(
+  async sendRequest<T = unknown>(
     method: string,
     params?: Record<string, unknown>,
     payload?: Uint8Array | null,
-    timeoutMs?: number
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
   ): Promise<T> {
     const socket = this.activeSocket;
-    if (!this.isReady || !socket) {
-      return Promise.reject(new IpcError('IPC_NOT_READY', 'IPC channel is not ready'));
-    }
-
-    const streamId = this.allocateStreamId();
-    const payloadBuf = payload == null ? EMPTY_BUFFER : toBuffer(payload);
-    const chunkedPayload = payloadBuf.length > this.chunkBytes;
-
-    let reqFrame: Buffer;
-    try {
-      reqFrame = encodeFrame({
-        type: FrameType.REQ,
-        streamId,
-        meta: chunkedPayload
-          ? { method, params: params ?? {}, streamed: true }
-          : { method, params: params ?? {} },
-        payload: chunkedPayload ? EMPTY_BUFFER : payloadBuf
-      });
-    } catch (error) {
-      return Promise.reject(error instanceof Error ? error : new Error(errorMessage(error)));
-    }
-
+    if (!socket || socket.destroyed) throw new IpcError('IPC_NOT_READY', 'IPC channel is not ready');
+    const data = payload == null ? EMPTY_BUFFER : toBuffer(payload);
+    if (data.length > MAX_PAYLOAD_BYTES) throw new IpcError('PAYLOAD_TOO_LARGE', 'RPC payload exceeds 16 MiB');
+    if (this.outbound.size >= MAX_CALLS) throw limitError();
+    const id = this.nextStreamId;
+    this.nextStreamId = id === 0xffffffff ? 0x80000001 : id + 1;
+    const fragmented = data.length > this.chunkBytes;
+    const request = encodeFrame({ type: FrameType.REQ, streamId: id,
+      meta: { method, params: params ?? {}, ...(fragmented ? { streamed: true } : {}) },
+      payload: fragmented ? undefined : data });
+    const reserved = data.length + request.length;
+    this.reserve(reserved);
+    const timeout = Math.max(1, Math.min(timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS));
     return new Promise<T>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      if (timeoutMs !== undefined && timeoutMs > 0) {
-        timer = setTimeout(() => {
-          const pending = this.outboundPending.get(streamId);
-          if (!pending) return;
-          this.outboundPending.delete(streamId);
-          reject(new IpcError('IPC_TIMEOUT', `IPC request ${method} timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
-        timer.unref?.();
-      }
-
-      this.outboundPending.set(streamId, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timer,
-        streamChunks: [],
-        streamBytes: 0
-      });
-
-      try {
-        socket.write(reqFrame);
-        if (chunkedPayload) {
-          void this.sendOutboundPayloadChunks(socket, streamId, payloadBuf);
+      const timer = setTimeout(() => this.failOutbound(socket, id, new IpcError('IPC_TIMEOUT', `IPC request ${method} timed out`), true), timeout);
+      timer.unref?.();
+      const pending: OutboundPending = { resolve: resolve as (value: unknown) => void, reject, timer,
+        chunks: [], bytes: 0, reserved, sent: false };
+      this.outbound.set(id, pending);
+      const live = () => this.outbound.get(id) === pending;
+      void (async () => {
+        await this.writer(socket).send(request, false, () => {
+          if (!live()) return false;
+          pending.sent = true;
+          return true;
+        });
+        if (!fragmented) return;
+        for (let offset = 0; live() && offset < data.length; offset += this.chunkBytes) {
+          await this.send(socket, { type: FrameType.STREAM_DATA, streamId: id,
+            payload: data.subarray(offset, offset + this.chunkBytes) }, live);
         }
-      } catch (error) {
-        const pending = this.outboundPending.get(streamId);
-        if (pending) {
-          this.outboundPending.delete(streamId);
-          if (pending.timer) clearTimeout(pending.timer);
-          reject(error instanceof Error ? error : new Error(errorMessage(error)));
-        }
-      }
+        if (live()) await this.send(socket, { type: FrameType.STREAM_END, streamId: id }, live);
+      })().catch((error: Error) => this.failOutbound(socket, id, error, true));
     });
-  }
-
-  private async sendOutboundPayloadChunks(
-    socket: Socket,
-    streamId: number,
-    payload: Buffer
-  ): Promise<void> {
-    try {
-      let offset = 0;
-      while (offset < payload.length) {
-        if (socket.destroyed || this.activeSocket !== socket || !this.outboundPending.has(streamId)) {
-          return;
-        }
-        const end = Math.min(offset + this.chunkBytes, payload.length);
-        await this.writeFrameWithYield(socket, {
-          type: FrameType.STREAM_DATA,
-          streamId,
-          payload: payload.subarray(offset, end)
-        });
-        offset = end;
-      }
-      if (!socket.destroyed && this.activeSocket === socket && this.outboundPending.has(streamId)) {
-        this.writeFrameImmediate(socket, {
-          type: FrameType.STREAM_END,
-          streamId
-        });
-      }
-    } catch (error) {
-      const pending = this.outboundPending.get(streamId);
-      if (pending) {
-        this.outboundPending.delete(streamId);
-        if (pending.timer) clearTimeout(pending.timer);
-        pending.reject(error instanceof Error ? error : new Error(errorMessage(error)));
-      }
-    }
   }
 
   sendEvent(name: string, payloadJson: unknown = null, rawPayload?: Uint8Array | null): boolean {
     const socket = this.activeSocket;
-    if (!this.isReady || !socket) return false;
-
-    const encoded = encodeFrame({
-      type: FrameType.EVENT,
-      streamId: 0,
-      meta: { name, payload: payloadJson === undefined ? null : payloadJson },
-      payload: rawPayload
-    });
-    return socket.write(encoded);
-  }
-
-  private allocateStreamId(): number {
-    // Allocate >= 0x80000001 so outbound IDs never collide with low peer-initiated stream IDs.
-    const id = this.nextStreamId;
-    this.nextStreamId = this.nextStreamId >= 0xffffffff ? 0x80000001 : this.nextStreamId + 1;
-    return id;
+    if (!socket || socket.destroyed) return false;
+    this.writer(socket).immediate(encodeFrame({ type: FrameType.EVENT, streamId: 0,
+      meta: { name, payload: payloadJson }, payload: rawPayload }), true);
+    return true;
   }
 
   private handleConnection(socket: Socket): void {
-    if (this.closed) {
-      socket.destroy();
-      return;
-    }
-
+    if (this.closed || this.sockets.size >= 4) { socket.destroy(); return; }
+    const writer = new SocketWriter(socket);
+    this.sockets.set(socket, writer);
     const decoder = new FrameDecoder();
     let authenticated = false;
-
+    const handshake = setTimeout(() => socket.destroy(), WRITE_TIMEOUT_MS);
+    handshake.unref?.();
     socket.on('data', (chunk) => {
-      let frames: DecodedFrame[];
       try {
-        frames = decoder.push(chunk);
-      } catch (error) {
-        this.onError?.(error instanceof Error ? error : new Error(errorMessage(error)));
-        socket.destroy();
-        return;
-      }
-
-      for (const frame of frames) {
-        if (!authenticated) {
-          if (frame.type !== FrameType.PING || !tokensEqual(frame.meta?.token, this.token)) {
-            socket.destroy();
-            return;
+        for (const frame of decoder.push(chunk)) {
+          if (!authenticated) {
+            if (frame.type !== FrameType.PING || frame.payload.length ||
+                !tokensEqual(frame.meta?.token, this.options.token)) { socket.destroy(); return; }
+            clearTimeout(handshake);
+            authenticated = true;
+            const previous = this.activeSocket;
+            if (previous) {
+              this.disconnect(previous, new IpcError('IPC_REPLACED', 'IPC connection replaced'));
+              previous.destroy();
+            }
+            this.activeSocket = socket;
+            this.windowNegotiated = frame.meta?.window === STREAM_WINDOW_BYTES;
+            this.control(socket, { type: FrameType.PONG, streamId: frame.streamId,
+              meta: this.windowNegotiated ? { ok: true, window: STREAM_WINDOW_BYTES } : { ok: true } });
+            this.options.onReady?.();
+          } else if (this.activeSocket === socket && !socket.destroyed) {
+            this.dispatch(socket, frame);
           }
-          authenticated = true;
-          const previous = this.activeSocket;
-          if (previous && previous !== socket) {
-            this.cleanupActiveSocket(previous, new IpcError('IPC_REPLACED', 'IPC connection replaced'));
-            previous.destroy();
-          }
-          this.activeSocket = socket;
-          this.ready = true;
-          this.writeFrameImmediate(socket, {
-            type: FrameType.PONG,
-            streamId: frame.streamId,
-            meta: { ok: true }
-          });
-          this.onReady?.();
-          continue;
         }
-
-        this.dispatchFrame(socket, frame);
+      } catch (error) {
+        socket.destroy(error instanceof Error ? error : new Error(errorMessage(error)));
       }
     });
-
-    socket.on('error', (error) => {
-      this.onError?.(error);
-    });
-
+    socket.on('error', (error) => this.options.onError?.(error));
     socket.on('close', () => {
+      clearTimeout(handshake);
+      const error = new IpcError('IPC_CLOSED', 'IPC connection closed');
+      writer.close(error);
+      this.sockets.delete(socket);
       if (this.activeSocket === socket) {
-        this.cleanupActiveSocket(socket, new IpcError('IPC_CLOSED', 'IPC connection closed'));
-        this.onClose?.();
+        this.disconnect(socket, error);
+        this.options.onClose?.();
       }
     });
   }
 
-  private cleanupActiveSocket(socket: Socket, reason: Error): void {
-    if (this.activeSocket !== socket) return;
-    this.ready = false;
+  private disconnect(socket: Socket, error: Error): void {
     this.activeSocket = null;
-    this.inboundPendingRequests.clear();
-    for (const entry of this.inboundStreams.values()) {
-      entry.cancelled = true;
-      entry.controller.abort();
-    }
-    this.inboundStreams.clear();
-    this.rejectAllOutbound(reason);
+    for (const id of this.inbound.keys()) this.abortInbound(id, error);
+    for (const id of this.outbound.keys()) this.failOutbound(socket, id, error, false);
   }
 
-  private rejectAllOutbound(reason: Error): void {
-    for (const [id, entry] of this.outboundPending) {
-      this.outboundPending.delete(id);
-      if (entry.timer) clearTimeout(entry.timer);
-      entry.reject(reason);
-    }
-  }
-
-  private dispatchFrame(socket: Socket, frame: DecodedFrame): void {
-    switch (frame.type) {
-      case FrameType.PING:
-        this.writeFrameImmediate(socket, {
-          type: FrameType.PONG,
-          streamId: frame.streamId,
-          meta: frame.meta ?? { ok: true },
-          payload: frame.payload.length > 0 ? frame.payload : undefined
-        });
-        break;
-      case FrameType.PONG:
-        break;
-      case FrameType.REQ:
-        this.receiveInboundRequestFrame(socket, frame);
-        break;
-      case FrameType.RESP:
-        this.handleOutboundFrame(frame);
-        break;
-      case FrameType.ERR:
-        if (this.outboundPending.has(frame.streamId)) {
-          this.handleOutboundFrame(frame);
-        } else {
-          this.inboundPendingRequests.delete(frame.streamId);
-          this.cancelInboundStream(socket, frame.streamId);
-        }
-        break;
-      case FrameType.STREAM_DATA:
-        if (this.outboundPending.has(frame.streamId)) {
-          this.handleOutboundFrame(frame);
-        } else {
-          this.receiveInboundRequestData(socket, frame);
-        }
-        break;
-      case FrameType.STREAM_END:
-        if (this.outboundPending.has(frame.streamId)) {
-          this.handleOutboundFrame(frame);
-        } else if (this.inboundPendingRequests.has(frame.streamId)) {
-          this.finishInboundPendingRequest(socket, frame);
-        } else {
-          this.cancelInboundStream(socket, frame.streamId);
-        }
-        break;
-      case FrameType.EVENT: {
-        const name = typeof frame.meta?.name === 'string' ? frame.meta.name : '';
-        if (name) {
-          this.onEvent?.(name, frame.meta?.payload, frame.payload);
-        }
-        break;
-      }
-    }
-  }
-
-  private handleOutboundFrame(frame: DecodedFrame): void {
-    const pending = this.outboundPending.get(frame.streamId);
-    if (!pending) return;
-
-    if (frame.type === FrameType.RESP) {
-      if (frame.meta?.streamed === true) {
-        pending.streamMeta = frame.meta;
-        if (frame.payload.length > 0) {
-          pending.streamChunks.push(frame.payload);
-          pending.streamBytes += frame.payload.length;
-        }
-        return;
-      }
-      this.outboundPending.delete(frame.streamId);
-      if (pending.timer) clearTimeout(pending.timer);
-      this.resolveOutboundResult(pending, frame.meta, frame.payload);
-      return;
-    }
-
-    if (frame.type === FrameType.ERR) {
-      this.outboundPending.delete(frame.streamId);
-      if (pending.timer) clearTimeout(pending.timer);
-      const code = typeof frame.meta?.code === 'string' && frame.meta.code ? frame.meta.code : 'HOST_ERROR';
-      const message =
-        typeof frame.meta?.message === 'string' && frame.meta.message
-          ? frame.meta.message
-          : 'IPC request failed';
-      pending.reject(new IpcError(code, message));
-      return;
-    }
-
-    if (frame.type === FrameType.STREAM_DATA) {
-      if (frame.payload.length > 0) {
-        if (pending.streamBytes + frame.payload.length > MAX_PAYLOAD_BYTES) {
-          this.outboundPending.delete(frame.streamId);
-          if (pending.timer) clearTimeout(pending.timer);
-          pending.reject(
-            new IpcError('PAYLOAD_TOO_LARGE', `Streamed response exceeds ${MAX_PAYLOAD_BYTES} bytes`)
-          );
-          return;
-        }
-        pending.streamChunks.push(frame.payload);
-        pending.streamBytes += frame.payload.length;
-      }
-      if (frame.meta) {
-        pending.streamMeta = { ...(pending.streamMeta ?? {}), ...frame.meta };
-      }
-      return;
-    }
-
-    if (frame.type === FrameType.STREAM_END) {
-      this.outboundPending.delete(frame.streamId);
-      if (pending.timer) clearTimeout(pending.timer);
-      if (frame.meta && isPlainObject(frame.meta.error)) {
-        const errObj = frame.meta.error;
-        const code = typeof errObj.code === 'string' && errObj.code ? errObj.code : 'HOST_ERROR';
-        const message = typeof errObj.message === 'string' && errObj.message ? errObj.message : 'Stream failed';
-        pending.reject(new IpcError(code, message));
-        return;
-      }
-
-      if (frame.payload.length > 0) {
-        if (pending.streamBytes + frame.payload.length > MAX_PAYLOAD_BYTES) {
-          pending.reject(
-            new IpcError('PAYLOAD_TOO_LARGE', `Streamed response exceeds ${MAX_PAYLOAD_BYTES} bytes`)
-          );
-          return;
-        }
-        pending.streamChunks.push(frame.payload);
-      }
-      const payload =
-        pending.streamChunks.length > 0 ? Buffer.concat(pending.streamChunks) : EMPTY_BUFFER;
-      const mergedMeta =
-        pending.streamMeta || frame.meta
-          ? { ...(pending.streamMeta ?? {}), ...(frame.meta ?? {}) }
-          : undefined;
-      this.resolveOutboundResult(pending, mergedMeta, payload);
-    }
-  }
-
-  private resolveOutboundResult(
-    pending: OutboundPending,
-    meta: Record<string, unknown> | undefined,
-    payload: Buffer
-  ): void {
-    if (meta && Object.prototype.hasOwnProperty.call(meta, 'result')) {
-      pending.resolve(meta.result);
-      return;
-    }
-    if (meta?.encoding === 'json' && payload.length > 0) {
+  private dispatch(socket: Socket, frame: DecodedFrame): void {
+    const { type, streamId: id, meta } = frame;
+    if (type === FrameType.PING) {
+      this.control(socket, { type: FrameType.PONG, streamId: id, meta });
+    } else if (type === FrameType.EVENT) {
+      const name = typeof meta?.name === 'string' ? meta.name : typeof meta?.method === 'string' ? meta.method : '';
+      if (name && this.options.onEvent) this.options.onEvent(name, meta?.payload, frame.payload);
+      else if (frame.payload.length) this.options.onError?.(new IpcError('BINARY_UNSUPPORTED', `Unhandled binary event ${name}`));
+    } else if (type === FrameType.REQ) {
+      this.receiveRequest(socket, frame);
+    } else if (this.outbound.has(id)) {
+      this.receiveResult(socket, frame);
+    } else {
+      const call = this.inbound.get(id);
+      if (!call || call.controller.signal.aborted) return;
       try {
-        pending.resolve(JSON.parse(payload.toString('utf8')));
-      } catch (error) {
-        pending.reject(
-          new IpcError('INVALID_RESPONSE_JSON', 'Invalid JSON payload: ' + errorMessage(error))
-        );
-      }
-      return;
-    }
-    if (payload.length > 0) {
-      pending.resolve({ meta: meta ?? {}, payload });
-      return;
-    }
-    pending.resolve(meta ?? null);
-  }
-
-  private cancelInboundStream(socket: Socket, streamId: number): void {
-    const state = this.inboundStreams.get(streamId);
-    if (!state) return;
-    state.cancelled = true;
-    state.controller.abort();
-    this.sendStreamEndOnce(socket, streamId, state, { cancelled: true });
-  }
-
-  private sendStreamEndOnce(
-    socket: Socket,
-    streamId: number,
-    state: InboundStreamState,
-    meta: Record<string, unknown>
-  ): void {
-    if (state.ended || socket.destroyed || this.activeSocket !== socket) return;
-    state.ended = true;
-    this.writeFrameImmediate(socket, {
-      type: FrameType.STREAM_END,
-      streamId,
-      meta
-    });
-  }
-
-  private receiveInboundRequestFrame(socket: Socket, frame: DecodedFrame): void {
-    const method = typeof frame.meta?.method === 'string' ? frame.meta.method : '';
-    const params = isPlainObject(frame.meta?.args)
-      ? frame.meta!.args
-      : isPlainObject(frame.meta?.params)
-        ? frame.meta!.params
-        : {};
-
-    if (frame.meta?.streamed === true) {
-      const chunks = frame.payload.length > 0 ? [frame.payload] : [];
-      this.inboundPendingRequests.set(frame.streamId, {
-        method,
-        params,
-        chunks,
-        totalBytes: frame.payload.length
-      });
-      return;
-    }
-
-    void this.handleInboundRequest(socket, frame.streamId, method, params, frame.payload);
-  }
-
-  private receiveInboundRequestData(socket: Socket, frame: DecodedFrame): void {
-    const acc = this.inboundPendingRequests.get(frame.streamId);
-    if (!acc) return;
-    if (frame.payload.length > 0) {
-      if (acc.totalBytes + frame.payload.length > MAX_PAYLOAD_BYTES) {
-        this.inboundPendingRequests.delete(frame.streamId);
-        this.writeFrameImmediate(socket, {
-          type: FrameType.ERR,
-          streamId: frame.streamId,
-          meta: { code: 'PAYLOAD_TOO_LARGE', message: `Request payload exceeds ${MAX_PAYLOAD_BYTES} bytes` }
-        });
-        return;
-      }
-      acc.chunks.push(frame.payload);
-      acc.totalBytes += frame.payload.length;
-    }
-  }
-
-  private finishInboundPendingRequest(socket: Socket, frame: DecodedFrame): void {
-    const acc = this.inboundPendingRequests.get(frame.streamId);
-    if (!acc) return;
-    this.inboundPendingRequests.delete(frame.streamId);
-    if (frame.meta?.cancelled === true) return;
-
-    if (frame.payload.length > 0) {
-      if (acc.totalBytes + frame.payload.length > MAX_PAYLOAD_BYTES) {
-        this.writeFrameImmediate(socket, {
-          type: FrameType.ERR,
-          streamId: frame.streamId,
-          meta: { code: 'PAYLOAD_TOO_LARGE', message: `Request payload exceeds ${MAX_PAYLOAD_BYTES} bytes` }
-        });
-        return;
-      }
-      acc.chunks.push(frame.payload);
-    }
-
-    const fullPayload = acc.chunks.length > 0 ? Buffer.concat(acc.chunks) : EMPTY_BUFFER;
-    void this.handleInboundRequest(socket, frame.streamId, acc.method, acc.params, fullPayload);
-  }
-
-  private async handleInboundRequest(
-    socket: Socket,
-    streamId: number,
-    method: string,
-    params: Record<string, unknown>,
-    payload: Buffer
-  ): Promise<void> {
-    if (!this.onRequest) {
-      this.writeFrameImmediate(socket, {
-        type: FrameType.ERR,
-        streamId,
-        meta: { code: 'METHOD_UNKNOWN', message: method }
-      });
-      return;
-    }
-
-    const controller = new AbortController();
-    const state: InboundStreamState = { controller, cancelled: false, ended: false };
-    this.inboundStreams.set(streamId, state);
-
-    try {
-      const result = await this.onRequest(method, params, {
-        signal: controller.signal,
-        payload,
-        streamId,
-        method
-      });
-
-      if (state.cancelled || socket.destroyed || this.activeSocket !== socket) {
-        if (isAsyncIterable(result)) {
-          const iter = result[Symbol.asyncIterator]();
-          await iter.return?.(undefined).catch(() => undefined);
+        if (type === FrameType.ERR || (type === FrameType.STREAM_END && (meta?.cancelled === true || meta?.cancel === true))) {
+          this.abortInbound(id, new IpcError('IPC_CANCELLED', 'IPC request cancelled'));
+          this.control(socket, { type: FrameType.STREAM_END, streamId: id, meta: { cancelled: true } });
+        } else if (type === FrameType.WINDOW_UPDATE) {
+          const bytes = Number(meta?.bytes);
+          if (!this.windowNegotiated || frame.payload.length || !Number.isInteger(bytes) ||
+              typeof meta?.bytes !== 'number' || bytes <= 0 || bytes > STREAM_WINDOW_BYTES) throw limitError();
+          if (call.responseStream && call.credit + bytes <= STREAM_WINDOW_BYTES) {
+            call.credit += bytes;
+            call.wakeCredit?.();
+          }
+        } else if (type === FrameType.STREAM_DATA || type === FrameType.STREAM_END) {
+          this.receiveBody(socket, call, frame);
         }
-        return;
+      } catch (error) {
+        this.abortInbound(id, error as Error);
+        this.replyError(socket, id, error);
       }
+    }
+  }
 
-      if (isAsyncIterable(result)) {
-        await this.sendAsyncIterable(socket, streamId, state, result);
-        return;
+  private receiveRequest(socket: Socket, frame: DecodedFrame): void {
+    const { streamId: id, meta, payload } = frame;
+    try {
+      if (!id || id > 0x7fffffff || this.inbound.has(id)) throw new IpcError('IPC_PROTOCOL_ERROR', 'Invalid or duplicate request ID');
+      const method = typeof meta?.method === 'string' ? meta.method : '';
+      if (!method || !this.options.onRequest) throw new IpcError('METHOD_UNKNOWN', method || 'Missing method');
+      if (this.inbound.size >= MAX_CALLS || this.runningHandlers >= MAX_CALLS) throw limitError();
+      const upload = meta?.upload === true;
+      const fragmented = meta?.streamed === true;
+      if (upload && (!this.windowNegotiated || fragmented || payload.length)) {
+        throw new IpcError('BINARY_UNSUPPORTED', 'Invalid or unsupported streaming upload');
       }
-
-      if (result instanceof Uint8Array) {
-        await this.sendBinaryResult(socket, streamId, state, { payload: result });
-        return;
-      }
-
-      if (isBinaryResult(result)) {
-        await this.sendBinaryResult(socket, streamId, state, result);
-        return;
-      }
-
-      const normalized = result === undefined ? null : result;
-      const respMeta = { result: normalized };
-      const jsonSize = Buffer.byteLength(JSON.stringify(respMeta), 'utf8');
-      if (jsonSize <= this.chunkBytes) {
-        this.writeFrameImmediate(socket, {
-          type: FrameType.RESP,
-          streamId,
-          meta: respMeta
-        });
+      const params = isPlainObject(meta?.args) ? meta.args : isPlainObject(meta?.params) ? meta.params : {};
+      const reserved = (frameMetadataSizes.get(frame) ?? 0) + payload.length;
+      this.reserve(reserved);
+      const requestedTimeout = typeof meta?.timeoutMs === 'number' ? meta.timeoutMs : DEFAULT_REQUEST_TIMEOUT_MS;
+      const timeout = Math.max(1, Math.min(requestedTimeout, MAX_REQUEST_TIMEOUT_MS));
+      const timer = setTimeout(() => {
+        this.abortInbound(id, new IpcError('IPC_TIMEOUT', 'IPC handler timed out'));
+        this.replyError(socket, id, new IpcError('IPC_TIMEOUT', 'IPC handler timed out'));
+      }, timeout);
+      timer.unref?.();
+      const call: InboundCall = { method, params, controller: new AbortController(), timer,
+        responseStream: true, running: false, reserved, fragmentBytes: payload.length, credit: STREAM_WINDOW_BYTES };
+      this.inbound.set(id, call);
+      if (upload) {
+        call.upload = new UploadBody((bytes) => this.control(socket, { type: FrameType.WINDOW_UPDATE, streamId: id, meta: { bytes } }));
+        this.runHandler(socket, id, call, EMPTY_BUFFER);
+      } else if (fragmented) {
+        call.fragments = payload.length ? [payload] : [];
       } else {
-        const jsonPayload = Buffer.from(JSON.stringify(normalized), 'utf8');
-        await this.sendBinaryResult(socket, streamId, state, {
-          meta: { encoding: 'json' },
-          payload: jsonPayload
-        });
+        this.runHandler(socket, id, call, payload);
       }
     } catch (error) {
-      if (!state.cancelled && !socket.destroyed && this.activeSocket === socket) {
-        this.writeFrameImmediate(socket, {
-          type: FrameType.ERR,
-          streamId,
-          meta: { code: errorCode(error), message: errorMessage(error) }
+      this.replyError(socket, id, error);
+    }
+  }
+
+  private receiveBody(socket: Socket, call: InboundCall, frame: DecodedFrame): void {
+    const final = frame.type === FrameType.STREAM_END;
+    const error = final ? terminalError(frame.meta) : undefined;
+    if (error) throw error;
+    if (call.upload) {
+      if (final) {
+        if (frame.payload.length) throw new IpcError('IPC_PROTOCOL_ERROR', 'Upload end must not contain bytes');
+        call.upload.finish();
+      } else call.upload.push(frame);
+      return;
+    }
+    if (!call.fragments || (!final && frame.meta !== undefined)) throw new IpcError('IPC_PROTOCOL_ERROR', 'Unexpected request body');
+    const bytes = frame.payload.length;
+    if (call.fragmentBytes + bytes > MAX_PAYLOAD_BYTES) throw new IpcError('PAYLOAD_TOO_LARGE', 'RPC payload exceeds 16 MiB');
+    if (bytes) {
+      const cost = frameCost(bytes);
+      this.reserve(cost);
+      call.reserved += cost;
+      call.fragmentBytes += bytes;
+      call.fragments.push(frame.payload);
+    }
+    if (final) {
+      const payload = Buffer.concat(call.fragments, call.fragmentBytes);
+      call.fragments = undefined;
+      this.runHandler(socket, frame.streamId, call, payload);
+    }
+  }
+
+  private runHandler(socket: Socket, id: number, call: InboundCall, payload: Buffer): void {
+    call.running = true;
+    this.runningHandlers++;
+    const signal = call.controller.signal;
+    const live = () => !signal.aborted && this.activeSocket === socket;
+    void (async () => {
+      try {
+        const result = await this.options.onRequest!(call.method, call.params, {
+          method: call.method, streamId: id, signal, payload, ...(call.upload ? { payloadStream: call.upload } : {})
         });
-        state.ended = true;
+        if (!live()) return;
+        if (call.upload && !call.upload.consumed) throw new IpcError('UPLOAD_INCOMPLETE', 'Handler returned before consuming the upload');
+        if (isAsyncIterable(result)) {
+          await this.sendIterable(socket, id, call, result, live);
+        } else if (result instanceof Uint8Array || isBinaryResult(result)) {
+          const binary = result instanceof Uint8Array ? { payload: result } : result;
+          await this.sendBinary(socket, id, call, binary, live);
+        } else {
+          const normalized = result ?? null;
+          const json = JSON.stringify(normalized);
+          if (Buffer.byteLength(json) <= this.chunkBytes - 16) {
+            await this.send(socket, { type: FrameType.RESP, streamId: id, meta: { result: normalized } }, live);
+          } else {
+            await this.sendBinary(socket, id, call, { meta: { encoding: 'json' }, payload: Buffer.from(json) }, live);
+          }
+        }
+      } catch (error) {
+        if (live()) {
+          call.upload?.finish(error as Error);
+          this.replyError(socket, id, error);
+        }
+      } finally {
+        this.runningHandlers--;
+        this.finishInbound(id, call);
+      }
+    })();
+  }
+
+  private async sendIterable(socket: Socket, id: number, call: InboundCall, iterable: AsyncIterable<unknown>, live: () => boolean): Promise<void> {
+    const iterator = iterable[Symbol.asyncIterator]();
+    let done = false;
+    try {
+      while (live()) {
+        const step = await raceWithAbort(iterator.next(), call.controller.signal);
+        if (step.aborted) return;
+        if (step.value.done) {
+          done = true;
+          const meta = step.value.value === undefined ? { ok: true } : { ok: true, result: step.value.value };
+          const bytes = encodeFrame({ type: FrameType.STREAM_END, streamId: id, meta });
+          if (bytes.length > STREAM_WINDOW_BYTES) throw limitError();
+          await this.send(socket, { type: FrameType.STREAM_END, streamId: id, meta }, live,
+            call.responseStream ? call : undefined);
+          return;
+        }
+        const chunk = step.value.value;
+        if (chunk instanceof Uint8Array) await this.sendData(socket, id, call, chunk, undefined, live);
+        else if (isPlainObject(chunk) && Object.keys(chunk).length > 0 && Object.keys(chunk).every((k) => k === 'meta' || k === 'payload') &&
+            (chunk.payload == null || chunk.payload instanceof Uint8Array) && (chunk.meta === undefined || isPlainObject(chunk.meta))) {
+          await this.sendData(socket, id, call, chunk.payload as Uint8Array | undefined, chunk.meta as Record<string, unknown> | undefined, live);
+        } else if (chunk !== undefined) {
+          await this.sendData(socket, id, call, undefined, isPlainObject(chunk) ? chunk : { value: chunk }, live);
+        }
       }
     } finally {
-      this.inboundStreams.delete(streamId);
+      if (!done) await iterator.return?.().catch(() => undefined);
     }
   }
 
-  private async sendBinaryResult(
-    socket: Socket,
-    streamId: number,
-    state: InboundStreamState,
-    result: BinaryResult
-  ): Promise<void> {
-    const payloadBuf = toBuffer(result.payload);
-    if (payloadBuf.length <= this.chunkBytes) {
-      this.writeFrameImmediate(socket, {
-        type: FrameType.RESP,
-        streamId,
-        meta: result.meta ?? {},
-        payload: payloadBuf
-      });
-      return;
-    }
-
-    this.writeFrameImmediate(socket, {
-      type: FrameType.RESP,
-      streamId,
-      meta: { ...(result.meta ?? {}), streamed: true }
-    });
-    await this.sendChunkedData(socket, streamId, state, payloadBuf, undefined);
-    if (!state.cancelled) {
-      this.sendStreamEndOnce(socket, streamId, state, { ok: true });
-    }
-  }
-
-  private async sendAsyncIterable(
-    socket: Socket,
-    streamId: number,
-    state: InboundStreamState,
-    iterable: AsyncIterable<unknown>
-  ): Promise<void> {
-    const iterator = iterable[Symbol.asyncIterator]();
-    const signal = state.controller.signal;
-
+  private async sendBinary(socket: Socket, id: number, call: InboundCall, result: BinaryResult, live: () => boolean): Promise<void> {
+    const { payload, meta } = result;
+    if (payload.length > MAX_PAYLOAD_BYTES) throw new IpcError('PAYLOAD_TOO_LARGE', 'Use an AsyncIterable for bytes beyond 16 MiB');
+    this.reserve(payload.length);
     try {
-      while (!state.cancelled && !socket.destroyed && this.activeSocket === socket) {
-        const nextStep = await raceWithAbort(iterator.next(), signal);
-        if (nextStep.aborted) {
-          await iterator.return?.(undefined).catch(() => undefined);
-          return;
-        }
-        const item = nextStep.value;
-        if (item.done) {
-          const endMeta =
-            item.value !== undefined ? { ok: true, result: item.value } : { ok: true };
-          this.sendStreamEndOnce(socket, streamId, state, endMeta);
-          return;
-        }
-
-        const chunk = item.value;
-        if (chunk instanceof Uint8Array) {
-          await this.sendChunkedData(socket, streamId, state, toBuffer(chunk), undefined);
-        } else if (isPlainObject(chunk)) {
-          const keys = Object.keys(chunk);
-          const isStreamChunkWrapper =
-            keys.length > 0 &&
-            keys.every((k) => k === 'meta' || k === 'payload') &&
-            (chunk.payload === undefined ||
-              chunk.payload === null ||
-              chunk.payload instanceof Uint8Array) &&
-            (chunk.meta === undefined || isPlainObject(chunk.meta));
-          if (isStreamChunkWrapper) {
-            if (chunk.payload instanceof Uint8Array && chunk.payload.byteLength > 0) {
-              await this.sendChunkedData(
-                socket,
-                streamId,
-                state,
-                toBuffer(chunk.payload),
-                chunk.meta as Record<string, unknown> | undefined
-              );
-            } else {
-              await this.writeFrameWithYield(socket, {
-                type: FrameType.STREAM_DATA,
-                streamId,
-                meta: chunk.meta as Record<string, unknown> | undefined
-              });
-            }
-          } else {
-            await this.writeFrameWithYield(socket, {
-              type: FrameType.STREAM_DATA,
-              streamId,
-              meta: chunk
-            });
-          }
-        } else if (chunk !== undefined) {
-          await this.writeFrameWithYield(socket, {
-            type: FrameType.STREAM_DATA,
-            streamId,
-            meta: { value: chunk }
-          });
-        }
+      if (payload.length <= this.chunkBytes) {
+        const bytes = encodeFrame({ type: FrameType.RESP, streamId: id, meta, payload });
+        if (call.responseStream && bytes.length > STREAM_WINDOW_BYTES) throw limitError();
+        await this.writer(socket).send(bytes, false, live);
+      } else {
+        await this.send(socket, { type: FrameType.RESP, streamId: id, meta: { ...meta, streamed: true } }, live,
+          call.responseStream && meta && Object.keys(meta).length ? call : undefined);
+        await this.sendData(socket, id, call, payload, undefined, live);
+        await this.send(socket, { type: FrameType.STREAM_END, streamId: id, meta: { ok: true } }, live);
       }
-    } catch (error) {
-      await iterator.return?.(undefined).catch(() => undefined);
-      throw error;
+    } finally {
+      this.bufferedBytes -= payload.length;
     }
   }
 
-  private async sendChunkedData(
-    socket: Socket,
-    streamId: number,
-    state: InboundStreamState,
-    payload: Buffer,
-    meta: Record<string, unknown> | undefined
-  ): Promise<void> {
-    if (payload.length === 0) {
-      await this.writeFrameWithYield(socket, {
-        type: FrameType.STREAM_DATA,
-        streamId,
-        meta,
-        payload: EMPTY_BUFFER
-      });
-      return;
-    }
-
+  private async sendData(socket: Socket, id: number, call: InboundCall, bytes: Uint8Array | undefined,
+    meta: Record<string, unknown> | undefined, live: () => boolean): Promise<void> {
+    const payload = bytes == null ? EMPTY_BUFFER : bytes;
     let offset = 0;
-    let first = true;
-    while (offset < payload.length) {
-      if (state.cancelled || socket.destroyed || this.activeSocket !== socket) return;
+    do {
       const end = Math.min(offset + this.chunkBytes, payload.length);
-      const slice = payload.subarray(offset, end);
-      await this.writeFrameWithYield(socket, {
-        type: FrameType.STREAM_DATA,
-        streamId,
-        meta: first ? meta : undefined,
-        payload: slice
-      });
-      first = false;
+      await this.send(socket, { type: FrameType.STREAM_DATA, streamId: id,
+        meta: offset === 0 ? meta : undefined, payload: payload.subarray(offset, end) }, live,
+        call.responseStream ? call : undefined);
       offset = end;
+    } while (offset < payload.length && live());
+  }
+
+  private receiveResult(socket: Socket, frame: DecodedFrame): void {
+    const { streamId: id, type, meta, payload } = frame;
+    const pending = this.outbound.get(id)!;
+    try {
+      if (type === FrameType.ERR) {
+        const code = typeof meta?.code === 'string' ? meta.code : 'HOST_ERROR';
+        throw new IpcError(['IPC_CLOSED', 'IPC_NOT_READY'].includes(code) ? 'IPC_REMOTE_ERROR' : code,
+          typeof meta?.message === 'string' ? meta.message : 'IPC request failed');
+      }
+      if (type === FrameType.RESP && !pending.meta && meta?.streamed !== true) {
+        this.completeOutbound(id, meta, payload);
+        return;
+      }
+      if (type === FrameType.RESP && !pending.meta) {
+        const { streamed: _, ...header } = meta!;
+        pending.meta = header;
+      } else if (type === FrameType.STREAM_END) {
+        const error = terminalError(meta);
+        if (error) throw error;
+        if (!pending.meta) throw new IpcError('STREAM_REQUIRED', 'RPC received a byte stream instead of a finite response');
+      } else if (type !== FrameType.STREAM_DATA || !pending.meta || meta !== undefined) {
+        throw new IpcError('IPC_PROTOCOL_ERROR', 'Unexpected RPC response frame');
+      }
+      if (pending.bytes + payload.length > MAX_PAYLOAD_BYTES) throw new IpcError('PAYLOAD_TOO_LARGE', 'RPC response exceeds 16 MiB');
+      const cost = (frameMetadataSizes.get(frame) ?? 0) + (payload.length ? frameCost(payload.length) : 0);
+      this.reserve(cost);
+      pending.reserved += cost;
+      pending.bytes += payload.length;
+      if (payload.length) pending.chunks.push(payload);
+      if (this.windowNegotiated && (type === FrameType.STREAM_DATA || type === FrameType.STREAM_END || (type === FrameType.RESP && meta?.streamed === true))) {
+        const cost = frameCost(IPC_HEADER_BYTES + (frameMetadataSizes.get(frame) ?? 0) + payload.length);
+        this.control(socket, { type: FrameType.WINDOW_UPDATE, streamId: id, meta: { bytes: cost } });
+      }
+      if (type === FrameType.STREAM_END) this.completeOutbound(id, { ...pending.meta, ...meta }, Buffer.concat(pending.chunks, pending.bytes));
+    } catch (error) {
+      this.failOutbound(socket, id, error as Error, type !== FrameType.ERR && type !== FrameType.STREAM_END);
     }
   }
 
-  private writeFrameImmediate(socket: Socket, frame: IpcFrame): void {
-    if (socket.destroyed) return;
-    socket.write(encodeFrame(frame));
+  private completeOutbound(id: number, meta: Record<string, unknown> | undefined, payload: Buffer): void {
+    let value: unknown;
+    if (meta?.encoding === 'json' && payload.length) value = JSON.parse(payload.toString('utf8'));
+    else if (payload.length) value = { meta: meta ?? {}, payload };
+    else if (meta && Object.prototype.hasOwnProperty.call(meta, 'result')) value = meta.result;
+    else value = meta ?? null;
+    this.removeOutbound(id)?.resolve(value);
   }
 
-  private async writeFrameWithYield(socket: Socket, frame: IpcFrame): Promise<void> {
+  private removeOutbound(id: number): OutboundPending | undefined {
+    const entry = this.outbound.get(id);
+    if (!entry) return;
+    this.outbound.delete(id);
+    clearTimeout(entry.timer);
+    this.bufferedBytes -= entry.reserved;
+    return entry;
+  }
+
+  private failOutbound(socket: Socket, id: number, error: Error, cancel: boolean): void {
+    const entry = this.removeOutbound(id);
+    if (!entry) return;
+    entry.reject(error);
+    if (cancel && entry.sent) {
+      setImmediate(() => {
+        if (this.activeSocket === socket && !socket.destroyed) {
+          this.control(socket, { type: FrameType.STREAM_END, streamId: id, meta: { cancelled: true } });
+        }
+      });
+    }
+  }
+
+  private abortInbound(id: number, error: Error): void {
+    const call = this.inbound.get(id);
+    if (!call) return;
+    call.upload?.finish(error);
+    call.controller.abort();
+    call.wakeCredit?.();
+    this.finishInbound(id, call);
+  }
+
+  private finishInbound(id: number, call: InboundCall): void {
+    if (this.inbound.get(id) !== call) return;
+    this.inbound.delete(id);
+    clearTimeout(call.timer);
+    this.bufferedBytes -= call.reserved;
+  }
+
+  private reserve(bytes: number): void {
+    if (this.bufferedBytes + bytes > BUFFER_BUDGET) throw limitError();
+    this.bufferedBytes += bytes;
+  }
+
+  private writer(socket: Socket): SocketWriter {
+    const writer = this.sockets.get(socket);
+    if (!writer) throw new IpcError('IPC_CLOSED', 'IPC connection closed');
+    return writer;
+  }
+
+  private async send(socket: Socket, frame: IpcFrame, live: () => boolean, credit?: InboundCall): Promise<void> {
+    const bytes = encodeFrame(frame);
+    if (credit && this.windowNegotiated) {
+      const cost = frameCost(bytes.length);
+      if (cost > STREAM_WINDOW_BYTES) throw limitError();
+      while (live() && credit.credit < cost) {
+        await new Promise<void>((resolve) => { credit.wakeCredit = resolve; });
+        credit.wakeCredit = undefined;
+      }
+      if (!live()) throw new IpcError('IPC_CANCELLED', 'IPC stream cancelled');
+      credit.credit -= cost;
+    }
+    await this.writer(socket).send(bytes, frame.type === FrameType.STREAM_DATA, live);
+  }
+
+  private control(socket: Socket, frame: IpcFrame): void {
     if (socket.destroyed || this.activeSocket !== socket) return;
-    const ok = socket.write(encodeFrame(frame));
-    if (!ok) {
-      await waitForDrainOrClose(socket);
-    } else {
-      // Yield once so concurrent requests and incoming STREAM_END cancellations are processed promptly.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    try { this.writer(socket).immediate(encodeFrame(frame)); }
+    catch (error) { socket.destroy(error as Error); }
+  }
+
+  private replyError(socket: Socket, id: number, error: unknown): void {
+    this.control(socket, { type: FrameType.ERR, streamId: id, meta: {
+      code: errorCode(error).slice(0, 128), message: errorMessage(error).slice(0, 2000)
+    } });
   }
 }
 

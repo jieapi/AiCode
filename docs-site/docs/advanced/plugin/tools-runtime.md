@@ -221,7 +221,7 @@ TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时�
 
 | 方法 | 参数 | 说明 |
 | --- | --- | --- |
-| `host.workspaces.upsert` | `{backendId, workspaces}` | 按工作区 `id`（缺省取 `path`）增量插入或更新工作区；单次最多 500 条 |
+| `host.workspaces.upsert` | `{backendId, workspaces}` | 按必填的工作区 `id` 增量插入或更新工作区；单次最多 500 条 |
 | `host.workspaces.remove` | `{backendId, workspaceIds}` | 按 ID 批量移除该执行后端下的工作区 |
 | `host.workspaces.set` | `{backendId, workspaces}` | 全量替换该执行后端下的工作区列表 |
 | `host.sessions.upsert` | `{sourceId, sessions}` | 按 `sessionId` 增量新增或更新外部会话摘要（局部 Diff 更新） |
@@ -229,9 +229,62 @@ TypeScript SDK 负责消息收发；使用其他语言或自行接入协议时�
 | `host.sessions.replaceAll` | `{sourceId, sessions}` | 全量替换该会话源的会话列表（首次拉取或重同步使用） |
 | `host.sessions.setLoading` | `{sourceId, loading}` | 设置外部会话分组的加载指示状态 |
 | `host.sessions.setError` | `{sourceId, error}` | 设置或清除外部会话分组的错误提示（传 `null` 清除） |
-| `host.sessions.setThinking` | `{sourceId, sessionId, visible?, text?}` | 控制外部会话聊天页的等待思考气泡展示与文案 |
+| `host.sessions.setThinking` | `{sourceId, sessionId, visible, text?}` | 控制外部会话聊天页的等待思考气泡展示与文案 |
 
-`workspaces` 数组中的每个 `WorkspaceItem` 包含必填的 `id`、`name`、`path`，以及可选的 `group`、`available`（默认 `true`）和 `capabilities`（`createChild`、`delete`、`git`）。外部会话摘要可关联 `workflowId`、`backendId`、`workspaceId` 等元数据，供用户在聊天页继续发送消息时由宿主路由到对应工作流。
+`workspaces` 数组中的每个 `WorkspaceItem` 包含必填的 `id`、`name`、`path`，以及可选的 `group`、`available`（默认 `true`）和嵌套的 `capabilities`（可选布尔字段 `createChild`、`delete`、`git`），能力字段不能平铺在条目顶层。例如：
+
+```json
+{
+  "backendId": "cloud-box",
+  "workspaces": [{
+    "id": "demo",
+    "name": "Demo",
+    "path": "/srv/demo",
+    "group": "cloud",
+    "available": true,
+    "capabilities": { "createChild": true, "delete": false, "git": true }
+  }]
+}
+```
+
+移除条目使用 `host.workspaces.remove({backendId: 'cloud-box', workspaceIds: ['demo']})`，参数名不是 `ids`。`host.sessions.setThinking` 的 `visible` 是必填布尔值。
+
+外部会话摘要可关联 `workflowId`、`backendId`、`workspaceId` 等元数据，供用户在聊天页继续发送消息时由宿主路由到对应工作流。`readMessages` 返回消息的时间字段为 `createdAt`，分页的 `nextCursor` 可为任意 JSON 值（对象、数组、字符串、数字、布尔或 `null`），下一页读取时由宿主原样传入 `cursor`，不要自行转为字符串：
+
+```json
+{
+  "messages": [{
+    "id": "m1",
+    "role": "assistant",
+    "createdAt": 1700000000000,
+    "blocks": [{ "type": "text", "text": "Hello" }]
+  }],
+  "hasMore": true,
+  "nextCursor": { "page": 2, "boundary": ["m1", 123] }
+}
+```
+
+### 执行后端 handler 参数
+
+后端调用通过 `backend.invoke` 分发，`args.backendId` 为后端完整 ID。后端 `fs` handler 与插件调用的 `host.fs.*` 是两套不同接口，不要混用操作名或参数。
+
+`fs` 的正式 `op` 为 `readFile`、`writeFile`、`readBytes`、`writeBytes`、`listFiles`、`listFilesRecursive`、`stat`、`fingerprint`、`permissions`、`resolvePath`、`delete`、`deleteRecursively`、`rename`、`copy`、`move`、`mkdirs`。所有操作都带 `path`；其余参数为：
+
+| 操作 | 额外参数 |
+| --- | --- |
+| `writeFile` | `overwrite: boolean`、`encoding: string`；内容通过二进制 payload 传输 |
+| `writeBytes` | `overwrite: boolean`；字节通过二进制 payload 传输 |
+| `readBytes` | 可选 `maxBytes: number` |
+| `listFilesRecursive` | `maxDepth: number` |
+| `resolvePath` | `followFinalLink: boolean` |
+| `rename` | `newPath: string` |
+| `copy`、`move` | `newPath: string`、`overwrite: boolean` |
+
+`permissions` 属于正式操作名；当前宿主读取权限时从 `stat` 返回的 `permissions` 字段取值。`readFile` / `readBytes` 可通过二进制 payload 返回内容，`stat` / `listFiles` 等元数据操作返回 JSON。文件监听与插件后端端口转发当前未开放，清单 `fileWatch` / `portForward` 只能省略或为 `false`，不能通过声明 `true` 启用。
+
+`exec` 与 `execStream` 收到 `{backendId, command, projectPath?, timeoutMs, unbounded?}`；工作目录字段为 `projectPath`，超时单位为毫秒。`unbounded: true` 表示同步执行请求扩大输出限制，不代表无限超时。同步结果为 `{output, exitCode, truncated?}`；流式命令返回文本块，退出帧使用 `{type: 'exit', exitCode}`。
+
+`terminal` 当前操作为 `start`、`status`、`send`、`write`、`writeBytes`、`read`、`stream`、`list`、`close`。`start` 使用 `command`、可选 `title` / `notify` / `sourceSessionId` / `ownerPluginId`；除 `start` / `list` 外均使用 `tabId`，`send` 还需要 `input` 与 `appendNewline`，`write` 需要 `text`，`writeBytes` 使用二进制 payload。不要使用未开放的 `open` / `resize` 等操作。
 
 ### 工具目录与代执行
 

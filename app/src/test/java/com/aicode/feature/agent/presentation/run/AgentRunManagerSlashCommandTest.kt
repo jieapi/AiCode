@@ -165,6 +165,7 @@ class AgentRunManagerSlashCommandTest {
             toolPermissionManager = toolPermissionManager,
             askUserQuestionManager = askUserQuestionManager,
             containerEngine = containerEngine,
+            executionBackendRegistry = mockk<com.aicode.feature.agent.domain.container.ExecutionBackendRegistry>(relaxed = true),
             sessionUseCase = sessionUseCase,
             messagePersistenceUseCase = messagePersistenceUseCase,
             checkpointManager = checkpointManager,
@@ -192,7 +193,12 @@ class AgentRunManagerSlashCommandTest {
     @Test
     fun enqueueCompress_runsCompactionAndQueuesSubsequentMessagesUntilFinished() {
         val compactionGate = CompletableDeferred<Unit>()
-        coEvery { agentWorkflow.compactSession(sessionId, any()) } coAnswers {
+        coEvery {
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } coAnswers {
             compactionGate.await()
             true
         }
@@ -205,7 +211,7 @@ class AgentRunManagerSlashCommandTest {
 
         coVerify(timeout = 2000) {
             messagePersistenceUseCase.persist(sessionId, MessageRole.USER, "/compress", id = any())
-            agentWorkflow.compactSession(sessionId, any())
+            agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>())
         }
         assertTrue(sessionId in manager.runningCommandSessions.value)
 
@@ -303,7 +309,12 @@ class AgentRunManagerSlashCommandTest {
         every { agentWorkflow.executeEvents("running turn", any(), any()) } returns flow {
             turnGate.await()
         }
-        coEvery { agentWorkflow.compactSession(sessionId, any()) } returns true
+        coEvery {
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } returns true
 
         manager.enqueueAgentRequest(
             request = "running turn",
@@ -319,13 +330,13 @@ class AgentRunManagerSlashCommandTest {
             projectRoot = workspace,
             targetSessionId = sessionId
         )
-        coVerify(exactly = 0) { agentWorkflow.compactSession(sessionId, any()) }
+        coVerify(exactly = 0) { agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()) }
 
         turnGate.complete(Unit)
 
         coVerify(timeout = 2000) {
             messagePersistenceUseCase.persist(sessionId, MessageRole.USER, "/compress", id = any())
-            agentWorkflow.compactSession(sessionId, any())
+            agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>())
         }
     }
 
@@ -354,8 +365,18 @@ class AgentRunManagerSlashCommandTest {
             emit(AgentEvent.AssistantDelta("ok", "m1"))
             emit(AgentEvent.Completed)
         }
-        coEvery { pluginWorkflow.generateTitle(sessionId, any()) } returns "自定义标题"
-        coEvery { pluginWorkflow.compactSession(sessionId, any()) } returns true
+        coEvery {
+            pluginWorkflow.generateTitle(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<String>()
+            )
+        } returns "自定义标题"
+        coEvery {
+            pluginWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } returns true
         coEvery { sessionUseCase.getSessionById(sessionId) } returns ChatSessionEntity(
             id = sessionId,
             title = "测试会话",
@@ -375,13 +396,21 @@ class AgentRunManagerSlashCommandTest {
         )
 
         coVerify(timeout = 2000) {
-            pluginWorkflow.executeEvents("hello plugin workflow", any(), any())
-            pluginWorkflow.generateTitle(sessionId, "hello plugin workflow")
+            pluginWorkflow.executeEvents(
+                "hello plugin workflow",
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<List<com.aicode.feature.agent.domain.tool.AgentTool>>()
+            )
+            pluginWorkflow.generateTitle(any<com.aicode.feature.agent.domain.model.AgentContext>(), "hello plugin workflow")
             sessionUseCase.updateTitle(sessionId, "自定义标题")
         }
         coVerify(exactly = 0) {
-            agentWorkflow.executeEvents(any(), any(), any())
-            agentWorkflow.generateTitle(any(), any())
+            agentWorkflow.executeEvents(
+                any<String>(),
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<List<com.aicode.feature.agent.domain.tool.AgentTool>>()
+            )
+            agentWorkflow.generateTitle(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<String>())
         }
 
         manager.enqueueAgentRequest(
@@ -391,10 +420,16 @@ class AgentRunManagerSlashCommandTest {
         )
 
         coVerify(timeout = 2000) {
-            pluginWorkflow.compactSession(sessionId, any())
+            pluginWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
         }
         coVerify(exactly = 0) {
-            agentWorkflow.compactSession(any(), any())
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
         }
     }
 }

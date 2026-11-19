@@ -1,0 +1,146 @@
+{
+  "validManifests": [
+    {
+      "manifestVersion": 1,
+      "id": "community.three-axis",
+      "name": "Three Axis",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Execution backend, workflow and external sessions",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": {
+        "executionBackends": [{ "id": "remote", "title": "Remote", "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }],
+        "workflows": [{ "id": "loop", "title": "Loop", "handlers": { "startTurn": "workflow.start", "cancelTurn": "workflow.cancel" } }],
+        "sessions": [{ "id": "history", "title": "History", "handlers": { "readMessages": "sessions.read" } }]
+      }
+    },
+    {
+      "manifestVersion": 1,
+      "id": "community.minimal-backend",
+      "name": "Minimal Backend",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Capabilities omitted",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "minimal", "title": "Minimal", "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1,
+      "id": "community.explicit-backend",
+      "name": "Explicit Backend",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Explicit capabilities and every backend handler",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": {
+        "executionBackends": [{
+          "id": "explicit",
+          "title": { "default": "Explicit", "zh-CN": "显式能力" },
+          "description": "Remote sandbox",
+          "capabilities": { "filesystem": true, "command": true, "terminal": true, "fileWatch": false, "portForward": false, "isRemoteEnvironment": true, "workspaceDiscovery": "hybrid", "projectConfigLocation": "appPrivateDir" },
+          "handlers": { "fs": "backend.fs", "exec": "backend.exec", "execStream": "backend.stream", "execHealth": "backend.health", "terminal": "backend.terminal", "workspaceList": "workspace.list", "workspaceCreate": "workspace.create", "workspaceDelete": "workspace.delete", "workspaceSelect": "workspace.select" }
+        }],
+        "workflows": [{ "id": "loop", "title": "Loop", "capabilities": { "streaming": true, "tools": true, "compaction": true, "titleGeneration": true }, "handlers": { "startTurn": "workflow.start", "cancelTurn": "workflow.cancel", "compact": "workflow.compact", "generateTitle": "workflow.title" } }],
+        "sessions": [{ "id": "history", "title": "History", "handlers": { "refresh": "sessions.refresh", "readMessages": "sessions.read", "createSession": "sessions.create", "deleteSession": "sessions.delete", "renameSession": "sessions.rename", "pinSession": "sessions.pin" } }]
+      }
+    },
+    {
+      "manifestVersion": 1,
+      "id": "community.filesystem-backend",
+      "name": "Filesystem Backend",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Scan with workspace configuration",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "files", "title": "Files", "capabilities": { "filesystem": true, "command": false, "terminal": false, "fileWatch": false, "portForward": false, "isRemoteEnvironment": false, "workspaceDiscovery": "scan", "projectConfigLocation": "workspaceDir" }, "handlers": { "fs": "backend.fs" } }] }
+    },
+    {
+      "manifestVersion": 1,
+      "id": "community.command-backend",
+      "name": "Command Backend",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Register workspaces with filesystem disabled",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "commands", "title": "Commands", "capabilities": { "filesystem": false, "workspaceDiscovery": "register", "projectConfigLocation": "appPrivateDir" }, "handlers": { "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1,
+      "id": "community.empty-capabilities",
+      "name": "Default Capabilities",
+      "version": "1.0.0",
+      "publisher": "community",
+      "repository": "https://example.com/community/demo-kit",
+      "description": "Empty capabilities object uses defaults",
+      "license": "MIT",
+      "engines": { "pluginApi": "^1.0.0" },
+      "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "defaults", "title": "Defaults", "capabilities": {}, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    }
+  ],
+  "invalidManifests": [
+    {
+      "manifestVersion": 1, "id": "community.old-backend-name", "name": "Old Backend Name", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Backend name instead of title", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "name": "Remote", "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.snake-workspace-dir", "name": "Snake Workspace Dir", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Snake case config location", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "projectConfigLocation": "workspace_dir" }, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.snake-app-private-dir", "name": "Snake App Private Dir", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Snake case config location", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "projectConfigLocation": "app_private_dir" }, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-default-fs", "name": "Missing Default FS", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Omitted capabilities still require fs", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "handlers": { "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-default-exec", "name": "Missing Default Exec", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Empty capabilities still require exec", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": {}, "handlers": { "fs": "backend.fs" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-explicit-fs", "name": "Missing Explicit FS", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Enabled filesystem requires fs", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "filesystem": true }, "handlers": { "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-explicit-exec", "name": "Missing Explicit Exec", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Enabled command requires exec", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "command": true }, "handlers": { "fs": "backend.fs" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-terminal", "name": "Missing Terminal", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Enabled terminal requires handler", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "terminal": true }, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.file-watch-enabled", "name": "File Watch Enabled", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Plugin file watching is not available", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "fileWatch": true }, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.port-forward-enabled", "name": "Port Forward Enabled", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Plugin port forwarding is not available", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "capabilities": { "portForward": true }, "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-handlers", "name": "Missing Handlers", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Handlers object is required", "license": "MIT", "engines": { "pluginApi": "^1.0.0" }, "runtime": { "type": "javascript", "entry": "dist/main.js" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote" }] }
+    },
+    {
+      "manifestVersion": 1, "id": "community.missing-runtime", "name": "Missing Runtime", "version": "1.0.0", "publisher": "community", "repository": "https://example.com/community/demo-kit", "description": "Runtime contributions require runtime", "license": "MIT", "engines": { "pluginApi": "^1.0.0" },
+      "contributes": { "executionBackends": [{ "id": "remote", "title": "Remote", "handlers": { "fs": "backend.fs", "exec": "backend.exec" } }] }
+    }
+  ]
+}

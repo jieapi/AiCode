@@ -1,5 +1,6 @@
 package com.aicode.feature.workspace.domain
 
+import com.aicode.feature.agent.domain.container.BackendExecutionContext
 import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
@@ -39,6 +40,11 @@ class DelegatingFileAccess private constructor(
     ) : this(null, modeHolder, localFileAccess, remoteSftpFileAccess)
 
     private fun delegate(path: String): FileAccessProvider {
+        val binding = BackendExecutionContext.binding()
+        if (binding != null && executionBackendRegistry != null) {
+            binding.checkActive(executionBackendRegistry)
+            return if (WorkspacePathMapper.isLocalFolderContainerPath(path)) localFileAccess else binding.fileAccess
+        }
         if (WorkspacePathMapper.isLocalFolderContainerPath(path)) return localFileAccess
         return executionBackendRegistry?.currentBackend()?.fileAccess
             ?: if (modeHolder?.currentMode() == ExecutionMode.REMOTE_SSH) {

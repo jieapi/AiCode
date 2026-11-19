@@ -27,8 +27,7 @@ class PluginWorkspaceRegistry @Inject constructor() {
             val current = _workspacesByBackend.value[backendId].orEmpty()
             val merged = LinkedHashMap<String, Workspace>(current.size + items.size)
             current.forEach { ws ->
-                val key = ws.id.ifBlank { ws.path }
-                merged[key] = ws
+                merged[ws.id] = ws
             }
             items.forEach { item ->
                 val normalized = normalize(backendId, item)
@@ -87,10 +86,10 @@ class PluginWorkspaceRegistry @Inject constructor() {
     }
 
     private fun normalize(backendId: String, item: Workspace): Workspace {
-        val resolvedId = item.id.ifBlank { item.path }
+        require(item.id.isNotBlank()) { "workspace.id is required" }
         return item.copy(
-            id = resolvedId,
-            backendId = backendId
+            backendId = backendId,
+            instanceId = backendId
         )
     }
 }

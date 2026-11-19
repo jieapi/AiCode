@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+class WorkflowNotFoundException(workflowId: String) :
+    IllegalArgumentException("WORKFLOW_NOT_FOUND: $workflowId")
+
 data class WorkflowCapabilities(
     val streaming: Boolean = true,
     val tools: Boolean = true,
@@ -36,7 +39,7 @@ class AgentWorkflowRegistry @Inject constructor(
             return defaultWorkflow
         }
         return synchronized(lock) {
-            pluginEntries[workflowId]?.second ?: defaultWorkflow
+            pluginEntries[workflowId]?.second ?: throw WorkflowNotFoundException(workflowId)
         }
     }
 
@@ -51,6 +54,7 @@ class AgentWorkflowRegistry @Inject constructor(
     fun syncPluginWorkflows(pluginId: String, entries: List<Pair<WorkflowDescriptor, AgentWorkflow>>) {
         if (pluginId.isBlank()) return
         synchronized(lock) {
+            val prefix = "$pluginId:"
             val iterator = pluginEntries.entries.iterator()
             while (iterator.hasNext()) {
                 if (iterator.next().value.first.pluginId == pluginId) {
@@ -59,7 +63,8 @@ class AgentWorkflowRegistry @Inject constructor(
             }
             for ((descriptor, workflow) in entries) {
                 val id = descriptor.id
-                if (id.isBlank() || id == BUILTIN_WORKFLOW_ID) continue
+                if (id == BUILTIN_WORKFLOW_ID) continue
+                require(id.startsWith(prefix)) { "Workflow id must use plugin prefix: $id" }
                 val existingOwner = pluginEntries[id]?.first?.pluginId
                 if (existingOwner != null && existingOwner != pluginId) continue
                 val normalized = if (descriptor.pluginId == pluginId) {

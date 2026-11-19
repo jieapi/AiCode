@@ -210,7 +210,9 @@ data class ChatSessionDto(
     val parentId: String? = null,
     val subagentType: String? = null,
     val workflowId: String? = null,
-    val workflowState: String? = null
+    val workflowState: String? = null,
+    val backendInstanceId: String? = null,
+    val workspaceId: String? = null
 )
 
 @Serializable

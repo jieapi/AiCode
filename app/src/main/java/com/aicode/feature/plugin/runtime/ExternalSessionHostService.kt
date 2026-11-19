@@ -92,18 +92,18 @@ class ExternalSessionHostService @Inject constructor(
         val prefix = "${source.key}|"
         val sessionId = if (rawSessionId.startsWith(prefix)) rawSessionId.removePrefix(prefix) else rawSessionId
         val visible = (params["visible"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-        val rawText = params["text"] ?: params["thinking"]
+            ?: throw PluginHostException("PARAM_INVALID", "visible must be a boolean")
+        val rawText = params["text"]
         val text = when (rawText) {
             null, JsonNull -> ""
             is JsonPrimitive -> if (rawText.isString) rawText.content
             else throw PluginHostException("PARAM_INVALID", "text must be a string or null")
             else -> throw PluginHostException("PARAM_INVALID", "text must be a string or null")
         }
-        val shouldShow = visible ?: text.isNotBlank()
-        if (!shouldShow) {
+        if (!visible) {
             store.clearThinking(ExternalSessionSummary.compositeId(source.key, sessionId))
         } else {
-            store.setThinking(source.key, sessionId, text.ifBlank { "正在思考中…" })
+            store.setThinking(source.key, sessionId, text.ifBlank { "Thinking…" })
         }
         return buildJsonObject { put("ok", true) }
     }
@@ -121,7 +121,7 @@ class ExternalSessionHostService @Inject constructor(
             ?: throw PluginHostException("PARAM_MISSING", "missing parameter: sourceId")
         val source = plugin.content.sessions.firstOrNull { it.localId == rawSource || it.key == rawSource }
             ?: throw PluginHostException(
-                "FORBIDDEN",
+                "SESSION_SOURCE_NOT_FOUND",
                 "session source does not belong to plugin $pluginId: $rawSource"
             )
         return plugin to source

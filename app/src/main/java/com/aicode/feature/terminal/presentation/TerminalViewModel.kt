@@ -35,14 +35,32 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
+import java.util.UUID
 import javax.inject.Inject
+
+private class PluginTerminalMirrorOwner(
+    val backendInstanceId: String,
+    val provider: TerminalSessionProvider
+) {
+    private val hostByRemote = mutableMapOf<String, String>()
+
+    fun matches(backend: ExecutionBackend): Boolean =
+        backend.instanceId == backendInstanceId && backend.terminalSessionProvider === provider
+
+    fun hostHandle(remoteTabId: String): String = hostByRemote.getOrPut(remoteTabId) {
+        UUID.randomUUID().toString()
+    }
+
+}
 
 /**
  * 终端页的薄观察层。
@@ -75,15 +93,16 @@ class TerminalViewModel @Inject constructor(
 
     private fun isLocalProot() = currentBackend().id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
 
-    private fun activePluginProvider(): TerminalSessionProvider? {
-        val backend = currentBackend()
-        if (backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID ||
-            backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
-        ) {
-            return null
-        }
-        return backend.terminalSessionProvider
-    }
+    private var pluginMirrorOwner: PluginTerminalMirrorOwner? = null
+    private var pluginMirrorGeneration = 0L
+    private var prepareJob: Job? = null
+    private var createJob: Job? = null
+
+    private fun activePluginOwner(): PluginTerminalMirrorOwner? =
+        pluginMirrorOwner?.takeIf { it.matches(currentBackend()) }
+
+    private fun ownsMirror(owner: PluginTerminalMirrorOwner): Boolean =
+        pluginMirrorOwner === owner && owner.matches(currentBackend())
 
     /** 当前是否远程环境（UI 据此隐藏本地容器专属入口，如环境工具）。 */
     val isRemoteMode: Boolean get() = currentBackend().capabilities.isRemoteEnvironment
@@ -129,12 +148,26 @@ class TerminalViewModel @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val tabs: StateFlow<List<TerminalTab>> = modeHolder.activeBackend
-        .flatMapLatest { tabsFlowFor(it) }
+        .flatMapLatest { backend ->
+            tabsFlowFor(backend).map { list ->
+                if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID ||
+                    backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID ||
+                    pluginMirrorOwner?.matches(backend) == true
+                ) list else emptyList()
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, tabsFlowFor(currentBackend()).value)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val activeTabId: StateFlow<String?> = modeHolder.activeBackend
-        .flatMapLatest { activeTabIdFlowFor(it) }
+        .flatMapLatest { backend ->
+            activeTabIdFlowFor(backend).map { id ->
+                if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID ||
+                    backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID ||
+                    pluginMirrorOwner?.matches(backend) == true
+                ) id else null
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, activeTabIdFlowFor(currentBackend()).value)
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -169,15 +202,34 @@ class TerminalViewModel @Inject constructor(
     }
 
     init {
-        prepare()
+        viewModelScope.launch {
+            modeHolder.activeBackend.collect { backend ->
+                prepareJob?.cancel()
+                createJob?.cancel()
+                _creatingTab.value = false
+                clearPluginMirrors()
+                pluginMirrorGeneration++
+                if (backend.id != ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID &&
+                    backend.id != ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+                ) {
+                    backend.terminalSessionProvider?.let {
+                        pluginMirrorOwner = PluginTerminalMirrorOwner(backend.instanceId, it)
+                    }
+                }
+                prepare()
+            }
+        }
     }
 
     /** 进入终端页：确保至少有一个标签（首次会解压容器或连 SSH；插件后端则同步或提示不支持）。 */
     fun prepare() {
-        viewModelScope.launch {
+        prepareJob?.cancel()
+        val backend = currentBackend()
+        val owner = activePluginOwner()
+        val generation = pluginMirrorGeneration
+        prepareJob = viewModelScope.launch {
             _prepareState.value = PrepareState.Loading
             try {
-                val backend = currentBackend()
                 when (backend.id) {
                     ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID -> {
                         remoteManager.ensureInitialTab()
@@ -194,11 +246,14 @@ class TerminalViewModel @Inject constructor(
                                 context.getString(R.string.terminal_backend_unsupported, backend.displayName)
                             )
                         } else {
-                            syncPluginTabs(provider)
-                            _prepareState.value = PrepareState.Ready
+                            if (owner == null || generation != pluginMirrorGeneration) return@launch
+                            syncPluginTabs(owner)
+                            if (ownsMirror(owner)) _prepareState.value = PrepareState.Ready
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 FileLogger.e(TAG, "终端准备失败", e)
                 _prepareState.value = PrepareState.Error(e.message ?: context.getString(R.string.terminal_prepare_error_unknown))
@@ -209,22 +264,27 @@ class TerminalViewModel @Inject constructor(
     fun newTab() {
         if (_creatingTab.value) return
         _creatingTab.value = true
-        viewModelScope.launch {
+        val backend = currentBackend()
+        val owner = activePluginOwner()
+        val generation = pluginMirrorGeneration
+        createJob = viewModelScope.launch {
             try {
-                val backend = currentBackend()
                 when (backend.id) {
                     ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID -> remoteManager.createInteractiveTab()
                     ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID -> localManager.createInteractiveTab()
                     else -> {
-                        val provider = backend.terminalSessionProvider
-                        if (provider != null) {
-                            val newId = withContext(Dispatchers.IO) {
-                                provider.startBackgroundCommand("", title = backend.displayName, notify = false)
+                        if (owner != null && generation == pluginMirrorGeneration) {
+                            val remoteId = withContext(Dispatchers.IO) {
+                                owner.provider.startBackgroundCommand("", title = backend.displayName, notify = false)
                             }
-                            syncPluginTabs(provider, preferredActiveId = newId)
+                            if (generation == pluginMirrorGeneration) {
+                                syncPluginTabs(owner, preferredActiveRemoteId = remoteId)
+                            }
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 FileLogger.e(TAG, "新建标签失败", e)
             } finally {
@@ -237,7 +297,7 @@ class TerminalViewModel @Inject constructor(
         when {
             isRemoteSsh() -> remoteManager.activate(id)
             isLocalProot() -> localManager.activate(id)
-            else -> if (_pluginTabs.value.any { it.id == id }) {
+            else -> if (activePluginOwner() != null && _pluginTabs.value.any { it.id == id }) {
                 _pluginActiveTabId.value = id
             }
         }
@@ -248,19 +308,19 @@ class TerminalViewModel @Inject constructor(
             isRemoteSsh() -> remoteManager.closeTab(id)
             isLocalProot() -> localManager.closeTab(id)
             else -> {
-                val target = _pluginTabs.value.firstOrNull { it.id == id }
-                if (target != null) {
-                    runCatching { target.session.finishIfRunning() }
-                    val remaining = _pluginTabs.value.filterNot { it.id == id }
-                    _pluginTabs.value = remaining
-                    if (_pluginActiveTabId.value == id) {
-                        _pluginActiveTabId.value = remaining.firstOrNull()?.id
-                    }
-                    _pluginRevision.value++
+                val owner = activePluginOwner() ?: return
+                val target = _pluginTabs.value.firstOrNull { it.id == id } ?: return
+                val remoteTabId = (target.client as PluginSessionClient).remoteTabId
+                target.view = null
+                runCatching { target.session.finishIfRunning() }
+                val remaining = _pluginTabs.value.filterNot { it.id == id }
+                _pluginTabs.value = remaining
+                if (_pluginActiveTabId.value == id) {
+                    _pluginActiveTabId.value = remaining.firstOrNull()?.id
                 }
-                val provider = activePluginProvider() ?: return
+                _pluginRevision.value++
                 viewModelScope.launch(Dispatchers.IO) {
-                    runCatching { provider.closeTab(id) }
+                    runCatching { owner.provider.closeTab(remoteTabId) }
                 }
             }
         }
@@ -281,6 +341,7 @@ class TerminalViewModel @Inject constructor(
             isRemoteSsh() -> remoteManager.writeToActive(text)
             isLocalProot() -> localManager.writeToActive(text)
             else -> {
+                if (activePluginOwner() == null) return
                 val active = _pluginTabs.value.firstOrNull { it.id == _pluginActiveTabId.value } ?: return
                 val bytes = text.toByteArray(Charsets.UTF_8)
                 active.session.write(bytes, 0, bytes.size)
@@ -294,6 +355,7 @@ class TerminalViewModel @Inject constructor(
             isRemoteSsh() -> remoteManager.writeBytesToActive(*bytes)
             isLocalProot() -> localManager.writeBytesToActive(*bytes)
             else -> {
+                if (activePluginOwner() == null) return
                 val active = _pluginTabs.value.firstOrNull { it.id == _pluginActiveTabId.value } ?: return
                 val arr = ByteArray(bytes.size) { bytes[it].toByte() }
                 active.session.write(arr, 0, arr.size)
@@ -302,46 +364,50 @@ class TerminalViewModel @Inject constructor(
     }
 
     private suspend fun syncPluginTabs(
-        provider: TerminalSessionProvider,
-        preferredActiveId: String? = null
+        owner: PluginTerminalMirrorOwner,
+        preferredActiveRemoteId: String? = null
     ) {
+        if (!ownsMirror(owner)) return
+        val provider = owner.provider
         val remoteInfos = withContext(Dispatchers.IO) { provider.listTabs() }
-        val existingById = _pluginTabs.value.associateBy { it.id }
+        if (!ownsMirror(owner)) return
+        val existingByRemoteId = _pluginTabs.value.associateBy { (it.client as PluginSessionClient).remoteTabId }
         val remoteIds = remoteInfos.map { it.id }.toSet()
-        // 移除已不存在于插件侧的本地桥接标签
-        existingById.values.filter { it.id !in remoteIds }.forEach { oldTab ->
+        existingByRemoteId.filterKeys { it !in remoteIds }.values.forEach { oldTab ->
+            oldTab.view = null
             runCatching { oldTab.session.finishIfRunning() }
         }
         val nextTabs = remoteInfos.map { info ->
-            existingById[info.id]?.also { tab ->
+            val hostId = owner.hostHandle(info.id)
+            existingByRemoteId[info.id]?.also { tab ->
                 tab.title = info.title
                 tab.runState = if (info.running) RunState.Running else RunState.Finished(0)
-            } ?: buildPluginTab(provider, info.id, info.title, info.isBackground, info.command, info.running, info.ownerPluginId)
+            } ?: buildPluginTab(owner, hostId, info.id, info.title, info.isBackground, info.command, info.running, info.ownerPluginId)
         }
         _pluginTabs.value = nextTabs
-        _pluginActiveTabId.value = when {
-            preferredActiveId != null && nextTabs.any { it.id == preferredActiveId } -> preferredActiveId
-            _pluginActiveTabId.value != null && nextTabs.any { it.id == _pluginActiveTabId.value } -> _pluginActiveTabId.value
-            else -> nextTabs.firstOrNull { it.ownerPluginId == null }?.id ?: nextTabs.firstOrNull()?.id
-        }
+        _pluginActiveTabId.value = nextTabs.firstOrNull {
+            (it.client as PluginSessionClient).remoteTabId == preferredActiveRemoteId
+        }?.id ?: _pluginActiveTabId.value?.takeIf { active -> nextTabs.any { it.id == active } }
+            ?: nextTabs.firstOrNull { it.ownerPluginId == null }?.id ?: nextTabs.firstOrNull()?.id
         _pluginRevision.value++
     }
 
     private fun buildPluginTab(
-        provider: TerminalSessionProvider,
-        tabId: String,
+        owner: PluginTerminalMirrorOwner,
+        hostTabId: String,
+        remoteTabId: String,
         title: String,
         isBackground: Boolean,
         command: String?,
         running: Boolean,
         ownerPluginId: String?
     ): TerminalTab {
-        val sessionClient = PluginSessionClient(tabId)
-        val backend = PluginTabSessionBackend(provider, tabId, viewModelScope)
+        val sessionClient = PluginSessionClient(owner, remoteTabId)
+        val backend = PluginTabSessionBackend(owner.provider, remoteTabId, viewModelScope)
         val session = TerminalSession(PLUGIN_TRANSCRIPT_ROWS, sessionClient, backend)
         session.updateSize(PLUGIN_DEFAULT_COLUMNS, PLUGIN_DEFAULT_ROWS)
         return TerminalTab(
-            id = tabId,
+            id = hostTabId,
             title = title,
             session = session,
             isBackground = isBackground,
@@ -352,9 +418,21 @@ class TerminalViewModel @Inject constructor(
         )
     }
 
+    private fun clearPluginMirrors() {
+        pluginMirrorGeneration++
+        pluginMirrorOwner = null
+        val oldTabs = _pluginTabs.value
+        _pluginTabs.value = emptyList()
+        _pluginActiveTabId.value = null
+        oldTabs.forEach { tab ->
+            tab.view = null
+            runCatching { tab.session.finishIfRunning() }
+        }
+        _pluginRevision.value++
+    }
+
     override fun onCleared() {
-        // 只关闭本地视图流镜像，不去关闭插件运行时或内置单例管理器持有的后台会话。
-        _pluginTabs.value.forEach { tab -> runCatching { tab.session.finishIfRunning() } }
+        clearPluginMirrors()
         super.onCleared()
     }
 
@@ -393,16 +471,14 @@ class TerminalViewModel @Inject constructor(
             }
         }
 
+        // TerminalSession 调用此流时已在单一 writer 线程；不再把 RPC 转回 Main。
         private val outputStream = object : OutputStream() {
-            override fun write(b: Int) {
-                if (closed) return
-                provider.writeBytesToTab(tabId, b and 0xFF)
-            }
+            override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
 
             override fun write(b: ByteArray, off: Int, len: Int) {
                 if (closed || len <= 0) return
-                val ints = IntArray(len) { idx -> b[off + idx].toInt() and 0xFF }
-                provider.writeBytesToTab(tabId, *ints)
+                val bytes = IntArray(len) { b[off + it].toInt() and 0xFF }
+                provider.writeBytesToTab(tabId, *bytes)
             }
         }
 
@@ -410,7 +486,14 @@ class TerminalViewModel @Inject constructor(
 
         override fun getOutputStream(): OutputStream = outputStream
 
-        override fun resize(columns: Int, rows: Int) {}
+        override fun resize(columns: Int, rows: Int) {
+            if (!resizeUnsupportedReported) {
+                resizeUnsupportedReported = true
+                FileLogger.w(TAG, "Plugin terminal resize unsupported: TerminalSessionProvider has no resize API")
+            }
+        }
+
+        private var resizeUnsupportedReported = false
 
         override fun waitForExit(): Int {
             while (!closed && streamJob.isActive) {
@@ -420,7 +503,7 @@ class TerminalViewModel @Inject constructor(
                     break
                 }
             }
-            return provider.tabStatus(tabId)?.exitCode ?: 0
+            return if (closed) 0 else provider.tabStatus(tabId)?.exitCode ?: 0
         }
 
         override fun close() {
@@ -431,16 +514,21 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
-    private inner class PluginSessionClient(private val tabId: String) : TerminalSessionClient {
+    private inner class PluginSessionClient(
+        private val owner: PluginTerminalMirrorOwner,
+        val remoteTabId: String
+    ) : TerminalSessionClient {
         override fun onTextChanged(changedSession: TerminalSession) {
-            _pluginTabs.value.firstOrNull { it.id == tabId }?.view?.onScreenUpdated()
+            if (!ownsMirror(owner)) return
+            _pluginTabs.value.firstOrNull { it.session === changedSession }?.view?.onScreenUpdated()
             _pluginRevision.value++
         }
 
         override fun onTitleChanged(changedSession: TerminalSession) {}
 
         override fun onSessionFinished(finishedSession: TerminalSession) {
-            _pluginTabs.value.firstOrNull { it.id == tabId }?.let { tab ->
+            if (!ownsMirror(owner)) return
+            _pluginTabs.value.firstOrNull { it.session === finishedSession }?.let { tab ->
                 tab.runState = RunState.Finished(0)
                 _pluginRevision.value++
             }

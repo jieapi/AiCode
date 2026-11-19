@@ -18,7 +18,7 @@ enum class WorkspaceType {
  * AI 的文件工具与命令执行都以 [path] 为根，切换工作区即切换 AI 的操作范围。
  */
 data class Workspace(
-    /** 文件夹名，作为唯一标识。 */
+    /** 工作区显示名称。 */
     val name: String,
     /** 绝对路径，可直接用于 java.io.File 与容器挂载。 */
     val path: String,
@@ -26,7 +26,7 @@ data class Workspace(
     val type: WorkspaceType = WorkspaceType.INTERNAL,
     /** 工作区当前是否可用（外部本地目录被移动/删除时为 false），默认可用。 */
     val available: Boolean = true,
-    /** 工作区稳定标识；默认沿用 [path]，插件工作区可由后端指定独立 ID。 */
+    /** 实例内的稳定标识；仓库为内置工作区分配持久化 ID，插件使用后端提供的 ID。 */
     val id: String = path,
     /** 所属执行后端 ID，默认本地 PRoot。 */
     val backendId: String = "builtin:local-proot",
@@ -35,5 +35,9 @@ data class Workspace(
     /** 是否允许在该工作区下新建子工作区。 */
     val canCreateChild: Boolean = true,
     /** 是否允许删除该工作区。 */
-    val canDelete: Boolean = true
-)
+    val canDelete: Boolean = true,
+    val instanceId: String = backendId
+) {
+    val ref: WorkspaceRef
+        get() = WorkspaceRef(instanceId, id)
+}

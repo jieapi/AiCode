@@ -78,17 +78,50 @@ interface AgentMessageDao {
         resetLastInputTokens(sessionId)
     }
 
-    @Query("DELETE FROM agent_messages WHERE sessionId = :sessionId AND (isCompactionMarker = 1 OR isContextSummary = 1)")
-    suspend fun deleteCompactionMessages(sessionId: String)
+    /**
+     * 恢复「所有者摘要已不存在」的压缩行，含被更晚压缩吞掉的旧摘要与压缩标记。返回受影响行数。
+     * 回退点在压缩之前时，该压缩的摘要被删掉，它覆盖的历史才需要重新参与回放。
+     */
+    @Query(
+        """
+        UPDATE agent_messages SET isCompacted = 0, compactedBySummaryId = NULL
+        WHERE sessionId = :sessionId
+          AND isCompacted = 1
+          AND isContextExcluded = 0
+          AND compactedBySummaryId IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM agent_messages s WHERE s.id = agent_messages.compactedBySummaryId)
+        """
+    )
+    suspend fun restoreCompactedByMissingSummary(sessionId: String): Int
 
-    @Query("UPDATE agent_messages SET isCompacted = 0, compactedBySummaryId = NULL WHERE sessionId = :sessionId AND timestamp < :cutoff AND isCompacted = 1 AND isContextExcluded = 0 AND isContextSummary = 0 AND isCompactionMarker = 0")
-    suspend fun restoreCompactedMessagesBefore(sessionId: String, cutoff: Long)
+    /**
+     * 旧版压缩没有逐条摘要归属（[AgentMessageEntity.compactedBySummaryId] 为空）：
+     * 无法判断归属哪个摘要，只在会话已无存活摘要（压缩被整体撤销）时恢复。
+     */
+    @Query(
+        """
+        UPDATE agent_messages SET isCompacted = 0, compactedBySummaryId = NULL
+        WHERE sessionId = :sessionId
+          AND isCompacted = 1
+          AND isContextExcluded = 0
+          AND isContextSummary = 0
+          AND isCompactionMarker = 0
+          AND compactedBySummaryId IS NULL
+          AND NOT EXISTS (SELECT 1 FROM agent_messages s WHERE s.sessionId = :sessionId AND s.isContextSummary = 1 AND s.isCompacted = 0)
+        """
+    )
+    suspend fun restoreUnattributedCompactedWithoutSummary(sessionId: String): Int
 
     @Transaction
     suspend fun rewindConversation(sessionId: String, cutoff: Long) {
-        deleteCompactionMessages(sessionId)
-        restoreCompactedMessagesBefore(sessionId, cutoff)
+        // 先删回滚点及之后：落在该范围内的压缩摘要一并删除，留在库里的才是回退点之前已生效的摘要。
         deleteMessagesFromTimestamp(sessionId, cutoff)
+        // 压缩链逐层恢复：被删摘要吞掉的旧摘要本身也带 isCompacted 标记，需先恢复为存活，
+        // 它覆盖的历史才能继续留在压缩状态。每轮解开一层，直到没有归属失效的压缩行为止。
+        while (restoreCompactedByMissingSummary(sessionId) > 0) {
+            // 仅用于迭代至收敛，无循环体。
+        }
+        restoreUnattributedCompactedWithoutSummary(sessionId)
         resetLastInputTokens(sessionId)
     }
 

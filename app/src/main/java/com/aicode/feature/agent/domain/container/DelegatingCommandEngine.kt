@@ -14,8 +14,14 @@ class DelegatingCommandEngine @Inject constructor(
     private val executionBackendRegistry: ExecutionBackendRegistry
 ) : CommandEngine {
 
-    private fun delegate(): CommandEngine =
-        executionBackendRegistry.currentBackend().commandEngine
+    private fun delegate(): CommandEngine {
+        val binding = BackendExecutionContext.binding()
+        if (binding != null) {
+            binding.checkActive(executionBackendRegistry)
+            return binding.commandEngine
+        }
+        return executionBackendRegistry.currentBackend().commandEngine
+    }
 
     override val initProgress: StateFlow<ContainerInitState>
         get() = delegate().initProgress

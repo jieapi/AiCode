@@ -28,13 +28,16 @@ import com.aicode.feature.plugin.runtime.PluginWorkspaceRegistry
 import com.aicode.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import com.aicode.feature.workspace.domain.model.Workspace
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
 import com.aicode.feature.workspace.domain.model.WorkspaceType
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -51,6 +54,7 @@ import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -315,7 +319,7 @@ class WorkspaceRepositoryTest {
     }
 
     @Test
-    fun selectCreateAndDelete_dispatchToPluginBackendAndPersistByBackendId() = runTest {
+    fun selectCreateAndDelete_dispatchToPluginBackendAndPersistByInstanceId() = runTest {
         val runtimeManager = mockk<PluginRuntimeManager>(relaxed = true)
         coEvery {
             runtimeManager.invokeBinary("demo.cloud", "1.0.0", runtime, "backend.wsCreate", any(), any(), any(), any())
@@ -346,7 +350,7 @@ class WorkspaceRepositoryTest {
         assertEquals("ws-new", created?.id)
         assertTrue(repo.workspaces.value.any { it.id == "ws-new" })
 
-        repo.selectWorkspace("ws-new")
+        repo.selectWorkspace(checkNotNull(created).ref)
         assertEquals("ws-new", repo.current.value?.id)
 
         // 切换回本地后重新初始化，各自选中互不覆盖
@@ -358,9 +362,87 @@ class WorkspaceRepositoryTest {
         repo.initialize()
         assertEquals("ws-new", repo.current.value?.id)
 
-        repo.deleteWorkspace("ws-new")
+        repo.deleteWorkspace(checkNotNull(created).ref)
         assertFalse(repo.workspaces.value.any { it.id == "ws-new" })
         assertEquals("ws-first", repo.current.value?.id)
-        coVerify { sessionUseCase.deleteSessionsByWorkspace("/sandbox/my-app") }
+        coVerify { sessionUseCase.deleteSessionsByWorkspace(checkNotNull(created).ref) }
+        coVerify(exactly = 0) { sessionUseCase.deleteSessionsByWorkspace(any<String>()) }
+    }
+
+    @Test
+    fun sameNameSelectsByRefAndInvalidOrProtectedTargetsDoNotDelete() = runTest {
+        val runtimeManager = mockk<PluginRuntimeManager>(relaxed = true)
+        val adapter = PluginExecutionBackendAdapter(pluginDefinition("register"), runtimeManager)
+        backendRegistry.register(adapter)
+        backendRegistry.setActiveBackend(adapter.id)
+        val first = Workspace(name = "same", path = "/same/path", id = "id-1", backendId = adapter.id)
+        val protected = first.copy(id = "id-2", canDelete = false)
+        pluginWorkspaceRegistry.set(adapter.id, listOf(first, protected))
+        val repo = createRepo()
+        repo.initialize()
+
+        repo.selectWorkspace(protected.ref)
+        assertEquals(protected.ref, repo.current.value?.ref)
+        repo.selectWorkspace(WorkspaceRef("wrong-instance", "id-1"))
+        assertEquals(protected.ref, repo.current.value?.ref)
+        repo.selectWorkspace(first.ref)
+        assertEquals(first.ref, repo.current.value?.ref)
+
+        repo.deleteWorkspace(WorkspaceRef("wrong-instance", "id-1"))
+        repo.deleteWorkspace(first.ref.copy(backendInstanceId = "another-instance"))
+        repo.deleteWorkspace(protected.ref)
+        assertEquals(listOf(first.ref, protected.ref), repo.workspaces.value.map { it.ref })
+        coVerify(exactly = 0) {
+            runtimeManager.invokeBinary("demo.cloud", "1.0.0", runtime, "backend.wsDelete", any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { sessionUseCase.deleteSessionsByWorkspace(any<WorkspaceRef>()) }
+    }
+
+    @Test
+    fun lateScanAfterBackendSwitchCannotOverwriteCurrentOrWorkspaces() = runTest {
+        val runtimeManager = mockk<PluginRuntimeManager>(relaxed = true)
+        val scanStarted = CompletableDeferred<Unit>()
+        val scanResult = CompletableDeferred<BinaryResult>()
+        coEvery {
+            runtimeManager.invokeBinary("demo.cloud", "1.0.0", runtime, "backend.wsList", any(), any(), any(), any())
+        } coAnswers {
+            scanStarted.complete(Unit)
+            scanResult.await()
+        }
+        val adapter = PluginExecutionBackendAdapter(pluginDefinition("scan"), runtimeManager)
+        backendRegistry.register(adapter)
+        backendRegistry.setActiveBackend(adapter.id)
+        val repo = createRepo()
+        val stale = async { runCatching { repo.initialize() } }
+        try {
+            scanStarted.await()
+            backendRegistry.setActiveBackend(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)
+            repo.initialize()
+            val selected = checkNotNull(repo.current.value)
+            scanResult.complete(workspacesResult("stale" to "stale"))
+            assertTrue(stale.await().isFailure)
+            assertEquals(selected, repo.current.value)
+            assertEquals(listOf(selected), repo.workspaces.value)
+        } finally {
+            scanResult.cancel()
+        }
+    }
+
+    @Test
+    fun builtinWorkspaceIdsAreStableWithinAnInstanceAndSeparatedAcrossProfiles() = runTest {
+        val repo = createRepo()
+        repo.initialize()
+        val first = checkNotNull(repo.current.value)
+        repo.refreshAvailability()
+        assertEquals(first.ref, repo.current.value?.ref)
+
+        backendRegistry.updateBuiltinInstance(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID, "another-profile")
+        repo.initialize()
+        val second = checkNotNull(repo.current.value)
+        assertEquals(first.path, second.path)
+        assertNotEquals(first.ref, second.ref)
+        assertNotEquals(second.path, second.id)
+        repo.deleteWorkspace(first.ref)
+        assertTrue(File(second.path).isDirectory)
     }
 }

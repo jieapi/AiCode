@@ -123,7 +123,14 @@ class PluginChatServiceTest {
     @Test
     fun createSession_usesCurrentWorkspaceAndDefaultModel() = runTest {
         val sessionUseCase = mockk<SessionUseCase>(relaxed = true)
-        every { sessionUseCase.newSessionEntity(any(), any(), any(), any()) } returns session()
+        every {
+            sessionUseCase.newSessionEntity(
+                workspacePath,
+                "provider",
+                "model",
+                "high"
+            )
+        } returns session()
         coEvery { sessionUseCase.upsertSession(any()) } just Runs
         val service = service(sessionUseCase = sessionUseCase)
 

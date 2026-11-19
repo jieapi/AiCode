@@ -35,7 +35,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /** 插件进程调用失败；[code] 是宿主与插件都可判断的稳定错误码。 */
-class PluginProcessException(val code: String, override val message: String) : Exception(message)
+open class PluginProcessException(val code: String, override val message: String) : Exception(message)
+
+/** 仅表示本地确定尚未将请求写入对端的 IPC 未就绪状态，可安全回退到 NDJSON。 */
+class PluginIpcUnavailableException(message: String) : PluginProcessException("PLUGIN_IPC_UNAVAILABLE", message)
 
 /**
  * 插件进程的 NDJSON JSON-RPC 通道。
@@ -59,7 +62,9 @@ class PluginProcessTransport(
     private val closeOnTimeout: Boolean = true,
     private val ipcSocketFile: File? = null,
     private val ipcToken: String? = null,
-    private val binaryConnectorFactory: ((File) -> BinaryConnector)? = null
+    private val binaryConnectorFactory: ((File) -> BinaryConnector)? = null,
+    private val onBinaryRequest: (suspend (BinaryIncomingRequest) -> BinaryResult)? = null,
+    private val onBinaryEvent: ((method: String, meta: JsonObject, payload: ByteArray) -> Unit)? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val startMutex = Mutex()
@@ -76,6 +81,12 @@ class PluginProcessTransport(
     val isBinaryConnected: Boolean
         get() = binaryChannel?.isConnected == true
 
+    val activeRequests: Int
+        get() = binaryChannel?.activeRequests ?: pending.size
+
+    val isBusy: Boolean
+        get() = activeRequests > 0
+
     /** 发送请求并等待插件返回的 `result`；优先走二进制 IPC 通道，未建连时无缝走 NDJSON；超时默认结束进程，常驻进程可保留（见 [closeOnTimeout]）。 */
     suspend fun request(method: String, params: JsonObject, timeoutMs: Long): JsonElement {
         ensureStarted()
@@ -84,16 +95,12 @@ class PluginProcessTransport(
             try {
                 val result = channel.request(method = method, metaParams = params, timeoutMs = timeoutMs)
                 return decodeBinaryResultToJson(result)
+            } catch (e: PluginIpcUnavailableException) {
+                if (closed) throw e
+                FileLogger.w(TAG, "[$pluginId] 二进制 IPC 未就绪，回退 NDJSON: ${e.message}")
             } catch (e: PluginProcessException) {
-                if (e.code == "PLUGIN_TIMEOUT") {
-                    if (closeOnTimeout) close()
-                    throw e
-                }
-                if ((e.code == "PLUGIN_IPC_NOT_CONNECTED" || e.code == "PLUGIN_IPC_CLOSED") && !closed) {
-                    FileLogger.w(TAG, "[$pluginId] 二进制 IPC 未就绪，回退 NDJSON: ${e.message}")
-                } else {
-                    throw e
-                }
+                if (e.code == "PLUGIN_TIMEOUT" && closeOnTimeout) close()
+                throw e
             }
         }
         val id = idCounter.incrementAndGet()
@@ -134,7 +141,7 @@ class PluginProcessTransport(
     ): BinaryResult {
         ensureStarted()
         val channel = binaryChannel?.takeIf { it.isConnected }
-            ?: throw PluginProcessException("PLUGIN_IPC_UNAVAILABLE", "[$pluginId] 二进制 IPC 通道未就绪")
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
         return try {
             channel.request(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs)
         } catch (e: PluginProcessException) {
@@ -147,12 +154,30 @@ class PluginProcessTransport(
     fun openBinaryStream(
         method: String,
         metaParams: JsonObject = JsonObject(emptyMap()),
-        payload: ByteArray = BinaryFrame.EMPTY_BYTES
+        payload: ByteArray = BinaryFrame.EMPTY_BYTES,
+        timeoutMs: Long = DEFAULT_BINARY_TIMEOUT_MS
     ): Flow<BinaryStreamChunk> = flow {
         ensureStarted()
         val channel = binaryChannel?.takeIf { it.isConnected }
-            ?: throw PluginProcessException("PLUGIN_IPC_UNAVAILABLE", "[$pluginId] 二进制 IPC 通道未就绪")
-        emitAll(channel.openStream(method = method, metaParams = metaParams, payload = payload))
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
+        emitAll(channel.openStream(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs))
+    }
+
+    suspend fun uploadBinary(
+        method: String,
+        metaParams: JsonObject,
+        payload: Flow<ByteArray>,
+        timeoutMs: Long = DEFAULT_BINARY_TIMEOUT_MS
+    ): BinaryResult {
+        ensureStarted()
+        val channel = binaryChannel?.takeIf { it.isConnected }
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
+        return try {
+            channel.upload(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs)
+        } catch (e: PluginProcessException) {
+            if (e.code == "PLUGIN_TIMEOUT" && closeOnTimeout) close()
+            throw e
+        }
     }
 
     fun close() {
@@ -297,13 +322,16 @@ class PluginProcessTransport(
             pluginId = pluginId,
             connector = connector,
             ipcToken = token,
-            onRequest = { req -> handleBinaryPeerRequest(req) },
-            onEvent = { eventMethod, meta, _ ->
-                val params = (meta["args"] as? JsonObject)
-                    ?: (meta["params"] as? JsonObject)
-                    ?: meta
-                runCatching { onNotification(eventMethod, params) }
-                    .onFailure { FileLogger.w(TAG, "[$pluginId] 处理二进制事件 $eventMethod 失败", it) }
+            onRequest = { req ->
+                onBinaryRequest?.invoke(req) ?: throw PluginProcessException(
+                    "BINARY_UNSUPPORTED", "[$pluginId] 未绑定二进制 host 请求: ${req.method}"
+                )
+            },
+            onEvent = { eventMethod, meta, payload ->
+                onBinaryEvent?.invoke(eventMethod, meta, payload)
+                    ?: throw PluginProcessException(
+                        "BINARY_UNSUPPORTED", "[$pluginId] 未绑定二进制事件: $eventMethod"
+                    )
             },
             onClosed = {
                 if (binaryChannel === channel) {

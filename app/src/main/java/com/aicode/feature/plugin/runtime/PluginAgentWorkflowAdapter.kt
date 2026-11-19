@@ -6,7 +6,8 @@ import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.provider.RetryErrorInfo
 import com.aicode.feature.agent.domain.provider.RetryErrorKind
-import com.aicode.feature.agent.domain.session.SessionUseCase
+import com.aicode.feature.agent.domain.workflow.SessionRef
+import com.aicode.feature.agent.domain.workflow.WorkflowTurnContext
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
 import com.aicode.feature.agent.domain.workflow.AgentEvent
@@ -23,6 +24,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -46,8 +50,7 @@ import kotlinx.serialization.json.put
 class PluginAgentWorkflowAdapter(
     val definition: PluginWorkflowDefinition,
     private val runtimeManager: PluginRuntimeManager,
-    private val workflowEventBus: PluginWorkflowEventBus,
-    private val sessionUseCase: SessionUseCase
+    private val workflowEventBus: PluginWorkflowEventBus
 ) : AgentWorkflow {
 
     override fun executeEvents(
@@ -55,17 +58,21 @@ class PluginAgentWorkflowAdapter(
         context: AgentContext,
         tools: List<AgentTool>
     ): Flow<AgentEvent> = channelFlow {
-        val sessionId = context.sessionId
-        val session = sessionId?.let { sessionUseCase.getSessionById(it) }
-        val turnId = UUID.randomUUID().toString()
+        val turn = context.turn
+        val sessionId = when (val ref = turn?.sessionRef) {
+            is SessionRef.Room -> ref.opaqueId
+            is SessionRef.External -> ref.opaqueId
+            null -> context.sessionId
+        }
+        val turnId = turn?.runId ?: UUID.randomUUID().toString()
         val args = buildStartTurnArgs(
             turnId = turnId,
             userRequest = userRequest,
             context = context,
-            workspacePath = context.projectRoot.ifBlank { session?.workspacePath.orEmpty() },
-            providerId = session?.providerId,
-            model = session?.model,
-            workflowState = session?.workflowState
+            workspacePath = context.projectRoot,
+            providerId = turn?.providerId,
+            model = turn?.model,
+            workflowState = turn?.workflowState
         )
 
         val state = TurnStreamState(sessionId = sessionId)
@@ -81,7 +88,7 @@ class PluginAgentWorkflowAdapter(
                     args = args
                 ).collect { chunk ->
                     val eventObj = extractChunkEvent(chunk) ?: return@collect
-                    if (emitMappedEvent(eventObj, state, ::send)) {
+                    if (emitMappedEvent(eventObj, state, ::send, turn)) {
                         terminalEmitted = true
                     }
                 }
@@ -94,7 +101,8 @@ class PluginAgentWorkflowAdapter(
                         turnId = turnId,
                         args = args,
                         state = state,
-                        emit = ::send
+                        emit = ::send,
+                        turnContext = turn
                     )
                 } else {
                     FileLogger.w(TAG, "[${definition.key}] 工作流流式调用失败: ${e.message}", e)
@@ -130,10 +138,15 @@ class PluginAgentWorkflowAdapter(
     override suspend fun compactSession(
         sessionId: String,
         onEvent: suspend (AgentEvent) -> Unit
+    ): Boolean = false
+
+    override suspend fun compactSession(
+        context: AgentContext,
+        onEvent: suspend (AgentEvent) -> Unit
     ): Boolean {
         val handler = definition.handlers.compact ?: return false
-        val session = sessionUseCase.getSessionById(sessionId)
-        onEvent(AgentEvent.CompactionStarted(estimatedTokens = session?.lastInputTokens ?: 0))
+        val turn = context.turn ?: return false
+        onEvent(AgentEvent.CompactionStarted(estimatedTokens = context.lastInputTokens))
         return try {
             val result = runtimeManager.invokeWorkflow(
                 pluginId = definition.pluginId,
@@ -141,17 +154,17 @@ class PluginAgentWorkflowAdapter(
                 runtime = definition.runtime,
                 handler = handler,
                 args = buildJsonObject {
-                    put("sessionId", sessionId)
-                    put("workspacePath", session?.workspacePath.orEmpty())
-                    session?.providerId?.takeIf { it.isNotBlank() }?.let { put("providerId", it) }
-                    session?.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
-                    session?.workflowState?.let { put("workflowState", encodeWorkflowStateElement(it)) }
+                    put("sessionId", turn.sessionRef.opaqueId)
+                    put("workspacePath", context.projectRoot)
+                    turn.providerId?.takeIf { it.isNotBlank() }?.let { put("providerId", it) }
+                    turn.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
+                    turn.workflowState?.let { put("workflowState", encodeWorkflowStateElement(it)) }
                 },
                 timeoutMs = CONTROL_TIMEOUT_MS
             )
             val obj = result as? JsonObject
             if (obj != null && obj.containsKey("workflowState")) {
-                persistWorkflowState(sessionId, obj["workflowState"])
+                persistWorkflowState(turn, obj["workflowState"], onEvent)
             }
             val error = obj?.get("error")?.stringVal()?.takeIf { it.isNotBlank() }
             if (error != null) {
@@ -168,15 +181,17 @@ class PluginAgentWorkflowAdapter(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.w(TAG, "[${definition.key}] compact 失败: sessionId=$sessionId", e)
+            FileLogger.w(TAG, "[${definition.key}] compact 失败: sessionId=${turn.sessionRef.opaqueId}", e)
             onEvent(AgentEvent.CompactionFailed(e.message ?: "Compaction failed"))
             false
         }
     }
 
-    override suspend fun generateTitle(sessionId: String, request: String): String? {
+    override suspend fun generateTitle(sessionId: String, request: String): String? = null
+
+    override suspend fun generateTitle(context: AgentContext, request: String): String? {
         val handler = definition.handlers.generateTitle ?: return null
-        val session = sessionUseCase.getSessionById(sessionId)
+        val turn = context.turn ?: return null
         return try {
             val result = runtimeManager.invokeWorkflow(
                 pluginId = definition.pluginId,
@@ -184,11 +199,11 @@ class PluginAgentWorkflowAdapter(
                 runtime = definition.runtime,
                 handler = handler,
                 args = buildJsonObject {
-                    put("sessionId", sessionId)
+                    put("sessionId", turn.sessionRef.opaqueId)
                     put("userRequest", request)
-                    put("workspacePath", session?.workspacePath.orEmpty())
-                    session?.providerId?.takeIf { it.isNotBlank() }?.let { put("providerId", it) }
-                    session?.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
+                    put("workspacePath", context.projectRoot)
+                    turn.providerId?.takeIf { it.isNotBlank() }?.let { put("providerId", it) }
+                    turn.model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
                 },
                 timeoutMs = CONTROL_TIMEOUT_MS
             )
@@ -201,7 +216,7 @@ class PluginAgentWorkflowAdapter(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.w(TAG, "[${definition.key}] generateTitle 失败: sessionId=$sessionId", e)
+            FileLogger.w(TAG, "[${definition.key}] generateTitle 失败: sessionId=${turn.sessionRef.opaqueId}", e)
             null
         }
     }
@@ -212,7 +227,8 @@ class PluginAgentWorkflowAdapter(
         turnId: String,
         args: JsonObject,
         state: TurnStreamState,
-        emit: suspend (AgentEvent) -> Unit
+        emit: suspend (AgentEvent) -> Unit,
+        turnContext: WorkflowTurnContext?
     ) {
         val eventChannel = Channel<JsonObject>(Channel.UNLIMITED)
         val unsubscribe = workflowEventBus.subscribe(definition.pluginId, turnId) { event ->
@@ -233,7 +249,7 @@ class PluginAgentWorkflowAdapter(
                         )
                         val obj = result as? JsonObject
                         if (obj != null && obj.containsKey("workflowState") && state.sessionId != null) {
-                            persistWorkflowState(state.sessionId, obj["workflowState"])
+                            persistWorkflowState(turnContext, obj["workflowState"], emit)
                         }
                     } catch (e: CancellationException) {
                         throw e
@@ -243,24 +259,33 @@ class PluginAgentWorkflowAdapter(
                     }
                 }
 
-                for (eventObj in eventChannel) {
-                    if (emitMappedEvent(eventObj, state, emit)) {
-                        terminalEmitted = true
-                        eventChannel.close()
-                        break
+                var timedOut = false
+                try {
+                    withTimeout(CONTROL_TIMEOUT_MS) {
+                        for (eventObj in eventChannel) {
+                            if (emitMappedEvent(eventObj, state, emit, turnContext)) {
+                                terminalEmitted = true
+                                eventChannel.close()
+                                break
+                            }
+                        }
                     }
+                } catch (_: TimeoutCancellationException) {
+                    timedOut = true
                 }
 
                 val failure = rpcFailure
                 if (!terminalEmitted && failure != null) {
                     val code = (failure as? PluginProcessException)?.code
                     emit(AgentEvent.Failed(failure.message ?: "Plugin workflow failed", code))
+                } else if (!terminalEmitted && timedOut) {
+                    emit(AgentEvent.Failed("Plugin workflow timed out waiting for terminal event", "PLUGIN_WORKFLOW_TIMEOUT"))
                 } else if (!terminalEmitted) {
-                    emit(AgentEvent.Completed)
+                    emit(AgentEvent.Failed("Plugin workflow ended without a terminal event", "PLUGIN_WORKFLOW_NO_TERMINAL"))
                 }
 
                 if (rpcJob.isActive) {
-                    rpcJob.cancel()
+                    withTimeoutOrNull(CONTROL_TIMEOUT_MS) { rpcJob.join() } ?: rpcJob.cancel()
                 }
             }
         } finally {
@@ -272,7 +297,8 @@ class PluginAgentWorkflowAdapter(
     private suspend fun emitMappedEvent(
         eventObj: JsonObject,
         state: TurnStreamState,
-        emit: suspend (AgentEvent) -> Unit
+        emit: suspend (AgentEvent) -> Unit,
+        turnContext: WorkflowTurnContext? = null
     ): Boolean {
         val type = eventObj["type"]?.stringVal() ?: return false
         when (type) {
@@ -317,7 +343,7 @@ class PluginAgentWorkflowAdapter(
                 val signature = eventObj["signature"]?.stringVal().orEmpty()
                 val thinkingBlocksJson = eventObj["thinkingBlocksJson"]?.stringVal().orEmpty()
                 if (eventObj.containsKey("workflowState") && state.sessionId != null) {
-                    persistWorkflowState(state.sessionId, eventObj["workflowState"])
+                    persistWorkflowState(turnContext, eventObj["workflowState"], emit)
                 }
                 emit(
                     AgentEvent.AssistantText(
@@ -427,7 +453,7 @@ class PluginAgentWorkflowAdapter(
             }
             "compaction.finished" -> {
                 if (eventObj.containsKey("workflowState") && state.sessionId != null) {
-                    persistWorkflowState(state.sessionId, eventObj["workflowState"])
+                    persistWorkflowState(turnContext, eventObj["workflowState"], emit)
                 }
                 emit(AgentEvent.CompactionFinished)
             }
@@ -455,7 +481,7 @@ class PluginAgentWorkflowAdapter(
             }
             "completed" -> {
                 if (eventObj.containsKey("workflowState") && state.sessionId != null) {
-                    persistWorkflowState(state.sessionId, eventObj["workflowState"])
+                    persistWorkflowState(turnContext, eventObj["workflowState"], emit)
                 }
                 emit(AgentEvent.Completed)
                 return true
@@ -464,13 +490,18 @@ class PluginAgentWorkflowAdapter(
         return false
     }
 
-    private suspend fun persistWorkflowState(sessionId: String, raw: JsonElement?) {
+    private suspend fun persistWorkflowState(
+        turn: WorkflowTurnContext?,
+        raw: JsonElement?,
+        emit: suspend (AgentEvent) -> Unit
+    ) {
         val serialized = when (raw) {
             null, JsonNull -> null
             is JsonPrimitive -> if (raw.isString) raw.content else raw.toString()
             else -> raw.toString()
         }
-        sessionUseCase.updateWorkflowState(sessionId, serialized)
+        turn?.persistence?.persistWorkflowState(serialized)
+        emit(AgentEvent.WorkflowStateChanged(serialized))
     }
 
     private fun buildStartTurnArgs(
@@ -482,7 +513,11 @@ class PluginAgentWorkflowAdapter(
         model: String?,
         workflowState: String?
     ): JsonObject = buildJsonObject {
-        put("sessionId", context.sessionId.orEmpty())
+        put("sessionId", when (val ref = context.turn?.sessionRef) {
+            is SessionRef.Room -> ref.opaqueId
+            is SessionRef.External -> ref.opaqueId
+            null -> context.sessionId.orEmpty()
+        })
         put("turnId", turnId)
         put("userRequest", userRequest)
         put("mode", context.mode.name.lowercase(Locale.ROOT))

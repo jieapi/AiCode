@@ -6,11 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.model.Workspace
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -57,18 +58,20 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch { runCatching { repository.initialize() } }
-        // 执行后端切换后重新加载工作区列表（本地 File.listFiles ↔ 远程 SFTP ls ↔ 插件工作区）。
-        // drop(1) 跳过首帧（init 已调 initialize），仅响应后续切换。
         viewModelScope.launch {
-            executionModeHolder.activeBackend.drop(1).distinctUntilChanged().collect {
-                runCatching { repository.initialize() }
+            executionModeHolder.activeBackend.collectLatest {
+                try {
+                    repository.initialize()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
         }
     }
 
-    fun selectWorkspace(name: String) = viewModelScope.launch {
-        runCatching { repository.selectWorkspace(name) }
+    fun selectWorkspace(ref: WorkspaceRef) = viewModelScope.launch {
+        runCatching { repository.selectWorkspace(ref) }
     }
 
     fun createWorkspace(name: String, onResult: (Workspace?) -> Unit = {}) = viewModelScope.launch {
@@ -91,7 +94,7 @@ class WorkspaceViewModel @Inject constructor(
         onResult(ws)
     }
 
-    fun deleteWorkspace(name: String) = viewModelScope.launch {
-        runCatching { repository.deleteWorkspace(name) }
+    fun deleteWorkspace(ref: WorkspaceRef) = viewModelScope.launch {
+        runCatching { repository.deleteWorkspace(ref) }
     }
 }

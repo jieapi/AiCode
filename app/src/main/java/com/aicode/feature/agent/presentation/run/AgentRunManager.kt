@@ -22,6 +22,11 @@ import com.aicode.feature.agent.domain.command.SlashCommandContext
 import com.aicode.feature.agent.domain.command.SlashCommandRegistry
 import com.aicode.feature.agent.domain.command.SlashCommandRegistry.ResolvedCommand
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.BackendExecutionContext
+import com.aicode.feature.agent.domain.workflow.SessionRef
+import com.aicode.feature.agent.domain.workflow.TurnPersistence
+import com.aicode.feature.agent.domain.workflow.WorkflowTurnContext
 import com.aicode.feature.agent.domain.model.AgentContext
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
@@ -140,6 +145,7 @@ class AgentRunManager @Inject constructor(
     private val toolPermissionManager: ToolPermissionManager,
     private val askUserQuestionManager: AskUserQuestionManager,
     private val containerEngine: LinuxContainerEngine,
+    private val executionBackendRegistry: ExecutionBackendRegistry,
     private val sessionUseCase: SessionUseCase,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
@@ -738,7 +744,25 @@ class AgentRunManager @Inject constructor(
         var failed = false
         try {
             val session = sessionUseCase.getSessionById(sessionId)
-            val changed = workflowRegistry.resolve(session?.workflowId).compactSession(sessionId) { event ->
+            val sessionDomain = session?.toDomain()
+            val compactionContext = AgentContext(
+                currentFile = null,
+                selectedCode = null,
+                projectRoot = session?.workspacePath.orEmpty(),
+                language = null,
+                sessionId = sessionId,
+                mode = sessionDomain?.mode ?: AgentMode.BUILD,
+                turn = WorkflowTurnContext(
+                    runId = UUID.randomUUID().toString(),
+                    sessionRef = SessionRef.Room(sessionId),
+                    providerId = session?.providerId,
+                    model = session?.model,
+                    workflowState = session?.workflowState,
+                    permissionMode = sessionDomain?.mode ?: AgentMode.BUILD,
+                    persistence = roomTurnPersistence(sessionId)
+                )
+            )
+            val changed = workflowRegistry.resolve(session?.workflowId).compactSession(compactionContext) { event ->
                 when (event) {
                     is AgentEvent.CompactionStarted -> setCompacting(sessionId, true)
                     AgentEvent.CompactionFinished -> {
@@ -1514,7 +1538,26 @@ class AgentRunManager @Inject constructor(
                     pendingTitleRequest = {
                         scope.launch {
                             workflowRegistry.resolve(currentSession?.workflowId)
-                                .generateTitle(sessionId, request)?.let {
+                                .generateTitle(
+                                    AgentContext(
+                                        currentFile = null,
+                                        selectedCode = null,
+                                        projectRoot = currentSession?.workspacePath.orEmpty(),
+                                        language = null,
+                                        sessionId = sessionId,
+                                        mode = currentSession?.toDomain()?.mode ?: AgentMode.BUILD,
+                                        turn = WorkflowTurnContext(
+                                            runId = UUID.randomUUID().toString(),
+                                            sessionRef = SessionRef.Room(sessionId),
+                                            providerId = currentSession?.providerId,
+                                            model = currentSession?.model,
+                                            workflowState = currentSession?.workflowState,
+                                            permissionMode = currentSession?.toDomain()?.mode ?: AgentMode.BUILD,
+                                            persistence = roomTurnPersistence(sessionId)
+                                        )
+                                    ),
+                                    request
+                                )?.let {
                                     sessionUseCase.updateTitle(sessionId, it)
                                 }
                         }
@@ -1552,7 +1595,16 @@ class AgentRunManager @Inject constructor(
                 goal = sessionDomain?.goal,
                 goalStatus = sessionDomain?.goalStatus,
                 reasoningEffort = sessionDomain?.reasoningEffort?.apiValue,
-                agentDefinition = agentDefinition
+                agentDefinition = agentDefinition,
+                turn = WorkflowTurnContext(
+                    runId = runToken.toString(),
+                    sessionRef = SessionRef.Room(sessionId),
+                    providerId = sessionEntity?.providerId,
+                    model = sessionEntity?.model,
+                    workflowState = sessionEntity?.workflowState,
+                    permissionMode = if (sessionDomain?.goalStatus == GoalStatus.ACTIVE) AgentMode.AUTO else mode,
+                    persistence = roomTurnPersistence(sessionId)
+                )
             )
 
             val allTools = toolRegistry.getAvailableTools()
@@ -1825,6 +1877,12 @@ class AgentRunManager @Inject constructor(
                     }
                     is AgentEvent.ModeChanged -> {
                     }
+                    is AgentEvent.TransientInstruction -> {
+                        // 外部工作流或插件发来的临时指令不写入本地消息表。
+                    }
+                    is AgentEvent.WorkflowStateChanged -> {
+                        // workflowState 由当前 workflow 的 persistence sink 提交。
+                    }
                 }
             }
             turnSucceeded = true
@@ -1932,9 +1990,11 @@ class AgentRunManager @Inject constructor(
         request: String,
         workspacePath: String,
         history: List<AgentMessage> = emptyList(),
-        @Suppress("UNUSED_PARAMETER") providerId: String? = null,
-        @Suppress("UNUSED_PARAMETER") model: String? = null,
+        providerId: String? = null,
+        model: String? = null,
         mode: AgentMode = AgentMode.BUILD,
+        workflowState: String? = null,
+        sessionRef: SessionRef = SessionRef.External(owner = "plugin", opaqueId = externalSessionId),
         onCommittedEvent: suspend (AgentEvent) -> Unit = {},
         onFinished: suspend (succeeded: Boolean) -> Unit = {}
     ): Job {
@@ -1945,7 +2005,10 @@ class AgentRunManager @Inject constructor(
             streamingAssistantStore.startRun(externalSessionId, runToken)
             setAgentState(externalSessionId, AgentUIState.Streaming)
             acquireKeepalive()
-            scope.launch(start = CoroutineStart.LAZY) {
+            scope.launch(
+                context = BackendExecutionContext.bind(executionBackendRegistry.currentBackend()),
+                start = CoroutineStart.LAZY
+            ) {
                 var turnSucceeded = false
                 var runStatus = "success"
                 var runError: String? = null
@@ -1961,7 +2024,16 @@ class AgentRunManager @Inject constructor(
                         history = history,
                         sessionId = externalSessionId,
                         inputMessageId = UUID.randomUUID().toString(),
-                        mode = mode
+                        mode = mode,
+                        turn = WorkflowTurnContext(
+                            runId = runToken.toString(),
+                            sessionRef = sessionRef,
+                            providerId = providerId,
+                            model = model,
+                            workflowState = workflowState,
+                            permissionMode = mode,
+                            persistence = externalTurnPersistence(onCommittedEvent)
+                        )
                     )
                     val tools = toolRegistry.getAvailableTools()
                         .filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
@@ -2152,6 +2224,10 @@ class AgentRunManager @Inject constructor(
                             }
                             is AgentEvent.ModeChanged -> {
                             }
+                            is AgentEvent.TransientInstruction -> {
+                            }
+                            is AgentEvent.WorkflowStateChanged -> {
+                            }
                         }
                     }
                     turnSucceeded = !failed
@@ -2287,6 +2363,64 @@ class AgentRunManager @Inject constructor(
     private suspend fun persistGoalNotice(sid: String, text: String) {
         sessionUseCase.touch(sid, messagePersistenceUseCase.nextTimestamp())
         messagePersistenceUseCase.persist(sid, MessageRole.ASSISTANT, text, isContextExcluded = true)
+    }
+
+    private fun roomTurnPersistence(sessionId: String): TurnPersistence = object : TurnPersistence {
+        override suspend fun persistWorkflowState(state: String?) {
+            sessionUseCase.updateWorkflowState(sessionId, state)
+        }
+
+        override suspend fun persistUserContinuation(message: AgentMessage.UserMessage) {
+            messagePersistenceUseCase.persist(sessionId, MessageRole.USER, message.content, id = message.id)
+            messagePersistenceUseCase.invalidateHistory(sessionId)
+        }
+
+        override suspend fun publishTransientInstruction(messageId: String, text: String) {
+            messagePersistenceUseCase.persist(sessionId, MessageRole.TOOL, text, id = messageId)
+        }
+
+        override suspend fun persistMode(mode: AgentMode, modeBeforePlan: AgentMode?) {
+            sessionUseCase.updateMode(sessionId, mode.name)
+        }
+
+        override suspend fun recordLlmCall(stats: com.aicode.feature.agent.domain.workflow.LlmCallStats) {
+            llmCallRecordDao.insert(com.aicode.feature.agent.data.local.entity.LlmCallRecordEntity(
+                sessionId = sessionId,
+                providerId = stats.providerId,
+                model = stats.model,
+                kind = stats.kind,
+                inputTokens = stats.inputTokens,
+                outputTokens = stats.outputTokens,
+                cachedInputTokens = stats.cachedInputTokens,
+                durationMillis = stats.durationMillis,
+                status = stats.status,
+                errorMessage = stats.errorMessage,
+                stopReason = stats.stopReason,
+                createdAt = stats.createdAt
+            ))
+        }
+    }
+
+    private fun externalTurnPersistence(onCommittedEvent: suspend (AgentEvent) -> Unit): TurnPersistence = object : TurnPersistence {
+        override suspend fun persistWorkflowState(state: String?) {
+            onCommittedEvent(AgentEvent.WorkflowStateChanged(state))
+        }
+
+        override suspend fun persistUserContinuation(message: AgentMessage.UserMessage) {
+            onCommittedEvent(AgentEvent.TransientInstruction(message.id, message.content))
+        }
+
+        override suspend fun publishTransientInstruction(messageId: String, text: String) {
+            onCommittedEvent(AgentEvent.TransientInstruction(messageId, text))
+        }
+
+        override suspend fun persistMode(mode: AgentMode, modeBeforePlan: AgentMode?) {
+            onCommittedEvent(AgentEvent.ModeChanged(mode, "workflow"))
+        }
+
+        override suspend fun recordLlmCall(stats: com.aicode.feature.agent.domain.workflow.LlmCallStats) {
+            onCommittedEvent(AgentEvent.ContextUsage(stats.inputTokens, 0, false))
+        }
     }
 
     private fun detectLanguage(filePath: String): String {

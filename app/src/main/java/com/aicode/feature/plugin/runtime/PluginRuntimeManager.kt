@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -194,7 +195,7 @@ class PluginRuntimeManager @Inject constructor(
                 timeoutMs = timeoutMs
             )
         } catch (e: PluginProcessException) {
-            if (e.code in BINARY_FALLBACK_CODES) {
+            if (e is PluginIpcUnavailableException) {
                 val fallbackArgs = if (payload.isEmpty() || args.containsKey("payloadBase64")) {
                     args
                 } else {
@@ -264,8 +265,34 @@ class PluginRuntimeManager @Inject constructor(
         runtime = runtime,
         handler = handler,
         args = args,
-        method = WORKFLOW_INVOKE_METHOD
+        method = WORKFLOW_INVOKE_METHOD,
+        timeoutMs = WORKFLOW_TIMEOUT_MS
     )
+
+    suspend fun uploadBinary(
+        pluginId: String,
+        version: String,
+        runtime: PluginRuntime,
+        handler: String,
+        args: JsonObject,
+        payload: Flow<ByteArray>,
+        method: String = BACKEND_INVOKE_METHOD,
+        timeoutMs: Long = TOOL_TIMEOUT_MS
+    ): BinaryResult {
+        requireActive(pluginId)
+        val entry = getOrCreate(pluginId, version, runtime)
+        requireActive(pluginId)
+        entry.lastUsed = System.currentTimeMillis()
+        return entry.transport.uploadBinary(
+            method = method,
+            metaParams = buildJsonObject {
+                put("handler", handler)
+                put("args", args)
+            },
+            payload = payload,
+            timeoutMs = timeoutMs
+        )
+    }
 
     /** 通过二进制 IPC 通道开启流式调用（默认 `method = "backend.invoke"`）。 */
     fun openBinaryStream(
@@ -275,7 +302,8 @@ class PluginRuntimeManager @Inject constructor(
         handler: String,
         args: JsonObject = JsonObject(emptyMap()),
         payload: ByteArray = BinaryFrame.EMPTY_BYTES,
-        method: String = BACKEND_INVOKE_METHOD
+        method: String = BACKEND_INVOKE_METHOD,
+        timeoutMs: Long = TOOL_TIMEOUT_MS
     ): Flow<BinaryStreamChunk> = flow {
         requireActive(pluginId)
         val entry = getOrCreate(pluginId, version, runtime)
@@ -294,7 +322,8 @@ class PluginRuntimeManager @Inject constructor(
                 entry.transport.openBinaryStream(
                     method = method,
                     metaParams = metaParams,
-                    payload = payload
+                    payload = payload,
+                    timeoutMs = timeoutMs
                 )
             )
         } catch (e: PluginProcessException) {
@@ -744,14 +773,12 @@ class PluginRuntimeManager @Inject constructor(
     /** 宿主文件路径映射到容器内路径：插件目录由 `.aicode` 绑定挂载到 `/root/.aicode`。 */
     private fun containerDir(file: File): String = installer.containerPathFor(file)
 
-    /**
-     * 插件数据目录在当前执行环境中的真实路径，并确保目录存在。本地落在
-     * `/…/.aicode/plugins/data/<id>`（与宿主 `aicodeDir/plugins/data/<id>` 同一份），远程落在服务器同名路径。
-     */
-    private suspend fun dataDirectory(pluginId: String): String {
-        val path = PluginHostPaths.dataRoot(homeResolver, pluginId)
-        fileAccess.mkdirs(path)
-        return path
+    internal suspend fun dataDirectory(pluginId: String): String = withContext(Dispatchers.IO) {
+        val directory = File(installer.aicodeDir, "plugins/data/$pluginId")
+        if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) {
+            throw PluginProcessException("STORAGE_FAILED", "cannot create plugin data directory")
+        }
+        installer.containerPathFor(directory)
     }
 
     /** 当前工作区在插件可见路径空间里的根：远程用远端绝对路径，本地容器用 `$HOME/workspace`。 */
@@ -774,7 +801,7 @@ class PluginRuntimeManager @Inject constructor(
         val now = System.currentTimeMillis()
         synchronized(processes) {
             processes.entries
-                .filter { !it.value.resident && now - it.value.lastUsed > IDLE_TIMEOUT_MS }
+                .filter { !it.value.resident && !it.value.transport.isBusy && now - it.value.lastUsed > IDLE_TIMEOUT_MS }
                 .forEach { (key, entry) ->
                     processes.remove(key, entry)
                     entry.transport.close()
@@ -821,11 +848,6 @@ class PluginRuntimeManager @Inject constructor(
         const val BACKEND_INVOKE_METHOD = "backend.invoke"
         const val WORKFLOW_INVOKE_METHOD = "workflow.invoke"
         const val WORKFLOW_TIMEOUT_MS = 30 * 60_000L
-        val BINARY_FALLBACK_CODES = setOf(
-            "PLUGIN_IPC_UNAVAILABLE",
-            "PLUGIN_IPC_NOT_CONNECTED",
-            "PLUGIN_IPC_CLOSED"
-        )
         const val IPC_DIR = "ipc"
         const val MAX_UNIX_SOCKET_PATH_BYTES = 100
         const val IPC_TOKEN_BYTES = 16

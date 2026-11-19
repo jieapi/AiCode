@@ -56,7 +56,7 @@
 
 ### 版本范围
 
-`engines.pluginApi` 支持 `^1.0.0`、`~1.0.0`、`>=1.0.0 <2.0.0`、精确版本 `1.0.0`。不支持 `1.x`、`*`、`||` 和区间简写。宿主当前提供 `1.0.0`，范围必须包含该版本。
+`engines.pluginApi` 支持 `^1.0.0`、`~1.0.0`、`>=1.0.0 <2.0.0`、精确版本 `1.0.0`。不支持 `1.x`、`*`、`||` 和区间简写。宿主插件 API 为 `1.0.0`，范围必须包含该版本。
 
 ## runtime
 
@@ -224,14 +224,14 @@
 
 ### executionBackends
 
-`executionBackends` 声明由插件提供的全局执行后端，启用后使用者可在工作区/执行环境中切换，使文件树、代码编辑器、Git、终端与内置工具通过插件读写目标环境。必须提供 `runtime`。
+`executionBackends` 最多声明 32 项，由插件提供全局执行后端，启用后使用者可在工作区/执行环境中切换，使文件树、代码编辑器、Git、终端与内置工具通过插件读写目标环境。必须提供 `runtime`。
 
 ```json
 {
   "executionBackends": [
     {
       "id": "cloud-box",
-      "name": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
+      "title": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
       "description": "在远端沙盒中执行命令与读写文件",
       "capabilities": {
         "filesystem": true,
@@ -241,7 +241,7 @@
         "portForward": false,
         "isRemoteEnvironment": true,
         "workspaceDiscovery": "hybrid",
-        "projectConfigLocation": "app_private_dir"
+        "projectConfigLocation": "appPrivateDir"
       },
       "handlers": {
         "fs": "backend.fs",
@@ -262,29 +262,29 @@
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `id` | 是 | 局部 ID，同一插件内唯一 |
-| `name` | 是 | 本地化展示名称，最多 80 字符 |
+| `title` | 是 | 本地化展示名称，最多 80 字符 |
 | `description` | 否 | 本地化说明，最多 600 字符 |
-| `capabilities` | 是 | 后端能力声明与工作区行为，`filesystem` 与 `command` 至少一项为 `true` |
-| `handlers` | 是 | runtime handler 映射，至少声明一个 handler |
+| `capabilities` | 否 | 后端能力声明与工作区行为；省略对象或子字段时采用下表默认值 |
+| `handlers` | 是 | runtime handler 映射，必须满足启用能力的要求；默认需要 `fs` 和 `exec` |
 
 `capabilities` 字段：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `filesystem` | `false` | 是否支持文件访问；为 `true` 时必填 `handlers.fs` |
-| `command` | `false` | 是否支持命令执行；为 `true` 时必填 `handlers.exec` |
+| `filesystem` | `true` | 是否支持文件访问；为 `true` 时必填 `handlers.fs` |
+| `command` | `true` | 是否支持命令执行；为 `true` 时必填 `handlers.exec` |
 | `terminal` | `false` | 是否支持终端 PTY；为 `true` 时必填 `handlers.terminal` |
-| `fileWatch` | `false` | 是否支持文件变更监听 |
-| `portForward` | `false` | 是否支持端口转发能力 |
-| `isRemoteEnvironment` | `false` | 是否属于远程环境（用于区分默认工作区类型与界面展示） |
+| `fileWatch` | `false` | 插件后端文件变更监听当前未开放，只能省略或为 `false` |
+| `portForward` | `false` | 插件后端端口转发当前未开放，只能省略或为 `false` |
+| `isRemoteEnvironment` | `true` | 是否属于远程环境（用于区分默认工作区类型与界面展示） |
 | `workspaceDiscovery` | `"scan"` | 工作区发现模式：`scan`（宿主拉取）、`register`（插件主动推送）或 `hybrid`（两者结合） |
-| `projectConfigLocation` | `"workspace_dir"` | 项目级 `.aicode` 存储位置：`workspace_dir`（工作区目录）或 `app_private_dir`（App 私有目录） |
+| `projectConfigLocation` | `"appPrivateDir"` | 项目级 `.aicode` 存储位置：`workspaceDir`（工作区目录）或 `appPrivateDir`（App 私有目录），只接受 camelCase；当前 `workspaceDir` 仅允许显式声明 `isRemoteEnvironment: false` 的后端使用 |
 
 `handlers` 支持以下可选键（按声明的能力提供）：`fs`、`exec`、`execStream`、`execHealth`、`terminal`、`workspaceList`、`workspaceCreate`、`workspaceDelete`、`workspaceSelect`。
 
 当 `workspaceDiscovery` 为 `register` 或 `hybrid` 时，插件可通过以下宿主方法增量维护该后端下的工作区列表：
 
-- `host.workspaces.upsert({ backendId, workspaces })`：按 `id`（省略时取 `path`）增量插入或更新工作区；
+- `host.workspaces.upsert({ backendId, workspaces })`：按必填的 `id` 增量插入或更新工作区；
 - `host.workspaces.remove({ backendId, workspaceIds })`：按工作区 ID 移除条目；
 - `host.workspaces.set({ backendId, workspaces })`：全量替换该后端的工作区列表。
 
@@ -585,7 +585,7 @@ if (result.decision === 'allow') {
 | 工具 `inputSchema` 不是 `.json` 或根不是 object | `FIELD_INVALID` / `CONTENT_INVALID` |
 | 存在 `tools`、`hooks`、`executionBackends`、`workflows` 或 `sessions` 但未声明 `runtime` | `FIELD_MISSING` |
 | `executionBackends` 声明了能力但缺少对应 `handlers.fs` / `exec` / `terminal` | `FIELD_MISSING` |
-| `executionBackends` 的 `filesystem` 与 `command` 同为 `false` | `FIELD_INVALID` |
+| `executionBackends` 的 `fileWatch` 或 `portForward` 为 `true`，或远端后端使用 `workspaceDir` | `FIELD_INVALID` |
 | `workflows` 缺少 `handlers.startTurn` / `cancelTurn` 或 `sessions` 缺少 `handlers.readMessages` | `FIELD_MISSING` |
 | hook 的 `event` 不在支持列表，或 `mode` 与事件不匹配 | `FIELD_INVALID` |
 | 同一类型内 `id` 重复 | `DUPLICATE_ID` |

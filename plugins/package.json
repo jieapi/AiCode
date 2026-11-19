@@ -8,11 +8,12 @@
   "scripts": {
     "build:plugins": "node build.mjs",
     "build:sdk": "tsc -p sdk/tsconfig.json",
+    "typecheck:sdk": "tsc --noEmit -p sdk/test/tsconfig.json",
     "watch:plugins": "node build.mjs --watch",
     "typecheck:plugins": "tsc --noEmit -p tsconfig.json",
     "check:host-methods": "node ../scripts/check-host-methods.mjs",
     "check:page-bridge": "node ../scripts/check-page-bridge.mjs",
-    "check:manifests": "node ../scripts/check-plugin-manifests.mjs"
+    "check:manifests": "node schema/check-manifests.cjs"
   },
   "devDependencies": {
     "@types/node": "^18.19.130",

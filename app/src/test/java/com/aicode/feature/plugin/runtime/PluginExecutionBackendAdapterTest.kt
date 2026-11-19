@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -71,11 +72,11 @@ class PluginExecutionBackendAdapterTest {
             filesystem = true,
             command = true,
             terminal = terminal,
-            fileWatch = true,
+            fileWatch = false,
             portForward = false,
             isRemoteEnvironment = true,
             workspaceDiscovery = "register",
-            projectConfigLocation = "app_private_dir"
+            projectConfigLocation = "appPrivateDir"
         ),
         handlers = PluginExecutionBackendHandlersRef(
             fs = "backend.fs",
@@ -101,6 +102,16 @@ class PluginExecutionBackendAdapterTest {
         assertEquals(WorkspaceDiscoveryMode.REGISTER, withoutTerminal.capabilities.workspaceDiscovery)
         assertEquals(ProjectConfigLocation.APP_PRIVATE_DIR, withoutTerminal.capabilities.projectConfigLocation)
         assertTrue(withoutTerminal.capabilities.isRemoteEnvironment)
+        assertFalse(withoutTerminal.capabilities.fileWatch)
+        assertFalse(withoutTerminal.capabilities.portForward)
+        val workspaceConfig = PluginExecutionBackendAdapter(
+            definition().copy(capabilities = PluginExecutionBackendCapabilitiesRef(
+                isRemoteEnvironment = false,
+                projectConfigLocation = "workspaceDir"
+            )),
+            runtimeManager
+        )
+        assertEquals(ProjectConfigLocation.WORKSPACE_DIR, workspaceConfig.capabilities.projectConfigLocation)
         assertNull(withoutTerminal.terminalSessionProvider)
         assertEquals("plugin:demo.cloud:sandbox:1.2.0", withoutTerminal.environmentCacheKey())
         assertTrue(withoutTerminal.projectConfigKey("/ws/app").startsWith("app-"))
@@ -124,6 +135,11 @@ class PluginExecutionBackendAdapterTest {
             put("output", "hello world\n")
             put("exitCode", 0)
         })
+        every {
+            runtimeManager.openBinaryStream(any(), any(), any(), any<String>(), any(), any(), any(), any())
+        } returns flowOf(
+            BinaryStreamChunk(payload = "a\nb\n".toByteArray())
+        )
         every {
             runtimeManager.openBinaryStream("demo.cloud", "1.2.0", runtime, "backend.execStream", any(), any(), "backend.invoke")
         } returns flowOf(
@@ -196,6 +212,10 @@ class PluginExecutionBackendAdapterTest {
                     put("lastModified", 1234L)
                     put("permissions", "rw-")
                 })
+                "permissions" -> BinaryResult(meta = buildJsonObject { put("permissions", "rw-") })
+                "listFilesRecursive" -> BinaryResult(meta = buildJsonObject {
+                    put("paths", buildJsonArray { add(JsonPrimitive("a.txt")) })
+                })
                 "fingerprint" -> BinaryResult(meta = buildJsonObject { put("unsupported", true) })
                 "readBytes" -> BinaryResult(payload = byteArrayOf(1, 2, 3, 4))
                 "listFiles" -> BinaryResult(meta = buildJsonObject {
@@ -210,13 +230,28 @@ class PluginExecutionBackendAdapterTest {
                     })
                 })
                 "resolvePath" -> BinaryResult(meta = buildJsonObject { put("path", "/canonical$path") })
-                else -> BinaryResult()
+                else -> error("Unexpected filesystem operation: $op")
             }
         }
 
+        every {
+            runtimeManager.openBinaryStream(any(), any(), any(), any<String>(), any(), any(), any(), any())
+        } answers {
+            val args = arg<JsonObject>(4)
+            val payload = if (args["op"]?.jsonPrimitive?.content == "readStream") {
+                "a\nb\n".toByteArray()
+            } else {
+                byteArrayOf(1, 2, 3, 4)
+            }
+            flowOf(BinaryStreamChunk(payload = payload))
+        }
+        coEvery {
+            runtimeManager.uploadBinary(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns BinaryResult(meta = buildJsonObject { put("ok", true); put("bytesWritten", 3) })
+
         val fs = PluginExecutionBackendAdapter(definition(), runtimeManager).fileAccess
         assertEquals("a\nb\n", fs.readFile("/a.txt"))
-        assertEquals(listOf("a", "b", ""), fs.readLines("/a.txt").toList())
+        assertEquals(listOf("a", "b"), fs.readLines("/a.txt").toList())
         assertTrue(fs.exists("/a.txt"))
         assertTrue(fs.isFile("/a.txt"))
         assertFalse(fs.isDirectory("/a.txt"))
@@ -225,15 +260,31 @@ class PluginExecutionBackendAdapterTest {
         assertEquals("rw-", fs.permissions("/a.txt"))
         assertEquals("/canonical/link", fs.resolvePath("/link", true))
         assertEquals("a.txt", fs.listFiles("/").single().name)
+        assertEquals(listOf("a.txt"), fs.listFilesRecursive("/", 2))
+        fs.writeFile("/out.txt", "hello")
+        fs.writeBytes("/out.txt", byteArrayOf(1))
+        fs.mkdirs("/dir")
+        fs.delete("/out.txt")
+        fs.deleteRecursively("/dir")
+        fs.rename("/a.txt", "/b.txt")
+        fs.copy("/a.txt", "/b.txt", overwrite = false)
+        fs.move("/a.txt", "/b.txt", overwrite = true)
         assertTrue(fs.fingerprint("/a.txt")!!.startsWith("sha256:"))
         assertEquals(listOf<Byte>(1, 2, 3, 4), fs.readBytes("/a.txt", 4).toList())
         assertEquals(3L, fs.writeStream("/out.txt", ByteArrayInputStream(byteArrayOf(7, 8, 9))))
         assertEquals("/", fs.parentPath("/a.txt"))
         assertEquals("/ws/a.txt", fs.toDisplayPath("/ws/a.txt"))
+        coVerify {
+            runtimeManager.invokeBinary("demo.cloud", "1.2.0", runtime, "backend.fs",
+                match { it["op"] == JsonPrimitive("permissions") }, any(), "backend.invoke", any())
+            runtimeManager.invokeBinary("demo.cloud", "1.2.0", runtime, "backend.fs",
+                match { it["op"] == JsonPrimitive("copy") && it["newPath"] == JsonPrimitive("/b.txt") &&
+                    it["overwrite"] == JsonPrimitive(false) }, any(), "backend.invoke", any())
+        }
 
         val localCopy = fs.copyToLocal("/a.txt")
         try {
-            assertEquals(listOf<Byte>(1, 2, 3, 4), localCopy.readBytes().toList())
+            assertEquals("a\nb\n", localCopy.readText())
         } finally {
             localCopy.delete()
         }
@@ -288,6 +339,13 @@ class PluginExecutionBackendAdapterTest {
                     put("id", "ws-1")
                     put("name", "Project 1")
                     put("path", "/cloud/p1")
+                    put("canCreateChild", true)
+                    put("canDelete", true)
+                    put("capabilities", buildJsonObject {
+                        put("createChild", false)
+                        put("delete", false)
+                        put("git", true)
+                    })
                 })
             })
         })
@@ -306,6 +364,8 @@ class PluginExecutionBackendAdapterTest {
         assertEquals(1, listed.size)
         assertEquals(WorkspaceType.REMOTE, listed.single().type)
         assertEquals("demo.cloud:sandbox", listed.single().backendId)
+        assertFalse(listed.single().canCreateChild)
+        assertFalse(listed.single().canDelete)
 
         val localBackend = BuiltinLocalProotBackend(
             localEngine = mockk<LinuxContainerEngine>(relaxed = true),

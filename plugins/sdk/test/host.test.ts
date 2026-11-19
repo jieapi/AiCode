@@ -3,7 +3,9 @@ import type {
   AicodeErrorCode,
   AppInfo,
   ExecutionBackendExecParams,
+  ExecutionBackendFsOp,
   ExecutionBackendFsParams,
+  JsonValue,
   ExecutionBackendTerminalParams,
   ExternalSessionMessage,
   ExternalSessionPage,
@@ -77,6 +79,12 @@ export type WorkspacesSetParams = Assert<
 export type WorkspacesUpsertResult = Assert<
   Equal<HostResultOf<'host.workspaces.upsert'>, OkResult>
 >;
+export type BackendFsOperations = Assert<Equal<ExecutionBackendFsOp,
+  'readFile' | 'writeFile' | 'readBytes' | 'writeBytes' | 'listFiles' | 'listFilesRecursive' |
+  'stat' | 'fingerprint' | 'permissions' | 'resolvePath' | 'delete' | 'deleteRecursively' |
+  'rename' | 'copy' | 'move' | 'mkdirs'
+>>;
+export type SessionCursor = Assert<Equal<ExternalSessionPage['nextCursor'], JsonValue | undefined>>;
 export type BackendErrorCodes = Assert<
   'BACKEND_NOT_FOUND' | 'WORKSPACE_INVALID' extends AicodeErrorCode ? true : false
 >;
@@ -164,9 +172,18 @@ async function implicitInference(): Promise<void> {
   const upsertOk: OkResult = await workspaces.upsert('ssh-main', [item]);
   const removeOk: OkResult = await workspaces.remove('ssh-main', ['ws-1']);
   const setOk: OkResult = await workspaces.set('ssh-main', [item]);
-  const fsParams: ExecutionBackendFsParams = { op: 'read', path: '/srv/project/a.txt' };
-  const execParams: ExecutionBackendExecParams = { command: 'ls -la', cwd: '/srv/project' };
-  const termParams: ExecutionBackendTerminalParams = { op: 'open', cols: 80, rows: 24 };
+  const fsParams: ExecutionBackendFsParams[] = [
+    { backendId: 'ssh-main', op: 'readFile', path: '/srv/project/a.txt' },
+    { backendId: 'ssh-main', op: 'readBytes', path: '/srv/project/a.txt', maxBytes: 4096 },
+    { backendId: 'ssh-main', op: 'writeFile', path: '/srv/project/a.txt', overwrite: true, encoding: 'UTF-8' },
+    { backendId: 'ssh-main', op: 'writeBytes', path: '/srv/project/a.txt', overwrite: false },
+    { backendId: 'ssh-main', op: 'listFilesRecursive', path: '/srv/project', maxDepth: 3 },
+    { backendId: 'ssh-main', op: 'resolvePath', path: '/srv/project/link', followFinalLink: false },
+    { backendId: 'ssh-main', op: 'rename', path: '/srv/project/a.txt', newPath: '/srv/project/b.txt' },
+    { backendId: 'ssh-main', op: 'move', path: '/srv/project/a.txt', newPath: '/srv/project/b.txt', overwrite: true }
+  ];
+  const execParams: ExecutionBackendExecParams = { backendId: 'ssh-main', command: 'ls -la', projectPath: '/srv/project', timeoutMs: 1000, unbounded: true };
+  const termParams: ExecutionBackendTerminalParams = { backendId: 'ssh-main', op: 'send', tabId: 'tab-1', input: 'pwd', appendNewline: true };
 
   // 工作流契约类型与 emitWorkflowEvent
   const wfCaps: WorkflowCapabilities = {
@@ -244,7 +261,7 @@ async function implicitInference(): Promise<void> {
     status: 'idle',
     messages: [extMsg],
     hasMore: false,
-    nextCursor: null
+    nextCursor: { page: 2, boundary: ['m1', 123, null, true] }
   };
   const sessUpsertOk: OkResult = await sessions.upsert('src-1', [extSession]);
   const sessRemoveOk: OkResult = await sessions.remove('src-1', ['ext-1']);
@@ -307,6 +324,31 @@ function rejectedCalls(): void {
     executionMode: 'remote'
   };
   void invalidExternalSession;
+
+  // @ts-expect-error 工作区 ID 参数不能使用 ids
+  void hostCall('host.workspaces.remove', { backendId: 'remote', ids: ['ws-1'] });
+  // @ts-expect-error visible 必填
+  void sessions.setThinking('source', 'session');
+  // @ts-expect-error visible 必须为 boolean
+  void hostCall('host.sessions.setThinking', { sourceId: 'source', sessionId: 'session', visible: 'true' });
+  // @ts-expect-error 工作区能力必须嵌套
+  const flatWorkspace: WorkspaceItem = { id: 'ws-1', name: 'Demo', path: '/srv/demo', capabilities: {}, git: true };
+  const defaultCapabilities: WorkspaceItem = { id: 'ws-1', name: 'Demo', path: '/srv/demo' };
+  // @ts-expect-error 旧 FS 操作名不受支持
+  const oldFs: ExecutionBackendFsParams = { backendId: 'remote', op: 'read', path: '/a' };
+  // @ts-expect-error rename 必须使用 newPath
+  const badRename: ExecutionBackendFsParams = { backendId: 'remote', op: 'rename', path: '/a', to: '/b' };
+  // @ts-expect-error followFinalLink 必须为 boolean
+  const badResolve: ExecutionBackendFsParams = { backendId: 'remote', op: 'resolvePath', path: '/a', followFinalLink: 'false' };
+  // @ts-expect-error 旧 cwd 不属于后端 exec 参数
+  const oldExec: ExecutionBackendExecParams = { backendId: 'remote', command: 'pwd', timeoutMs: 1000, cwd: '/srv' };
+  // @ts-expect-error timeoutMs 必填
+  const noTimeout: ExecutionBackendExecParams = { backendId: 'remote', command: 'pwd' };
+  // @ts-expect-error createdAt 为正式时间字段
+  const oldMessage: ExternalSessionMessage = { id: 'm1', role: 'assistant', blocks: [], timestamp: 1 };
+  // @ts-expect-error 游标必须为 JSON 数据
+  const badCursor: ExternalSessionPage = { messages: [], nextCursor: () => 'cursor' };
+  void [flatWorkspace, defaultCapabilities, oldFs, badRename, badResolve, oldExec, noTimeout, oldMessage, badCursor];
 }
 
 void implicitInference;

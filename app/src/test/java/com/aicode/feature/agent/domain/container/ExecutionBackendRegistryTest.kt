@@ -117,6 +117,25 @@ class ExecutionBackendRegistryTest {
     }
 
     @Test
+    fun builtinInstancesSeparateProfilesWithoutChangingTheBackendDefinition() {
+        val registry = newRegistry()
+        val id = ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+        registry.updateBuiltinInstance(id, "server-a:user")
+        registry.setActiveBackend(id)
+        val first = registry.currentBackend()
+
+        registry.updateBuiltinInstance(id, "server-b:user")
+        val second = registry.currentBackend()
+
+        assertEquals(id, first.id)
+        assertEquals(id, second.id)
+        assertFalse(first.instanceId == second.instanceId)
+        assertFalse(first.projectConfigKey("/workspace") == second.projectConfigKey("/workspace"))
+        assertEquals("$id:server-a:user", first.instanceId)
+        assertEquals("$id:server-b:user", second.instanceId)
+    }
+
+    @Test
     fun register_doesNotAllowOverwritingBuiltins() {
         val registry = newRegistry()
         val spoofed = fakePluginBackend(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)

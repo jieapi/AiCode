@@ -9,6 +9,10 @@ import com.aicode.feature.agent.domain.session.SessionUseCase
 import com.aicode.feature.agent.domain.workflow.AgentEvent
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
 import com.aicode.feature.agent.domain.workflow.AgentWorkflowRegistry
+import com.aicode.feature.agent.domain.workflow.SessionRef
+import com.aicode.feature.agent.domain.workflow.TurnPersistence
+import com.aicode.feature.agent.domain.workflow.WorkflowTurnContext
+import com.aicode.feature.agent.domain.workflow.WorkflowNotFoundException
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.LocalizedText
 import com.aicode.feature.plugin.domain.PluginContent
@@ -45,6 +49,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PluginAgentWorkflowAdapterTest {
@@ -80,6 +85,25 @@ class PluginAgentWorkflowAdapterTest {
         ),
         runtime = runtime,
         pluginVersion = "1.0.0"
+    )
+
+    private fun pluginContext(workflowState: String? = """{"threadId":"thr-1"}""") = AgentContext(
+        currentFile = null,
+        selectedCode = null,
+        projectRoot = "/ws/demo",
+        language = null,
+        history = listOf(AgentMessage.UserMessage(id = "u0", content = "prev")),
+        sessionId = "sess-1",
+        mode = AgentMode.BUILD,
+        turn = WorkflowTurnContext(
+            runId = "run-1",
+            sessionRef = SessionRef.External("test", "sess-1"),
+            providerId = "prov-1",
+            model = "gpt-5",
+            workflowState = workflowState,
+            permissionMode = AgentMode.BUILD,
+            persistence = TurnPersistence.Noop
+        )
     )
 
     private fun sampleSession(workflowState: String? = """{"threadId":"thr-1"}""") = ChatSessionEntity(
@@ -205,19 +229,10 @@ class PluginAgentWorkflowAdapterTest {
             )
         }
 
-        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus, sessionUseCase)
+        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus)
         val events = adapter.executeEvents(
             userRequest = "check readme",
-            context = AgentContext(
-                currentFile = null,
-                selectedCode = null,
-                projectRoot = "/ws/demo",
-                language = null,
-                history = listOf(AgentMessage.UserMessage(id = "u0", content = "prev")),
-                sessionId = "sess-1",
-                mode = AgentMode.BUILD,
-                reasoningEffort = "high"
-            ),
+            context = pluginContext(),
             tools = emptyList()
         ).toList()
 
@@ -249,14 +264,15 @@ class PluginAgentWorkflowAdapterTest {
         assertEquals(AgentEvent.CompactionFinished, events[12])
         assertEquals(AgentEvent.CompactionFailed("no model"), events[13])
         assertEquals(AgentEvent.ModeChanged(AgentMode.PLAN, "planning"), events[14])
-        val assistantMsg = events[15] as AgentEvent.AssistantText
+        assertTrue(events[15] is AgentEvent.WorkflowStateChanged)
+        val assistantMsg = events[16] as AgentEvent.AssistantText
         assertEquals("Hello World", assistantMsg.content)
         assertEquals("m-1", assistantMsg.messageId)
         assertEquals(1, assistantMsg.toolCalls.size)
-        assertEquals(AgentEvent.Completed, events[16])
+        assertTrue(events[17] is AgentEvent.WorkflowStateChanged)
+        assertEquals(AgentEvent.Completed, events[18])
 
-        coVerify(exactly = 1) { sessionUseCase.updateWorkflowState("sess-1", """{"threadId":"thr-2"}""") }
-        coVerify(exactly = 1) { sessionUseCase.updateWorkflowState("sess-1", """{"threadId":"thr-3"}""") }
+        assertTrue(events.any { it is AgentEvent.WorkflowStateChanged })
     }
 
     @Test
@@ -305,7 +321,7 @@ class PluginAgentWorkflowAdapterTest {
             buildJsonObject { put("accepted", true) }
         }
 
-        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus, sessionUseCase)
+        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus)
         val events = adapter.executeEvents(
             userRequest = "hi",
             context = AgentContext(null, null, "/ws/demo", null, sessionId = "sess-1"),
@@ -315,11 +331,12 @@ class PluginAgentWorkflowAdapterTest {
         assertEquals(
             listOf(
                 AgentEvent.AssistantDelta("via-ndjson", "msg-nd"),
+                AgentEvent.WorkflowStateChanged("cursor-99"),
                 AgentEvent.Completed
             ),
             events
         )
-        coVerify { sessionUseCase.updateWorkflowState("sess-1", "cursor-99") }
+        assertEquals(AgentEvent.Completed, events.last())
     }
 
     @Test
@@ -351,13 +368,13 @@ class PluginAgentWorkflowAdapterTest {
             buildJsonObject { put("ok", true) }
         }
 
-        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus, sessionUseCase)
+        val adapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus)
         val received = mutableListOf<AgentEvent>()
         val job = launch {
             try {
                 adapter.executeEvents(
                     userRequest = "long run",
-                    context = AgentContext(null, null, "/ws/demo", null, sessionId = "sess-1"),
+                    context = pluginContext(null),
                     tools = emptyList()
                 ).collect { received += it }
             } catch (_: CancellationException) {
@@ -392,25 +409,24 @@ class PluginAgentWorkflowAdapterTest {
             runtimeManager.invokeWorkflow("demo.codex", "1.0.0", runtime, "wf.title", any(), any())
         } returns buildJsonObject { put("title", "  Generated Title  ") }
 
-        val fullAdapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus, sessionUseCase)
+        val fullAdapter = PluginAgentWorkflowAdapter(definition(), runtimeManager, eventBus)
         val compactEvents = mutableListOf<AgentEvent>()
-        assertTrue(fullAdapter.compactSession("sess-1") { compactEvents += it })
+        assertTrue(fullAdapter.compactSession(pluginContext()) { compactEvents += it })
         assertEquals(
-            listOf(AgentEvent.CompactionStarted(0), AgentEvent.CompactionFinished),
+            listOf(AgentEvent.CompactionStarted(0), AgentEvent.WorkflowStateChanged("compacted-state"), AgentEvent.CompactionFinished),
             compactEvents
         )
-        coVerify { sessionUseCase.updateWorkflowState("sess-1", "compacted-state") }
-        assertEquals("Generated Title", fullAdapter.generateTitle("sess-1", "hi"))
+        assertEquals(AgentEvent.CompactionFinished, compactEvents.last())
+        assertEquals("Generated Title", fullAdapter.generateTitle(pluginContext(), "hi"))
         assertNull(fullAdapter.generateCommitMessage("diff"))
 
         val minimalAdapter = PluginAgentWorkflowAdapter(
             definition(compact = null, generateTitle = null),
             runtimeManager,
-            eventBus,
-            sessionUseCase
+            eventBus
         )
-        assertFalse(minimalAdapter.compactSession("sess-1"))
-        assertNull(minimalAdapter.generateTitle("sess-1", "hi"))
+        assertFalse(minimalAdapter.compactSession(pluginContext()))
+        assertNull(minimalAdapter.generateTitle(pluginContext(), "hi"))
 
         var active = true
         val plugin = mockk<InstalledPlugin> {
@@ -428,7 +444,6 @@ class PluginAgentWorkflowAdapterTest {
             pluginManager = pluginManager,
             runtimeManager = runtimeManager,
             workflowEventBus = eventBus,
-            sessionUseCase = sessionUseCase,
             workflowRegistry = registry
         )
         registrar.syncAll()
@@ -438,6 +453,6 @@ class PluginAgentWorkflowAdapterTest {
         active = false
         registrar.syncAll()
         assertEquals(1, registry.workflows.value.size)
-        assertEquals(defaultWorkflow, registry.resolve("demo.codex:codex"))
+        assertThrows(WorkflowNotFoundException::class.java) { registry.resolve("demo.codex:codex") }
     }
 }

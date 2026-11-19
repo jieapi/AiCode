@@ -117,6 +117,7 @@ class AgentRunManagerExternalTurnTest {
             toolPermissionManager = toolPermissionManager,
             askUserQuestionManager = askUserQuestionManager,
             containerEngine = containerEngine,
+            executionBackendRegistry = mockk(relaxed = true),
             sessionUseCase = sessionUseCase,
             messagePersistenceUseCase = messagePersistenceUseCase,
             checkpointManager = checkpointManager,

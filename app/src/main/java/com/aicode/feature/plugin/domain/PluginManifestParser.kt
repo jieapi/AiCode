@@ -56,7 +56,7 @@ object PluginManifestParser {
     private val UI_ENTRY_KEYS = setOf("id", "slot", "title", "page", "handler", "confirm", "icon")
     private val WORKSPACE_TOOL_KEYS = setOf("id", "title", "description", "icon", "category", "pageFile")
     private val PROVIDER_KEYS = setOf("id", "name", "description", "format", "baseUrl")
-    private val EXECUTION_BACKEND_KEYS = setOf("id", "name", "description", "capabilities", "handlers")
+    private val EXECUTION_BACKEND_KEYS = setOf("id", "title", "description", "capabilities", "handlers")
     private val EXECUTION_BACKEND_CAPABILITY_KEYS = setOf(
         "filesystem", "command", "terminal", "fileWatch", "portForward",
         "isRemoteEnvironment", "workspaceDiscovery", "projectConfigLocation"
@@ -93,6 +93,7 @@ object PluginManifestParser {
     private const val MAX_REPOSITORY = 300
     private const val MAX_LOCALES = 16
     private const val MAX_IDS_PER_TYPE = 64
+    private const val MAX_EXECUTION_BACKENDS = 32
     private const val MAX_WORKFLOWS = 32
     private const val MAX_SESSIONS = 32
     private const val MAX_PROVIDER_URL = 2048
@@ -586,7 +587,7 @@ object PluginManifestParser {
         private fun readExecutionBackends(raw: JsonElement?, path: String): List<PluginExecutionBackendRef>? {
             if (raw == null) return emptyList()
             val array = raw as? JsonArray ?: return null.also { invalid(path) }
-            if (array.size > MAX_IDS_PER_TYPE) return null.also { invalid(path) }
+            if (array.size > MAX_EXECUTION_BACKENDS) return null.also { invalid(path) }
             val result = mutableListOf<PluginExecutionBackendRef>()
             var ok = true
             array.forEachIndexed { index, element ->
@@ -602,7 +603,7 @@ object PluginManifestParser {
                     ok = false
                 }
                 val id = item["id"]?.stringOrNull()?.takeIf { LOCAL_ID.matches(it) }
-                val name = item["name"]?.let { parseLocalized(it, "$itemPath.name", MAX_NAME) }
+                val title = item["title"]?.let { parseLocalized(it, "$itemPath.title", MAX_NAME) }
                 val descRaw = item["description"]
                 val description = if (descRaw != null) {
                     parseLocalized(descRaw, "$itemPath.description", MAX_DESCRIPTION)
@@ -610,7 +611,7 @@ object PluginManifestParser {
                     LocalizedText.single("")
                 }
                 if (id == null) { invalid("$itemPath.id"); ok = false }
-                if (name == null) { invalid("$itemPath.name"); ok = false }
+                if (title == null) { invalid("$itemPath.title"); ok = false }
                 if (description == null) { ok = false }
 
                 val caps = readExecutionBackendCapabilities(item["capabilities"], "$itemPath.capabilities")
@@ -633,14 +634,14 @@ object PluginManifestParser {
                     }
                 }
 
-                if (ok && id != null && name != null && caps != null && handlers != null) {
+                if (ok && id != null && title != null && caps != null && handlers != null) {
                     if (result.any { it.id == id }) {
                         err(PluginErrorCode.DUPLICATE_ID, "$path.$id")
                         ok = false
                     } else {
                         result += PluginExecutionBackendRef(
                             id = id,
-                            name = name,
+                            name = title,
                             description = description ?: LocalizedText.single(""),
                             capabilities = caps,
                             handlers = handlers
@@ -655,10 +656,7 @@ object PluginManifestParser {
             raw: JsonElement?,
             path: String
         ): PluginExecutionBackendCapabilitiesRef? {
-            if (raw == null) {
-                missing(path)
-                return null
-            }
+            if (raw == null) return PluginExecutionBackendCapabilitiesRef()
             val obj = raw as? JsonObject ?: return null.also { invalid(path) }
             var ok = true
             obj.keys.filter { it !in EXECUTION_BACKEND_CAPABILITY_KEYS }.forEach {
@@ -666,8 +664,8 @@ object PluginManifestParser {
                 ok = false
             }
 
-            fun readBool(key: String): Boolean {
-                val elem = obj[key] ?: return false
+            fun readBool(key: String, default: Boolean = false): Boolean {
+                val elem = obj[key] ?: return default
                 val value = (elem as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
                 if (value == null) {
                     invalid("$path.$key")
@@ -677,28 +675,36 @@ object PluginManifestParser {
                 return value
             }
 
-            val filesystem = readBool("filesystem")
-            val command = readBool("command")
+            val filesystem = readBool("filesystem", true)
+            val command = readBool("command", true)
             val terminal = readBool("terminal")
             val fileWatch = readBool("fileWatch")
             val portForward = readBool("portForward")
-            val isRemoteEnvironment = readBool("isRemoteEnvironment")
+            val isRemoteEnvironment = readBool("isRemoteEnvironment", true)
 
             val discovery = when (val elem = obj["workspaceDiscovery"]) {
                 null -> PluginBackendDiscoveryModes.SCAN
-                else -> elem.stringOrNull()?.trim()?.lowercase()
+                else -> elem.stringOrNull()
                     ?.takeIf { it in PluginBackendDiscoveryModes.ALL }
                     ?: run { invalid("$path.workspaceDiscovery"); ok = false; PluginBackendDiscoveryModes.SCAN }
             }
             val configLocation = when (val elem = obj["projectConfigLocation"]) {
-                null -> PluginBackendConfigLocations.WORKSPACE_DIR
-                else -> elem.stringOrNull()?.trim()?.lowercase()
+                null -> PluginBackendConfigLocations.APP_PRIVATE_DIR
+                else -> elem.stringOrNull()
                     ?.takeIf { it in PluginBackendConfigLocations.ALL }
-                    ?: run { invalid("$path.projectConfigLocation"); ok = false; PluginBackendConfigLocations.WORKSPACE_DIR }
+                    ?: run { invalid("$path.projectConfigLocation"); ok = false; PluginBackendConfigLocations.APP_PRIVATE_DIR }
             }
 
-            if (!filesystem && !command) {
-                invalid(path)
+            if (isRemoteEnvironment && configLocation == PluginBackendConfigLocations.WORKSPACE_DIR) {
+                invalid("$path.projectConfigLocation")
+                ok = false
+            }
+            if (fileWatch) {
+                invalid("$path.fileWatch")
+                ok = false
+            }
+            if (portForward) {
+                invalid("$path.portForward")
                 ok = false
             }
 
@@ -750,15 +756,6 @@ object PluginManifestParser {
             val workspaceCreate = readHandler("workspaceCreate")
             val workspaceDelete = readHandler("workspaceDelete")
             val workspaceSelect = readHandler("workspaceSelect")
-
-            if (listOfNotNull(
-                    fs, exec, execStream, execHealth, terminal,
-                    workspaceList, workspaceCreate, workspaceDelete, workspaceSelect
-                ).isEmpty()
-            ) {
-                invalid(path)
-                ok = false
-            }
 
             return if (ok) {
                 PluginExecutionBackendHandlersRef(

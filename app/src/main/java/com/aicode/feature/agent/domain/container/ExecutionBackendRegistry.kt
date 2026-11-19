@@ -190,6 +190,23 @@ class ExecutionBackendRegistry @Inject constructor(
         }
     }
 
+    fun updateBuiltinInstance(backendId: String, identity: String) = synchronized(lock) {
+        val base = when (backendId) {
+            BUILTIN_LOCAL_PROOT_ID -> localProotBackend
+            BUILTIN_REMOTE_SSH_ID -> remoteSshBackend
+            else -> return@synchronized
+        }
+        val instanceId = "$backendId:$identity"
+        if (registered[backendId]?.instanceId == instanceId) return@synchronized
+        registered[backendId] = object : ExecutionBackend by base {
+            override val instanceId: String = instanceId
+            override fun environmentCacheKey(): String = instanceId
+            override fun projectConfigKey(workspacePath: String): String =
+                hashProjectKey(workspacePath, "$instanceId\u0000$workspacePath")
+        }
+        publishLocked()
+    }
+
     /** 根据 ID 查找已注册后端。 */
     fun find(id: String): ExecutionBackend? = synchronized(lock) { registered[id] }
 

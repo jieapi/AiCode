@@ -2,6 +2,7 @@ package com.aicode.feature.plugin.runtime
 
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.terminal.domain.DelegatingTerminalSessionProvider
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
@@ -13,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -114,13 +117,15 @@ class PluginTerminalRunner @Inject constructor(
 
     private class Run(
         val pluginId: String,
+        val provider: TerminalSessionProvider,
         val tabId: String,
         val title: String,
         val command: String
     ) {
         val buffer = StringBuilder()
         var totalChars: Long = 0
-        var cancelled = false
+        @Volatile var cancelled = false
+        val input = Mutex()
         var collector: Job? = null
 
         /** 只在收集协程内调用，块与块之间保留不完整的 UTF-8 序列。 */
@@ -157,14 +162,12 @@ class PluginTerminalRunner @Inject constructor(
         if (command.length > PluginHostPaths.MAX_COMMAND_CHARS) {
             throw PluginTerminalException("PARAM_INVALID", "command too long")
         }
-        val tabId = withContext(Dispatchers.Main) {
-            provider.startPluginCommand(command, title, pluginId)
-        }
-        val run = Run(pluginId, tabId, title ?: tabId, command)
+        val tabId = provider.startPluginCommand(command, title, pluginId)
+        val run = Run(pluginId, provider, tabId, title ?: tabId, command)
         runs[tabId] = run
         run.collector = scope.launch {
             try {
-                provider.tabOutput(tabId)?.collect { bytes -> run.append(bytes) }
+                run.provider.tabOutput(run.tabId)?.collect { bytes -> run.append(bytes) }
             } finally {
                 run.flush()
             }
@@ -175,7 +178,7 @@ class PluginTerminalRunner @Inject constructor(
     /** 从 [offset] 读取新增输出；输出缓冲超出上限时 [PluginTerminalPoll.truncated] 为 true。 */
     suspend fun poll(pluginId: String, tabId: String, offset: Long): PluginTerminalPoll {
         val run = owned(pluginId, tabId)
-        val status = withContext(Dispatchers.Main) { provider.tabStatus(tabId) }
+        val status = withContext(Dispatchers.IO) { run.provider.tabStatus(run.tabId) }
         val from = offset.coerceAtLeast(0)
         var dropped = 0L
         var output = ""
@@ -204,35 +207,39 @@ class PluginTerminalRunner @Inject constructor(
     suspend fun stop(pluginId: String, tabId: String): Boolean {
         val run = owned(pluginId, tabId)
         run.cancelled = true
-        withContext(Dispatchers.Main) { provider.writeBytesToTab(tabId, 0x03) }
+        run.input.withLock {
+            withContext(Dispatchers.IO) { run.provider.writeBytesToTab(run.tabId, 0x03) }
+        }
         val stopped = withTimeoutOrNull(STOP_TIMEOUT_MS) {
             var running = true
             while (running) {
-                val status = withContext(Dispatchers.Main) { provider.tabStatus(tabId) }
+                val status = withContext(Dispatchers.IO) { run.provider.tabStatus(run.tabId) }
                 running = status?.running == true
                 if (running) delay(100)
             }
             true
         } ?: false
         if (!stopped) {
-            withContext(Dispatchers.Main) { provider.closeTab(tabId) }
+            closeBoundTab(run)
         }
         return true
     }
 
     /** 向自己的标签发送输入；[appendNewline] 为 true 时由终端补回车。 */
     suspend fun write(pluginId: String, tabId: String, text: String, appendNewline: Boolean = true): Boolean {
-        owned(pluginId, tabId)
+        val run = owned(pluginId, tabId)
         if (text.isEmpty()) throw PluginTerminalException("PARAM_INVALID", "empty input")
         if (text.length > MAX_INPUT_CHARS) throw PluginTerminalException("PARAM_INVALID", "input too long")
-        return withContext(Dispatchers.Main) { provider.sendInput(tabId, text, appendNewline) }
+        return run.input.withLock {
+            withContext(Dispatchers.IO) { run.provider.sendInput(run.tabId, text, appendNewline) }
+        }
     }
 
     /** 列出当前插件自己创建的标签及其运行状态。 */
     suspend fun list(pluginId: String): JsonElement {
         val mine = runs.values.filter { it.pluginId == pluginId }.sortedBy { it.tabId }
-        val statuses = withContext(Dispatchers.Main) {
-            mine.associate { it.tabId to provider.tabStatus(it.tabId) }
+        val statuses = withContext(Dispatchers.IO) {
+            mine.associate { it.tabId to it.provider.tabStatus(it.tabId) }
         }
         val entries = mine.map { run ->
             val status = statuses[run.tabId]
@@ -256,7 +263,8 @@ class PluginTerminalRunner @Inject constructor(
         val run = owned(pluginId, tabId)
         runs.remove(tabId)
         run.collector?.cancel()
-        return withContext(Dispatchers.Main) { provider.closeTab(tabId) }
+        closeBoundTab(run)
+        return true
     }
 
     /** 插件停用或卸载时关闭它创建的全部标签。 */
@@ -268,9 +276,18 @@ class PluginTerminalRunner @Inject constructor(
                 val run = runs.remove(tabId) ?: return@forEach
                 run.collector?.cancel()
                 scope.launch {
-                    withContext(Dispatchers.Main) { provider.closeTab(tabId) }
+                    closeBoundTab(run)
                 }
             }
+    }
+
+    private suspend fun closeBoundTab(run: Run): Boolean = run.input.withLock {
+        val boundProvider = run.provider
+        if (boundProvider is DelegatingTerminalSessionProvider) {
+            boundProvider.closeTabAsync(run.tabId)
+        } else {
+            withContext(Dispatchers.IO) { boundProvider.closeTab(run.tabId) }
+        }
     }
 
     private fun owned(pluginId: String, tabId: String): Run {

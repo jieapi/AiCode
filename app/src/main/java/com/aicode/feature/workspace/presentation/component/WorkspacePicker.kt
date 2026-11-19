@@ -186,7 +186,7 @@ private fun WorkspaceSelectionHost(
             pendingWorkspaceSelect = ws
         } else {
             onSwitchConfirmed()
-            viewModel.selectWorkspace(ws.name)
+            viewModel.selectWorkspace(ws.ref)
             onDismiss()
         }
     }
@@ -243,7 +243,7 @@ private fun WorkspaceSelectionHost(
                     if (created != null) select(created)
                 }
             },
-            onDelete = { viewModel.deleteWorkspace(it.name) },
+            onDelete = { viewModel.deleteWorkspace(it.ref) },
             onStopCurrentSessions = onSwitchConfirmed,
             deleteExternalWorkspaceSessions = deleteExternalWorkspaceSessions,
             onDismiss = onDismiss
@@ -296,7 +296,7 @@ private fun WorkspaceSelectionHost(
             confirmButton = {
                 TextButton(onClick = {
                     onSwitchConfirmed()
-                    viewModel.selectWorkspace(ws.name)
+                    viewModel.selectWorkspace(ws.ref)
                     pendingWorkspaceSelect = null
                     onDismiss()
                 }) { Text(stringResource(R.string.workspace_confirm)) }
@@ -376,11 +376,11 @@ private fun WorkspaceSheet(
                     modifier = Modifier.heightIn(max = 320.dp),
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs)
                 ) {
-                    items(workspaces, key = { it.name }) { ws ->
+                    items(workspaces, key = { it.ref.stableKey }) { ws ->
                         WorkspaceRow(
                             workspace = ws,
-                            selected = ws.name == current?.name,
-                            canDelete = workspaces.size > 1,
+                            selected = ws.ref == current?.ref,
+                            canDelete = ws.canDelete && workspaces.size > 1,
                             onClick = { onSelect(ws) },
                             onDelete = { pendingDelete = ws }
                         )
@@ -421,7 +421,7 @@ private fun WorkspaceSheet(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (ws.name == current?.name) onStopCurrentSessions()
+                    if (ws.ref == current?.ref) onStopCurrentSessions()
                     onDelete(ws)
                     pendingDelete = null
                 }) { Text(stringResource(R.string.common_delete), color = MaterialTheme.colorScheme.error) }

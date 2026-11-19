@@ -222,7 +222,7 @@ class AIAgentViewModel @Inject constructor(
         ChatMessagesState(null, emptyList(), loaded = false)
     )
     private var externalRawMessages: List<ExternalSessionMessage> = emptyList()
-    private var externalNextCursor: String? = null
+    private var externalNextCursor: kotlinx.serialization.json.JsonElement? = null
     private var externalLoadJob: Job? = null
     private var localSessionIdBeforeExternal: String? = null
 
@@ -2021,7 +2021,7 @@ class AIAgentViewModel @Inject constructor(
 
     private suspend fun loadExternalMessagesPage(
         session: ExternalSessionSummary,
-        cursor: String?,
+        cursor: kotlinx.serialization.json.JsonElement?,
         appendOlder: Boolean
     ) {
         try {

@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@jieapi/plugin-sdk": "^0.1.0",
+    "@jieapi/plugin-sdk": "^0.2.0",
     "@types/node": "^18.19.130",
     "@vitejs/plugin-vue": "^5.2.4",
     "esbuild": "^0.28.2",

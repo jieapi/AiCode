@@ -760,79 +760,61 @@ export interface WorkspaceItem {
 }
 
 export type ExecutionBackendFsOp =
-  | 'read'
-  | 'write'
-  | 'list'
-  | 'delete'
+  | 'readFile'
+  | 'writeFile'
+  | 'readBytes'
+  | 'writeBytes'
+  | 'listFiles'
+  | 'listFilesRecursive'
   | 'stat'
-  | 'mkdir'
+  | 'fingerprint'
+  | 'permissions'
+  | 'resolvePath'
+  | 'delete'
+  | 'deleteRecursively'
   | 'rename'
   | 'copy'
-  | 'append'
-  | 'readBinary'
-  | 'writeBinary'
-  | 'watch'
-  | 'unwatch'
-  | (string & {});
+  | 'move'
+  | 'mkdirs';
 
-export interface ExecutionBackendFsParams {
-  backendId?: string;
-  workspaceId?: string;
-  op: ExecutionBackendFsOp;
-  path?: string;
-  from?: string;
-  to?: string;
-  content?: string;
-  base64?: string;
-  overwrite?: boolean;
-  recursive?: boolean;
-  subscriptionId?: string;
-  offset?: number;
-  limit?: number;
-  [key: string]: JsonValue | undefined;
-}
+/** 写入内容通过 IPC 二进制 payload 传输，不放在参数对象中。 */
+export type ExecutionBackendFsParams = { backendId: string; path: string } & (
+  | { op: 'readFile' | 'listFiles' | 'stat' | 'fingerprint' | 'permissions' | 'delete' | 'deleteRecursively' | 'mkdirs' }
+  | { op: 'readBytes'; maxBytes?: number }
+  | { op: 'writeFile'; overwrite: boolean; encoding: string }
+  | { op: 'writeBytes'; overwrite: boolean }
+  | { op: 'listFilesRecursive'; maxDepth: number }
+  | { op: 'resolvePath'; followFinalLink: boolean }
+  | { op: 'rename'; newPath: string }
+  | { op: 'copy' | 'move'; newPath: string; overwrite: boolean }
+);
 
 export interface ExecutionBackendExecParams {
-  backendId?: string;
-  workspaceId?: string;
+  backendId: string;
   command: string;
-  cwd?: string;
-  env?: Record<string, string>;
-  timeout?: number;
-  timeoutMs?: number;
-  stdin?: string;
-  [key: string]: JsonValue | undefined;
+  projectPath?: string;
+  timeoutMs: number;
+  unbounded?: boolean;
 }
 
 export type ExecutionBackendTerminalOp =
-  | 'open'
-  | 'create'
-  | 'run'
+  | 'start'
+  | 'status'
+  | 'send'
   | 'write'
-  | 'resize'
-  | 'poll'
-  | 'stop'
-  | 'close'
+  | 'writeBytes'
+  | 'read'
+  | 'stream'
   | 'list'
-  | (string & {});
+  | 'close';
 
-export interface ExecutionBackendTerminalParams {
-  backendId?: string;
-  workspaceId?: string;
-  op: ExecutionBackendTerminalOp;
-  tabId?: string;
-  terminalId?: string;
-  command?: string;
-  title?: string;
-  cwd?: string;
-  text?: string;
-  data?: string;
-  appendNewline?: boolean;
-  cols?: number;
-  rows?: number;
-  offset?: number;
-  [key: string]: JsonValue | undefined;
-}
+export type ExecutionBackendTerminalParams = { backendId: string } & (
+  | { op: 'start'; command: string; title?: string; notify?: boolean; sourceSessionId?: string; ownerPluginId?: string }
+  | { op: 'status' | 'writeBytes' | 'read' | 'stream' | 'close'; tabId: string }
+  | { op: 'send'; tabId: string; input: string; appendNewline: boolean }
+  | { op: 'write'; tabId: string; text: string }
+  | { op: 'list' }
+);
 
 export interface ExecutionBackendWorkspaceParams {
   backendId?: string;
@@ -953,7 +935,7 @@ export interface ExternalSessionPage {
   status?: string;
   messages: ExternalSessionMessage[];
   hasMore?: boolean;
-  nextCursor?: unknown;
+  nextCursor?: JsonValue;
 }
 
 export type WorkflowStreamEvent =

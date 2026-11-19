@@ -38,6 +38,9 @@ interface ExecutionBackend {
     /** 后端全局唯一 ID，内置如 `"builtin:local-proot"`，插件后端格式为 `"<pluginId>:<localId>"`。 */
     val id: String
 
+    val instanceId: String
+        get() = id
+
     /** 面向 UI 与提示词的展示名称。 */
     val displayName: String
 

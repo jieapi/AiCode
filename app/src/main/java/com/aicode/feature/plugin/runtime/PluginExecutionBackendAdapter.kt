@@ -14,6 +14,7 @@ import com.aicode.feature.agent.domain.container.hashProjectKey
 import com.aicode.feature.plugin.domain.PluginBackendConfigLocations
 import com.aicode.feature.plugin.domain.PluginBackendDiscoveryModes
 import com.aicode.feature.plugin.domain.PluginExecutionBackendDefinition
+import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.terminal.domain.TabFinishedEvent
 import com.aicode.feature.terminal.domain.TabInfo
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
@@ -82,7 +83,7 @@ class PluginExecutionBackendAdapter(
             PluginBackendDiscoveryModes.HYBRID -> WorkspaceDiscoveryMode.HYBRID
             else -> WorkspaceDiscoveryMode.SCAN
         },
-        projectConfigLocation = when (definition.capabilities.projectConfigLocation.lowercase(Locale.ROOT)) {
+        projectConfigLocation = when (definition.capabilities.projectConfigLocation) {
             PluginBackendConfigLocations.APP_PRIVATE_DIR -> ProjectConfigLocation.APP_PRIVATE_DIR
             else -> ProjectConfigLocation.WORKSPACE_DIR
         }
@@ -168,11 +169,23 @@ class PluginExecutionBackendAdapter(
     private fun parseWorkspace(obj: JsonObject, defaultType: WorkspaceType): Workspace? {
         val name = obj["name"]?.stringVal()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         val path = obj["path"]?.stringVal()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val wsId = obj["id"]?.stringVal()?.trim()?.takeIf { it.isNotEmpty() } ?: path
+        val wsId = obj["id"]?.stringVal()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw PluginHostException("WORKSPACE_INVALID", "workspace.id is required")
         val available = obj["available"]?.booleanVal() ?: true
         val group = obj["group"]?.stringVal()?.trim().orEmpty()
-        val canCreateChild = obj["canCreateChild"]?.booleanVal() ?: true
-        val canDelete = obj["canDelete"]?.booleanVal() ?: true
+        val caps = when (val raw = obj["capabilities"]) {
+            null -> JsonObject(emptyMap())
+            is JsonObject -> raw
+            else -> throw PluginHostException("PARAM_INVALID", "workspace capabilities must be an object")
+        }
+        fun capability(key: String): Boolean {
+            val raw = caps[key] ?: return true
+            return raw.booleanVal()
+                ?: throw PluginHostException("PARAM_INVALID", "workspace capabilities.$key must be a boolean")
+        }
+        val canCreateChild = capability("createChild")
+        val canDelete = capability("delete")
+        capability("git")
         return Workspace(
             name = name,
             path = path,
@@ -503,9 +516,34 @@ class PluginExecutionBackendAdapter(
             return ""
         }
 
-        override fun readLines(path: String): Sequence<String> {
-            val text = readFile(path)
-            return text.lineSequence()
+        override fun readLines(path: String): Sequence<String> = sequence {
+            val temporary = File.createTempFile("aicode_plugin_lines_", ".tmp").apply { deleteOnExit() }
+            try {
+                runBlocking(Dispatchers.IO) {
+                    runtimeManager.openBinaryStream(
+                        pluginId = definition.pluginId,
+                        version = definition.pluginVersion,
+                        runtime = definition.runtime,
+                        handler = fsHandler(),
+                        args = buildJsonObject {
+                            put("backendId", id)
+                            put("op", "readStream")
+                            put("path", path)
+                        },
+                        method = BACKEND_INVOKE_METHOD
+                    ).collect { chunk ->
+                        if (chunk.payload.isNotEmpty()) temporary.appendBytes(chunk.payload)
+                    }
+                }
+                temporary.bufferedReader().use { reader ->
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        yield(line)
+                    }
+                }
+            } finally {
+                runCatching { temporary.delete() }
+            }
         }
 
         override fun writeFile(
@@ -572,7 +610,7 @@ class PluginExecutionBackendAdapter(
         }
 
         override fun permissions(path: String): String =
-            statMeta(path)["permissions"]?.stringVal() ?: "---"
+            unwrapMeta(fsCall(op = "permissions", path = path))["permissions"]?.stringVal() ?: "---"
 
         override fun listFiles(path: String): List<FileEntry> {
             val meta = unwrapMeta(fsCall(op = "listFiles", path = path))
@@ -664,20 +702,59 @@ class PluginExecutionBackendAdapter(
         }
 
         override fun writeStream(path: String, input: InputStream, overwrite: Boolean): Long {
-            val bytes = input.readBytes()
-            writeBytes(path, bytes, overwrite)
-            return bytes.size.toLong()
+            val bytes = input.asFlow()
+            val result = runBlocking(Dispatchers.IO) {
+                runtimeManager.uploadBinary(
+                    pluginId = definition.pluginId,
+                    version = definition.pluginVersion,
+                    runtime = definition.runtime,
+                    handler = fsHandler(),
+                    args = buildJsonObject {
+                        put("backendId", id)
+                        put("op", "writeStream")
+                        put("path", path)
+                        put("overwrite", overwrite)
+                    },
+                    payload = bytes,
+                    method = BACKEND_INVOKE_METHOD
+                )
+            }
+            val meta = unwrapMeta(result)
+            return meta["bytesWritten"]?.longVal() ?: result.payload.size.toLong()
         }
 
         override fun copyToLocal(path: String): File {
-            val bytes = readBytes(path)
-            val tmp = File.createTempFile("aicode_plugin_", ".copy").apply { deleteOnExit() }
-            return try {
-                tmp.writeBytes(bytes)
-                tmp
+            val temporary = File.createTempFile("aicode_plugin_", ".copy").apply { deleteOnExit() }
+            try {
+                runBlocking(Dispatchers.IO) {
+                    runtimeManager.openBinaryStream(
+                        pluginId = definition.pluginId,
+                        version = definition.pluginVersion,
+                        runtime = definition.runtime,
+                        handler = fsHandler(),
+                        args = buildJsonObject {
+                            put("backendId", id)
+                            put("op", "readStream")
+                            put("path", path)
+                        },
+                        method = BACKEND_INVOKE_METHOD
+                    ).collect { chunk ->
+                        if (chunk.payload.isNotEmpty()) temporary.appendBytes(chunk.payload)
+                    }
+                }
             } catch (e: Exception) {
-                runCatching { tmp.delete() }
+                runCatching { temporary.delete() }
                 throw e
+            }
+            return temporary
+        }
+
+        private fun InputStream.asFlow(): Flow<ByteArray> = flow {
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = read(buffer)
+                if (count < 0) break
+                if (count > 0) emit(buffer.copyOf(count))
             }
         }
 

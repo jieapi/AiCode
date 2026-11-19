@@ -1,6 +1,5 @@
 package com.aicode.feature.plugin.runtime
 
-import com.aicode.feature.agent.domain.session.SessionUseCase
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
 import com.aicode.feature.agent.domain.workflow.AgentWorkflowRegistry
 import com.aicode.feature.agent.domain.workflow.WorkflowCapabilities
@@ -19,7 +18,6 @@ class PluginWorkflowRegistrar @Inject constructor(
     private val pluginManager: PluginManager,
     private val runtimeManager: PluginRuntimeManager,
     private val workflowEventBus: PluginWorkflowEventBus,
-    private val sessionUseCase: SessionUseCase,
     private val workflowRegistry: AgentWorkflowRegistry
 ) {
 
@@ -48,8 +46,7 @@ class PluginWorkflowRegistrar @Inject constructor(
             val adapter: AgentWorkflow = PluginAgentWorkflowAdapter(
                 definition = def,
                 runtimeManager = runtimeManager,
-                workflowEventBus = workflowEventBus,
-                sessionUseCase = sessionUseCase
+                workflowEventBus = workflowEventBus
             )
             descriptor to adapter
         }

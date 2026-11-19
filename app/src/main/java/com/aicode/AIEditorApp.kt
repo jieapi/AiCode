@@ -215,6 +215,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var executionModeRepository: com.aicode.feature.settings.data.repository.ExecutionModeRepository
 
+    @Inject
+    lateinit var containerSettingsRepository: com.aicode.feature.settings.data.repository.ContainerSettingsRepository
+
     /** 应用语言偏好仓库：持久化用户选择的语言，供 attachBaseContext 同步读取。 */
     @Inject
     lateinit var languageSettings: LanguageSettingsRepository
@@ -387,6 +390,14 @@ class AIEditorApp : Application(), Configuration.Provider {
                 externalSessionService.syncDeclaredSources()
             }
         }
+        appScope.launch {
+            containerSettingsRepository.activeProfileIdFlow.collect { profileId ->
+                executionBackendRegistry.updateBuiltinInstance(
+                    ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID,
+                    profileId
+                )
+            }
+        }
         // 仅内置远程 SSH 后端需要监督 SSH 连接并在连接后同步内置文档与 assets；
         // 其余后端（本地 PRoot 或插件执行后端）停掉 SSH 监督并断开残留连接。
         appScope.launch {
@@ -394,8 +405,10 @@ class AIEditorApp : Application(), Configuration.Provider {
                 activeRemoteConnectionResolver.activeConfigFlow,
                 executionBackendRegistry.activeBackend.map {
                     it.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
-                }.distinctUntilChanged()
-            ) { config, isRemoteSsh -> config to isRemoteSsh }.collect { (config, isRemoteSsh) ->
+                }.distinctUntilChanged(),
+                containerSettingsRepository.activeProfileIdFlow
+            ) { config, isRemoteSsh, profileId -> Triple(config, isRemoteSsh, profileId) }
+                .collectLatest { (config, isRemoteSsh, profileId) ->
                 if (!isRemoteSsh) {
                     cancelDocsSync()
                     remoteSshConnection.stopSupervisor()
@@ -403,25 +416,40 @@ class AIEditorApp : Application(), Configuration.Provider {
                         remoteTerminalSessionManager.closeTab(it)
                     }
                     withContext(Dispatchers.IO) { remoteSshConnection.disconnect() }
-                    return@collect
+                    return@collectLatest
                 }
+                val remoteIdentity = config?.let {
+                    listOf(profileId, it.host, it.port.toString(), it.username).joinToString("\u0000")
+                } ?: "unconfigured:$profileId"
+                val targetInstanceId = "${ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID}:$remoteIdentity"
+                if (config != remoteSshConnection.config ||
+                    executionBackendRegistry.currentBackend().instanceId != targetInstanceId
+                ) {
+                    cancelDocsSync()
+                    remoteSshConnection.stopSupervisor()
+                    withContext(Dispatchers.IO) { remoteSshConnection.disconnect() }
+                }
+                executionBackendRegistry.updateBuiltinInstance(
+                    ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID,
+                    remoteIdentity
+                )
                 if (config == null) {
                     cancelDocsSync()
-                    return@collect
+                    return@collectLatest
                 }
-                if (config != remoteSshConnection.config || !remoteSshConnection.isConnected()) cancelDocsSync()
+                if (!remoteSshConnection.isConnected()) cancelDocsSync()
                 remoteSshConnection.startSupervisor(appScope) {
                     if (executionBackendRegistry.currentBackend().id != ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID) {
                         return@startSupervisor
                     }
-                    runCatching { workspaceRepository.initialize() }
-                        .onFailure { FileLogger.w(TAG, "SSH 重连后重新加载工作区失败", it) }
+                    runCatching { workspaceRepository.refreshAvailability() }
+                        .onFailure { FileLogger.w(TAG, "SSH 重连后刷新工作区失败", it) }
                     syncDocsToRemote()
                     releaseBuiltinAssetsToRemote()
                 }
                 if (config == remoteSshConnection.config && remoteSshConnection.isConnected()) {
                     syncDocsToRemote()
-                    return@collect
+                    return@collectLatest
                 }
                 runCatching {
                     remoteSshConnection.connect(config)
