@@ -8,9 +8,23 @@ import com.aicode.feature.plugin.data.PluginPackageReader
 import com.aicode.feature.plugin.domain.PluginRuntime
 import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
 import com.aicode.feature.settings.data.repository.ExecutionMode
+import java.io.File
+import java.io.IOException
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** 依赖准备结果；UI 按类型展示状态与原因。 */
 sealed interface PluginDependencyResult {
@@ -25,10 +39,10 @@ sealed interface PluginDependencyResult {
 }
 
 /**
- * 在本地容器、插件自己的安装目录里准备依赖。
+ * 在本地容器准备插件运行时依赖。
  *
- * 命令完全由宿主构造，不接受插件传入；插件目录在容器内可见（`.aicode` 绑定），
- * 所以 npm 的 `node_modules` 与 pip 的 `.venv` 都留在插件包目录里。
+ * 依赖清单由宿主读取和裁剪，npm 只看到生产 dependencies；容器只执行固定的安装命令，
+ * 不负责解析插件包里的 devDependencies，也不接收插件提供的 shell 片段。
  */
 @Singleton
 class PluginDependencyPreparer @Inject constructor(
@@ -53,29 +67,79 @@ class PluginDependencyPreparer @Inject constructor(
             )
         }
 
+        return when (dependency.tool) {
+            "npm" -> prepareNpm(runtime)
+            "pip" -> preparePip(runtime, dependency.file)
+            else -> PluginDependencyResult.Failed("不支持的依赖工具: ${dependency.tool}")
+        }
+    }
+
+    private suspend fun prepareNpm(runtime: PluginRuntime): PluginDependencyResult {
+        val dependencyFile = runtime.dependencies?.file
+            ?: return PluginDependencyResult.Failed("缺少 npm 依赖清单")
+        val tempDir = File(runtime.installDir.parentFile, ".deps-${UUID.randomUUID()}")
+        return try {
+            val packageJson = productionPackageJson(dependencyFile)
+            if (!tempDir.mkdirs()) throw IOException("无法创建 npm 依赖暂存目录")
+            File(tempDir, "package.json").writeText(packageJson)
+            val tempPath = shellQuote(installer.containerPathFor(tempDir))
+            val command = "cd $tempPath && npm install --no-save --package-lock=false --no-audit --no-fund"
+            FileLogger.i(TAG, "[${runtime.pluginId}] 准备依赖: npm ${dependencyFile.name}")
+            val result = runCommand(command)
+            if (result.exitCode != 0) {
+                FileLogger.w(TAG, "[${runtime.pluginId}] 依赖安装失败 exitCode=${result.exitCode}")
+                return PluginDependencyResult.Failed(tail(result.output))
+            }
+            val installed = File(tempDir, "node_modules")
+            if (!installed.isDirectory) return PluginDependencyResult.Failed("npm 安装完成但未生成 node_modules")
+            replaceNodeModules(runtime.installDir, installed)
+            PluginDependencyResult.Ready(sha256(dependencyFile))
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "[${runtime.pluginId}] 依赖准备失败", e)
+            PluginDependencyResult.Failed("依赖安装失败: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            deleteTree(tempDir)
+        }
+    }
+
+    private suspend fun preparePip(runtime: PluginRuntime, dependencyFile: File): PluginDependencyResult {
         val dir = shellQuote(installer.containerPathFor(runtime.installDir))
-        val file = shellQuote(installer.containerPathFor(dependency.file))
-        val command = when (dependency.tool) {
-            "npm" -> "cd $dir && if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi"
-            "pip" -> "cd $dir && python3 -m venv .venv && .venv/bin/pip install --disable-pip-version-check -r $file"
-            else -> return PluginDependencyResult.Failed("不支持的依赖工具: ${dependency.tool}")
-        }
-
-        FileLogger.i(TAG, "[${runtime.pluginId}] 准备依赖: ${dependency.tool} ${dependency.file.name}")
-        val result = runCatching {
-            engine.runCommandSyncWithExit(command, projectPath = null, timeoutMs = PREPARE_TIMEOUT_MS)
-        }.getOrElse { error ->
-            return PluginDependencyResult.Failed("依赖安装失败: ${error.message ?: error.javaClass.simpleName}")
-        }
-
+        val file = shellQuote(installer.containerPathFor(dependencyFile))
+        val command = "cd $dir && python3 -m venv .venv && .venv/bin/pip install --disable-pip-version-check -r $file"
+        FileLogger.i(TAG, "[${runtime.pluginId}] 准备依赖: pip ${dependencyFile.name}")
+        val result = runCommand(command)
         if (result.exitCode != 0) {
             FileLogger.w(TAG, "[${runtime.pluginId}] 依赖安装失败 exitCode=${result.exitCode}")
             return PluginDependencyResult.Failed(tail(result.output))
         }
-        val hash = sha256(dependency.file)
-        FileLogger.i(TAG, "[${runtime.pluginId}] 依赖准备完成")
-        return PluginDependencyResult.Ready(hash)
+        return PluginDependencyResult.Ready(sha256(dependencyFile))
     }
+
+    private fun productionPackageJson(file: File): String {
+        val source = Json.parseToJsonElement(file.readText()).jsonObject
+        val production = buildJsonObject {
+            source["name"]?.let { put("name", it) }
+            source["version"]?.let { put("version", it) }
+            put("private", true)
+            put("dependencies", source["dependencies"] ?: JsonObject(emptyMap()))
+        }
+        return Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), production)
+    }
+
+    private suspend fun runCommand(command: String): CommandResult {
+        return try {
+            val result = engine.runCommandSyncWithExit(
+                command,
+                projectPath = null,
+                timeoutMs = PREPARE_TIMEOUT_MS
+            )
+            CommandResult(result.exitCode ?: 1, result.output)
+        } catch (error: Exception) {
+            CommandResult(1, error.message ?: error.javaClass.simpleName)
+        }
+    }
+
+    private data class CommandResult(val exitCode: Int, val output: String)
 
     private suspend fun checkCommands(vararg commands: String): List<String> {
         val missing = mutableListOf<String>()
@@ -92,8 +156,29 @@ class PluginDependencyPreparer @Inject constructor(
         return missing
     }
 
-    private fun sha256(file: java.io.File): String =
-        PluginPackageReader.sha256Hex(file.readBytes())
+    private fun replaceNodeModules(pluginDir: File, source: File) {
+        val target = File(pluginDir, "node_modules")
+        deleteTree(target)
+        source.copyRecursively(target, overwrite = true)
+    }
+
+    private fun deleteTree(file: File) {
+        if (!Files.exists(file.toPath(), NOFOLLOW_LINKS)) return
+        Files.walkFileTree(file.toPath(), object : SimpleFileVisitor<Path>() {
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                Files.deleteIfExists(file)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                if (exc != null) throw exc
+                Files.deleteIfExists(dir)
+                return FileVisitResult.CONTINUE
+            }
+        })
+    }
+
+    private fun sha256(file: File): String = PluginPackageReader.sha256Hex(file.readBytes())
 
     private fun tail(output: String): String {
         val lines = output.trim().lines().takeLast(MAX_TAIL_LINES).joinToString("\n")

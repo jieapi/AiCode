@@ -7,8 +7,11 @@ import com.aicode.feature.agent.domain.skill.Skill
 import com.aicode.feature.agent.domain.subagent.AgentDefinition
 import com.aicode.feature.plugin.data.ExtractedPackage
 import com.aicode.feature.plugin.data.PackageReadResult
+import com.aicode.feature.plugin.data.PluginDependencyStore
 import com.aicode.feature.plugin.data.PluginInstallTransaction
 import com.aicode.feature.plugin.data.PluginPackageReader
+import com.aicode.feature.plugin.data.SOURCE_DEVELOPMENT
+import com.aicode.feature.plugin.data.SOURCE_PACKAGE
 import com.aicode.feature.plugin.data.PluginRecord
 import com.aicode.feature.plugin.data.PluginRegistryStore
 import com.aicode.feature.plugin.runtime.PluginDependencyPreparer
@@ -123,6 +126,7 @@ class PluginManager internal constructor(
     private val dataRoot = File(rootDir, "data")
     private val store = PluginRegistryStore(registryFile)
     private val reader = PluginPackageReader()
+    private val dependencyStore = PluginDependencyStore(rootDir)
 
     private val mutex = Mutex()
     private val loadLock = Any()
@@ -164,9 +168,11 @@ class PluginManager internal constructor(
             migrateLegacyRoot()
             // 进程重启后不可能存在进行中的安装，暂存目录里的都是残留
             cleanup { deleteTree(stagingDir) }
+            dependencyStore.cleanupStaging()
             val registry = loadRecords()
             val recovered = !registry.failed && recoverInterruptedInstall(registry.records)
             publish(registry.records.map { loadInstalled(it) })
+            migrateLegacyDependencies()
             // registry 或事务恢复失败时保留目录，避免把待恢复的备份当成孤儿。
             if (recovered) sweepOrphans(registry.records.map { it.id }.toSet())
             loaded = true
@@ -181,6 +187,7 @@ class PluginManager internal constructor(
             val loaded = loadRecords()
             val recovered = !loaded.failed && recoverInterruptedInstall(loaded.records)
             publish(loaded.records.map { loadInstalled(it) })
+            migrateLegacyDependencies()
             if (recovered) sweepOrphans(loaded.records.map { it.id }.toSet())
         }
     }
@@ -249,27 +256,67 @@ class PluginManager internal constructor(
             ?: return@withContext PluginDependencyResult.Failed("插件没有运行时，无需依赖")
         val preparer = dependencyPreparer
             ?: return@withContext PluginDependencyResult.Failed("依赖准备不可用")
+        val fingerprint = dependencyStore.fingerprint(runtime)
         val result = preparer.prepare(runtime)
+        val cacheSaved = if (result is PluginDependencyResult.Ready) {
+            runCatching {
+                val output = dependencyStore.dependencyOutput(runtime.installDir)
+                if (!dependencyStore.isReady(id, fingerprint) && output.exists()) {
+                    dependencyStore.capture(runtime, fingerprint)
+                }
+                if (dependencyStore.isReady(id, fingerprint)) {
+                    dependencyStore.link(runtime.installDir, fingerprint, id)
+                }
+                dependencyStore.isReady(id, fingerprint)
+            }.getOrDefault(false)
+        } else false
+        val prepared = result
         val saved = mutateRecords { current ->
             val installed = current.firstOrNull { it.id == id } ?: return@mutateRecords null
             if (!sameInstallation(installed.record, plugin.record)) return@mutateRecords null
             current.map { installed ->
                 if (installed.id != id) installed else {
-                    val record = when (result) {
+                    val record = when (prepared) {
                         is PluginDependencyResult.Ready -> installed.record.copy(
                             dependenciesReady = true,
-                            dependenciesHash = result.hash
+                            dependenciesHash = prepared.hash,
+                            dependencyFingerprint = fingerprint.takeIf { cacheSaved }
                         )
-                        else -> installed.record.copy(dependenciesReady = false, dependenciesHash = null)
+                        else -> installed.record.copy(
+                            dependenciesReady = false,
+                            dependenciesHash = null,
+                            dependencyFingerprint = null
+                        )
                     }
                     installed.copy(record = record)
                 }
             }.also { next -> store.save(next.map { it.record }) }
         }
-        if (saved) result else PluginDependencyResult.Failed(
+        if (saved) prepared else PluginDependencyResult.Failed(
             "Plugin changed or dependency state could not be saved",
             code = "STATE_NOT_SAVED"
         )
+    }
+
+    private fun preserveExistingDependencies(
+        existing: InstalledPlugin?,
+        pending: StagedPackage
+    ): String? {
+        val oldRuntime = existing?.content?.runtime ?: return null
+        val newRuntime = pending.content.runtime ?: return null
+        val newFingerprint = runCatching { dependencyStore.fingerprint(newRuntime) }.getOrNull() ?: return null
+        val recorded = existing.record.dependencyFingerprint
+        if (recorded == newFingerprint && dependencyStore.isReady(existing.id, recorded)) return recorded
+        val oldOutput = dependencyStore.dependencyOutput(oldRuntime.installDir)
+        if (!oldOutput.exists() || java.nio.file.Files.isSymbolicLink(oldOutput.toPath())) return null
+        val oldFingerprint = runCatching { dependencyStore.fingerprint(oldRuntime) }.getOrNull() ?: return null
+        if (oldFingerprint != newFingerprint) return null
+        return runCatching {
+            if (!dependencyStore.isReady(existing.id, oldFingerprint)) {
+                dependencyStore.capture(oldRuntime, oldFingerprint)
+            }
+            oldFingerprint.takeIf { dependencyStore.isReady(existing.id, it) }
+        }.getOrNull()
     }
 
     private fun sameInstallation(current: PluginRecord, prepared: PluginRecord): Boolean =
@@ -423,6 +470,7 @@ class PluginManager internal constructor(
         val existing = _plugins.value.firstOrNull { it.id == manifest.id }
         if (existing == null) deleteTree(dataDirFor(manifest.id))
         val installRevision = UUID.randomUUID().toString()
+        val preservedDependency = preserveExistingDependencies(existing, pending)
         val record = PluginRecord(
             id = manifest.id,
             version = manifest.version.toString(),
@@ -436,6 +484,11 @@ class PluginManager internal constructor(
             indexUrl = origin.indexUrl,
             repository = origin.repository,
             official = origin.official,
+            dependenciesReady = preservedDependency != null,
+            dependenciesHash = preservedDependency,
+            dependencyFingerprint = preservedDependency,
+            sourceKind = SOURCE_PACKAGE,
+            devDirName = null,
             installRevision = installRevision
         )
 
@@ -452,6 +505,9 @@ class PluginManager internal constructor(
             }
             moveDirectory(pending.pkg.dir, target)
             movedNew = true
+            if (preservedDependency != null) {
+                dependencyStore.link(target, preservedDependency, manifest.id)
+            }
             installed = loadInstalled(record)
             store.save(others.map { it.record } + record)
         } catch (e: IOException) {
@@ -483,7 +539,8 @@ class PluginManager internal constructor(
             publish(next)
             val installedDeleted = cleanup { deleteTree(File(installedDir, id)) }
             val dataDeleted = cleanup { deleteTree(dataDirFor(id)) }
-            installedDeleted && dataDeleted
+            val dependenciesDeleted = cleanup { dependencyStore.deleteForPlugin(id) }
+            installedDeleted && dataDeleted && dependenciesDeleted
         }
     }
 
@@ -524,11 +581,104 @@ class PluginManager internal constructor(
         revisionCounter.incrementAndGet()
     }
 
+    /** 把已安装的同 ID 插件绑定到开发目录；代码修改后由 [reloadDevelopment] 直接重读该目录。 */
+    suspend fun bindDevelopment(id: String, dirName: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            ensureLoaded()
+            val current = _plugins.value.firstOrNull { it.id == id } ?: return@withLock false
+            val dir = developmentDir(dirName)
+            val manifest = readDevelopmentManifest(dir) ?: return@withLock false
+            if (manifest.id != id) return@withLock false
+            val updated = current.record.copy(
+                version = manifest.version.toString(),
+                sourceKind = SOURCE_DEVELOPMENT,
+                devDirName = dirName,
+                manifestSha256 = PluginPackageReader.sha256Hex(File(dir, PluginPackageReader.MANIFEST_FILE).readBytes()),
+                archiveSha256 = directoryFingerprint(dir),
+                installRevision = UUID.randomUUID().toString()
+            )
+            val loaded = loadDevelopment(updated, dir)
+            if (loaded.status != PluginStatus.OK) return@withLock false
+            val effectiveRecord = loaded.record
+            store.save(_plugins.value.filter { it.id != id }.map { it.record } + effectiveRecord)
+            publish(_plugins.value.filter { it.id != id } + loaded)
+            true
+        }
+    }
+
+    /** 开发目录保存后直接重读清单与贡献，不重新打包或触碰正式安装目录。 */
+    suspend fun reloadDevelopment(dirName: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            ensureLoaded()
+            val dir = developmentDir(dirName)
+            val manifest = readDevelopmentManifest(dir) ?: return@withLock false
+            val current = _plugins.value.firstOrNull {
+                it.record.sourceKind == SOURCE_DEVELOPMENT && it.record.devDirName == dirName
+            } ?: return@withLock false
+            val updated = current.record.copy(
+                version = manifest.version.toString(),
+                manifestSha256 = PluginPackageReader.sha256Hex(File(dir, PluginPackageReader.MANIFEST_FILE).readBytes()),
+                archiveSha256 = directoryFingerprint(dir),
+                dependenciesReady = current.record.dependenciesReady,
+                dependenciesHash = current.record.dependenciesHash,
+                dependencyFingerprint = current.record.dependencyFingerprint,
+                installRevision = UUID.randomUUID().toString()
+            )
+            val loaded = loadDevelopment(updated, dir)
+            if (loaded.status != PluginStatus.OK) return@withLock false
+            val effectiveRecord = loaded.record
+            store.save(_plugins.value.filter { it.id != current.id }.map { it.record } + effectiveRecord)
+            publish(_plugins.value.filter { it.id != current.id } + loaded)
+            true
+        }
+    }
+
+    private fun loadDevelopment(record: PluginRecord, dir: File): InstalledPlugin {
+        val manifest = readDevelopmentManifest(dir)
+            ?: return InstalledPlugin(record, PluginStatus.MISSING, null, PluginContent())
+        return when (val content = PluginContentLoader.load(dir, manifest, record.installRevision)) {
+            is ContentLoadResult.Failed -> InstalledPlugin(record, PluginStatus.CORRUPTED, manifest, PluginContent(), content.errors)
+            is ContentLoadResult.Ok -> InstalledPlugin(
+                refreshDependencyState(record, content.content),
+                PluginStatus.OK,
+                manifest,
+                content.content
+            )
+        }
+    }
+
+    private fun developmentDir(dirName: String): File {
+        val root = devDir.canonicalFile
+        val dir = File(root, dirName).canonicalFile
+        if (!dir.toPath().startsWith(root.toPath())) throw IOException("开发目录越界")
+        return dir
+    }
+
+    private fun readDevelopmentManifest(dir: File): PluginManifest? {
+        val file = File(dir, PluginPackageReader.MANIFEST_FILE)
+        if (!file.isFile || file.length() > PluginManifestParser.MAX_MANIFEST_BYTES) return null
+        return (PluginManifestParser.parse(file.readText(), hostApi) as? ManifestParseResult.Success)?.manifest
+    }
+
+    private fun directoryFingerprint(dir: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        dir.walkTopDown()
+            .filter { it.isFile && it.relativeTo(dir).invariantSeparatorsPath.split('/').none { part -> part in setOf(".git", "node_modules", ".venv", "__pycache__", ".idea") } }
+            .sortedBy { it.relativeTo(dir).invariantSeparatorsPath }
+            .forEach { file ->
+                digest.update(file.relativeTo(dir).invariantSeparatorsPath.toByteArray(Charsets.UTF_8))
+                digest.update(file.readBytes())
+            }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun loadInstalled(record: PluginRecord): InstalledPlugin {
         fun broken(status: PluginStatus, errors: List<PluginError> = emptyList()) =
             InstalledPlugin(record, status, manifest = null, content = PluginContent(), errors = errors)
 
-        val dir = File(installedDir, record.id)
+        val dir = if (record.sourceKind == SOURCE_DEVELOPMENT && record.devDirName != null) {
+            runCatching { developmentDir(record.devDirName) }.getOrNull() ?: File(devDir, "__invalid__")
+        } else File(installedDir, record.id)
         val manifestFile = File(dir, PluginPackageReader.MANIFEST_FILE)
         if (!manifestFile.isFile) return broken(PluginStatus.MISSING)
         if (manifestFile.length() > PluginManifestParser.MAX_MANIFEST_BYTES) return broken(PluginStatus.CORRUPTED)
@@ -543,7 +693,7 @@ class PluginManager internal constructor(
         if (manifest.id != record.id || manifest.version.toString() != record.version) {
             return broken(PluginStatus.CORRUPTED)
         }
-        return when (val content = PluginContentLoader.load(dir, manifest)) {
+        return when (val content = PluginContentLoader.load(dir, manifest, record.installRevision)) {
             is ContentLoadResult.Failed -> InstalledPlugin(record, PluginStatus.CORRUPTED, manifest, PluginContent(), content.errors)
             is ContentLoadResult.Ok -> InstalledPlugin(
                 refreshDependencyState(record, content.content),
@@ -556,12 +706,55 @@ class PluginManager internal constructor(
 
     /** 依赖文件被改动后，准备状态失效；这里只修正视图，不写盘。 */
     private fun refreshDependencyState(record: PluginRecord, content: PluginContent): PluginRecord {
-        val dependency = content.runtime?.dependencies ?: return record.copy(dependenciesReady = true)
+        val runtime = content.runtime ?: return record.copy(dependenciesReady = true)
+        val dependency = runtime.dependencies ?: return record.copy(dependenciesReady = true)
         val hash = runCatching {
             PluginPackageReader.sha256Hex(dependency.file.readBytes())
         }.getOrNull() ?: return record.copy(dependenciesReady = false)
-        return if (record.dependenciesHash == hash) record.copy(dependenciesReady = true)
-        else record.copy(dependenciesReady = false)
+        val fingerprint = runCatching { dependencyStore.fingerprint(runtime) }.getOrNull()
+        val ready = fingerprint != null && dependencyStore.isReady(record.id, fingerprint)
+        val legacyReady = record.dependenciesReady && record.dependencyFingerprint == null && record.dependenciesHash == hash
+        return if (ready || legacyReady) {
+            record.copy(dependenciesReady = true, dependencyFingerprint = fingerprint.takeIf { ready })
+        } else {
+            record.copy(dependenciesReady = false)
+        }
+    }
+
+    /** 将旧版安装目录内的依赖迁移到独立缓存；迁移失败时保留旧目录，等待下次启动重试。 */
+    private fun migrateLegacyDependencies() {
+        val current = _plugins.value
+        val updated = current.map { plugin ->
+            val runtime = plugin.content.runtime ?: return@map plugin
+            val output = dependencyStore.dependencyOutput(runtime.installDir)
+            if (!output.exists() || java.nio.file.Files.isSymbolicLink(output.toPath())) return@map plugin
+            val fingerprint = runCatching { dependencyStore.fingerprint(runtime) }.getOrNull()
+                ?: return@map plugin
+            val ready = runCatching {
+                if (!dependencyStore.isReady(plugin.id, fingerprint)) {
+                    dependencyStore.capture(runtime, fingerprint)
+                }
+                dependencyStore.link(runtime.installDir, fingerprint, plugin.id)
+                dependencyStore.isReady(plugin.id, fingerprint)
+            }.getOrDefault(false)
+            if (!ready) plugin else plugin.copy(
+                record = plugin.record.copy(
+                    dependenciesReady = true,
+                    dependenciesHash = runtime.dependencies?.let { PluginPackageReader.sha256Hex(it.file.readBytes()) },
+                    dependencyFingerprint = fingerprint
+                ),
+                content = loadInstalled(plugin.record.copy(
+                    dependenciesReady = true,
+                    dependenciesHash = runtime.dependencies?.let { PluginPackageReader.sha256Hex(it.file.readBytes()) },
+                    dependencyFingerprint = fingerprint
+                )).content
+            )
+        }
+        if (updated != current) {
+            runCatching { store.save(updated.map { it.record }) }
+                .onSuccess { publish(updated) }
+                .onFailure { FileLogger.w(TAG, "迁移插件依赖记录失败", it) }
+        }
     }
 
     /**

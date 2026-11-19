@@ -46,12 +46,15 @@ data class PluginPage(
     val pageFile: String,
     val icon: String,
     val installDir: File,
-    val pluginVersion: String = ""
+    val pluginVersion: String = "",
+    val installRevision: String? = null
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 
-    /** WebView/页面桥缓存键：插件版本变化后强制创建新实例，避免继续使用旧页面。 */
-    val cacheKey: String get() = if (pluginVersion.isBlank()) key else "$key@$pluginVersion"
+    /** WebView/页面桥缓存键：安装 revision 变化后强制创建新实例，避免开发重载继续使用旧页面。 */
+    val cacheKey: String get() = listOfNotNull(key, pluginVersion, installRevision)
+        .filter { it.isNotBlank() }
+        .joinToString("@")
 }
 
 /** 已解析的槽位入口：页面或运行时动作。 */
@@ -210,7 +213,8 @@ data class PluginOverlaySurface(
     val width: Int,
     val height: Int,
     val draggable: Boolean,
-    val snap: String = PluginOverlaySnap.NONE
+    val snap: String = PluginOverlaySnap.NONE,
+    val installRevision: String? = null
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
 }
@@ -267,7 +271,7 @@ object PluginContentLoader {
 
     private val WHITESPACE = Regex("\\s+")
 
-    fun load(dir: File, manifest: PluginManifest): ContentLoadResult {
+    fun load(dir: File, manifest: PluginManifest, installRevision: String? = null): ContentLoadResult {
         val errors = mutableListOf<PluginError>()
         val icon = manifest.icon?.let { loadIcon(dir, it, errors) }
         val skills = manifest.skills.mapNotNull { loadSkill(dir, manifest.id, it, errors) }
@@ -276,7 +280,7 @@ object PluginContentLoader {
             loadWorkspaceTool(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         val uiEntries = manifest.uiEntries.mapNotNull {
-            loadUiEntry(dir, manifest.id, manifest.version.toString(), it, errors)
+            loadUiEntry(dir, manifest.id, manifest.version.toString(), it, errors, installRevision)
         }
         val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
         if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty() || manifest.executionBackends.isNotEmpty() || manifest.workflows.isNotEmpty() || manifest.sessions.isNotEmpty()) && runtime == null) {
@@ -344,7 +348,7 @@ object PluginContentLoader {
             emptyList()
         }
         val configPage = manifest.configPage?.let {
-            loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
+            loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors, installRevision)
         }
         val shizuku = manifest.shizuku?.let {
             PluginShizukuDefinition(
@@ -366,7 +370,7 @@ object PluginContentLoader {
         }
         val overlay = manifest.overlay?.let { declaration ->
             val surfaces = declaration.surfaces.mapNotNull { surface ->
-                loadOverlaySurface(dir, manifest.id, manifest.version.toString(), surface, errors)
+                loadOverlaySurface(dir, manifest.id, manifest.version.toString(), surface, errors, installRevision)
             }
             if (surfaces.size == declaration.surfaces.size) {
                 PluginOverlayDefinition(
@@ -481,12 +485,16 @@ object PluginContentLoader {
             }
             PluginDependency(dep.tool, depFile)
         }
+        val command = ref.command ?: defaultCommand(ref.type, ref.entry)
+        val effectiveCommand = if (ref.type == PluginRuntimeTypes.PYTHON && File(dir, ".venv/bin/python").isFile) {
+            listOf(".venv/bin/python") + command.drop(1)
+        } else command
         return PluginRuntime(
             pluginId = pluginId,
             type = ref.type,
             installDir = dir,
             entryFile = file,
-            command = ref.command ?: defaultCommand(ref.type, ref.entry),
+            command = effectiveCommand,
             dependencies = dependency,
             resident = ref.resident
         )
@@ -581,7 +589,8 @@ object PluginContentLoader {
         pluginId: String,
         pluginVersion: String,
         ref: PluginOverlaySurfaceRef,
-        errors: MutableList<PluginError>
+        errors: MutableList<PluginError>,
+        installRevision: String? = null
     ): PluginOverlaySurface? {
         val file = File(dir, ref.page)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
@@ -599,6 +608,7 @@ object PluginContentLoader {
             pageFile = ref.page,
             installDir = dir,
             pluginVersion = pluginVersion,
+            installRevision = installRevision,
             width = ref.width,
             height = ref.height,
             draggable = ref.draggable,
@@ -612,9 +622,10 @@ object PluginContentLoader {
         pluginId: String,
         pluginVersion: String,
         ref: PluginUiEntryRef,
-        errors: MutableList<PluginError>
+        errors: MutableList<PluginError>,
+        installRevision: String? = null
     ): PluginUiEntry? {
-        val page = ref.page?.let { loadUiPage(dir, pluginId, pluginVersion, ref, errors) }
+        val page = ref.page?.let { loadUiPage(dir, pluginId, pluginVersion, ref, errors, installRevision) }
         if (ref.page != null && page == null) return null
         return PluginUiEntry(
             pluginId = pluginId,
@@ -634,7 +645,8 @@ object PluginContentLoader {
         pluginId: String,
         pluginVersion: String,
         ref: PluginUiEntryRef,
-        errors: MutableList<PluginError>
+        errors: MutableList<PluginError>,
+        installRevision: String? = null
     ): PluginPage? {
         val page = ref.page ?: return null
         val file = File(dir, page)
@@ -655,7 +667,8 @@ object PluginContentLoader {
             pageFile = page,
             icon = ref.icon,
             installDir = dir,
-            pluginVersion = pluginVersion
+            pluginVersion = pluginVersion,
+            installRevision = installRevision
         )
     }
 
@@ -665,7 +678,8 @@ object PluginContentLoader {
         pluginId: String,
         pluginVersion: String,
         relativePath: String,
-        errors: MutableList<PluginError>
+        errors: MutableList<PluginError>,
+        installRevision: String? = null
     ): PluginPage? {
         val file = File(dir, relativePath)
         val inside = file.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
@@ -685,7 +699,8 @@ object PluginContentLoader {
             pageFile = relativePath,
             icon = "settings",
             installDir = dir,
-            pluginVersion = pluginVersion
+            pluginVersion = pluginVersion,
+            installRevision = installRevision
         )
     }
 

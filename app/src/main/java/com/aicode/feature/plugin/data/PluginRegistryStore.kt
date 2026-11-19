@@ -33,8 +33,14 @@ data class PluginRecord(
     val official: Boolean = false,
     /** 依赖是否已在本容器准备完成。 */
     val dependenciesReady: Boolean = false,
-    /** 依赖输入文件的 sha256；变化后需要重新准备。 */
+    /** 依赖输入与运行环境的指纹；旧版本中这里保存的是依赖文件 sha256。 */
     val dependenciesHash: String? = null,
+    /** 依赖缓存的完整指纹，缺省时回退使用 [dependenciesHash]。 */
+    val dependencyFingerprint: String? = null,
+    /** 来源类型：package 或 development。 */
+    val sourceKind: String = SOURCE_PACKAGE,
+    /** development 来源在 ~/.aicode/plugin-dev 下的目录名。 */
+    val devDirName: String? = null,
     /** 每次安装独立生成，区分同版本、同清单甚至相同 ZIP 的重装。 */
     val installRevision: String? = null
 )
@@ -45,7 +51,9 @@ private data class RegistryFile(val schema: Int = SCHEMA, val plugins: List<Plug
 @Serializable
 internal data class PluginInstallTransaction(val id: String, val revision: String, val hadPrevious: Boolean)
 
-private const val SCHEMA = 5
+private const val SCHEMA = 6
+const val SOURCE_PACKAGE = "package"
+const val SOURCE_DEVELOPMENT = "development"
 
 /** 安装记录库：一个 JSON 文件，临时文件加原子重命名落盘，崩溃不会留下写了一半的内容。 */
 class PluginRegistryStore(private val file: File) {

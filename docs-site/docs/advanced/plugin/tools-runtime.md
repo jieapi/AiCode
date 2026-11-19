@@ -376,7 +376,7 @@ definePlugin({
 }
 ```
 
-在插件详情页点击「准备依赖」，宿主将在插件目录中执行 `npm ci`/`npm install`，或 `python3 -m venv` 加 `pip install`。准备结果会保存，刷新或重启后仍可识别；准备期间若插件已替换或卸载，旧任务的结果不会覆盖新安装的状态。容器缺少 node/npm 或 python3 时仅提示前往终端执行「环境安装」，不会自动安装系统包。
+在插件详情页点击「准备依赖」，宿主会按依赖输入文件和 lockfile 的指纹创建独立缓存，并在插件安装目录中建立引用；代码替换不会删除可复用的 `node_modules` 或 Python 虚拟环境。npm 只安装 `dependencies`，不会安装 `devDependencies`；使用 lockfile 时执行 `npm ci --omit=dev`，没有 lockfile 时执行 `npm install --omit=dev`。因此构建期 SDK、TypeScript 和 bundler 可以放在 `devDependencies`，不要求发布到运行时 npm registry；运行时实际需要的库必须放在 `dependencies`，并在构建时 external。Python runtime 会优先使用缓存虚拟环境中的解释器。准备结果会保存，刷新或重启后仍可识别；准备期间若插件已替换或卸载，旧任务的结果不会覆盖新安装的状态。容器缺少 node/npm 或 python3 时仅提示前往终端执行「环境安装」，不会自动安装系统包。
 
 ## 常驻与自启动
 
