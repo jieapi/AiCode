@@ -954,11 +954,6 @@ export interface AicodeBridge {
     list(): Promise<{ keys: string[] }>;
   };
 
-  sessionSource: {
-    setMessages(options: import('./host').HostParamsOf<'host.sessionSource.setMessages'>): Promise<{ ok: boolean }>;
-    pushEvent(options: import('./host').HostParamsOf<'host.sessionSource.pushEvent'>): Promise<{ ok: boolean }>;
-  };
-
   /** 仅本次用户决定；不会覆盖宿主权限策略或记忆授权。 */
   permissions: {
     request(options: import('./host').PermissionRequest): Promise<import('./host').PermissionDecision>;

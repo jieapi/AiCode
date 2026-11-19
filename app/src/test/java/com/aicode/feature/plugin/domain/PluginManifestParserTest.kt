@@ -1,6 +1,12 @@
 package com.aicode.feature.plugin.domain
 
 import com.aicode.feature.plugin.PluginFixtures
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -30,7 +36,7 @@ class PluginManifestParserTest {
         )
     }
 
-    private val base = PluginFixtures.manifest()
+    private val base = PluginFixtures.manifest(pluginApi = "^1.0.0")
 
     @Test
     fun valid_manifestIsParsed() {
@@ -187,7 +193,7 @@ class PluginManifestParserTest {
     @Test
     fun unknownTopLevelField_isRejectedNotIgnored() {
         assertRejected(base.replace("\"license\"", "\"official\": true, \"license\""), PluginErrorCode.UNSUPPORTED_FIELD, "official")
-        assertRejected(PluginFixtures.manifest(extra = ",\"autoUpdate\": true"), PluginErrorCode.UNSUPPORTED_FIELD, "autoUpdate")
+        assertRejected(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\"autoUpdate\": true"), PluginErrorCode.UNSUPPORTED_FIELD, "autoUpdate")
     }
 
     @Test
@@ -226,6 +232,7 @@ class PluginManifestParserTest {
     @Test
     fun apiRange_mustContainHostVersion() {
         assertRejected(PluginFixtures.manifest(pluginApi = "^2.0.0"), PluginErrorCode.API_INCOMPATIBLE, "^2.0.0")
+        assertRejected(PluginFixtures.manifest(pluginApi = "^3.0.0"), PluginErrorCode.API_INCOMPATIBLE, "^3.0.0")
         assertRejected(PluginFixtures.manifest(pluginApi = "1.x"), PluginErrorCode.FIELD_INVALID, "engines.pluginApi")
         assertEquals("^1.0.0", success(base).pluginApi)
     }
@@ -1097,37 +1104,37 @@ class PluginManifestParserTest {
 
     @Test
     fun icon_acceptsBuiltinNameAndPackageImage() {
-        val builtin = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"terminal\""))
+        val builtin = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"terminal\""))
         assertEquals("terminal", builtin.icon)
 
-        val png = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.png\""))
+        val png = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.png\""))
         assertEquals("icons/logo.png", png.icon)
 
-        val webp = success(PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.WEBP\""))
+        val webp = success(PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.WEBP\""))
         assertEquals("icons/logo.WEBP", webp.icon)
     }
 
     @Test
     fun icon_rejectsUnsupportedImageAndUnsafePath() {
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"icons/logo.svg\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"icons/logo.svg\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"../logo.png\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"../logo.png\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
         assertRejected(
-            PluginFixtures.manifest(extra = ",\n  \"icon\": \"\""),
+            PluginFixtures.manifest(pluginApi = "^1.0.0", extra = ",\n  \"icon\": \"\""),
             PluginErrorCode.FIELD_INVALID,
             "icon"
         )
     }
 
     @Test
-    fun sessionSourceContribution_isParsed() {
+    fun sessionSourceContribution_isRejectedAsUnsupported() {
         val json = """
             {
               "manifestVersion": 1,
@@ -1139,18 +1146,14 @@ class PluginManifestParserTest {
               "description": "Remote sessions",
               "license": "MIT",
               "engines": {"pluginApi": "^1.0.0"},
-              "runtime": {"type": "javascript", "entry": "dist/main.js"},
               "contributes": {
                 "sessionSources": [
                   {
                     "id": "ds-harness",
-                    "title": {"default": "DS Harness Remote", "zh-CN": "DS Harness 远程"},
+                    "title": {"default": "DS Harness Remote"},
                     "handlers": {
                       "listSessions": "sessionSource.listSessions",
-                      "readSession": "sessionSource.readSession",
-                      "sendMessage": "sessionSource.sendMessage",
-                      "interruptSession": "sessionSource.interruptSession",
-                      "createSession": "sessionSource.createSession"
+                      "readSession": "sessionSource.readSession"
                     }
                   }
                 ]
@@ -1158,12 +1161,507 @@ class PluginManifestParserTest {
             }
         """.trimIndent()
 
-        val manifest = success(json)
-        val source = manifest.sessionSources.single()
-        assertEquals("ds-harness", source.id)
-        assertEquals("DS Harness 远程", source.title.resolve("zh-CN"))
-        assertEquals("sessionSource.listSessions", source.handlers.listSessions)
-        assertEquals("sessionSource.readSession", source.handlers.readSession)
-        assertEquals(1, manifest.contributionCount)
+        assertRejected(json, PluginErrorCode.UNSUPPORTED_CONTRIBUTION, "sessionSources")
+    }
+
+    @Test
+    fun executionBackendContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "title": {"default": "Cloud Sandbox", "zh-CN": "云沙盒"},
+                    "description": "Run commands in cloud sandbox",
+                    "capabilities": {
+                      "filesystem": true,
+                      "command": true,
+                      "terminal": true,
+                      "fileWatch": false,
+                      "portForward": false,
+                      "isRemoteEnvironment": true,
+                      "workspaceDiscovery": "hybrid",
+                      "projectConfigLocation": "appPrivateDir"
+                    },
+                    "handlers": {
+                      "fs": "backend.fs",
+                      "exec": "backend.exec",
+                      "execStream": "backend.execStream",
+                      "execHealth": "backend.health",
+                      "terminal": "backend.terminal",
+                      "workspaceList": "backend.wsList",
+                      "workspaceCreate": "backend.wsCreate",
+                      "workspaceDelete": "backend.wsDelete",
+                      "workspaceSelect": "backend.wsSelect"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.executionBackends.size)
+        val backend = m.executionBackends.single()
+        assertEquals("cloud-box", backend.id)
+        assertEquals("云沙盒", backend.name.resolve("zh-CN"))
+        assertTrue(backend.capabilities.filesystem)
+        assertTrue(backend.capabilities.command)
+        assertTrue(backend.capabilities.terminal)
+        assertTrue(backend.capabilities.isRemoteEnvironment)
+        assertEquals("hybrid", backend.capabilities.workspaceDiscovery)
+        assertEquals("appPrivateDir", backend.capabilities.projectConfigLocation)
+        assertEquals("backend.fs", backend.handlers.fs)
+        assertEquals("backend.execStream", backend.handlers.execStream)
+        assertEquals("backend.terminal", backend.handlers.terminal)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun executionBackendContribution_validatesRuntimeAndHandlers() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "title": "Cloud Sandbox",
+                    "capabilities": {"filesystem": true, "command": false},
+                    "handlers": {"fs": "backend.fs"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingExecHandler = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Backend",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "Remote execution backend",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "executionBackends": [
+                  {
+                    "id": "cloud-box",
+                    "title": "Cloud Sandbox",
+                    "capabilities": {"filesystem": true, "command": true},
+                    "handlers": {"fs": "backend.fs"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingExecHandler, PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.exec")
+    }
+
+    @Test
+    fun workflowContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": {"default": "Codex Loop", "zh-CN": "Codex 工作流"},
+                    "description": "Delegates turns to Codex CLI",
+                    "capabilities": {
+                      "streaming": true,
+                      "tools": true,
+                      "compaction": true,
+                      "titleGeneration": false
+                    },
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn",
+                      "compact": "wf.compact",
+                      "generateTitle": "wf.title"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.workflows.size)
+        val wf = m.workflows.single()
+        assertEquals("codex-loop", wf.id)
+        assertEquals("Codex 工作流", wf.title.resolve("zh-CN"))
+        assertEquals("Delegates turns to Codex CLI", wf.description.resolve("en"))
+        assertTrue(wf.capabilities.streaming)
+        assertTrue(wf.capabilities.tools)
+        assertTrue(wf.capabilities.compaction)
+        assertEquals(false, wf.capabilities.titleGeneration)
+        assertEquals("wf.startTurn", wf.handlers.startTurn)
+        assertEquals("wf.cancelTurn", wf.handlers.cancelTurn)
+        assertEquals("wf.compact", wf.handlers.compact)
+        assertEquals("wf.title", wf.handlers.generateTitle)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun workflowContribution_validatesRequiredFieldsAndRuntime() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingIdAndTitle = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingIdAndTitle, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].id")
+        assertRejected(missingIdAndTitle, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].title")
+
+        val missingHandlers = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "handlers": {
+                      "startTurn": "wf.startTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingHandlers, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].handlers.cancelTurn")
+
+        val missingStartTurn = missingHandlers.replace("\"startTurn\": \"wf.startTurn\"", "\"cancelTurn\": \"wf.cancelTurn\"")
+        assertRejected(missingStartTurn, PluginErrorCode.FIELD_MISSING, "contributes.workflows[0].handlers.startTurn")
+
+        val unknownField = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.codex",
+              "name": "Codex Workflow",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/codex",
+              "description": "Codex agent workflow",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "workflows": [
+                  {
+                    "id": "codex-loop",
+                    "title": "Codex Loop",
+                    "extra": true,
+                    "handlers": {
+                      "startTurn": "wf.startTurn",
+                      "cancelTurn": "wf.cancelTurn"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(unknownField, PluginErrorCode.UNSUPPORTED_FIELD, "contributes.workflows[0].extra")
+    }
+
+    @Test
+    fun sessionContribution_isParsed() {
+        val json = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js", "resident": true},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": {"default": "Harness", "zh-CN": "外部会话"},
+                    "description": "Stream remote harness sessions",
+                    "handlers": {
+                      "refresh": "sessions.refresh",
+                      "readMessages": "sessions.readMessages",
+                      "createSession": "sessions.create",
+                      "deleteSession": "sessions.delete",
+                      "renameSession": "sessions.rename",
+                      "pinSession": "sessions.pin"
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val m = success(json)
+        assertEquals(1, m.sessions.size)
+        val session = m.sessions.single()
+        assertEquals("harness", session.id)
+        assertEquals("外部会话", session.title.resolve("zh-CN"))
+        assertEquals("Stream remote harness sessions", session.description.resolve("en"))
+        assertEquals("sessions.refresh", session.handlers.refresh)
+        assertEquals("sessions.readMessages", session.handlers.readMessages)
+        assertEquals("sessions.create", session.handlers.createSession)
+        assertEquals("sessions.delete", session.handlers.deleteSession)
+        assertEquals("sessions.rename", session.handlers.renameSession)
+        assertEquals("sessions.pin", session.handlers.pinSession)
+        assertEquals(1, m.contributionCount)
+    }
+
+    @Test
+    fun sessionContribution_validatesRequiredFieldsAndRuntime() {
+        val noRuntime = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": "Harness",
+                    "handlers": {"readMessages": "sessions.readMessages"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(noRuntime, PluginErrorCode.FIELD_MISSING, "runtime")
+
+        val missingReadMessages = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {
+                "sessions": [
+                  {
+                    "id": "harness",
+                    "title": "Harness",
+                    "handlers": {"refresh": "sessions.refresh"}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        assertRejected(missingReadMessages, PluginErrorCode.FIELD_MISSING, "contributes.sessions[0].handlers.readMessages")
+
+        val tooMany = (0 until 33).joinToString(",") { idx ->
+            """{"id": "s$idx", "title": "S$idx", "handlers": {"readMessages": "sessions.readMessages"}}"""
+        }
+        val overLimit = """
+            {
+              "manifestVersion": 1,
+              "id": "demo.remote",
+              "name": "Remote Sessions",
+              "version": "1.0.0",
+              "publisher": "demo",
+              "repository": "https://example.com/demo/remote",
+              "description": "External sessions plugin",
+              "license": "MIT",
+              "engines": {"pluginApi": "^1.0.0"},
+              "runtime": {"type": "javascript", "entry": "index.js"},
+              "contributes": {"sessions": [$tooMany]}
+            }
+        """.trimIndent()
+        assertRejected(overLimit, PluginErrorCode.FIELD_INVALID, "contributes.sessions")
+    }
+
+    private fun backendManifest(backends: String): String {
+        val root = Json.parseToJsonElement(base) as JsonObject
+        return buildJsonObject {
+            root.forEach { (key, value) -> put(key, value) }
+            put("runtime", buildJsonObject {
+                put("type", "javascript")
+                put("entry", "index.js")
+            })
+            put("contributes", buildJsonObject {
+                put("executionBackends", Json.parseToJsonElement("[$backends]"))
+            })
+        }.toString()
+    }
+
+    @Test
+    fun executionBackend_defaultsMatchApiContract() {
+        assertEquals(SemVer(1, 0, 0), PluginApi.VERSION)
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        val expected = PluginExecutionBackendCapabilitiesRef(
+            filesystem = true,
+            command = true,
+            terminal = false,
+            fileWatch = false,
+            portForward = false,
+            isRemoteEnvironment = true,
+            workspaceDiscovery = "scan",
+            projectConfigLocation = "appPrivateDir"
+        )
+        assertEquals(expected, success(backendManifest(backend)).executionBackends.single().capabilities)
+        assertEquals(expected, success(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{},\"handlers\"")))
+            .executionBackends.single().capabilities)
+        assertEquals("workspaceDir", success(backendManifest(backend.replace(
+            "\"handlers\"", "\"capabilities\":{\"isRemoteEnvironment\":false,\"projectConfigLocation\":\"workspaceDir\"},\"handlers\""
+        ))).executionBackends.single().capabilities.projectConfigLocation)
+        success(backendManifest("""{"id":"cloud","title":"Cloud","capabilities":{"filesystem":false,"command":false},"handlers":{}}"""))
+    }
+
+    @Test
+    fun executionBackend_rejectsNameUnsupportedCapabilitiesAndConfigAliases() {
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        assertRejected(backendManifest(backend.replace("\"title\"", "\"name\"")),
+            PluginErrorCode.UNSUPPORTED_FIELD, "contributes.executionBackends[0].name")
+        listOf("fileWatch", "portForward").forEach { capability ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"$capability\":true},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.$capability")
+        }
+        listOf("", "\"isRemoteEnvironment\":true,").forEach { remote ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{$remote\"projectConfigLocation\":\"workspaceDir\"},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.projectConfigLocation")
+        }
+        listOf("workspace_dir", "app_private_dir", "workspacedir", "appprivatedir").forEach { location ->
+            assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"projectConfigLocation\":\"$location\"},\"handlers\"")),
+                PluginErrorCode.FIELD_INVALID, "contributes.executionBackends[0].capabilities.projectConfigLocation")
+        }
+    }
+
+    @Test
+    fun executionBackend_requiresCapabilityHandlersAndLimitsEntriesTo32() {
+        val backend = """{"id":"cloud","title":"Cloud","handlers":{"fs":"fs","exec":"exec"}}"""
+        assertRejected(backendManifest(backend.replace("\"fs\":\"fs\",", "")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.fs")
+        assertRejected(backendManifest(backend.replace(",\"exec\":\"exec\"", "")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.exec")
+        assertRejected(backendManifest(backend.replace("\"handlers\"", "\"capabilities\":{\"terminal\":true},\"handlers\"")),
+            PluginErrorCode.FIELD_MISSING, "contributes.executionBackends[0].handlers.terminal")
+        val entries = (0 until 33).map { backend.replace("\"cloud\"", "\"cloud$it\"") }
+        assertEquals(32, success(backendManifest(entries.take(32).joinToString(","))).executionBackends.size)
+        assertRejected(backendManifest(entries.joinToString(",")),
+            PluginErrorCode.FIELD_INVALID, "contributes.executionBackends")
+    }
+
+    @Test
+    fun sharedSdkContractFixtures_areParsedByHost() {
+        val relativePath = "plugins/sdk/test/fixtures/contracts.json"
+        val fixtureFile = listOf(File(relativePath), File("../$relativePath")).firstOrNull { it.isFile }
+            ?: error("Missing shared contract fixtures: $relativePath")
+        val fixtures = Json.parseToJsonElement(fixtureFile.readText()) as JsonObject
+        val valid = fixtures.getValue("validManifests") as JsonArray
+        val invalid = fixtures.getValue("invalidManifests") as JsonArray
+        assertTrue("validManifests must not be empty", valid.isNotEmpty())
+        assertTrue("invalidManifests must not be empty", invalid.isNotEmpty())
+        valid.forEachIndexed { index, manifest ->
+            val result = parse(manifest.toString())
+            assertTrue("validManifests[$index]: $result", result is ManifestParseResult.Success)
+            assertEquals("^1.0.0", (result as ManifestParseResult.Success).manifest.pluginApi)
+        }
+        invalid.forEachIndexed { index, manifest ->
+            assertTrue("invalidManifests[$index]", parse(manifest.toString()) is ManifestParseResult.Failure)
+        }
     }
 }

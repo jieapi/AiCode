@@ -1,29 +1,27 @@
 package com.aicode.feature.agent.domain.container
 
-import com.aicode.feature.settings.data.repository.ExecutionMode
-import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * [CommandEngine] 的委托层：同时持有本地与远程两套实现，每次方法调用时按
- * [ExecutionModeHolder.currentMode] 转发到对应实现。
- *
- * 这样 Hilt 注入时机不再影响最终行为——无论 [CommandEngine] 在何时被首次注入，
- * 真正执行命令时才读取当前模式。
+ * [CommandEngine] 的委托层：每次方法调用时按 [ExecutionBackendRegistry.currentBackend]
+ * 动态转发到当前激活执行后端的 [ExecutionBackend.commandEngine]。
  */
 @Singleton
 class DelegatingCommandEngine @Inject constructor(
-    private val modeHolder: ExecutionModeHolder,
-    private val localEngine: LinuxContainerEngine,
-    private val remoteEngine: RemoteSshEngine
+    private val executionBackendRegistry: ExecutionBackendRegistry
 ) : CommandEngine {
 
-    private fun delegate(): CommandEngine =
-        if (modeHolder.currentMode() == ExecutionMode.REMOTE_SSH) remoteEngine
-        else localEngine
+    private fun delegate(): CommandEngine {
+        val binding = BackendExecutionContext.binding()
+        if (binding != null) {
+            binding.checkActive(executionBackendRegistry)
+            return binding.commandEngine
+        }
+        return executionBackendRegistry.currentBackend().commandEngine
+    }
 
     override val initProgress: StateFlow<ContainerInitState>
         get() = delegate().initProgress

@@ -37,7 +37,6 @@ internal class PluginOverlayBridge(
     private val density: Float,
     private val window: PluginOverlayWindow,
     private val permissionService: com.aicode.feature.plugin.runtime.PluginPermissionService,
-    private val sessionSourceService: com.aicode.feature.plugin.runtime.PluginSessionHostService,
     private val onPageMessage: (JsonElement) -> Unit,
     private val onClose: () -> Unit
 ) {
@@ -74,8 +73,6 @@ internal class PluginOverlayBridge(
     }
 
     private suspend fun dispatch(method: String, params: JsonObject): JsonElement = when (method) {
-        "sessionSource.setMessages" -> sessionSourceService.setMessages(pluginId, params)
-        "sessionSource.pushEvent" -> sessionSourceService.pushEvent(pluginId, params)
         "permissions.request" -> permissionService.request(pluginId, params)
         "permissions.cancel" -> permissionService.cancel(pluginId, params)
         "context" -> buildJsonObject {

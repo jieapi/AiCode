@@ -5,6 +5,7 @@ import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import java.io.BufferedWriter
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -15,6 +16,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,7 +35,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /** 插件进程调用失败；[code] 是宿主与插件都可判断的稳定错误码。 */
-class PluginProcessException(val code: String, override val message: String) : Exception(message)
+open class PluginProcessException(val code: String, override val message: String) : Exception(message)
+
+/** 仅表示本地确定尚未将请求写入对端的 IPC 未就绪状态，可安全回退到 NDJSON。 */
+class PluginIpcUnavailableException(message: String) : PluginProcessException("PLUGIN_IPC_UNAVAILABLE", message)
 
 /**
  * 插件进程的 NDJSON JSON-RPC 通道。
@@ -52,21 +59,50 @@ class PluginProcessTransport(
     private val onNotification: (method: String, params: JsonObject) -> Unit,
     private val onExit: () -> Unit,
     /** 为 false 时常驻进程在单次请求超时后保留，避免一个慢 handler 拖垮后续调用。 */
-    private val closeOnTimeout: Boolean = true
+    private val closeOnTimeout: Boolean = true,
+    private val ipcSocketFile: File? = null,
+    private val ipcToken: String? = null,
+    private val binaryConnectorFactory: ((File) -> BinaryConnector)? = null,
+    private val onBinaryRequest: (suspend (BinaryIncomingRequest) -> BinaryResult)? = null,
+    private val onBinaryEvent: ((method: String, meta: JsonObject, payload: ByteArray) -> Unit)? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val startMutex = Mutex()
     private val writeMutex = Mutex()
+    private val ipcMutex = Mutex()
     private val idCounter = AtomicLong(0)
     private val pending = ConcurrentHashMap<Long, CompletableDeferred<JsonElement>>()
 
     @Volatile private var process: Process? = null
     @Volatile private var writer: BufferedWriter? = null
+    @Volatile private var binaryChannel: PluginBinaryChannel? = null
     @Volatile private var closed = false
 
-    /** 发送请求并等待插件返回的 `result`；超时默认结束进程，常驻进程可保留（见 [closeOnTimeout]）。 */
+    val isBinaryConnected: Boolean
+        get() = binaryChannel?.isConnected == true
+
+    val activeRequests: Int
+        get() = binaryChannel?.activeRequests ?: pending.size
+
+    val isBusy: Boolean
+        get() = activeRequests > 0
+
+    /** 发送请求并等待插件返回的 `result`；优先走二进制 IPC 通道，未建连时无缝走 NDJSON；超时默认结束进程，常驻进程可保留（见 [closeOnTimeout]）。 */
     suspend fun request(method: String, params: JsonObject, timeoutMs: Long): JsonElement {
         ensureStarted()
+        val channel = binaryChannel
+        if (channel != null && channel.isConnected) {
+            try {
+                val result = channel.request(method = method, metaParams = params, timeoutMs = timeoutMs)
+                return decodeBinaryResultToJson(result)
+            } catch (e: PluginIpcUnavailableException) {
+                if (closed) throw e
+                FileLogger.w(TAG, "[$pluginId] 二进制 IPC 未就绪，回退 NDJSON: ${e.message}")
+            } catch (e: PluginProcessException) {
+                if (e.code == "PLUGIN_TIMEOUT" && closeOnTimeout) close()
+                throw e
+            }
+        }
         val id = idCounter.incrementAndGet()
         val deferred = CompletableDeferred<JsonElement>()
         pending[id] = deferred
@@ -96,11 +132,62 @@ class PluginProcessTransport(
         }
     }
 
+    /** 通过二进制 IPC 通道发送带原始字节 payload 的请求。 */
+    suspend fun requestBinary(
+        method: String,
+        metaParams: JsonObject = JsonObject(emptyMap()),
+        payload: ByteArray = BinaryFrame.EMPTY_BYTES,
+        timeoutMs: Long = DEFAULT_BINARY_TIMEOUT_MS
+    ): BinaryResult {
+        ensureStarted()
+        val channel = binaryChannel?.takeIf { it.isConnected }
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
+        return try {
+            channel.request(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs)
+        } catch (e: PluginProcessException) {
+            if (e.code == "PLUGIN_TIMEOUT" && closeOnTimeout) close()
+            throw e
+        }
+    }
+
+    /** 通过二进制 IPC 通道开启流式请求，接收插件侧持续推送的数据块。 */
+    fun openBinaryStream(
+        method: String,
+        metaParams: JsonObject = JsonObject(emptyMap()),
+        payload: ByteArray = BinaryFrame.EMPTY_BYTES,
+        timeoutMs: Long = DEFAULT_BINARY_TIMEOUT_MS
+    ): Flow<BinaryStreamChunk> = flow {
+        ensureStarted()
+        val channel = binaryChannel?.takeIf { it.isConnected }
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
+        emitAll(channel.openStream(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs))
+    }
+
+    suspend fun uploadBinary(
+        method: String,
+        metaParams: JsonObject,
+        payload: Flow<ByteArray>,
+        timeoutMs: Long = DEFAULT_BINARY_TIMEOUT_MS
+    ): BinaryResult {
+        ensureStarted()
+        val channel = binaryChannel?.takeIf { it.isConnected }
+            ?: throw PluginIpcUnavailableException("[$pluginId] 二进制 IPC 通道未就绪")
+        return try {
+            channel.upload(method = method, metaParams = metaParams, payload = payload, timeoutMs = timeoutMs)
+        } catch (e: PluginProcessException) {
+            if (e.code == "PLUGIN_TIMEOUT" && closeOnTimeout) close()
+            throw e
+        }
+    }
+
     fun close() {
         if (closed) return
         closed = true
         FileLogger.i(TAG, "[$pluginId] 关闭插件进程")
         scope.cancel()
+        runCatching { binaryChannel?.close() }
+        binaryChannel = null
+        runCatching { ipcSocketFile?.delete() }
         runCatching { writer?.close() }
         runCatching { process?.destroy() }
         writer = null
@@ -140,7 +227,7 @@ class PluginProcessTransport(
     }
 
     private fun readLoop(p: Process) {
-        val reader = BoundedLineReader(p.inputStream.buffered(), MAX_STDOUT_LINE_BYTES)
+        val reader = BoundedLineReader(p.inputStream, MAX_STDOUT_LINE_BYTES)
         try {
             while (true) {
                 val read = reader.readLine()
@@ -173,6 +260,9 @@ class PluginProcessTransport(
         } finally {
             FileLogger.i(TAG, "[$pluginId] stdout 已结束")
             logExitCode(p)
+            runCatching { binaryChannel?.close() }
+            binaryChannel = null
+            runCatching { ipcSocketFile?.delete() }
             failAllPending("插件进程 stdout 已关闭")
             onExit()
         }
@@ -213,9 +303,86 @@ class PluginProcessTransport(
     }
 
     private fun handleNotification(method: String, obj: JsonObject) {
+        if (method == IPC_READY_METHOD) {
+            scope.launch { connectBinaryChannel() }
+            return
+        }
         val params = obj["params"] as? JsonObject ?: JsonObject(emptyMap())
         runCatching { onNotification(method, params) }
             .onFailure { FileLogger.w(TAG, "[$pluginId] 处理通知 $method 失败", it) }
+    }
+
+    private suspend fun connectBinaryChannel() = ipcMutex.withLock {
+        if (closed || binaryChannel?.isConnected == true) return@withLock
+        val sockFile = ipcSocketFile ?: return@withLock
+        val token = ipcToken?.takeIf { it.isNotEmpty() } ?: return@withLock
+        val connector = binaryConnectorFactory?.invoke(sockFile) ?: LocalSocketBinaryConnector(sockFile)
+        lateinit var channel: PluginBinaryChannel
+        channel = PluginBinaryChannel(
+            pluginId = pluginId,
+            connector = connector,
+            ipcToken = token,
+            onRequest = { req ->
+                onBinaryRequest?.invoke(req) ?: throw PluginProcessException(
+                    "BINARY_UNSUPPORTED", "[$pluginId] 未绑定二进制 host 请求: ${req.method}"
+                )
+            },
+            onEvent = { eventMethod, meta, payload ->
+                onBinaryEvent?.invoke(eventMethod, meta, payload)
+                    ?: throw PluginProcessException(
+                        "BINARY_UNSUPPORTED", "[$pluginId] 未绑定二进制事件: $eventMethod"
+                    )
+            },
+            onClosed = {
+                if (binaryChannel === channel) {
+                    binaryChannel = null
+                }
+            }
+        )
+        try {
+            channel.connect()
+            if (closed) {
+                channel.close()
+                return@withLock
+            }
+            binaryChannel = channel
+            FileLogger.i(TAG, "[$pluginId] 二进制 IPC 通道已就绪")
+        } catch (e: CancellationException) {
+            runCatching { channel.close() }
+            throw e
+        } catch (e: Exception) {
+            runCatching { channel.close() }
+            FileLogger.w(TAG, "[$pluginId] 二进制 IPC 建连/握手失败，保持 NDJSON 通道: ${e.message}")
+        }
+    }
+
+    private suspend fun handleBinaryPeerRequest(req: BinaryIncomingRequest): BinaryResult {
+        val params = (req.meta["args"] as? JsonObject)
+            ?: (req.meta["params"] as? JsonObject)
+            ?: req.meta
+        val result = onRequest(req.method, params)
+        val wrapped = buildJsonObject { put("result", result) }
+        val wrappedBytes = wrapped.toString().toByteArray(Charsets.UTF_8)
+        return if (wrappedBytes.size <= PluginBinaryCodec.DEFAULT_CHUNK_BYTES) {
+            BinaryResult(meta = wrapped, payload = BinaryFrame.EMPTY_BYTES)
+        } else {
+            BinaryResult(
+                meta = buildJsonObject { put("encoding", "json") },
+                payload = result.toString().toByteArray(Charsets.UTF_8)
+            )
+        }
+    }
+
+    private fun decodeBinaryResultToJson(result: BinaryResult): JsonElement {
+        if (result.meta.containsKey("result")) {
+            return result.meta["result"] ?: JsonNull
+        }
+        if (result.payload.isNotEmpty()) {
+            val text = result.payload.toString(Charsets.UTF_8)
+            return runCatching { JSON.parseToJsonElement(text) }
+                .getOrElse { JsonPrimitive(text) }
+        }
+        return if (result.meta.isEmpty()) JsonNull else result.meta
     }
 
     private fun handleResponse(idElement: JsonElement, obj: JsonObject) {
@@ -236,7 +403,7 @@ class PluginProcessTransport(
 
     /** stderr 只做诊断：单行有上限，日志按时间窗限流，避免插件刷屏拖垮日志 IO。 */
     private fun drainStderr(p: Process) {
-        val reader = BoundedLineReader(p.errorStream.buffered(), MAX_STDERR_LINE_BYTES)
+        val reader = BoundedLineReader(p.errorStream, MAX_STDERR_LINE_BYTES)
         var lastLogMs = Long.MIN_VALUE
         var suppressed = 0
         try {
@@ -281,10 +448,11 @@ class PluginProcessTransport(
     }
 
     /**
-     * 按字节读一行并限制长度：正常行原样返回，超过 [maxBytes] 的行整行丢弃，
-     * 只回报丢弃的字节数，避免恶意或失控的插件输出占满堆与日志。
+     * 按字节读一行并限制长度：使用 8 KiB 块缓冲区批量读取并扫描 `\n`，
+     * 正常行原样返回，超过 [maxBytes] 的行整行丢弃并回报丢弃的字节数，
+     * 避免恶意或失控的插件输出占满堆与日志。
      */
-    private class BoundedLineReader(private val input: InputStream, private val maxBytes: Int) {
+    internal class BoundedLineReader(private val input: InputStream, private val maxBytes: Int) {
 
         sealed interface Line {
             data class Text(val text: String) : Line
@@ -292,39 +460,91 @@ class PluginProcessTransport(
             data object Eof : Line
         }
 
-        private val buffer = ByteArrayOutputStream(minOf(maxBytes, INITIAL_BUFFER_BYTES))
+        private val chunk = ByteArray(CHUNK_BYTES)
+        private var chunkPos = 0
+        private var chunkLen = 0
+        private val buffer = ByteArrayOutputStream(minOf(maxBytes, CHUNK_BYTES))
 
         fun readLine(): Line {
             buffer.reset()
             while (true) {
-                val b = input.read()
-                if (b == -1) {
-                    return if (buffer.size() == 0) Line.Eof else Line.Text(decode())
+                if (chunkPos >= chunkLen) {
+                    val read = input.read(chunk)
+                    if (read == -1) {
+                        chunkPos = 0
+                        chunkLen = 0
+                        return if (buffer.size() == 0) Line.Eof else Line.Text(decode())
+                    }
+                    if (read == 0) continue
+                    chunkPos = 0
+                    chunkLen = read
                 }
-                if (b == '\n'.code) return Line.Text(decode())
-                if (buffer.size() >= maxBytes) {
-                    var discarded = buffer.size().toLong() + 1
-                    while (true) {
-                        val next = input.read()
-                        if (next == -1) return Line.Overlong(discarded)
-                        if (next == '\n'.code) return Line.Overlong(discarded)
-                        discarded++
+                val start = chunkPos
+                var newlineIndex = -1
+                for (i in start until chunkLen) {
+                    if (chunk[i] == NEWLINE_BYTE) {
+                        newlineIndex = i
+                        break
                     }
                 }
-                buffer.write(b)
+                if (newlineIndex >= 0) {
+                    val segmentLen = newlineIndex - start
+                    chunkPos = newlineIndex + 1
+                    val totalBytes = buffer.size().toLong() + segmentLen
+                    if (totalBytes > maxBytes) {
+                        return Line.Overlong(totalBytes)
+                    }
+                    if (buffer.size() == 0) {
+                        return Line.Text(String(chunk, start, segmentLen, Charsets.UTF_8).trimEnd('\r'))
+                    }
+                    if (segmentLen > 0) buffer.write(chunk, start, segmentLen)
+                    return Line.Text(decode())
+                }
+                val segmentLen = chunkLen - start
+                chunkPos = chunkLen
+                val totalBytes = buffer.size().toLong() + segmentLen
+                if (totalBytes > maxBytes) {
+                    return discardUntilNewline(totalBytes)
+                }
+                if (segmentLen > 0) buffer.write(chunk, start, segmentLen)
+            }
+        }
+
+        private fun discardUntilNewline(initialDiscarded: Long): Line.Overlong {
+            var discarded = initialDiscarded
+            while (true) {
+                val read = input.read(chunk)
+                if (read == -1) {
+                    chunkPos = 0
+                    chunkLen = 0
+                    return Line.Overlong(discarded)
+                }
+                if (read == 0) continue
+                for (i in 0 until read) {
+                    if (chunk[i] == NEWLINE_BYTE) {
+                        discarded += i
+                        chunkPos = i + 1
+                        chunkLen = read
+                        return Line.Overlong(discarded)
+                    }
+                }
+                discarded += read
             }
         }
 
         private fun decode(): String = String(buffer.toByteArray(), Charsets.UTF_8).trimEnd('\r')
 
         private companion object {
-            const val INITIAL_BUFFER_BYTES = 8 * 1024
+            const val CHUNK_BYTES = 8 * 1024
+            const val NEWLINE_BYTE = '\n'.code.toByte()
         }
     }
 
     private companion object {
         const val TAG = "PluginProcess"
         const val EXIT_WAIT_MS = 2_000L
+        const val DEFAULT_BINARY_TIMEOUT_MS = 120_000L
+        const val IPC_READY_METHOD = "ipc.ready"
 
         /** stdout 单行字节上限；正常 JSON-RPC 结果远小于该值。 */
         const val MAX_STDOUT_LINE_BYTES = 4 * 1024 * 1024

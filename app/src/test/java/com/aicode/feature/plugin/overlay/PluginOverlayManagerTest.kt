@@ -185,7 +185,6 @@ class PluginOverlayManagerTest {
             context = context,
             pluginManager = pluginManager,
             permissionService = mockk(relaxed = true),
-            sessionSourceService = mockk(relaxed = true),
             permissionRepository = permissions,
             positionRepository = positions,
             appForegroundMonitor = foreground

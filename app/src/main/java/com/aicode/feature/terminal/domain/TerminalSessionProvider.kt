@@ -16,7 +16,7 @@ interface TerminalSessionProvider {
     /** 后台命令结束时 emit 的事件，供 ViewModel 订阅后通知 AI。 */
     val tabFinishedEvents: SharedFlow<TabFinishedEvent>
 
-    /** 把一条命令挂后台跑（如 `npm run dev`），返回唯一 tabId。 */
+    /** 把一条命令挂后台跑（如 `npm run dev`），返回 opaque 标签句柄，调用方不得解析或替换它。 */
     suspend fun startBackgroundCommand(
         command: String,
         title: String? = null,
@@ -43,7 +43,7 @@ interface TerminalSessionProvider {
     /** 按 id 向标签写入原始文本，不自动追加回车。 */
     fun writeToTab(id: String, text: String): Boolean
 
-    /** 按 id 向标签写入原始字节（控制字符，如 Ctrl-C=0x03）。 */
+    /** 按 id 向标签写入原始字节（控制字符，如 Ctrl-C=0x03）；可能阻塞，调用方应在后台有序写入。 */
     fun writeBytesToTab(id: String, vararg bytes: Int): Boolean
 
     /** 按 id 读取终端内容（emulator 屏幕缓冲）。返回 null 表示无此标签。 */
@@ -52,7 +52,7 @@ interface TerminalSessionProvider {
     /** 订阅标签的原始输出；标签关闭或会话结束时流完成。返回 null 表示无此标签。 */
     fun tabOutput(id: String): Flow<ByteArray>?
 
-    /** 列出全部标签的摘要。 */
+    /** 列出当前后端上下文的非插件标签摘要；不汇总其他后端的标签。 */
     fun listTabs(): List<TabInfo>
 
     /** 关闭并销毁标签。返回是否成功。 */

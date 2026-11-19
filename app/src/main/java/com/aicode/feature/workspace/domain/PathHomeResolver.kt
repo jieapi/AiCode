@@ -1,5 +1,6 @@
 package com.aicode.feature.workspace.domain
 
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
@@ -23,11 +24,21 @@ class PathHomeResolver @Inject constructor(
     @Volatile
     var containerHome: String? = null
 
-    /** 当前环境的 home：远程取远程用户 home（连接后缓存），本地取容器 home；未知时回退 /root。 */
-    fun home(): String = when {
-        executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH ->
+    /** 当前环境的 home：远程 SSH 取远程用户 home（连接后缓存），插件远端后端不读取本地/SSH 路径，本地取容器 home；未知时回退 /root。 */
+    fun home(): String {
+        if (!executionModeHolder.capabilities().isRemoteEnvironment) {
+            return containerHome ?: "/root"
+        }
+        val isBuiltinRemoteSsh = runCatching {
+            executionModeHolder.currentBackend().id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+        }.getOrElse {
+            executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH
+        }
+        return if (isBuiltinRemoteSsh) {
             remoteSshConnection.remoteHome ?: "/root"
-        else -> containerHome ?: "/root"
+        } else {
+            "/root"
+        }
     }
 
     /**

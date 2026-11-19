@@ -337,7 +337,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // 远程模式回到前台时，若 SSH 断了立即触发重连，不等 supervisor 轮询
-        if (executionModeHolder.currentMode() == com.aicode.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
+        val backend = executionModeHolder.currentBackend()
+        if (backend.id == com.aicode.feature.agent.domain.container.ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID &&
+            backend.capabilities.isRemoteEnvironment
+        ) {
             lifecycleScope.launch {
                 runCatching { remoteSshConnection.tryReconnectIfDisconnected() }
             }
@@ -397,14 +400,6 @@ fun AppNavigation(
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
     val pluginsViewModel: PluginsViewModel = hiltViewModel()
     val installedPlugins by pluginsViewModel.plugins.collectAsStateWithLifecycle()
-    val pluginSessionGroups by agentViewModel.pluginSessionGroups.collectAsStateWithLifecycle()
-    val activePluginSession by agentViewModel.activePluginSession.collectAsStateWithLifecycle()
-    LaunchedEffect(installedPlugins) {
-        agentViewModel.refreshPluginSessions()
-    }
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) agentViewModel.refreshPluginSessions()
-    }
     val pluginLanguageTag = currentLanguageTag()
     // 入口直接从已加载的插件快照算，不在组合期读盘；顺序按插件显示名，重装后仍稳定。
     val pluginSlotEntries = remember(installedPlugins, pluginLanguageTag) {
@@ -484,6 +479,14 @@ fun AppNavigation(
     }
 
     val sessions by agentViewModel.sessions.collectAsStateWithLifecycle()
+    val externalSessionGroups by agentViewModel.externalSessionGroups.collectAsStateWithLifecycle()
+    val activeExternalSession by agentViewModel.activeExternalSession.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        agentViewModel.refreshExternalSessions()
+    }
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen) agentViewModel.refreshExternalSessions()
+    }
     val currentSessionId by agentViewModel.currentSessionId.collectAsStateWithLifecycle()
     val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle()
     val awaitingPermissionSessionIds by agentViewModel.awaitingPermissionSessionIds.collectAsStateWithLifecycle()
@@ -717,6 +720,15 @@ fun AppNavigation(
         CompositionLocalProvider(LocalChatAnimationsEnabled provides animationsEnabled) {
         ChatDrawerContent(
             sessions = sessions,
+            externalSessionGroups = externalSessionGroups,
+            currentExternalSessionId = activeExternalSession?.id,
+            onSelectExternalSession = { session ->
+                agentViewModel.openExternalSession(session)
+                if (!permanentDrawer) scope.launch { drawerState.close() }
+            },
+            onDeleteExternalSession = { session -> agentViewModel.deleteExternalSession(session) },
+            onRenameExternalSession = { session, title -> agentViewModel.renameExternalSession(session, title) },
+            onTogglePinExternalSession = { session -> agentViewModel.togglePinExternalSession(session) },
             currentSessionId = currentSessionId,
             agentStates = agentStates,
             awaitingPermissionSessionIds = awaitingPermissionSessionIds,
@@ -803,12 +815,6 @@ fun AppNavigation(
             pluginEntries = drawerPluginEntries,
             pluginLanguageTag = pluginLanguageTag,
             onPluginEntry = { entry -> runPluginEntry(entry, PluginEntryContext()) },
-            pluginSessionGroups = pluginSessionGroups,
-            currentPluginSessionId = activePluginSession?.id,
-            onSelectPluginSession = { session ->
-                agentViewModel.openPluginSession(session)
-                if (!permanentDrawer) scope.launch { drawerState.close() }
-            },
             sessionPluginEntries = sessionPluginEntries,
             onSessionPluginEntry = { session, entry ->
                 runPluginEntry(entry, PluginEntryContext(sessionId = session.id))

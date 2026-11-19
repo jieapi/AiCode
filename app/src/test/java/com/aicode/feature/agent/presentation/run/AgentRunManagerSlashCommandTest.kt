@@ -33,6 +33,8 @@ import com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aicode.feature.agent.domain.tool.question.AskUserQuestionManager
 import com.aicode.feature.agent.domain.workflow.AgentEvent
 import com.aicode.feature.agent.domain.workflow.AgentWorkflow
+import com.aicode.feature.agent.domain.workflow.AgentWorkflowRegistry
+import com.aicode.feature.agent.domain.workflow.WorkflowDescriptor
 import com.aicode.feature.agent.presentation.MessageRole
 import com.aicode.feature.agent.presentation.notification.AgentApprovalNotificationManager
 import com.aicode.feature.agent.presentation.notification.AgentLiveNotificationManager
@@ -62,6 +64,7 @@ import org.junit.Test
 class AgentRunManagerSlashCommandTest {
 
     private val agentWorkflow = mockk<AgentWorkflow>(relaxed = true)
+    private val workflowRegistry = AgentWorkflowRegistry(agentWorkflow)
     private val toolRegistry = mockk<ToolRegistry>(relaxed = true)
     private val agentMessageDao = mockk<AgentMessageDao>(relaxed = true)
     private val chatSessionDao = mockk<ChatSessionDao>(relaxed = true)
@@ -152,7 +155,7 @@ class AgentRunManagerSlashCommandTest {
         runBlocking { slashCommandRegistry.refresh() }
 
         manager = AgentRunManager(
-            agentWorkflow = agentWorkflow,
+            workflowRegistry = workflowRegistry,
             toolRegistry = toolRegistry,
             agentMessageDao = agentMessageDao,
             chatSessionDao = chatSessionDao,
@@ -162,6 +165,7 @@ class AgentRunManagerSlashCommandTest {
             toolPermissionManager = toolPermissionManager,
             askUserQuestionManager = askUserQuestionManager,
             containerEngine = containerEngine,
+            executionBackendRegistry = mockk<com.aicode.feature.agent.domain.container.ExecutionBackendRegistry>(relaxed = true),
             sessionUseCase = sessionUseCase,
             messagePersistenceUseCase = messagePersistenceUseCase,
             checkpointManager = checkpointManager,
@@ -189,7 +193,12 @@ class AgentRunManagerSlashCommandTest {
     @Test
     fun enqueueCompress_runsCompactionAndQueuesSubsequentMessagesUntilFinished() {
         val compactionGate = CompletableDeferred<Unit>()
-        coEvery { agentWorkflow.compactSession(sessionId, any()) } coAnswers {
+        coEvery {
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } coAnswers {
             compactionGate.await()
             true
         }
@@ -202,7 +211,7 @@ class AgentRunManagerSlashCommandTest {
 
         coVerify(timeout = 2000) {
             messagePersistenceUseCase.persist(sessionId, MessageRole.USER, "/compress", id = any())
-            agentWorkflow.compactSession(sessionId, any())
+            agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>())
         }
         assertTrue(sessionId in manager.runningCommandSessions.value)
 
@@ -300,7 +309,12 @@ class AgentRunManagerSlashCommandTest {
         every { agentWorkflow.executeEvents("running turn", any(), any()) } returns flow {
             turnGate.await()
         }
-        coEvery { agentWorkflow.compactSession(sessionId, any()) } returns true
+        coEvery {
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } returns true
 
         manager.enqueueAgentRequest(
             request = "running turn",
@@ -316,13 +330,13 @@ class AgentRunManagerSlashCommandTest {
             projectRoot = workspace,
             targetSessionId = sessionId
         )
-        coVerify(exactly = 0) { agentWorkflow.compactSession(sessionId, any()) }
+        coVerify(exactly = 0) { agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()) }
 
         turnGate.complete(Unit)
 
         coVerify(timeout = 2000) {
             messagePersistenceUseCase.persist(sessionId, MessageRole.USER, "/compress", id = any())
-            agentWorkflow.compactSession(sessionId, any())
+            agentWorkflow.compactSession(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>())
         }
     }
 
@@ -336,6 +350,86 @@ class AgentRunManagerSlashCommandTest {
 
         coVerify(timeout = 2000) {
             agentWorkflow.executeEvents("/etc/hosts", any(), any())
+        }
+    }
+
+    @Test
+    fun routeBySessionWorkflowId_usesPluginWorkflowForExecuteCompactAndTitle() {
+        val pluginWorkflow = mockk<AgentWorkflow>(relaxed = true)
+        val pluginWorkflowId = "plugin-a:custom-workflow"
+        workflowRegistry.syncPluginWorkflows(
+            "plugin-a",
+            listOf(WorkflowDescriptor(pluginWorkflowId, "自定义工作流") to pluginWorkflow)
+        )
+        every { pluginWorkflow.executeEvents(any(), any(), any()) } returns flow {
+            emit(AgentEvent.AssistantDelta("ok", "m1"))
+            emit(AgentEvent.Completed)
+        }
+        coEvery {
+            pluginWorkflow.generateTitle(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<String>()
+            )
+        } returns "自定义标题"
+        coEvery {
+            pluginWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        } returns true
+        coEvery { sessionUseCase.getSessionById(sessionId) } returns ChatSessionEntity(
+            id = sessionId,
+            title = "测试会话",
+            workspacePath = workspace,
+            createdAt = 1L,
+            updatedAt = 1L,
+            providerId = "p1",
+            model = "m1",
+            mode = AgentMode.BUILD.name,
+            workflowId = pluginWorkflowId
+        )
+
+        manager.enqueueAgentRequest(
+            request = "hello plugin workflow",
+            projectRoot = workspace,
+            targetSessionId = sessionId
+        )
+
+        coVerify(timeout = 2000) {
+            pluginWorkflow.executeEvents(
+                "hello plugin workflow",
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<List<com.aicode.feature.agent.domain.tool.AgentTool>>()
+            )
+            pluginWorkflow.generateTitle(any<com.aicode.feature.agent.domain.model.AgentContext>(), "hello plugin workflow")
+            sessionUseCase.updateTitle(sessionId, "自定义标题")
+        }
+        coVerify(exactly = 0) {
+            agentWorkflow.executeEvents(
+                any<String>(),
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<List<com.aicode.feature.agent.domain.tool.AgentTool>>()
+            )
+            agentWorkflow.generateTitle(any<com.aicode.feature.agent.domain.model.AgentContext>(), any<String>())
+        }
+
+        manager.enqueueAgentRequest(
+            request = "/compress",
+            projectRoot = workspace,
+            targetSessionId = sessionId
+        )
+
+        coVerify(timeout = 2000) {
+            pluginWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
+        }
+        coVerify(exactly = 0) {
+            agentWorkflow.compactSession(
+                any<com.aicode.feature.agent.domain.model.AgentContext>(),
+                any<suspend (com.aicode.feature.agent.domain.workflow.AgentEvent) -> Unit>()
+            )
         }
     }
 }

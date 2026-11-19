@@ -1,10 +1,10 @@
 package com.aicode.feature.plugin.presentation
 
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.plugin.domain.PluginFileWatchSource
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginWatchTarget
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.PathHomeResolver
@@ -32,18 +32,16 @@ class PluginPageEnvironment @Inject constructor(
 ) {
     val changes: Flow<String> = combine(
         workspaceRepository.current,
-        modeHolder.mode,
+        modeHolder.activeBackend,
         connection.connectionState
     ) { _, _, _ -> contextKey() }.distinctUntilChanged()
 
     fun contextKey(): String {
-        val remote = connection.config.takeIf { modeHolder.currentMode() == ExecutionMode.REMOTE_SSH }
+        val backend = modeHolder.currentBackend()
         val identity = listOf(
-            modeHolder.currentMode().name,
-            workspaceRepository.currentPath(),
-            remote?.host.orEmpty(),
-            remote?.port?.toString().orEmpty(),
-            remote?.username.orEmpty()
+            backend.id,
+            backend.environmentCacheKey(),
+            workspaceRepository.currentPath()
         ).joinToString("\u0000")
         return MessageDigest.getInstance("SHA-256")
             .digest(identity.toByteArray(Charsets.UTF_8))
@@ -56,22 +54,32 @@ class PluginPageEnvironment @Inject constructor(
         .ifBlank { "workspace" }
 
     /**
-     * 当前工作区在插件可见路径空间里的根：远程直接用远端绝对路径，本地用容器内 `$HOME/workspace`。
+     * 当前工作区在插件可见路径空间里的根：远程直接用远端绝对路径，本地容器用 `$HOME/workspace`，
+     * 其它后端使用 [com.aicode.feature.agent.domain.container.ExecutionBackend.workspaceRootDisplay]。
      * 本地 `currentPath()` 是宿主路径，不能直接给插件。
      */
-    fun workspaceRoot(): String =
-        if (modeHolder.currentMode() == ExecutionMode.REMOTE_SSH) {
-            workspaceRepository.currentPath()
-        } else {
-            homeResolver.home().trimEnd('/') + "/workspace"
+    fun workspaceRoot(): String {
+        val backend = modeHolder.currentBackend()
+        val currentPath = workspaceRepository.currentPath()
+        return when {
+            backend.capabilities.isRemoteEnvironment ->
+                currentPath.ifBlank { backend.workspaceRootDisplay(currentPath) }
+            backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID ->
+                homeResolver.home().trimEnd('/') + "/workspace"
+            else ->
+                backend.workspaceRootDisplay(currentPath).ifBlank {
+                    homeResolver.home().trimEnd('/') + "/workspace"
+                }
         }
+    }
 
     fun watch(paths: PluginHostPaths, path: String, recursive: Boolean): Flow<JsonObject> {
         val key = contextKey()
+        val isRemote = modeHolder.capabilities().isRemoteEnvironment
         val target = paths.watchTarget(
             path = path,
             localFile = { containerPath ->
-                if (modeHolder.currentMode() == ExecutionMode.LOCAL_PROOT) {
+                if (!isRemote) {
                     pathMapper.resolveFile(containerPath)
                 } else {
                     null

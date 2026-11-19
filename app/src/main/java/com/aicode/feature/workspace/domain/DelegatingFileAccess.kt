@@ -1,5 +1,7 @@
 package com.aicode.feature.workspace.domain
 
+import com.aicode.feature.agent.domain.container.BackendExecutionContext
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import java.io.File
@@ -9,30 +11,48 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * [FileAccessProvider] 的委托层：同时持有本地与远程两套实现，每次方法调用时按
- * [ExecutionModeHolder.currentMode] 转发到对应实现。
+ * [FileAccessProvider] 的委托层：每次方法调用时按 [ExecutionBackendRegistry.currentBackend]
+ * 动态转发到当前激活执行后端的 [com.aicode.feature.agent.domain.container.ExecutionBackend.fileAccess]。
  *
- * 这样 Hilt 注入时机不再影响最终行为——无论 [FileAccessProvider] 在何时被首次注入，
- * 真正读写文件时才读取当前模式。
- *
- * 文件树添加的本机文件夹（[WorkspacePathMapper.LOCAL_FS_ROOT] 下的虚拟路径）在任何执行模式下
- * 都走本地实现：它们就是当前设备上的目录，与远程服务器无关。
+ * 文件树添加的本机文件夹（[WorkspacePathMapper.LOCAL_FS_ROOT] 下的虚拟路径）在任何执行后端下
+ * 都走本地实现 [localFileAccess]：它们就是当前设备上的目录，与远程或插件后端无关。
  */
 @Singleton
-class DelegatingFileAccess @Inject constructor(
-    private val modeHolder: ExecutionModeHolder,
+class DelegatingFileAccess private constructor(
+    private val executionBackendRegistry: ExecutionBackendRegistry?,
+    private val modeHolder: ExecutionModeHolder?,
     private val localFileAccess: LocalFileAccess,
     private val remoteSftpFileAccess: RemoteSftpFileAccess
 ) : FileAccessProvider {
 
-    private fun delegate(path: String): FileAccessProvider =
-        if (WorkspacePathMapper.isLocalFolderContainerPath(path) ||
-            modeHolder.currentMode() != ExecutionMode.REMOTE_SSH
-        ) {
-            localFileAccess
-        } else {
-            remoteSftpFileAccess
+    @Inject
+    constructor(
+        executionBackendRegistry: ExecutionBackendRegistry,
+        localFileAccess: LocalFileAccess,
+        remoteSftpFileAccess: RemoteSftpFileAccess
+    ) : this(executionBackendRegistry, null, localFileAccess, remoteSftpFileAccess)
+
+    /** 兼容旧单测构造。 */
+    constructor(
+        modeHolder: ExecutionModeHolder,
+        localFileAccess: LocalFileAccess,
+        remoteSftpFileAccess: RemoteSftpFileAccess
+    ) : this(null, modeHolder, localFileAccess, remoteSftpFileAccess)
+
+    private fun delegate(path: String): FileAccessProvider {
+        val binding = BackendExecutionContext.binding()
+        if (binding != null && executionBackendRegistry != null) {
+            binding.checkActive(executionBackendRegistry)
+            return if (WorkspacePathMapper.isLocalFolderContainerPath(path)) localFileAccess else binding.fileAccess
         }
+        if (WorkspacePathMapper.isLocalFolderContainerPath(path)) return localFileAccess
+        return executionBackendRegistry?.currentBackend()?.fileAccess
+            ?: if (modeHolder?.currentMode() == ExecutionMode.REMOTE_SSH) {
+                remoteSftpFileAccess
+            } else {
+                localFileAccess
+            }
+    }
 
     override fun backendFor(path: String): FileAccessProvider = delegate(path)
 
@@ -43,8 +63,14 @@ class DelegatingFileAccess @Inject constructor(
         delegate(path).cachedAgentConfigSnapshot(path, kind)
 
     override fun invalidateAgentConfigCache(path: String?) {
-        if (path == null) remoteSftpFileAccess.invalidateAgentConfigCache()
-        else delegate(path).invalidateAgentConfigCache(path)
+        if (path == null) {
+            remoteSftpFileAccess.invalidateAgentConfigCache()
+            executionBackendRegistry?.currentBackend()?.fileAccess
+                ?.takeIf { it !== remoteSftpFileAccess }
+                ?.invalidateAgentConfigCache(null)
+        } else {
+            delegate(path).invalidateAgentConfigCache(path)
+        }
     }
 
     override fun readFile(path: String): String = delegate(path).readFile(path)

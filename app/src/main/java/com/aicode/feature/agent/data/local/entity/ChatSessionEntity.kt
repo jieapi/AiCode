@@ -1,16 +1,18 @@
 package com.aicode.feature.agent.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.aicode.feature.agent.domain.model.AgentMode
 import com.aicode.feature.agent.domain.model.ChatSession
 import com.aicode.feature.agent.domain.model.GoalStatus
 import com.aicode.feature.agent.domain.model.ReasoningEffort
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
 
 @Entity(
     tableName = "chat_sessions",
-    indices = [Index(value = ["workspacePath"])]
+    indices = [Index(value = ["workspacePath"]), Index(value = ["backendInstanceId", "workspaceId"])]
 )
 data class ChatSessionEntity(
     @PrimaryKey val id: String,
@@ -38,14 +40,25 @@ data class ChatSessionEntity(
     /** 子代理会话：父会话 id；null 表示普通根会话。 */
     val parentId: String? = null,
     /** 子代理会话：派生子代理的类型（如 coder / researcher）；null 表示普通根会话。 */
-    val subagentType: String? = null
+    val subagentType: String? = null,
+    /** 会话绑定的工作流 ID；null 表示使用默认内置工作流。 */
+    val workflowId: String? = null,
+    /** 会话绑定的工作流持久化状态；null 表示无状态。 */
+    val workflowState: String? = null,
+    val backendInstanceId: String? = null,
+    val workspaceId: String? = null
 ) {
+    @get:Ignore
+    val workspaceRef: WorkspaceRef?
+        get() = backendInstanceId?.let { instance -> workspaceId?.let { WorkspaceRef(instance, it) } }
+
     fun toDomain(): ChatSession = ChatSession(
         id = id,
         title = title,
         createdAt = createdAt,
         updatedAt = updatedAt,
         workspacePath = workspacePath,
+        workspaceRef = workspaceRef,
         mode = runCatching { AgentMode.valueOf(mode) }.getOrDefault(AgentMode.BUILD),
         modeBeforePlan = modeBeforePlan?.let { runCatching { AgentMode.valueOf(it) }.getOrNull() },
         goal = goal,
@@ -61,7 +74,9 @@ data class ChatSessionEntity(
         lastInputTokens = lastInputTokens,
         isPinned = isPinned,
         parentId = parentId,
-        subagentType = subagentType
+        subagentType = subagentType,
+        workflowId = workflowId,
+        workflowState = workflowState
     )
 
     companion object {
@@ -71,6 +86,8 @@ data class ChatSessionEntity(
             createdAt = session.createdAt,
             updatedAt = session.updatedAt,
             workspacePath = session.workspacePath,
+            backendInstanceId = session.workspaceRef?.backendInstanceId,
+            workspaceId = session.workspaceRef?.workspaceId,
             mode = session.mode.name,
             modeBeforePlan = session.modeBeforePlan?.name,
             goal = session.goal,
@@ -86,7 +103,9 @@ data class ChatSessionEntity(
             lastInputTokens = session.lastInputTokens,
             isPinned = session.isPinned,
             parentId = session.parentId,
-            subagentType = session.subagentType
+            subagentType = session.subagentType,
+            workflowId = session.workflowId,
+            workflowState = session.workflowState
         )
     }
 }

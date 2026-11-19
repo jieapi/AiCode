@@ -1,7 +1,6 @@
 package com.aicode.feature.agent.domain.container
 
 import com.aicode.core.util.FileLogger
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import java.net.BindException
 import java.net.InetAddress
@@ -104,7 +103,7 @@ class PortForwardManager @Inject constructor(
         val host = remoteHost.trim().ifEmpty { "127.0.0.1" }
         if (host.any { it.isWhitespace() }) throw PortForwardException("PARAM_INVALID", "host 非法: $remoteHost")
 
-        if (executionModeHolder.currentMode() != ExecutionMode.REMOTE_SSH) {
+        if (!executionModeHolder.capabilities().portForward) {
             return mutex.withLock {
                 checkLimits(owner)
                 val info = PortForwardInfo(

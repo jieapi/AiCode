@@ -305,6 +305,8 @@ fun SettingsScreen(
     val modelMetadata by viewModel.modelMetadata.collectAsStateWithLifecycle()
     val containerProfiles by viewModel.profiles.collectAsStateWithLifecycle()
     val activeProfileId by viewModel.activeProfileId.collectAsStateWithLifecycle()
+    val pluginExecutionBackends by viewModel.pluginExecutionBackends.collectAsStateWithLifecycle()
+    val activeBackendId by viewModel.activeBackendId.collectAsStateWithLifecycle()
     val defaultContainerId by viewModel.defaultContainerId.collectAsStateWithLifecycle()
     val containerOsMap by viewModel.containerOsMap.collectAsStateWithLifecycle()
     val remoteConnections by viewModel.remoteConnections.collectAsStateWithLifecycle()
@@ -1489,6 +1491,9 @@ fun SettingsScreen(
                     showAddSheetExternal = showContainerAddSheet,
                     onDismissAddSheet = { showContainerAddSheet = false },
                     onSelect = { viewModel.setActiveContainerProfile(it) },
+                    pluginBackends = pluginExecutionBackends,
+                    activeBackendId = activeBackendId,
+                    onSelectPluginBackend = { viewModel.setActiveExecutionBackend(it) },
                     onSetDefaultContainer = { viewModel.setDefaultContainerId(it) },
                     onSaveCustom = { viewModel.saveCustomContainerProfile(it) },
                     onEditCustom = { viewModel.editCustomContainerProfile(it) },

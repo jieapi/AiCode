@@ -141,12 +141,42 @@ data class PluginProviderDefinition(
     val key: String get() = pluginContributionName(pluginId, localId)
 }
 
-/** 已解析的插件会话源：宿主通过 handlers 拉取会话列表与消息。 */
-data class PluginSessionSourceDefinition(
+/** 已解析的插件执行后端定义；由适配器转成 [com.aicode.feature.agent.domain.container.ExecutionBackend]。 */
+data class PluginExecutionBackendDefinition(
+    val pluginId: String,
+    val localId: String,
+    val name: LocalizedText,
+    val description: LocalizedText,
+    val capabilities: PluginExecutionBackendCapabilitiesRef,
+    val handlers: PluginExecutionBackendHandlersRef,
+    val runtime: PluginRuntime,
+    val pluginVersion: String
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
+/** 已解析的插件 Agent 工作流定义；由适配器转成 [com.aicode.feature.agent.domain.workflow.AgentWorkflow]。 */
+data class PluginWorkflowDefinition(
     val pluginId: String,
     val localId: String,
     val title: LocalizedText,
-    val handlers: PluginSessionSourceHandlersRef,
+    val description: LocalizedText,
+    val capabilities: PluginWorkflowCapabilitiesRef,
+    val handlers: PluginWorkflowHandlersRef,
+    val runtime: PluginRuntime,
+    val pluginVersion: String
+) {
+    val key: String get() = pluginContributionName(pluginId, localId)
+}
+
+/** 已解析的插件外部会话源定义。 */
+data class PluginExternalSessionDefinition(
+    val pluginId: String,
+    val localId: String,
+    val title: LocalizedText,
+    val description: LocalizedText,
+    val handlers: PluginExternalSessionHandlersRef,
+    val runtime: PluginRuntime,
     val pluginVersion: String
 ) {
     val key: String get() = pluginContributionName(pluginId, localId)
@@ -209,7 +239,9 @@ data class PluginContent(
     val hooks: List<PluginHook> = emptyList(),
     val mcp: List<PluginMcpServer> = emptyList(),
     val providers: List<PluginProviderDefinition> = emptyList(),
-    val sessionSources: List<PluginSessionSourceDefinition> = emptyList(),
+    val executionBackends: List<PluginExecutionBackendDefinition> = emptyList(),
+    val workflows: List<PluginWorkflowDefinition> = emptyList(),
+    val sessions: List<PluginExternalSessionDefinition> = emptyList(),
     val shizuku: PluginShizukuDefinition? = null,
     val overlay: PluginOverlayDefinition? = null,
     val backup: PluginBackupDefinition? = null,
@@ -247,7 +279,7 @@ object PluginContentLoader {
             loadUiEntry(dir, manifest.id, manifest.version.toString(), it, errors)
         }
         val runtime = manifest.runtime?.let { loadRuntime(dir, manifest.id, it, errors) }
-        if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty() || manifest.sessionSources.isNotEmpty()) && runtime == null) {
+        if ((manifest.tools.isNotEmpty() || manifest.hooks.isNotEmpty() || manifest.executionBackends.isNotEmpty() || manifest.workflows.isNotEmpty() || manifest.sessions.isNotEmpty()) && runtime == null) {
             errors += PluginError(PluginErrorCode.CONTENT_INVALID, "runtime")
         }
         val tools = manifest.tools.mapNotNull { loadTool(dir, manifest.id, it, runtime, errors) }
@@ -264,14 +296,52 @@ object PluginContentLoader {
                 pluginVersion = manifest.version.toString()
             )
         }
-        val sessionSources = manifest.sessionSources.map { source ->
-            PluginSessionSourceDefinition(
-                pluginId = manifest.id,
-                localId = source.id,
-                title = source.title,
-                handlers = source.handlers,
-                pluginVersion = manifest.version.toString()
-            )
+        val executionBackends = if (runtime != null) {
+            manifest.executionBackends.map { backend ->
+                PluginExecutionBackendDefinition(
+                    pluginId = manifest.id,
+                    localId = backend.id,
+                    name = backend.name,
+                    description = backend.description,
+                    capabilities = backend.capabilities,
+                    handlers = backend.handlers,
+                    runtime = runtime,
+                    pluginVersion = manifest.version.toString()
+                )
+            }
+        } else {
+            emptyList()
+        }
+        val workflows = if (runtime != null) {
+            manifest.workflows.map { workflow ->
+                PluginWorkflowDefinition(
+                    pluginId = manifest.id,
+                    localId = workflow.id,
+                    title = workflow.title,
+                    description = workflow.description,
+                    capabilities = workflow.capabilities,
+                    handlers = workflow.handlers,
+                    runtime = runtime,
+                    pluginVersion = manifest.version.toString()
+                )
+            }
+        } else {
+            emptyList()
+        }
+        val sessions = if (runtime != null) {
+            manifest.sessions.map { session ->
+                PluginExternalSessionDefinition(
+                    pluginId = manifest.id,
+                    localId = session.id,
+                    title = session.title,
+                    description = session.description,
+                    handlers = session.handlers,
+                    runtime = runtime,
+                    pluginVersion = manifest.version.toString()
+                )
+            }
+        } else {
+            emptyList()
         }
         val configPage = manifest.configPage?.let {
             loadConfigPage(dir, manifest.id, manifest.version.toString(), it, errors)
@@ -321,7 +391,9 @@ object PluginContentLoader {
                     hooks = hooks,
                     mcp = mcp,
                     providers = providers,
-                    sessionSources = sessionSources,
+                    executionBackends = executionBackends,
+                    workflows = workflows,
+                    sessions = sessions,
                     shizuku = shizuku,
                     overlay = overlay,
                     backup = backup,

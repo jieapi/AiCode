@@ -89,8 +89,6 @@ export type AicodeErrorCode =
   | 'MODE_UNSUPPORTED'
   | 'APPROVAL_NOT_FOUND'
   | 'NOT_REMEMBERABLE'
-  | 'SESSION_SOURCE_NOT_FOUND'
-  | 'SESSION_SOURCE_INVALID'
   // 模型
   | 'MODEL_ACCESS_NOT_DECLARED'
   | 'MODEL_NOT_AVAILABLE'
@@ -136,7 +134,16 @@ export type AicodeErrorCode =
   | 'OVERLAY_DENIED'
   | 'OVERLAY_LIMIT'
   | 'OVERLAY_SERVICE_FAILED'
-  | 'SURFACE_NOT_FOUND';
+  | 'SURFACE_NOT_FOUND'
+  // 执行后端与工作区
+  | 'BACKEND_NOT_FOUND'
+  | 'WORKSPACE_INVALID'
+  // 工作流
+  | 'WORKFLOW_NOT_FOUND'
+  | 'WORKFLOW_FAILED'
+  // 外部会话源
+  | 'SESSION_SOURCE_NOT_FOUND'
+  | 'SESSION_SOURCE_INVALID';
 
 /** 宿主确认类方法的统一返回。 */
 export interface OkResult {
@@ -382,53 +389,6 @@ export interface ChatAcceptedResult {
 export interface ChatDraftAcceptedResult {
   sessionId?: string;
   accepted: boolean;
-}
-
-/** 插件会话源推送给宿主的会话摘要；sessionId 由插件生成，宿主只保存与回传。 */
-export interface SessionSourceSession {
-  sessionId: string;
-  title?: string;
-  status?: string;
-  running?: boolean;
-  updatedAt?: number | null;
-  hostName?: string;
-  workspaceTitle?: string;
-  group?: string;
-  capabilities?: string[];
-  /** 本插件声明的提供商局部 ID。 */
-  providerId?: string;
-  model?: string;
-  executionMode?: 'remote';
-}
-
-export interface SessionSourceMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'tool';
-  createdAt?: number;
-  status?: string;
-  blocks: Array<Record<string, unknown> & {type: string}>;
-}
-
-export interface SessionSourcePage {
-  sessionId?: string;
-  title?: string;
-  status?: string;
-  messages: SessionSourceMessage[];
-  hasMore?: boolean;
-  nextCursor?: unknown;
-}
-
-export interface SessionSourceEvent {
-  sourceId: string;
-  sessionId: string;
-  type: 'tool-start' | 'tool-output' | 'tool-end' | 'message' | 'turn-end';
-  callId?: string;
-  name?: string;
-  input?: unknown;
-  output?: unknown;
-  isError?: boolean;
-  message?: SessionSourceMessage;
-  revision?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +743,275 @@ export interface PortForwardOptions {
 }
 
 // ---------------------------------------------------------------------------
+// 执行后端与工作区
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceItem {
+  id: string;
+  name: string;
+  path: string;
+  group?: string;
+  available?: boolean;
+  capabilities?: {
+    createChild?: boolean;
+    delete?: boolean;
+    git?: boolean;
+  };
+}
+
+export type ExecutionBackendFsOp =
+  | 'readFile'
+  | 'writeFile'
+  | 'readBytes'
+  | 'writeBytes'
+  | 'listFiles'
+  | 'listFilesRecursive'
+  | 'stat'
+  | 'fingerprint'
+  | 'permissions'
+  | 'resolvePath'
+  | 'delete'
+  | 'deleteRecursively'
+  | 'rename'
+  | 'copy'
+  | 'move'
+  | 'mkdirs';
+
+/** 写入内容通过 IPC 二进制 payload 传输，不放在参数对象中。 */
+export type ExecutionBackendFsParams = { backendId: string; path: string } & (
+  | { op: 'readFile' | 'listFiles' | 'stat' | 'fingerprint' | 'permissions' | 'delete' | 'deleteRecursively' | 'mkdirs' }
+  | { op: 'readBytes'; maxBytes?: number }
+  | { op: 'writeFile'; overwrite: boolean; encoding: string }
+  | { op: 'writeBytes'; overwrite: boolean }
+  | { op: 'listFilesRecursive'; maxDepth: number }
+  | { op: 'resolvePath'; followFinalLink: boolean }
+  | { op: 'rename'; newPath: string }
+  | { op: 'copy' | 'move'; newPath: string; overwrite: boolean }
+);
+
+export interface ExecutionBackendExecParams {
+  backendId: string;
+  command: string;
+  projectPath?: string;
+  timeoutMs: number;
+  unbounded?: boolean;
+}
+
+export type ExecutionBackendTerminalOp =
+  | 'start'
+  | 'status'
+  | 'send'
+  | 'write'
+  | 'writeBytes'
+  | 'read'
+  | 'stream'
+  | 'list'
+  | 'close';
+
+export type ExecutionBackendTerminalParams = { backendId: string } & (
+  | { op: 'start'; command: string; title?: string; notify?: boolean; sourceSessionId?: string; ownerPluginId?: string }
+  | { op: 'status' | 'writeBytes' | 'read' | 'stream' | 'close'; tabId: string }
+  | { op: 'send'; tabId: string; input: string; appendNewline: boolean }
+  | { op: 'write'; tabId: string; text: string }
+  | { op: 'list' }
+);
+
+export interface ExecutionBackendWorkspaceParams {
+  backendId?: string;
+  workspaceId?: string;
+  name?: string;
+  path?: string;
+  group?: string;
+  parentId?: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface ExecutionBackendHealthResult {
+  ok: boolean;
+  message?: string;
+  latencyMs?: number;
+  details?: JsonObject;
+}
+
+export interface ExecutionBackendInvokeParams<TArgs = JsonObject> {
+  backendId?: string;
+  handler?: string;
+  capability?: string;
+  args?: TArgs;
+}
+
+// ---------------------------------------------------------------------------
+// 工作流
+// ---------------------------------------------------------------------------
+
+export interface WorkflowCapabilities {
+  streaming?: boolean;
+  tools?: boolean;
+  compaction?: boolean;
+  titleGeneration?: boolean;
+}
+
+export interface WorkflowHistoryMessage {
+  id?: string;
+  role: 'user' | 'assistant' | 'tool' | 'system' | (string & {});
+  content: string;
+  timestamp?: number;
+  toolName?: string;
+  toolCallId?: string;
+  toolCalls?: ChatToolCall[];
+  reasoning?: string;
+  isError?: boolean;
+}
+
+export interface WorkflowTurnRequest {
+  sessionId: string;
+  turnId: string;
+  userRequest: string;
+  mode: ChatMode | (string & {});
+  workspacePath: string;
+  providerId?: string;
+  model?: string;
+  reasoningEffort?: string;
+  workflowState?: JsonObject;
+  recentMessages?: WorkflowHistoryMessage[];
+}
+
+export interface WorkflowTurnCancelParams {
+  sessionId: string;
+  turnId: string;
+  reason?: string;
+}
+
+export interface WorkflowCompactParams {
+  sessionId: string;
+  workspacePath?: string;
+  providerId?: string;
+  model?: string;
+  workflowState?: JsonObject;
+  messages?: WorkflowHistoryMessage[];
+  targetTokens?: number;
+  reason?: string;
+}
+
+export interface WorkflowGenerateTitleParams {
+  sessionId: string;
+  userRequest?: string;
+  messages?: WorkflowHistoryMessage[];
+  providerId?: string;
+  model?: string;
+  workspacePath?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 外部会话源
+// ---------------------------------------------------------------------------
+
+export interface ExternalSessionSummary {
+  sessionId: string;
+  title?: string;
+  status?: string;
+  running?: boolean;
+  updatedAt?: number | null;
+  group?: string;
+  isPinned?: boolean;
+  workflowId?: string;
+  backendId?: string;
+  workspaceId?: string;
+  providerId?: string;
+  model?: string;
+}
+
+export interface ExternalSessionMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'tool';
+  createdAt?: number;
+  status?: string;
+  blocks: Array<Record<string, unknown> & { type: string }>;
+}
+
+export interface ExternalSessionPage {
+  sessionId?: string;
+  title?: string;
+  status?: string;
+  messages: ExternalSessionMessage[];
+  hasMore?: boolean;
+  nextCursor?: JsonValue;
+}
+
+export type WorkflowStreamEvent =
+  | { type: 'assistant.delta'; text: string; messageId?: string }
+  | { type: 'reasoning.delta'; text: string; messageId?: string }
+  | {
+      type: 'assistant.message';
+      content: string;
+      reasoning?: string;
+      messageId?: string;
+      toolCalls?: ChatToolCall[];
+    }
+  | { type: 'tool.preparing'; callId: string; toolName: string }
+  | {
+      type: 'tool.started';
+      callId: string;
+      toolName: string;
+      arguments?: JsonObject | string;
+    }
+  | { type: 'tool.progress'; callId: string; toolName?: string; chunk: string }
+  | {
+      type: 'tool.finished';
+      callId: string;
+      toolName?: string;
+      status: ToolResultStatus;
+      result?: JsonValue;
+      error?: string;
+      durationMs?: number;
+    }
+  | {
+      type: 'retrying';
+      attempt: number;
+      maxRetries: number;
+      code?: string;
+      message?: string;
+      statusCode?: number;
+      delayMs?: number;
+    }
+  | { type: 'keySwitched'; index: number; total: number; providerId?: string }
+  | {
+      type: 'contextUsage';
+      inputTokens: number;
+      outputTokens?: number;
+      cachedInputTokens?: number;
+      contextLimit?: number;
+    }
+  | { type: 'compaction.started'; reason?: string }
+  | {
+      type: 'compaction.finished';
+      summary?: string;
+      compactedCount?: number;
+      workflowState?: JsonObject;
+    }
+  | { type: 'compaction.failed'; message: string; code?: string }
+  | { type: 'modeChanged'; mode: ChatMode | (string & {}); reason?: string }
+  | {
+      type: 'completed';
+      content?: string;
+      workflowState?: JsonObject;
+      usage?: {
+        input: number;
+        output: number;
+        cachedInput?: number;
+        cacheCreation?: number;
+      };
+      durationMs?: number;
+    }
+  | {
+      type: 'failed';
+      message: string;
+      code?: string;
+      recoverable?: boolean;
+      partialContent?: string;
+    };
+
+// ---------------------------------------------------------------------------
 // 方法表
 // ---------------------------------------------------------------------------
 
@@ -907,33 +1136,6 @@ export interface HostMethodMap {
     result: OkResult;
   };
 
-  // 插件会话源（需清单声明 contributes.sessionSources）
-  'host.sessionSource.setSessions': {
-    params: { sourceId: string; sessions: SessionSourceSession[] };
-    result: OkResult;
-  };
-  'host.sessionSource.setMessages': {
-    params: {sourceId: string; sessionId: string; page: SessionSourcePage; revision?: number};
-    result: OkResult;
-  };
-  'host.sessionSource.pushEvent': {
-    params: SessionSourceEvent;
-    result: OkResult;
-  };
-  'host.sessionSource.setLoading': {
-    params: { sourceId: string; loading: boolean };
-    result: OkResult;
-  };
-  'host.sessionSource.setError': {
-    params: { sourceId: string; error?: string | null };
-    result: OkResult;
-  };
-  /** 设置当前插件会话的思考气泡；visible=false 时关闭。 */
-  'host.sessionSource.setThinking': {
-    params: { sourceId: string; sessionId: string; visible: boolean; text?: string };
-    result: OkResult;
-  };
-
   // 模型句柄（需清单声明 contributes.modelAccess）
   'host.model.listProviders': {
     params: NoParams;
@@ -1015,6 +1217,46 @@ export interface HostMethodMap {
   'host.ports.forward': { params: PortForwardOptions; result: PortForwardInfo };
   'host.ports.close': { params: { id: string }; result: { closed: boolean } };
   'host.ports.list': { params: NoParams; result: PortForwardInfo[] };
+
+  // 工作区（执行后端）
+  'host.workspaces.upsert': {
+    params: { backendId: string; workspaces: WorkspaceItem[] };
+    result: OkResult;
+  };
+  'host.workspaces.remove': {
+    params: { backendId: string; workspaceIds: string[] };
+    result: OkResult;
+  };
+  'host.workspaces.set': {
+    params: { backendId: string; workspaces: WorkspaceItem[] };
+    result: OkResult;
+  };
+
+  // 外部会话源
+  'host.sessions.upsert': {
+    params: { sourceId: string; sessions: ExternalSessionSummary[] };
+    result: OkResult;
+  };
+  'host.sessions.remove': {
+    params: { sourceId: string; sessionIds: string[] };
+    result: OkResult;
+  };
+  'host.sessions.replaceAll': {
+    params: { sourceId: string; sessions: ExternalSessionSummary[] };
+    result: OkResult;
+  };
+  'host.sessions.setLoading': {
+    params: { sourceId: string; loading: boolean };
+    result: OkResult;
+  };
+  'host.sessions.setError': {
+    params: { sourceId: string; error?: string | null };
+    result: OkResult;
+  };
+  'host.sessions.setThinking': {
+    params: { sourceId: string; sessionId: string; visible: boolean; text?: string };
+    result: OkResult;
+  };
 }
 
 /**

@@ -1,6 +1,8 @@
 package com.aicode.core.watch
 
 import android.os.FileObserver
+import com.aicode.feature.agent.domain.container.BuiltinLocalProotBackend
+import com.aicode.feature.agent.domain.container.BuiltinRemoteSshBackend
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
@@ -86,6 +88,10 @@ class FileChangeHubTest {
         observerDispatcher: CoroutineDispatcher = mainDispatcher
     ): FileChangeHub {
         every { executionModeHolder.currentMode() } returns mode
+        every { executionModeHolder.capabilities() } returns when (mode) {
+            ExecutionMode.LOCAL_PROOT -> BuiltinLocalProotBackend.CAPABILITIES
+            ExecutionMode.REMOTE_SSH -> BuiltinRemoteSshBackend.CAPABILITIES
+        }
         every { workspaceRepository.currentPath() } returns workspace
         return FileChangeHub(
             workspaceRepository,

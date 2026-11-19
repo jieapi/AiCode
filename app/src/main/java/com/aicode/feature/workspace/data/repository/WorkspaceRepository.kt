@@ -10,30 +10,49 @@ import com.aicode.core.datastore.preferencesCorruptionHandler
 import com.aicode.R
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ConnectionState
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
+import com.aicode.feature.agent.domain.container.WorkspaceDiscoveryMode
 import com.aicode.feature.agent.domain.session.SessionUseCase
 import com.aicode.feature.credentials.data.CredentialInjectSettingsRepository
 import com.aicode.feature.credentials.domain.repository.CredentialRepository
-import com.aicode.feature.settings.data.repository.ExecutionMode
-import com.aicode.feature.settings.data.repository.ExecutionModeHolder
+import com.aicode.feature.plugin.runtime.PluginExecutionBackendAdapter
+import com.aicode.feature.plugin.runtime.PluginWorkspaceRegistry
 import com.aicode.feature.settings.data.repository.GeneralSettingsRepository
 import com.aicode.feature.workspace.domain.PathHomeResolver
 import com.aicode.feature.workspace.domain.UriPathResolver
 import com.aicode.feature.workspace.domain.model.Workspace
 import com.aicode.feature.workspace.domain.model.WorkspaceType
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.util.Comparator
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,19 +70,91 @@ private val Context.workspaceDataStore by preferencesDataStore(
  * **远程模式**：工作区 = 远程 SSH 服务器上 `remoteWorkspacePath` 下的子文件夹。
  * 列表/新建/删除通过 SFTP 操作远程目录，[Workspace.path] 为远程绝对路径。
  *
- * 当前选中的工作区名持久化在 DataStore 中，重启后保留（本地/远程共用同一份名字）。
+ * 当前选择与内置工作区 ID 按后端实例持久化；路径仅用于定位目录。
  */
 @Singleton
-class WorkspaceRepository @Inject constructor(
-    @param:ApplicationContext private val context: Context,
-    private val executionModeHolder: ExecutionModeHolder,
+class WorkspaceRepository internal constructor(
+    private val context: Context,
+    private val executionBackendRegistry: ExecutionBackendRegistry,
+    private val pluginWorkspaceRegistry: PluginWorkspaceRegistry,
     private val remoteSshConnection: RemoteSshConnection,
     private val pathHomeResolver: PathHomeResolver,
     private val sessionUseCase: SessionUseCase,
     private val generalSettingsRepository: GeneralSettingsRepository,
     private val credentialInjectSettings: CredentialInjectSettingsRepository,
-    private val credentialRepository: CredentialRepository
+    private val credentialRepository: CredentialRepository,
+    private val scope: CoroutineScope
 ) {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        executionBackendRegistry: ExecutionBackendRegistry,
+        pluginWorkspaceRegistry: PluginWorkspaceRegistry,
+        remoteSshConnection: RemoteSshConnection,
+        pathHomeResolver: PathHomeResolver,
+        sessionUseCase: SessionUseCase,
+        generalSettingsRepository: GeneralSettingsRepository,
+        credentialInjectSettings: CredentialInjectSettingsRepository,
+        credentialRepository: CredentialRepository
+    ) : this(
+        context = context,
+        executionBackendRegistry = executionBackendRegistry,
+        pluginWorkspaceRegistry = pluginWorkspaceRegistry,
+        remoteSshConnection = remoteSshConnection,
+        pathHomeResolver = pathHomeResolver,
+        sessionUseCase = sessionUseCase,
+        generalSettingsRepository = generalSettingsRepository,
+        credentialInjectSettings = credentialInjectSettings,
+        credentialRepository = credentialRepository,
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    )
+
+    private class BackendOperation(
+        val backend: ExecutionBackend,
+        val instanceId: String,
+        val generation: Long
+    ) {
+        val mutex = Mutex()
+        var initialized = false
+    }
+
+    private val operationLock = Any()
+    private var nextGeneration = 0L
+    @Volatile
+    private var currentOperation = activeBackend().let { BackendOperation(it, it.instanceId, 0L) }
+
+    private fun operation(): BackendOperation = currentOperation
+
+    private suspend fun checkCurrent(operation: BackendOperation) {
+        currentCoroutineContext().ensureActive()
+        requireCurrent(operation)
+    }
+
+    private fun requireCurrent(operation: BackendOperation) {
+        val backend = activeBackend()
+        if (currentOperation !== operation || operation.generation != currentOperation.generation ||
+            backend !== operation.backend || backend.instanceId != operation.instanceId
+        ) {
+            throw CancellationException("Workspace backend changed")
+        }
+    }
+
+    private suspend fun publish(operation: BackendOperation, update: () -> Unit) {
+        currentCoroutineContext().ensureActive()
+        synchronized(operationLock) {
+            requireCurrent(operation)
+            update()
+        }
+    }
+
+    private suspend fun <T> backendCall(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "Workspace backend operation failed", e)
+        null
+    }
     /** 校验失败时给 UI 的提示文案（如目录不可写/无法解析），消费后置 null。 */
     private val _addError = MutableStateFlow<String?>(null)
     val addError: StateFlow<String?> = _addError.asStateFlow()
@@ -98,20 +189,23 @@ class WorkspaceRepository @Inject constructor(
             while ("$base ($i)" in existing) i++
             return "$base ($i)"
         }
+
+        /** 合并主动扫描与插件注册工作区：按 [Workspace.id] 去重，注册项优先覆盖同 ID 扫描项。 */
+        internal fun mergeWorkspaces(
+            scanned: List<Workspace>,
+            registered: List<Workspace>
+        ): List<Workspace> {
+            if (registered.isEmpty()) return scanned
+            if (scanned.isEmpty()) return registered
+            val merged = LinkedHashMap<String, Workspace>(scanned.size + registered.size)
+            scanned.forEach { ws -> merged[ws.id] = ws }
+            registered.forEach { ws -> merged[ws.id] = ws }
+            return merged.values.toList()
+        }
     }
 
-    private val currentNameKey = stringPreferencesKey("current_workspace_name")
-
-    /**
-     * 当前工作区名按模式分开存：本地沿用原 key，远程按服务器（host:port）单独存。
-     * 共用一个 key 时，切到远程会把本地选中的工作区名覆盖成远程的，切回本地就丢了。
-     */
-    private fun currentNameKeyForMode(): androidx.datastore.preferences.core.Preferences.Key<String> {
-        if (isLocal()) return currentNameKey
-        val cfg = remoteSshConnection.config
-        val suffix = if (cfg != null) "${cfg.host}:${cfg.port}" else ""
-        return stringPreferencesKey("current_workspace_name_remote_$suffix")
-    }
+    private fun currentWorkspaceKey(operation: BackendOperation) =
+        stringPreferencesKey("current_workspace_ref_${operation.instanceId}")
     private val externalWarningDismissedKey = booleanPreferencesKey("external_workspace_warning_dismissed")
     val externalWarningDismissed = context.workspaceDataStore.data
         .map { it[externalWarningDismissedKey] ?: false }
@@ -153,67 +247,161 @@ class WorkspaceRepository @Inject constructor(
         _initError.value = null
     }
 
-    /** 扫描并恢复上次选中的工作区；首次启动本地模式会创建默认工作区。应在 App/ViewModel 启动时调用一次。 */
+    init {
+        scope.launch {
+            pluginWorkspaceRegistry.workspacesByBackend
+                .drop(1)
+                .collect {
+                    try {
+                        handlePluginWorkspacesChanged()
+                    } catch (e: CancellationException) {
+                        currentCoroutineContext().ensureActive()
+                    }
+                }
+        }
+    }
+
+    /** 扫描并恢复上次选中的工作区；首次启动按后端发现模式决定是否创建默认工作区。应在 App/ViewModel 启动时调用一次。 */
     suspend fun initialize() = withContext(Dispatchers.IO) {
-        // 远程模式：等 SSH 连接就绪后再列工作区，避免启动时序竞争
-        if (!isLocal()) {
-            waitForConnection()
-            ensureRemoteWorkspaceRoot()
+        val operation = synchronized(operationLock) {
+            val backend = activeBackend()
+            BackendOperation(backend, backend.instanceId, ++nextGeneration).also {
+                currentOperation = it
+                _current.value = null
+                _workspaces.value = emptyList()
+                _initError.value = null
+            }
         }
-        // 清掉上一个模式遗留的当前工作区：它不属于本模式的列表，留着会让下面的可达性校验
-        // 误判为“当前工作区失效”而回退，并把本模式已保存的选择覆盖掉。
-        _current.value = null
-        refreshWorkspaces()
+        val backend = operation.backend
+        if (isBuiltinRemoteSsh(backend)) waitForConnection(operation)
+        refreshAndRestore(operation)
+        val target = current.value?.takeIf { it.instanceId == operation.instanceId }
+        val location = when {
+            isBuiltinLocal(backend) -> projectsRoot.absolutePath
+            isBuiltinRemoteSsh(backend) -> remoteSshConnection.config?.remoteWorkspacePath.orEmpty()
+            else -> backend.displayName
+        }
+        FileLogger.i(TAG, "工作区初始化完成，后端: ${backend.id}，当前: ${target?.name}，根目录: $location")
+    }
 
-        // 没有可用工作区时创建默认工作区（本地/远程一致），保证 AI 始终有可用目录；
-        // 全部工作区失联（如唯一外部目录被删除）也走这里，避免 currentPath 回退到父目录。
+    private suspend fun refreshAndRestore(operation: BackendOperation) {
+        val backend = operation.backend
+        checkCurrent(operation)
+        if (isBuiltinRemoteSsh(backend)) ensureRemoteWorkspaceRoot(operation)
+        refreshWorkspaces(operation)
+
         if (_workspaces.value.none { it.available }) {
-            val created = if (isLocal()) createLocalFallbackWorkspace() else {
-                val fallbackName = uniqueName(DEFAULT_WORKSPACE, _workspaces.value.map { it.name }.toSet())
-                createWorkspace(fallbackName)
-            }
-            refreshWorkspaces()
-            if (!isLocal() && created == null && remoteSshConnection.isConnected()) {
-                _initError.value = context.getString(R.string.workspace_remote_default_create_failed)
+            when (backend.capabilities.workspaceDiscovery) {
+                WorkspaceDiscoveryMode.REGISTER -> {
+                    // REGISTER 模式下列表暂时为空时等待插件主动推送，不强行创建本地 fallback 目录
+                }
+                WorkspaceDiscoveryMode.SCAN, WorkspaceDiscoveryMode.HYBRID -> {
+                    when {
+                        isBuiltinLocal(backend) -> createLocalFallbackWorkspace(operation)
+                        isBuiltinRemoteSsh(backend) -> {
+                            val fallbackName = uniqueName(DEFAULT_WORKSPACE, _workspaces.value.map { it.name }.toSet())
+                            checkCurrent(operation)
+                            val created = createWorkspace(operation, fallbackName)
+                            if (created == null && remoteSshConnection.isConnected()) {
+                                publish(operation) {
+                                    _initError.value = context.getString(R.string.workspace_remote_default_create_failed)
+                                }
+                            }
+                        }
+                        else -> {
+                            val adapter = backend as? PluginExecutionBackendAdapter
+                            if (adapter != null && adapter.definition.handlers.workspaceCreate != null) {
+                                val fallbackName = uniqueName(DEFAULT_WORKSPACE, _workspaces.value.map { it.name }.toSet())
+                                val created = backendCall { adapter.createWorkspace(fallbackName) }
+                                checkCurrent(operation)
+                                if (created != null) {
+                                    refreshWorkspaces(operation)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        val savedName = context.workspaceDataStore.data.first()[currentNameKeyForMode()]
-        val saved = savedName?.let { name -> _workspaces.value.firstOrNull { it.name == name } }
+        operation.mutex.withLock {
+            checkCurrent(operation)
+            if (_current.value == null) restoreAndActivate(operation)
+            operation.initialized = true
+        }
+    }
+
+    private suspend fun restoreAndActivate(operation: BackendOperation) {
+        val target = restoreTargetWorkspace(operation)
+        onWorkspaceActivated(operation, target)
+        publish(operation) { _current.value = target }
+    }
+
+    private suspend fun restoreTargetWorkspace(operation: BackendOperation): Workspace? {
+        val savedKey = context.workspaceDataStore.data.first()[currentWorkspaceKey(operation)]
+        checkCurrent(operation)
+        val saved = savedKey?.let { key ->
+            _workspaces.value.firstOrNull { it.id == key && it.instanceId == operation.instanceId }
+        }
         val target = saved?.takeIf { it.available }
             ?: _workspaces.value.firstOrNull { it.available }
         if (saved != null && !saved.available) {
-            _initError.value = target?.let {
-                context.getString(R.string.workspace_unavailable_fallback, saved.name, it.name)
-            } ?: context.getString(R.string.workspace_unavailable_current, saved.name)
+            publish(operation) {
+                _initError.value = target?.let {
+                    context.getString(R.string.workspace_unavailable_fallback, saved.name, it.name)
+                } ?: context.getString(R.string.workspace_unavailable_current, saved.name)
+            }
             FileLogger.w(TAG, "上次工作区不可用，回退: ${saved.name} -> ${target?.name}")
         }
-        _current.value = target
-        val location = if (isLocal()) projectsRoot.absolutePath else remoteSshConnection.config?.remoteWorkspacePath ?: ""
-        FileLogger.i(TAG, "工作区初始化完成，当前: ${target?.name}，根目录: $location")
-        // 远程模式：选中工作区后更新符号链接，让 Bash 的 ~/workspace 指向当前工作区
-        if (!isLocal() && target != null) {
-            remoteSshConnection.updateWorkspaceSymlink(target.path)
-            syncRemoteCredentials(target.path)
+        return target
+    }
+
+    private suspend fun onWorkspaceActivated(operation: BackendOperation, target: Workspace?) {
+        checkCurrent(operation)
+        val backend = operation.backend
+        if (target == null || target.instanceId != operation.instanceId) return
+        when {
+            isBuiltinRemoteSsh(backend) -> {
+                remoteSshConnection.updateWorkspaceSymlink(target.path)
+                checkCurrent(operation)
+                syncRemoteCredentials(operation, target.path)
+            }
+            !isBuiltinLocal(backend) -> {
+                (backend as? PluginExecutionBackendAdapter)?.let { adapter ->
+                    backendCall { adapter.selectWorkspace(target) }
+                    checkCurrent(operation)
+                }
+            }
         }
     }
 
-    private suspend fun syncRemoteCredentials(workspacePath: String) {
+    private suspend fun syncRemoteCredentials(operation: BackendOperation, workspacePath: String) {
         val config = remoteSshConnection.config ?: return
         val key = credentialInjectSettings.serverKey(config.host, config.port)
         if (!credentialInjectSettings.isAutoInjectEnabled(key)) return
-        remoteSshConnection.uploadGitCredentialConfig(credentialRepository.getAll().first(), workspacePath)
+        val credentials = credentialRepository.getAll().first()
+        checkCurrent(operation)
+        remoteSshConnection.uploadGitCredentialConfig(credentials, workspacePath)
     }
 
-    private fun isLocal(): Boolean =
-        executionModeHolder.currentMode() != ExecutionMode.REMOTE_SSH
+    private fun activeBackend(): ExecutionBackend = executionBackendRegistry.currentBackend()
 
-    /** 远程模式下等待 SSH 连接就绪（最多 5 秒），避免启动时序竞争。 */
-    /** 远程模式下挂起等待 SSH 连接就绪（CONNECTED）；连接失败（FAILED）则提前返回，保持空工作区。 */
-    private suspend fun waitForConnection() {
-        val state = remoteSshConnection.connectionState.first {
-            it == ConnectionState.CONNECTED || it == ConnectionState.FAILED
+    private fun isBuiltinLocal(backend: ExecutionBackend = activeBackend()): Boolean =
+        backend.id == ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+
+    private fun isBuiltinRemoteSsh(backend: ExecutionBackend = activeBackend()): Boolean =
+        backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+
+    private suspend fun waitForConnection(operation: BackendOperation) {
+        val state = withTimeoutOrNull(5_000) {
+            combine(remoteSshConnection.connectionState, executionBackendRegistry.activeBackend) { state, backend ->
+                if (backend !== operation.backend || backend.instanceId != operation.instanceId) {
+                    throw CancellationException("Workspace backend changed")
+                }
+                state
+            }.first { it == ConnectionState.CONNECTED || it == ConnectionState.FAILED }
         }
+        checkCurrent(operation)
         if (state == ConnectionState.FAILED) {
             FileLogger.w(TAG, "SSH 连接失败，工作区保持空")
         }
@@ -221,15 +409,16 @@ class WorkspaceRepository @Inject constructor(
 
     /** 远程模式：确保 remoteWorkspacePath 存在（用户填写的路径可能尚不存在），不存在则 mkdir -p 创建。
      *  @return 是否成功；连接不可用时不提示直接返回 false。 */
-    private suspend fun ensureRemoteWorkspaceRoot(): Boolean {
+    private suspend fun ensureRemoteWorkspaceRoot(operation: BackendOperation): Boolean {
         val cfg = remoteSshConnection.config ?: return false
         if (!remoteSshConnection.isConnected()) return false
         val wsRoot = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
         if (wsRoot.isEmpty()) return false
         val exit = execRemoteExit("mkdir -p ${shellQuote(wsRoot)}")
+        checkCurrent(operation)
         if (exit != 0) {
             FileLogger.w(TAG, "创建远程工作区根目录失败: $wsRoot (exit=$exit)")
-            _initError.value = context.getString(R.string.workspace_remote_root_create_failed)
+            publish(operation) { _initError.value = context.getString(R.string.workspace_remote_root_create_failed) }
             return false
         }
         return true
@@ -237,43 +426,143 @@ class WorkspaceRepository @Inject constructor(
 
     /** 重新扫描工作区可用性（打开面板、拔插存储后调用），失联项置灰并在必要时回退当前工作区。 */
     suspend fun refreshAvailability() = withContext(Dispatchers.IO) {
-        refreshWorkspaces()
+        val operation = operation()
+        val initialized = operation.mutex.withLock { operation.initialized }
+        if (initialized) refreshAndRestore(operation)
     }
 
-    /** 重新读取工作区目录列表。本地扫 projectsRoot + 外部本地工作区，远程 exec ls remoteWorkspacePath。 */
-    private suspend fun refreshWorkspaces() {
-        _workspaces.value = if (isLocal()) refreshLocalWorkspaces() else refreshRemoteWorkspaces()
-        ensureCurrentReachable()
+    private suspend fun handlePluginWorkspacesChanged() {
+        val operation = operation()
+        val backend = operation.backend
+        val discovery = backend.capabilities.workspaceDiscovery
+        if (discovery != WorkspaceDiscoveryMode.REGISTER && discovery != WorkspaceDiscoveryMode.HYBRID) {
+            return
+        }
+        operation.mutex.withLock {
+            val discovered = discoverWorkspaces(operation)
+            publish(operation) { _workspaces.value = discovered }
+            if (_current.value != null) {
+                ensureCurrentReachable(operation)
+            } else if (operation.initialized) {
+                restoreAndActivate(operation)
+            }
+        }
+    }
+
+    /** 重新读取工作区目录列表。按后端发现模式（SCAN / REGISTER / HYBRID）获取并校验当前选中项。 */
+    private suspend fun refreshWorkspaces(operation: BackendOperation) {
+        operation.mutex.withLock {
+            checkCurrent(operation)
+            val discovered = discoverWorkspaces(operation)
+            publish(operation) { _workspaces.value = discovered }
+            ensureCurrentReachable(operation)
+        }
+    }
+
+    private suspend fun discoverWorkspaces(operation: BackendOperation): List<Workspace> {
+        checkCurrent(operation)
+        val backend = operation.backend
+        val discovered = when (backend.capabilities.workspaceDiscovery) {
+            WorkspaceDiscoveryMode.SCAN -> scanWorkspacesFor(backend)
+            WorkspaceDiscoveryMode.REGISTER -> pluginWorkspaceRegistry.workspacesFor(backend.id)
+            WorkspaceDiscoveryMode.HYBRID -> {
+                val scanned = scanWorkspacesFor(backend)
+                val registered = pluginWorkspaceRegistry.workspacesFor(backend.id)
+                mergeWorkspaces(scanned, registered)
+            }
+        }
+        checkCurrent(operation)
+        val bound = if (isBuiltinLocal(backend) || isBuiltinRemoteSsh(backend)) {
+            bindBuiltinWorkspaceIds(operation, discovered)
+        } else discovered.filter { it.id.isNotBlank() }.distinctBy { it.id }
+        return bound.map { it.copy(backendId = backend.id, instanceId = operation.instanceId) }
+    }
+
+    private fun builtinLocator(workspace: Workspace) = "${workspace.type.name}:${workspace.name}"
+
+    private suspend fun bindBuiltinWorkspaceIds(operation: BackendOperation, workspaces: List<Workspace>): List<Workspace> {
+        val key = stringPreferencesKey("workspace_ids_${operation.instanceId}")
+        var ids = emptyMap<String, String>()
+        context.workspaceDataStore.edit { prefs ->
+            checkCurrent(operation)
+            val stored = prefs[key]?.let { json.decodeFromString<Map<String, String>>(it) }.orEmpty()
+            ids = stored + workspaces.associate {
+                val locator = builtinLocator(it)
+                locator to (stored[locator] ?: UUID.randomUUID().toString())
+            }
+            prefs[key] = json.encodeToString(ids)
+        }
+        checkCurrent(operation)
+        return workspaces.map { it.copy(id = ids.getValue(builtinLocator(it))) }
+    }
+
+    private suspend fun forgetBuiltinWorkspaceId(operation: BackendOperation, target: Workspace) {
+        val key = stringPreferencesKey("workspace_ids_${operation.instanceId}")
+        context.workspaceDataStore.edit { prefs ->
+            checkCurrent(operation)
+            val stored = prefs[key]?.let { json.decodeFromString<Map<String, String>>(it) }.orEmpty()
+            prefs[key] = json.encodeToString(stored - builtinLocator(target))
+        }
+    }
+
+    private suspend fun scanWorkspacesFor(backend: ExecutionBackend): List<Workspace> = when (backend.id) {
+        ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID -> refreshLocalWorkspaces()
+        ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID -> refreshRemoteWorkspaces()
+        else -> (backend as? PluginExecutionBackendAdapter)?.let { adapter ->
+            backendCall { adapter.listWorkspaces() }.orEmpty()
+        }.orEmpty()
     }
 
     /**
      * 刷新后校验当前工作区：已被移除或不可用（目录被移动/删除）时回退到第一个可用工作区，
      * 并在实际发生切换时通过 [_initError] 提示用户。
      */
-    private suspend fun ensureCurrentReachable() {
-        val current = _current.value ?: return
-        val matched = _workspaces.value.firstOrNull { it.name == current.name }
-        if (matched != null && matched.available) return
+    private suspend fun ensureCurrentReachable(operation: BackendOperation) {
+        checkCurrent(operation)
+        val backend = operation.backend
+        val current = _current.value?.takeIf { it.instanceId == operation.instanceId } ?: return
+        val matched = _workspaces.value.firstOrNull { it.ref == current.ref }
+        if (matched != null && matched.available) {
+            if (matched != current) publish(operation) { _current.value = matched }
+            return
+        }
         var fallback = _workspaces.value.firstOrNull { it.available }
-        if (fallback == null && isLocal()) {
-            fallback = createLocalFallbackWorkspace()
+        if (fallback == null && isBuiltinLocal(backend)) {
+            fallback = createLocalFallbackWorkspaceLocked(operation)
         }
-        _current.value = fallback
+        publish(operation) { _current.value = fallback }
         context.workspaceDataStore.edit { prefs ->
-            val key = currentNameKeyForMode()
-            if (fallback != null) prefs[key] = fallback.name else prefs.remove(key)
+            checkCurrent(operation)
+            val key = currentWorkspaceKey(operation)
+            if (fallback != null) {
+                prefs[key] = fallback.id
+            } else {
+                prefs.remove(key)
+            }
         }
-        if (fallback != null && fallback.name != current.name) {
-            _initError.value = context.getString(R.string.workspace_unavailable_fallback, current.name, fallback.name)
+        checkCurrent(operation)
+        if (fallback != null && fallback.ref != current.ref) {
+            publish(operation) {
+                _initError.value = context.getString(R.string.workspace_unavailable_fallback, current.name, fallback.name)
+            }
+        }
+        if (fallback != null) {
+            onWorkspaceActivated(operation, fallback)
         }
         FileLogger.w(TAG, "当前工作区不可用，回退: ${current.name} -> ${fallback?.name}")
     }
 
-    private suspend fun createLocalFallbackWorkspace(): Workspace? {
+    private suspend fun createLocalFallbackWorkspace(operation: BackendOperation): Workspace? = operation.mutex.withLock {
+        createLocalFallbackWorkspaceLocked(operation)
+    }
+
+    private suspend fun createLocalFallbackWorkspaceLocked(operation: BackendOperation): Workspace? {
+        checkCurrent(operation)
         val fallbackName = uniqueName(DEFAULT_WORKSPACE, _workspaces.value.map { it.name }.toSet())
         val fallbackDir = File(projectsRoot, fallbackName)
         if (!fallbackDir.isDirectory && !fallbackDir.mkdirs()) return null
-        _workspaces.value = refreshLocalWorkspaces()
+        val discovered = discoverWorkspaces(operation)
+        publish(operation) { _workspaces.value = discovered }
         return _workspaces.value.firstOrNull { it.name == fallbackName && it.available }
     }
 
@@ -289,22 +578,27 @@ class WorkspaceRepository @Inject constructor(
 
     /** exec 列出 remoteWorkspacePath 下的子目录作为工作区（不用 SFTP，避免 sshj Buffer bug）。 */
     private suspend fun refreshRemoteWorkspaces(): List<Workspace> {
-        val cfg = remoteSshConnection.config ?: run {
-            FileLogger.w(TAG, "远程工作区列表失败：SSH 未配置")
-            return emptyList()
-        }
+        val cfg = remoteSshConnection.config ?: return emptyList()
+        if (!remoteSshConnection.isConnected()) return emptyList()
         val wsRoot = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
         return runCatching {
             // 目录名可含空格，不能交给 xargs/basename 按空白分词（会把 "new api" 拆成两条），
             // 用 glob 逐项原样输出目录名。
             val output = execRemote(
                 "cd ${shellQuote(wsRoot)} 2>/dev/null || exit 0; " +
-                    "for d in */; do [ -d \"\$d\" ] && printf '%s\\n' \"\${d%/}\"; done"
+                    "for d in */; do [ -d \"\$d\" ] && printf '%s\\0' \"\${d%/}\"; done"
             )
-            if (output.isBlank()) emptyList()
-            else output.lines().filter { it.isNotBlank() }
+            if (output.isEmpty()) emptyList()
+            else output.split('\u0000').filter { it.isNotEmpty() }
                 .sortedBy { it.lowercase() }
-                .map { Workspace(name = it, path = "$wsRoot/$it", type = WorkspaceType.REMOTE) }
+                .map {
+                    Workspace(
+                        name = it,
+                        path = "$wsRoot/$it",
+                        type = WorkspaceType.REMOTE,
+                        backendId = ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+                    )
+                }
         }.getOrElse {
             FileLogger.w(TAG, "远程工作区列表失败: $wsRoot", it)
             emptyList()
@@ -339,60 +633,92 @@ class WorkspaceRepository @Inject constructor(
             }
         }
 
-    /** 切换当前工作区并持久化。 */
-    suspend fun selectWorkspace(name: String) = withContext(Dispatchers.IO) {
-        val target = _workspaces.value.firstOrNull { it.name == name && it.available } ?: return@withContext
-        _current.value = target
-        context.workspaceDataStore.edit { it[currentNameKeyForMode()] = name }
-        FileLogger.i(TAG, "切换工作区: $name")
-        // 远程模式：切换后更新符号链接指向新工作区
-        if (!isLocal()) {
-            remoteSshConnection.updateWorkspaceSymlink(target.path)
-            syncRemoteCredentials(target.path)
+    @Deprecated("Pass WorkspaceRef to keep backend instance identity")
+    suspend fun selectWorkspace(id: String) = selectWorkspace(WorkspaceRef(activeBackend().instanceId, id))
+
+    suspend fun selectWorkspace(ref: WorkspaceRef) {
+        val operation = operation()
+        if (ref.backendInstanceId != operation.instanceId) return
+        withContext(Dispatchers.IO) {
+            operation.mutex.withLock {
+                checkCurrent(operation)
+                val target = _workspaces.value.firstOrNull { it.ref == ref && it.available } ?: return@withLock
+                onWorkspaceActivated(operation, target)
+                context.workspaceDataStore.edit {
+                    checkCurrent(operation)
+                    it[currentWorkspaceKey(operation)] = target.id
+                }
+                publish(operation) { _current.value = target }
+                FileLogger.i(TAG, "切换工作区: ${target.name} (${target.id})")
+            }
         }
     }
 
     /**
      * 新建工作区目录。名称会被清洗为安全的文件夹名。
-     * 本地模式 mkdirs projectsRoot/name；远程模式 SFTP mkdirs remoteWorkspacePath/name。
+     * 本地模式 mkdirs projectsRoot/name；远程模式 mkdirs remoteWorkspacePath/name；插件后端委托给 `workspaceCreate`。
      * @return 创建成功的 [Workspace]；名称非法或已存在返回 null。
      */
-    suspend fun createWorkspace(rawName: String): Workspace? = withContext(Dispatchers.IO) {
+    suspend fun createWorkspace(rawName: String): Workspace? {
+        val operation = operation()
+        val created = withContext(Dispatchers.IO) { createWorkspace(operation, rawName) }
+        checkCurrent(operation)
+        return created
+    }
+
+    private suspend fun createWorkspace(operation: BackendOperation, rawName: String): Workspace? {
+        val backend = operation.backend
+        checkCurrent(operation)
         val name = sanitize(rawName)
-        if (name.isEmpty()) {
+        if (name.isEmpty() || name == "." || name == "..") {
             FileLogger.w(TAG, "新建工作区失败：名称非法 '$rawName'")
-            return@withContext null
+            return null
         }
-        if (isLocal()) {
-            val dir = File(projectsRoot, name)
-            if (dir.exists() || _workspaces.value.any { it.name == name }) {
-                FileLogger.w(TAG, "新建工作区失败：已存在 '$name'")
-                return@withContext null
+        return when {
+            isBuiltinLocal(backend) -> {
+                val dir = File(projectsRoot, name)
+                if (dir.exists() || _workspaces.value.any { it.name == name }) {
+                    FileLogger.w(TAG, "新建工作区失败：已存在 '$name'")
+                    return null
+                }
+                if (!dir.mkdirs()) {
+                    FileLogger.e(TAG, "新建工作区失败：无法创建目录 ${dir.absolutePath}")
+                    return null
+                }
+                refreshWorkspaces(operation)
+                FileLogger.i(TAG, "新建工作区: $name")
+                checkCurrent(operation)
+                _workspaces.value.firstOrNull { it.path == dir.absolutePath && it.type == WorkspaceType.INTERNAL }
             }
-            if (!dir.mkdirs()) {
-                FileLogger.e(TAG, "新建工作区失败：无法创建目录 ${dir.absolutePath}")
-                return@withContext null
-            }
-            refreshWorkspaces()
-            FileLogger.i(TAG, "新建工作区: $name")
-            Workspace(name = name, path = dir.absolutePath)
-        } else {
-            val cfg = remoteSshConnection.config ?: return@withContext null
-            val wsRoot = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
-            val remotePath = "$wsRoot/$name"
-            runCatching {
+            isBuiltinRemoteSsh(backend) -> {
+                val cfg = remoteSshConnection.config ?: return null
+                if (!remoteSshConnection.isConnected()) return null
+                val wsRoot = pathHomeResolver.expandHome(cfg.remoteWorkspacePath.trimEnd('/'))
+                val remotePath = "$wsRoot/$name"
+                checkCurrent(operation)
                 if (execRemoteExit("test -d ${shellQuote(remotePath)}") == 0) {
                     FileLogger.w(TAG, "新建工作区失败：已存在 '$name'")
-                    return@withContext null
+                    return null
                 }
-                execRemoteExit("mkdir -p ${shellQuote(remotePath)}")
-            }.getOrElse {
-                FileLogger.e(TAG, "远程新建工作区失败: $remotePath", it)
-                return@withContext null
+                checkCurrent(operation)
+                if (execRemoteExit("mkdir -p ${shellQuote(remotePath)}") != 0) return null
+                refreshWorkspaces(operation)
+                FileLogger.i(TAG, "新建工作区(远程): $name")
+                checkCurrent(operation)
+                _workspaces.value.firstOrNull { it.path == remotePath }
             }
-            refreshWorkspaces()
-            FileLogger.i(TAG, "新建工作区(远程): $name")
-            Workspace(name = name, path = remotePath, type = WorkspaceType.REMOTE)
+            else -> {
+                val adapter = backend as? PluginExecutionBackendAdapter ?: return null
+                val created = backendCall { adapter.createWorkspace(name) }?.takeIf { it.id.isNotBlank() } ?: return null
+                checkCurrent(operation)
+                if (backend.capabilities.workspaceDiscovery == WorkspaceDiscoveryMode.REGISTER) {
+                    pluginWorkspaceRegistry.upsert(backend.id, listOf(created))
+                }
+                refreshWorkspaces(operation)
+                FileLogger.i(TAG, "新建工作区(插件): ${created.name} (${backend.id})")
+                checkCurrent(operation)
+                created.copy(backendId = backend.id, instanceId = operation.instanceId)
+            }
         }
     }
 
@@ -402,6 +728,9 @@ class WorkspaceRepository @Inject constructor(
      * @return 注册成功的 [Workspace]；校验失败返回 null（同时通过 [addError] 给出提示文案）。
      */
     suspend fun addExternalWorkspace(uri: Uri): Workspace? = withContext(Dispatchers.IO) {
+        val operation = operation()
+        if (!isBuiltinLocal(operation.backend)) return@withContext null
+        checkCurrent(operation)
         val uriFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
             android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         val path = UriPathResolver.toFilePath(context, uri)
@@ -420,6 +749,7 @@ class WorkspaceRepository @Inject constructor(
         }
         val dir = File(path)
         val existing = readExternalWorkspaces()
+        checkCurrent(operation)
         if (existing.any { it.path == path }) {
             _addError.value = context.getString(R.string.workspace_external_exists)
             FileLogger.w(TAG, "添加本地工作区失败：目录已是工作区 $path")
@@ -451,9 +781,11 @@ class WorkspaceRepository @Inject constructor(
         val allNames = (_workspaces.value.map { it.name } + existing.map { it.name }).toSet()
         val baseName = sanitize(dir.name).ifBlank { DEFAULT_WORKSPACE }
         val name = uniqueName(baseName, allNames)
-        writeExternalWorkspaces(existing + ExternalWorkspaceRecord(name, path, uri.toString()))
-        refreshWorkspaces()
-        val created = _workspaces.value.firstOrNull { it.path == path }
+        checkCurrent(operation)
+        writeExternalWorkspaces(operation, existing + ExternalWorkspaceRecord(name, path, uri.toString()))
+        refreshWorkspaces(operation)
+        checkCurrent(operation)
+        val created = _workspaces.value.firstOrNull { it.path == path && it.type == WorkspaceType.EXTERNAL_LOCAL }
         FileLogger.i(TAG, "添加本地工作区: $name ($path)")
         created
     }
@@ -465,39 +797,74 @@ class WorkspaceRepository @Inject constructor(
     /** 删除工作区。内部/远程工作区连同文件与会话记录删除；外部本地工作区只解除关联，不删除物理目录，
      *  其会话记录是否一并删除由「偏好设置」中的开关决定。
      *  若删的是当前工作区，则自动切到剩余的第一个。 */
-    suspend fun deleteWorkspace(name: String) = withContext(Dispatchers.IO) {
-        val target = _workspaces.value.firstOrNull { it.name == name }
-        if (isLocal() && target?.type == WorkspaceType.EXTERNAL_LOCAL) {
-            val records = readExternalWorkspaces()
-            val removed = records.firstOrNull { it.name == name }
-            writeExternalWorkspaces(records.filterNot { it.name == name })
-            removed?.let { record ->
-                runCatching {
-                    context.contentResolver.releasePersistableUriPermission(
-                        Uri.parse(record.uri),
-                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
+    @Deprecated("Pass WorkspaceRef to keep backend instance identity")
+    suspend fun deleteWorkspace(id: String) = deleteWorkspace(WorkspaceRef(activeBackend().instanceId, id))
+
+    suspend fun deleteWorkspace(ref: WorkspaceRef) = withContext(Dispatchers.IO) {
+        val operation = operation()
+        val backend = operation.backend
+        val target = _workspaces.value.firstOrNull { it.ref == ref && it.canDelete } ?: return@withContext
+        if (ref.backendInstanceId != operation.instanceId) return@withContext
+        checkCurrent(operation)
+        when {
+            isBuiltinLocal(backend) && target.type == WorkspaceType.EXTERNAL_LOCAL -> {
+                val records = readExternalWorkspaces()
+                checkCurrent(operation)
+                val removed = records.firstOrNull { it.path == target.path } ?: return@withContext
+                writeExternalWorkspaces(operation, records.filterNot { it.path == target.path })
+                releaseUriGrant(
+                    Uri.parse(removed.uri),
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                if (generalSettingsRepository.deleteExternalWorkspaceSessions()) {
+                    checkCurrent(operation)
+                    sessionUseCase.deleteSessionsByWorkspace(target.ref)
                 }
+                forgetBuiltinWorkspaceId(operation, target)
+                FileLogger.i(TAG, "移除外部工作区关联: ${target.name}")
             }
-            if (generalSettingsRepository.deleteExternalWorkspaceSessions()) {
-                sessionUseCase.deleteSessionsByWorkspace(target.path)
+            isBuiltinLocal(backend) -> {
+                val dir = File(target.path).toPath()
+                if (dir.parent != projectsRoot.toPath() || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) return@withContext
+                if (backendCall {
+                        Files.walk(dir).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } }
+                        true
+                    } != true
+                ) return@withContext
+                checkCurrent(operation)
+                sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                forgetBuiltinWorkspaceId(operation, target)
             }
-            FileLogger.i(TAG, "移除外部工作区关联: $name")
-        } else if (isLocal()) {
-            File(projectsRoot, name).deleteRecursively()
-            target?.let { sessionUseCase.deleteSessionsByWorkspace(it.path) }
-        } else {
-            val cfg = remoteSshConnection.config
-            if (cfg != null) {
-                val remotePath = "${pathHomeResolver.expandHome(cfg.remoteWorkspacePath).trimEnd('/')}/$name"
-                runCatching { execRemoteExit("rm -rf ${shellQuote(remotePath)}") }
-                    .onFailure { FileLogger.e(TAG, "远程删除工作区失败: $remotePath", it) }
+            isBuiltinRemoteSsh(backend) -> {
+                val cfg = remoteSshConnection.config ?: return@withContext
+                val root = pathHomeResolver.expandHome(cfg.remoteWorkspacePath).trimEnd('/')
+                if (target.path.substringBeforeLast('/') != root || target.path.substringAfterLast('/') in setOf("", ".", "..")) {
+                    return@withContext
+                }
+                checkCurrent(operation)
+                if (execRemoteExit("rm -rf -- ${shellQuote(target.path)}") != 0) return@withContext
+                checkCurrent(operation)
+                sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                forgetBuiltinWorkspaceId(operation, target)
             }
-            target?.let { sessionUseCase.deleteSessionsByWorkspace(it.path) }
+            else -> {
+                val adapter = backend as? PluginExecutionBackendAdapter ?: return@withContext
+                val targetId = target.id
+                val deleted = backendCall { adapter.deleteWorkspace(targetId) } == true
+                checkCurrent(operation)
+                if (deleted) {
+                    if (backend.capabilities.workspaceDiscovery == WorkspaceDiscoveryMode.REGISTER ||
+                        backend.capabilities.workspaceDiscovery == WorkspaceDiscoveryMode.HYBRID
+                    ) {
+                        pluginWorkspaceRegistry.remove(backend.id, listOf(targetId))
+                    }
+                    sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                } else return@withContext
+            }
         }
-        refreshWorkspaces()
-        FileLogger.i(TAG, "删除工作区: $name")
+        checkCurrent(operation)
+        refreshWorkspaces(operation)
+        FileLogger.i(TAG, "删除工作区: ${target.id}")
     }
 
     /** 外部本地工作区持久化记录。 */
@@ -517,8 +884,11 @@ class WorkspaceRepository @Inject constructor(
             }
     }
 
-    private suspend fun writeExternalWorkspaces(list: List<ExternalWorkspaceRecord>) {
-        context.workspaceDataStore.edit { it[externalWorkspacesKey] = json.encodeToString(list) }
+    private suspend fun writeExternalWorkspaces(operation: BackendOperation, list: List<ExternalWorkspaceRecord>) {
+        context.workspaceDataStore.edit {
+            checkCurrent(operation)
+            it[externalWorkspacesKey] = json.encodeToString(list)
+        }
     }
 
     /** 单引号转义，保证 shell 命令安全。 */
@@ -526,16 +896,19 @@ class WorkspaceRepository @Inject constructor(
 
     /** 当前工作区的路径，供 projectRoot / 命令执行目录使用。
      * 本地模式返回宿主工作区绝对路径；远程模式返回选中工作区的远程绝对路径（命令 cd 到此）。
-     * 无选中时本地回退到项目根目录，远程回退到配置的 remoteWorkspacePath。 */
+     * 无选中时本地回退到项目根目录，远程回退到配置的 remoteWorkspacePath，插件后端返回空串。 */
     fun currentPath(): String {
-        if (!isLocal()) {
-            return _current.value?.path
+        val backend = activeBackend()
+        val current = _current.value?.takeIf { it.instanceId == backend.instanceId }
+        return when {
+            isBuiltinLocal(backend) -> current?.path ?: projectsRoot.absolutePath
+            isBuiltinRemoteSsh(backend) -> current?.path
                 ?: remoteSshConnection.config?.remoteWorkspacePath
                     ?.let { pathHomeResolver.expandHome(it) }
                     ?.takeIf { it.isNotBlank() }
                 ?: "/"
+            else -> current?.path ?: ""
         }
-        return _current.value?.path ?: projectsRoot.absolutePath
     }
 
     /** 仅保留字母数字、下划线、连字符、点和空格，去掉路径分隔符等危险字符。 */

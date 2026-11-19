@@ -12,24 +12,51 @@ interface ChatSessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(session: ChatSessionEntity)
 
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath ORDER BY isPinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun getAllSessionsByWorkspace(workspacePath: String): Flow<List<ChatSessionEntity>>
 
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun getRootSessionsByWorkspace(workspacePath: String): Flow<List<ChatSessionEntity>>
 
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath ORDER BY isPinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     suspend fun getAllSessionsByWorkspaceOnce(workspacePath: String): List<ChatSessionEntity>
 
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     suspend fun getRootSessionsByWorkspaceOnce(workspacePath: String): List<ChatSessionEntity>
 
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND parentId IS NULL AND NOT EXISTS (SELECT 1 FROM agent_messages WHERE sessionId = chat_sessions.id) ORDER BY isPinned DESC, updatedAt DESC LIMIT 1")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL AND parentId IS NULL AND NOT EXISTS (SELECT 1 FROM agent_messages WHERE sessionId = chat_sessions.id) ORDER BY isPinned DESC, updatedAt DESC LIMIT 1")
     suspend fun getEmptyRootSessionByWorkspace(workspacePath: String): ChatSessionEntity?
 
     /** 最近更新的根会话（忽略置顶，仅按 updatedAt 降序），供启动时「打开最近会话」。 */
-    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND parentId IS NULL ORDER BY updatedAt DESC LIMIT 1")
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL AND parentId IS NULL ORDER BY updatedAt DESC LIMIT 1")
     suspend fun getLatestRootSessionByWorkspace(workspacePath: String): ChatSessionEntity?
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId ORDER BY isPinned DESC, updatedAt DESC")
+    fun getAllSessionsByWorkspaceRef(backendInstanceId: String, workspaceId: String): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    fun getRootSessionsByWorkspaceRef(backendInstanceId: String, workspaceId: String): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId ORDER BY isPinned DESC, updatedAt DESC")
+    suspend fun getAllSessionsByWorkspaceRefOnce(backendInstanceId: String, workspaceId: String): List<ChatSessionEntity>
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    suspend fun getRootSessionsByWorkspaceRefOnce(backendInstanceId: String, workspaceId: String): List<ChatSessionEntity>
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId AND parentId IS NULL ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun getLatestRootSessionByWorkspaceRef(backendInstanceId: String, workspaceId: String): ChatSessionEntity?
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId AND parentId IS NULL AND NOT EXISTS (SELECT 1 FROM agent_messages WHERE sessionId = chat_sessions.id) ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun getEmptyRootSessionByWorkspaceRef(backendInstanceId: String, workspaceId: String): ChatSessionEntity?
+
+    @Query("DELETE FROM chat_sessions WHERE backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId")
+    suspend fun deleteByWorkspaceRef(backendInstanceId: String, workspaceId: String)
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId IS NULL AND workspaceId IS NULL AND workspacePath = :workspacePath ORDER BY isPinned DESC, updatedAt DESC")
+    suspend fun getLegacySessionsByWorkspaceOnce(workspacePath: String): List<ChatSessionEntity>
+
+    @Query("UPDATE chat_sessions SET backendInstanceId = :backendInstanceId, workspaceId = :workspaceId WHERE id IN (:sessionIds) AND backendInstanceId IS NULL AND workspaceId IS NULL")
+    suspend fun claimLegacySessions(sessionIds: List<String>, backendInstanceId: String, workspaceId: String): Int
 
     /** 指定父会话的全部子会话（子代理），按最近更新降序。 */
     @Query("SELECT * FROM chat_sessions WHERE parentId = :parentId ORDER BY updatedAt DESC")
@@ -48,6 +75,9 @@ interface ChatSessionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(sessions: List<ChatSessionEntity>)
+
+    @Query("SELECT * FROM chat_sessions WHERE id = :id AND backendInstanceId = :backendInstanceId AND workspaceId = :workspaceId")
+    suspend fun getByIdAndWorkspaceRef(id: String, backendInstanceId: String, workspaceId: String): ChatSessionEntity?
 
     @Query("SELECT * FROM chat_sessions WHERE id = :id")
     suspend fun getById(id: String): ChatSessionEntity?
@@ -68,7 +98,7 @@ interface ChatSessionDao {
     @Query("DELETE FROM chat_sessions WHERE id = :id")
     suspend fun delete(id: String)
 
-    @Query("DELETE FROM chat_sessions WHERE workspacePath = :workspacePath")
+    @Query("DELETE FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL")
     suspend fun deleteByWorkspace(workspacePath: String)
 
     @Query("UPDATE chat_sessions SET providerId = :providerId, model = :model, lastInputTokens = 0 WHERE id = :id")
@@ -92,4 +122,10 @@ interface ChatSessionDao {
 
     @Query("UPDATE chat_sessions SET lastInputTokens = :lastInputTokens WHERE id = :id")
     suspend fun updateLastInputTokens(id: String, lastInputTokens: Int)
+
+    @Query("UPDATE chat_sessions SET workflowId = :workflowId, workflowState = :workflowState WHERE id = :id")
+    suspend fun updateWorkflow(id: String, workflowId: String?, workflowState: String? = null)
+
+    @Query("UPDATE chat_sessions SET workflowState = :workflowState WHERE id = :id")
+    suspend fun updateWorkflowState(id: String, workflowState: String?)
 }

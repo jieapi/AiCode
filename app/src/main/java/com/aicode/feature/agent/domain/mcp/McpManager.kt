@@ -2,6 +2,7 @@ package com.aicode.feature.agent.domain.mcp
 
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerProfile
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.agent.domain.mcp.auth.McpOAuthException
 import com.aicode.feature.agent.domain.mcp.auth.McpOAuthManager
@@ -9,6 +10,7 @@ import com.aicode.feature.agent.domain.tool.ToolRegistry
 import com.aicode.feature.plugin.domain.PluginManager
 import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
 import com.aicode.feature.settings.data.repository.ExecutionMode
+import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +50,7 @@ class McpManager @Inject constructor(
     private val containerEngine: LinuxContainerEngine,
     private val workspaceRepository: WorkspaceRepository,
     private val containerSettingsRepository: ContainerSettingsRepository,
+    private val executionModeHolder: ExecutionModeHolder,
     private val oauthManager: McpOAuthManager,
     private val pluginManager: PluginManager
 ) {
@@ -90,10 +93,10 @@ class McpManager @Inject constructor(
                 reloadStdioServers()
             }
         }
-        // 默认容器变化：远程模式下 stdio server 运行在默认容器上，同样需要重建。
+        // 默认容器变化：非本地容器直连模式（如远程 SSH 或远程插件后端）下 stdio server 运行在默认本地容器上，需要重建。
         scope.launch {
             containerSettingsRepository.defaultContainerIdFlow.drop(1).collect {
-                if (currentActiveProfile().mode == ExecutionMode.REMOTE_SSH) {
+                if (usesDefaultLocalContainer()) {
                     reloadStdioServers()
                 }
             }
@@ -247,10 +250,17 @@ class McpManager @Inject constructor(
         _statuses.value = _statuses.value.map { if (it.name == cfg.name) result else it }
     }
 
-    /** 解析 stdio server 的运行时容器：本地模式用当前 profile，远程 SSH 模式用默认容器。 */
+    private fun usesDefaultLocalContainer(): Boolean {
+        val backend = executionModeHolder.currentBackend()
+        return backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID ||
+            backend.capabilities.isRemoteEnvironment
+    }
+
+    /** 解析 stdio server 的运行时容器：本地容器后端用当前本地 profile，远程或远端插件后端回退默认本地容器。 */
     private suspend fun resolveMcpRuntimeProfile(): ContainerProfile {
+        if (usesDefaultLocalContainer()) return resolveDefaultContainerProfile()
         val active = currentActiveProfile()
-        return if (active.mode == ExecutionMode.REMOTE_SSH) resolveDefaultContainerProfile() else active
+        return if (active.mode == ExecutionMode.LOCAL_PROOT) active else resolveDefaultContainerProfile()
     }
 
     /** 当前激活 profile：按 id 从配置列表解析，找不到回退内置 Alpine。 */

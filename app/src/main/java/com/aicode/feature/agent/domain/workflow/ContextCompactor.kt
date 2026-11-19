@@ -64,11 +64,12 @@ class ContextCompactor @Inject constructor(
         systemPrompt: String = "",
         tools: List<AgentTool> = emptyList(),
         currentInputTokens: Int = 0,
-        onEvent: suspend (AgentEvent) -> Unit = {}
+        onEvent: suspend (AgentEvent) -> Unit = {},
+        persistence: TurnPersistence? = null
     ): CompactionResult {
         val eventContext = currentCoroutineContext().minusKey(Job)
         return withContext(Dispatchers.Default) {
-            compactOnBackground(messages, aiProvider, sessionId, force, windowProvider, systemPrompt, tools, currentInputTokens) { event ->
+            compactOnBackground(messages, aiProvider, sessionId, force, windowProvider, systemPrompt, tools, currentInputTokens, persistence) { event ->
                 withContext(eventContext) { onEvent(event) }
             }
         }
@@ -83,6 +84,7 @@ class ContextCompactor @Inject constructor(
         systemPrompt: String,
         tools: List<AgentTool>,
         currentInputTokens: Int,
+        persistence: TurnPersistence?,
         onEvent: suspend (AgentEvent) -> Unit
     ): CompactionResult {
         val unchanged = CompactionResult(messages, compacted = false)
@@ -157,7 +159,7 @@ class ContextCompactor @Inject constructor(
                 val chunk = cursor.next(available)
                 val request = listOf(AgentMessage.UserMessage(content = instruction + "\n\n<history-material block=\"${++block}\">\n" + chunk + "\n</history-material>"))
                 check(CompactionText.estimateRequest(SUMMARY_SYSTEM, emptyList(), request) <= summaryBudget) { "Summary block exceeds the input budget" }
-                summary = summarize(aiProvider, sessionId, request)
+                summary = summarize(aiProvider, sessionId, request, persistence)
             }
             check(!summary.isNullOrBlank()) { "Summary is empty" }
             val markerId = UUID.randomUUID().toString()
@@ -176,7 +178,7 @@ class ContextCompactor @Inject constructor(
             check(compactedTokens <= inputBudget) {
                 "Summary and retained history do not fit the main model input budget"
             }
-            if (sessionId != null) {
+            if (sessionId != null && persistence == null) {
                 agentMessageDao.commitCompaction(
                     sessionId = sessionId,
                     headIds = headIds,
@@ -189,6 +191,9 @@ class ContextCompactor @Inject constructor(
                     summaryId = summaryId
                 )
                 messagePersistenceUseCase.invalidateHistory(sessionId)
+            }
+            if (persistence != null) {
+                persistence.publishTransientInstruction(summaryId, summary)
             }
             FileLogger.i(TAG, "上下文压缩完成：$block 块，$estimatedTokens → $compactedTokens tokens")
             return CompactionResult(compacted, compacted = true)
@@ -204,7 +209,12 @@ class ContextCompactor @Inject constructor(
         }
     }
 
-    private suspend fun summarize(provider: AIProvider, sessionId: String?, messages: List<AgentMessage>): String {
+    private suspend fun summarize(
+        provider: AIProvider,
+        sessionId: String?,
+        messages: List<AgentMessage>,
+        persistence: TurnPersistence?
+    ): String {
         val startElapsed = SystemClock.elapsedRealtime()
         val startWall = System.currentTimeMillis()
         var response: AIResponse? = null
@@ -221,7 +231,23 @@ class ContextCompactor @Inject constructor(
             throw e
         } finally {
             withContext(NonCancellable) {
-                try {
+                val stats = LlmCallStats(
+                    providerId = provider.providerId.ifBlank { null },
+                    model = provider.model,
+                    kind = "compaction",
+                    inputTokens = response?.inputTokens ?: 0,
+                    outputTokens = response?.outputTokens ?: 0,
+                    cachedInputTokens = response?.cachedInputTokens ?: 0,
+                    durationMillis = (SystemClock.elapsedRealtime() - startElapsed).toInt(),
+                    status = if (error == null) "success" else "error",
+                    errorMessage = error,
+                    stopReason = response?.stopReason,
+                    createdAt = startWall
+                )
+                if (persistence != null) {
+                    runCatching { persistence.recordLlmCall(stats) }
+                        .onFailure { FileLogger.e(TAG, "记录压缩调用统计失败", it) }
+                } else try {
                     llmCallRecordDao.insert(LlmCallRecordEntity(
                         sessionId = sessionId,
                         providerId = provider.providerId.ifBlank { null },

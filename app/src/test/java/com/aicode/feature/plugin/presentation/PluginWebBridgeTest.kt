@@ -136,7 +136,6 @@ class PluginWebBridgeTest {
             introspectionService = mockk(relaxed = true),
             toolService = mockk(relaxed = true),
             permissionService = mockk(relaxed = true),
-            sessionSourceService = mockk(relaxed = true),
             httpService = mockk(relaxed = true),
             environment = environment,
             theme = { "light" },

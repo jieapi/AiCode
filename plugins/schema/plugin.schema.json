@@ -69,7 +69,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "entry"],
-      "description": "进程运行时。声明了 tools / hooks / sessionSources / 带 handler 的 uiEntries 时必须提供。",
+      "description": "进程运行时。声明了 tools / hooks / executionBackends / workflows / sessions / 带 handler 的 uiEntries 时必须提供。",
       "properties": {
         "type": { "enum": ["javascript", "python"] },
         "entry": { "$ref": "#/$defs/packagePath" },
@@ -201,9 +201,90 @@
             }
           }
         },
-        "sessionSources": {
+        "executionBackends": {
           "type": "array",
-          "maxItems": 64,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "handlers"],
+            "allOf": [
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["filesystem"], "properties": { "filesystem": { "const": false } } } }
+                },
+                "else": { "properties": { "handlers": { "required": ["fs"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["command"], "properties": { "command": { "const": false } } } }
+                },
+                "else": { "properties": { "handlers": { "required": ["exec"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["terminal"], "properties": { "terminal": { "const": true } } } }
+                },
+                "then": { "properties": { "handlers": { "required": ["terminal"] } } }
+              },
+              {
+                "if": {
+                  "required": ["capabilities"],
+                  "properties": { "capabilities": { "required": ["projectConfigLocation"], "properties": { "projectConfigLocation": { "const": "workspaceDir" } } } }
+                },
+                "then": {
+                  "properties": { "capabilities": { "required": ["isRemoteEnvironment"], "properties": { "isRemoteEnvironment": { "const": false } } } }
+                }
+              }
+            ],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "capabilities": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "filesystem": { "type": "boolean", "default": true },
+                  "command": { "type": "boolean", "default": true },
+                  "terminal": { "type": "boolean", "default": false },
+                  "fileWatch": { "const": false, "default": false, "description": "插件文件监听当前未开放，只能为 false。" },
+                  "portForward": { "const": false, "default": false, "description": "插件端口转发当前未开放，只能为 false。" },
+                  "isRemoteEnvironment": { "type": "boolean", "default": true },
+                  "workspaceDiscovery": {
+                    "enum": ["scan", "register", "hybrid"],
+                    "default": "scan"
+                  },
+                  "projectConfigLocation": {
+                    "enum": ["workspaceDir", "appPrivateDir"],
+                    "default": "appPrivateDir"
+                  }
+                }
+              },
+              "handlers": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "fs": { "$ref": "#/$defs/handlerName" },
+                  "exec": { "$ref": "#/$defs/handlerName" },
+                  "execStream": { "$ref": "#/$defs/handlerName" },
+                  "execHealth": { "$ref": "#/$defs/handlerName" },
+                  "terminal": { "$ref": "#/$defs/handlerName" },
+                  "workspaceList": { "$ref": "#/$defs/handlerName" },
+                  "workspaceCreate": { "$ref": "#/$defs/handlerName" },
+                  "workspaceDelete": { "$ref": "#/$defs/handlerName" },
+                  "workspaceSelect": { "$ref": "#/$defs/handlerName" }
+                }
+              }
+            }
+          }
+        },
+        "workflows": {
+          "type": "array",
+          "maxItems": 32,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -211,16 +292,53 @@
             "properties": {
               "id": { "$ref": "#/$defs/localId" },
               "title": { "$ref": "#/$defs/localizedText80" },
-              "handlers": {
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "capabilities": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "listSessions": { "$ref": "#/$defs/handlerName" },
-                  "readSession": { "$ref": "#/$defs/handlerName" },
-                  "sendMessage": { "$ref": "#/$defs/handlerName" },
-                  "interruptSession": { "$ref": "#/$defs/handlerName" },
+                  "streaming": { "type": "boolean" },
+                  "tools": { "type": "boolean" },
+                  "compaction": { "type": "boolean" },
+                  "titleGeneration": { "type": "boolean" }
+                }
+              },
+              "handlers": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["startTurn", "cancelTurn"],
+                "properties": {
+                  "startTurn": { "$ref": "#/$defs/handlerName" },
+                  "cancelTurn": { "$ref": "#/$defs/handlerName" },
+                  "compact": { "$ref": "#/$defs/handlerName" },
+                  "generateTitle": { "$ref": "#/$defs/handlerName" }
+                }
+              }
+            }
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "handlers"],
+            "properties": {
+              "id": { "$ref": "#/$defs/localId" },
+              "title": { "$ref": "#/$defs/localizedText80" },
+              "description": { "$ref": "#/$defs/localizedText600" },
+              "handlers": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["readMessages"],
+                "properties": {
+                  "refresh": { "$ref": "#/$defs/handlerName" },
+                  "readMessages": { "$ref": "#/$defs/handlerName" },
                   "createSession": { "$ref": "#/$defs/handlerName" },
-                  "refresh": { "$ref": "#/$defs/handlerName" }
+                  "deleteSession": { "$ref": "#/$defs/handlerName" },
+                  "renameSession": { "$ref": "#/$defs/handlerName" },
+                  "pinSession": { "$ref": "#/$defs/handlerName" }
                 }
               }
             }

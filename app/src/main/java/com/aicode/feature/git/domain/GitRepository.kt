@@ -11,7 +11,6 @@ import com.aicode.feature.git.domain.model.GraphCommit
 import com.aicode.feature.git.domain.model.GitStash
 import com.aicode.feature.git.domain.model.GitStatus
 import com.aicode.feature.git.domain.model.GitTag
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +77,7 @@ class GitRepository @Inject constructor(
     suspend fun discoverRepos(): List<String> {
         val root = workspaceRepository.currentPath()
         val candidates = mutableListOf(root)
-        if (executionModeHolder.currentMode() != ExecutionMode.REMOTE_SSH) {
+        if (!executionModeHolder.capabilities().isRemoteEnvironment) {
             runCatching {
                 java.io.File(root).listFiles { f -> f.isDirectory }
                     ?.sortedBy { it.name }
@@ -100,7 +99,7 @@ class GitRepository @Inject constructor(
      * 本地模式用 File 列；远程模式下 File 操作无效（路径是远程的），runCatching 捕获后返回空。
      */
     fun listSubdirectories(): List<String> {
-        if (executionModeHolder.currentMode() == ExecutionMode.REMOTE_SSH) return emptyList()
+        if (executionModeHolder.capabilities().isRemoteEnvironment) return emptyList()
         val root = workspaceRepository.currentPath()
         return runCatching {
             java.io.File(root).listFiles { f -> f.isDirectory }

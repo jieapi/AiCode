@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aicode.core.datastore.preferencesCorruptionHandler
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,12 +26,10 @@ enum class ExecutionMode {
 }
 
 /**
- * 持久化当前执行模式（本地 PRoot / 远程 SSH）。
+ * 持久化当前执行模式与激活的执行后端 ID。
  *
- * 远程连接参数不再在此持久化，改由
- * [com.aicode.feature.agent.domain.container.ActiveRemoteConnectionResolver] 按当前激活容器 profile 实时解析。
- * 切换模式时由 DI 层据此注入对应的 [com.aicode.feature.agent.domain.container.CommandEngine]
- * 与 [com.aicode.feature.workspace.domain.FileAccessProvider] 实现。
+ * 兼容旧版 [MODE_KEY]：未写入 [ACTIVE_BACKEND_ID_KEY] 时，按 `LOCAL_PROOT` -> `"builtin:local-proot"`、
+ * `REMOTE_SSH` -> `"builtin:remote-ssh"` 映射。
  */
 @Singleton
 class ExecutionModeRepository @Inject constructor(
@@ -38,17 +37,56 @@ class ExecutionModeRepository @Inject constructor(
 ) {
     private companion object {
         val MODE_KEY = stringPreferencesKey("execution_mode")
+        val ACTIVE_BACKEND_ID_KEY = stringPreferencesKey("active_backend_id")
     }
 
     /** 当前执行模式；无值时默认本地 PRoot。 */
     val executionModeFlow: Flow<ExecutionMode> = context.executionModeDataStore.data.map { prefs ->
-        prefs[MODE_KEY]?.let {
-            runCatching { ExecutionMode.valueOf(it) }.getOrNull()
-        } ?: ExecutionMode.LOCAL_PROOT
+        val backendId = prefs[ACTIVE_BACKEND_ID_KEY]?.takeIf { it.isNotBlank() }
+        when {
+            backendId == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID -> ExecutionMode.REMOTE_SSH
+            backendId != null -> ExecutionMode.LOCAL_PROOT
+            else -> prefs[MODE_KEY]?.let {
+                runCatching { ExecutionMode.valueOf(it) }.getOrNull()
+            } ?: ExecutionMode.LOCAL_PROOT
+        }
+    }
+
+    /** 当前激活的执行后端 ID；兼容旧 [MODE_KEY]，缺省返回 `"builtin:local-proot"`。 */
+    val activeBackendIdFlow: Flow<String> = context.executionModeDataStore.data.map { prefs ->
+        val storedBackendId = prefs[ACTIVE_BACKEND_ID_KEY]?.trim().orEmpty()
+        if (storedBackendId.isNotEmpty()) {
+            storedBackendId
+        } else {
+            when (prefs[MODE_KEY]?.let { runCatching { ExecutionMode.valueOf(it) }.getOrNull() }) {
+                ExecutionMode.REMOTE_SSH -> ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+                ExecutionMode.LOCAL_PROOT, null -> ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+            }
+        }
     }
 
     suspend fun setExecutionMode(mode: ExecutionMode) {
-        context.executionModeDataStore.edit { it[MODE_KEY] = mode.name }
+        val backendId = when (mode) {
+            ExecutionMode.LOCAL_PROOT -> ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+            ExecutionMode.REMOTE_SSH -> ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+        }
+        context.executionModeDataStore.edit {
+            it[MODE_KEY] = mode.name
+            it[ACTIVE_BACKEND_ID_KEY] = backendId
+        }
+    }
+
+    suspend fun setActiveBackendId(id: String) {
+        val trimmed = id.trim().ifEmpty { ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID }
+        val mappedMode = if (trimmed == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID) {
+            ExecutionMode.REMOTE_SSH
+        } else {
+            ExecutionMode.LOCAL_PROOT
+        }
+        context.executionModeDataStore.edit {
+            it[ACTIVE_BACKEND_ID_KEY] = trimmed
+            it[MODE_KEY] = mappedMode.name
+        }
     }
 }
 

@@ -3,15 +3,15 @@ package com.aicode.feature.workspace.presentation
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aicode.feature.settings.data.repository.ExecutionMode
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.model.Workspace
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -26,10 +26,14 @@ class WorkspaceViewModel @Inject constructor(
     val workspaces: StateFlow<List<Workspace>> = repository.workspaces
     val current: StateFlow<Workspace?> = repository.current
 
-    /** 本地执行模式（非远程 SSH）：本地模式下才可添加外部本地目录工作区。 */
-    val isLocalMode: StateFlow<Boolean> = executionModeHolder.mode
-        .map { it != ExecutionMode.REMOTE_SSH }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    /** 本地执行模式（非远程环境）：非远程后端下才可添加外部本地目录工作区。 */
+    val isLocalMode: StateFlow<Boolean> = executionModeHolder.activeBackend
+        .map { !it.capabilities.isRemoteEnvironment }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            !executionModeHolder.capabilities().isRemoteEnvironment
+        )
 
     /** 远程工作区初始化失败提示（根路径/默认工作区创建失败）。 */
     val initError: StateFlow<String?> = repository.initError
@@ -54,18 +58,20 @@ class WorkspaceViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch { runCatching { repository.initialize() } }
-        // 模式切换后重新加载工作区列表（本地 File.listFiles ↔ 远程 SFTP ls）。
-        // drop(1) 跳过首帧（init 已调 initialize），仅响应后续切换。
         viewModelScope.launch {
-            executionModeHolder.mode.drop(1).distinctUntilChanged().collect {
-                runCatching { repository.initialize() }
+            executionModeHolder.activeBackend.collectLatest {
+                try {
+                    repository.initialize()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
         }
     }
 
-    fun selectWorkspace(name: String) = viewModelScope.launch {
-        runCatching { repository.selectWorkspace(name) }
+    fun selectWorkspace(ref: WorkspaceRef) = viewModelScope.launch {
+        runCatching { repository.selectWorkspace(ref) }
     }
 
     fun createWorkspace(name: String, onResult: (Workspace?) -> Unit = {}) = viewModelScope.launch {
@@ -88,7 +94,7 @@ class WorkspaceViewModel @Inject constructor(
         onResult(ws)
     }
 
-    fun deleteWorkspace(name: String) = viewModelScope.launch {
-        runCatching { repository.deleteWorkspace(name) }
+    fun deleteWorkspace(ref: WorkspaceRef) = viewModelScope.launch {
+        runCatching { repository.deleteWorkspace(ref) }
     }
 }

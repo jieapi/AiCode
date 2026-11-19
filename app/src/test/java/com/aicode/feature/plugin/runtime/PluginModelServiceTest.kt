@@ -1,5 +1,8 @@
 package com.aicode.feature.plugin.runtime
 
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.ExecutionBackend
+import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.model.AgentImage
 import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.provider.AIProvider
@@ -178,7 +181,13 @@ class PluginModelServiceTest {
         every { workspaceRepository.currentPath() } returns "$WORKSPACE"
 
         val executionModeHolder = mockk<ExecutionModeHolder>(relaxed = true)
+        val localBackend = mockk<ExecutionBackend>(relaxed = true) {
+            every { id } returns ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+            every { capabilities } returns BackendCapabilities(isRemoteEnvironment = false)
+            every { workspaceRootDisplay(any()) } returns "~/workspace"
+        }
         every { executionModeHolder.currentMode() } returns ExecutionMode.LOCAL_PROOT
+        every { executionModeHolder.currentBackend() } returns localBackend
 
         return PluginModelService(
             pluginManager = pluginManager,

@@ -32,8 +32,8 @@ class PluginPermissionService @Inject constructor(
     private val pluginManager: PluginManager,
     private val workspaceRepository: WorkspaceRepository,
     private val sessions: ChatSessionDao,
-    private val registry: PluginSessionRegistry,
-    private val permissions: ToolPermissionManager
+    private val permissions: ToolPermissionManager,
+    private val externalSessionStore: ExternalSessionStore
 ) {
     private data class Entry(val id: String, val cancelled: CompletableDeferred<Unit>)
     private val pending = ConcurrentHashMap<Pair<String, String>, Entry>()
@@ -54,13 +54,17 @@ class PluginPermissionService @Inject constructor(
             (it as? JsonPrimitive)?.longOrNull
                 ?: throw PluginHostException("PARAM_INVALID", "timeoutMs must be a number")
         }?.coerceIn(1000L, 600000L) ?: 120000L
-        val workspace = workspaceRepository.current.value?.path
-            ?.takeIf { it.isNotBlank() }
-            ?: throw PluginHostException("WORKSPACE_UNAVAILABLE", "no active workspace")
-        val external = sessionId.contains('|')
-        if (external) {
-            if (!ownsExternalSession(pluginId, sessionId)) forbidden()
-        } else if (sessions.getById(sessionId)?.workspacePath != workspace) forbidden()
+        val isExternalSession = sessionId.contains('|')
+        val workspace = if (isExternalSession) {
+            if (externalSessionStore.findSession(sessionId)?.pluginId != pluginId) forbidden()
+            null
+        } else {
+            val activeWorkspace = workspaceRepository.current.value?.path
+                ?.takeIf { it.isNotBlank() }
+                ?: throw PluginHostException("WORKSPACE_UNAVAILABLE", "no active workspace")
+            if (sessions.getById(sessionId)?.workspacePath != activeWorkspace) forbidden()
+            activeWorkspace
+        }
         val key = pluginId to requestId
         val entry = Entry("plugin-permission-${UUID.randomUUID()}", CompletableDeferred())
         if (pending.putIfAbsent(key, entry) != null) {
@@ -86,31 +90,43 @@ class PluginPermissionService @Inject constructor(
                         ))
                     }
                     val inactive = async { pluginManager.plugins.first { rows -> rows.none { it.id == pluginId && it.isActive } } }
-                    val moved = async { workspaceRepository.current.first { it?.path != workspace } }
+                    val moved = if (workspace != null) {
+                        async { workspaceRepository.current.first { it?.path != workspace } }
+                    } else {
+                        null
+                    }
                     val removed = async {
-                        if (external) registry.groups.first { !ownsExternalSession(pluginId, sessionId) }
-                        else sessions.getByIdFlow(sessionId).first { it?.workspacePath != workspace }
+                        if (isExternalSession) {
+                            externalSessionStore.groups.first {
+                                externalSessionStore.findSession(sessionId)?.pluginId != pluginId
+                            }
+                        } else {
+                            sessions.getByIdFlow(sessionId).first { it?.workspacePath != workspace }
+                        }
                     }
                     try {
                         select<String> {
                             approval.onAwait { if (it == PermissionChoice.ONCE) "allow" else "deny" }
                             entry.cancelled.onAwait { "cancel" }
                             inactive.onAwait { "cancel" }
-                            moved.onAwait { "cancel" }
+                            moved?.onAwait { "cancel" }
                             removed.onAwait { "cancel" }
                         }
                     } finally {
                         approval.cancel()
                         inactive.cancel()
-                        moved.cancel()
+                        moved?.cancel()
                         removed.cancel()
                     }
                 }
             }
             val stillBound = pluginManager.plugins.value.any { it.id == pluginId && it.isActive } &&
-                workspaceRepository.current.value?.path == workspace &&
-                (if (external) ownsExternalSession(pluginId, sessionId)
-                 else sessions.getById(sessionId)?.workspacePath == workspace)
+                if (isExternalSession) {
+                    externalSessionStore.findSession(sessionId)?.pluginId == pluginId
+                } else {
+                    workspaceRepository.current.value?.path == workspace &&
+                        sessions.getById(sessionId)?.workspacePath == workspace
+                }
             return buildJsonObject {
                 put("decision", if (stillBound) result ?: "cancel" else "cancel")
                 if (result == null) put("reason", "timeout")
@@ -125,11 +141,6 @@ class PluginPermissionService @Inject constructor(
         val cancelled = pending[pluginId to requestId]?.cancelled?.complete(Unit) ?: false
         return buildJsonObject { put("cancelled", cancelled) }
     }
-
-    private fun ownsExternalSession(pluginId: String, sessionId: String): Boolean =
-        registry.groups.value.any { group ->
-            group.pluginId == pluginId && group.sessions.any { it.id == sessionId && it.pluginId == pluginId }
-        }
 
     private fun required(params: JsonObject, key: String, max: Int): String {
         val raw = params[key] as? JsonPrimitive

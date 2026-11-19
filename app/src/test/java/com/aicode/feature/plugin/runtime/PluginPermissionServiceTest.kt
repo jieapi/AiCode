@@ -8,6 +8,7 @@ import com.aicode.feature.agent.domain.tool.ToolPermissionManager
 import com.aicode.feature.plugin.domain.InstalledPlugin
 import com.aicode.feature.plugin.domain.PluginHostException
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.plugin.domain.session.ExternalSessionSummary
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.model.Workspace
 import io.mockk.coEvery
@@ -45,13 +46,16 @@ class PluginPermissionServiceTest {
         every { current } returns this@PluginPermissionServiceTest.workspaces
     }
     private val session = ChatSessionEntity("local", "Local", 0, 0, workspacePath = "/project")
+    private val otherWorkspaceSession = ChatSessionEntity("other", "Other", 0, 0, workspacePath = "/other")
+    private val sessionFlow = MutableStateFlow<ChatSessionEntity?>(session)
     private val dao = mockk<ChatSessionDao> {
         coEvery { getById(any()) } returns null
         coEvery { getById("local") } returns session
-        every { getByIdFlow("local") } returns MutableStateFlow(session)
+        coEvery { getById("other") } returns otherWorkspaceSession
+        every { getByIdFlow("local") } returns sessionFlow
     }
-    private val registry = PluginSessionRegistry()
-    private val service = PluginPermissionService(manager, workspace, dao, registry, permissions)
+    private val externalSessionStore = ExternalSessionStore()
+    private val service = PluginPermissionService(manager, workspace, dao, permissions, externalSessionStore)
     private fun params(sessionId: String = "local") = buildJsonObject {
         put("sessionId", sessionId)
         put("requestId", "r1")
@@ -116,34 +120,78 @@ class PluginPermissionServiceTest {
     }
 
     @Test
-    fun ownExternalSessionIsAllowedAndRemovalCancelsApproval() = runTest {
-        val sourceKey = com.aicode.feature.plugin.domain.pluginContributionName("demo", "remote")
-        val externalId = "$sourceKey|opaque"
-        val summary = mockk<com.aicode.feature.plugin.domain.session.PluginSessionSummary>(relaxed = true) {
-            every { id } returns externalId
-            every { pluginId } returns "demo"
-            every { title } returns "External"
-            every { updatedAt } returns 0L
-        }
-        registry.ensureSource("demo", "Demo", sourceKey, "Remote")
-        registry.setSessions("demo", "remote", listOf(summary))
-        val allowed = async { service.request("demo", params(externalId)) }
+    fun localSessionRemovalCancelsPendingApproval() = runTest {
+        val pending = async { service.request("demo", params("local")) }
         runCurrent()
-        permissions.resolve(permissions.pendingRequest.value!!.id, PermissionChoice.ONCE)
-        assertEquals("allow", allowed.await().jsonObject["decision"]!!.jsonPrimitive.content)
-        val removed = async { service.request("demo", params(externalId)) }
-        runCurrent()
-        registry.setSessions("demo", "remote", emptyList())
-        assertEquals("cancel", removed.await().jsonObject["decision"]!!.jsonPrimitive.content)
+        sessionFlow.value = null
+        assertEquals("cancel", pending.await().jsonObject["decision"]!!.jsonPrimitive.content)
         assertNull(permissions.pendingRequest.value)
     }
 
     @Test
-    fun nonexistentAndForeignExternalSessionsAreRejected() = runTest {
-        for (id in listOf("missing", "plugin:demo", "plugin__other__source|opaque")) {
+    fun nonexistentAndNonLocalSessionsAreRejected() = runTest {
+        for (id in listOf("missing", "other", "plugin:demo", "plugin__other__source|opaque")) {
             val error = try { service.request("demo", params(id)); null } catch (e: PluginHostException) { e }
             assertEquals("SESSION_FORBIDDEN", error?.code)
         }
         assertTrue(permissions.awaitingSessionIds.value.isEmpty())
+    }
+
+    @Test
+    fun externalSessionOwnershipAllowsActivePluginAndRejectsForeignPlugin() = runTest {
+        externalSessionStore.ensureSource("demo", "Demo", "demo:harness", "Harness")
+        externalSessionStore.upsert(
+            "demo",
+            "harness",
+            listOf(
+                ExternalSessionSummary(
+                    id = "demo:harness|ext-1",
+                    sessionId = "ext-1",
+                    sourceKey = "demo:harness",
+                    sourceTitle = "Harness",
+                    pluginId = "demo",
+                    pluginName = "Demo",
+                    pluginVersion = "1.0.0",
+                    title = "External 1"
+                )
+            )
+        )
+        externalSessionStore.ensureSource("other", "Other", "other:harness", "Harness")
+        externalSessionStore.upsert(
+            "other",
+            "harness",
+            listOf(
+                ExternalSessionSummary(
+                    id = "other:harness|ext-2",
+                    sessionId = "ext-2",
+                    sourceKey = "other:harness",
+                    sourceTitle = "Harness",
+                    pluginId = "other",
+                    pluginName = "Other",
+                    pluginVersion = "1.0.0",
+                    title = "External 2"
+                )
+            )
+        )
+
+        val foreignError = try {
+            service.request("demo", params("other:harness|ext-2"))
+            null
+        } catch (e: PluginHostException) {
+            e
+        }
+        assertEquals("SESSION_FORBIDDEN", foreignError?.code)
+
+        val allowed = async { service.request("demo", params("demo:harness|ext-1")) }
+        runCurrent()
+        val request = permissions.pendingRequest.value!!
+        assertEquals("demo:harness|ext-1", request.sessionId)
+        permissions.resolve(request.id, PermissionChoice.ONCE)
+        assertEquals("allow", allowed.await().jsonObject["decision"]!!.jsonPrimitive.content)
+
+        val removedDuringApproval = async { service.request("demo", params("demo:harness|ext-1")) }
+        runCurrent()
+        externalSessionStore.remove("demo", "harness", listOf("ext-1"))
+        assertEquals("cancel", removedDuringApproval.await().jsonObject["decision"]!!.jsonPrimitive.content)
     }
 }

@@ -1,5 +1,7 @@
 package com.aicode.feature.agent.domain.model
 
+import com.aicode.feature.workspace.domain.model.WorkspaceRef
+
 /**
  * Agent 的工作模式。
  */
@@ -71,5 +73,10 @@ data class ChatSession(
     /** 子代理会话：父会话 id；null 表示普通根会话。 */
     val parentId: String? = null,
     /** 子代理会话：派生子代理的类型（如 coder / researcher）；null 表示普通根会话。 */
-    val subagentType: String? = null
+    val subagentType: String? = null,
+    /** 会话绑定的工作流 ID；null 表示使用默认内置工作流。 */
+    val workflowId: String? = null,
+    /** 会话绑定的工作流持久化状态；null 表示无状态。 */
+    val workflowState: String? = null,
+    val workspaceRef: WorkspaceRef? = null
 )
