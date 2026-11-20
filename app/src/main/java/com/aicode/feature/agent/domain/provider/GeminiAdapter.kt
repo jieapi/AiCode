@@ -71,6 +71,21 @@ class GeminiAdapter @Inject constructor(
         return if (stream) "$url?alt=sse" else url
     }
 
+    /**
+     * 原生 generateContent 端点。用户可能把 baseUrl 直接填到模型名（如 `.../models/gemini-2.5-pro`），
+     * 此时只追加操作名，不再拼 `v1beta/models/{model}`。
+     * 按当前 [baseUrl] 现算：多 Key 模式下每条 Key 可带自己的地址，切 Key 后地址会变。
+     */
+    private fun resolveGenerateContentUrl(stream: Boolean): String {
+        if (useFullUrl) return baseUrl
+        val operation = if (stream) ":streamGenerateContent?alt=sse" else ":generateContent"
+        return if (baseUrl.trimEnd('/').endsWith(model)) {
+            baseUrl.trimEnd('/') + operation
+        } else {
+            joinUrl(baseUrl, "v1beta/models/$model$operation")
+        }
+    }
+
     override suspend fun complete(
         systemPrompt: String,
         messages: List<AgentMessage>,
@@ -83,16 +98,7 @@ class GeminiAdapter @Inject constructor(
 
         val request = buildRequestBody(systemPrompt, messages, tools, reasoningEffort)
 
-        val url = if (useFullUrl) {
-            baseUrl
-        } else {
-            val path = if (baseUrl.trimEnd('/').endsWith(model)) {
-                baseUrl.trimEnd('/') + ":generateContent"
-            } else {
-                joinUrl(baseUrl, "v1beta/models/$model:generateContent")
-            }
-            path
-        }
+        val url = resolveGenerateContentUrl(stream = false)
         val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", url, request)
 
         val triedKeys = mutableSetOf(apiKey)
@@ -101,7 +107,7 @@ class GeminiAdapter @Inject constructor(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, _ -> switchKeyOnFailure(e, triedKeys) != null }
             ) {
-                api.generateContent(url = url, apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
+                api.generateContent(url = resolveGenerateContentUrl(stream = false), apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
             }
         } catch (e: CancellationException) {
             throw e
@@ -201,16 +207,7 @@ class GeminiAdapter @Inject constructor(
 
         val request = buildRequestBody(systemPrompt, messages, tools, reasoningEffort)
 
-        val url = if (useFullUrl) {
-            baseUrl
-        } else {
-            val path = if (baseUrl.trimEnd('/').endsWith(model)) {
-                baseUrl.trimEnd('/') + ":streamGenerateContent?alt=sse"
-            } else {
-                joinUrl(baseUrl, "v1beta/models/$model:streamGenerateContent?alt=sse")
-            }
-            path
-        }
+        val url = resolveGenerateContentUrl(stream = true)
         
         val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", url, request)
         val sseLog = AILogger.beginRawSse(logSessionId, "Gemini", seq)
@@ -239,7 +236,7 @@ class GeminiAdapter @Inject constructor(
                 var streamOutputTokens = 0
                 var streamCachedInputTokens = 0
 
-                val body = firstContent.awaitBody(api.streamGenerateContent(url = url, apiKey = apiKey, extraHeaders = extraHeaders(), request = request))
+                val body = firstContent.awaitBody(api.streamGenerateContent(url = resolveGenerateContentUrl(stream = true), apiKey = apiKey, extraHeaders = extraHeaders(), request = request))
 
                 body.use { rb ->
                     firstContent.attach { rb.close() }
@@ -412,9 +409,8 @@ class GeminiAdapter @Inject constructor(
         tools: List<AgentTool>,
         reasoningEffort: String?
     ): AIResponse {
-        val url = resolveInteractionsUrl(stream = false)
         val request = buildInteractionsRequest(systemPrompt, messages, tools, reasoningEffort, stream = false)
-        val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", resolveInteractionsUrl(stream = false), request)
 
         val triedKeys = mutableSetOf(apiKey)
         val response = try {
@@ -422,7 +418,7 @@ class GeminiAdapter @Inject constructor(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, _ -> switchKeyOnFailure(e, triedKeys) != null }
             ) {
-                api.createInteraction(url = url, apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
+                api.createInteraction(url = resolveInteractionsUrl(stream = false), apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
             }
         } catch (e: CancellationException) {
             throw e
@@ -468,9 +464,8 @@ class GeminiAdapter @Inject constructor(
         tools: List<AgentTool>,
         reasoningEffort: String?
     ) {
-        val url = resolveInteractionsUrl(stream = true)
         val request = buildInteractionsRequest(systemPrompt, messages, tools, reasoningEffort, stream = true)
-        val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", resolveInteractionsUrl(stream = true), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "Gemini", seq)
         try {
@@ -489,7 +484,7 @@ class GeminiAdapter @Inject constructor(
                     val acc = GeminiInteractionsStreamAccumulator()
 
                     val body = firstContent.awaitBody(api.streamInteraction(
-                        url = url,
+                        url = resolveInteractionsUrl(stream = true),
                         apiKey = apiKey,
                         extraHeaders = extraHeaders(),
                         request = request

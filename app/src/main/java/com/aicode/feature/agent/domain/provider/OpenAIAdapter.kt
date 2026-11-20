@@ -114,7 +114,6 @@ class OpenAIAdapter @Inject constructor(
             )
         }
 
-        val url = resolveApiUrl()
         val reasoningPlan = chatReasoningPlan(reasoningEffort)
         val disableToggle = reasoningPlan.wire as? ReasoningWire.DisableToggle
         val request = ChatCompletionRequest(
@@ -129,7 +128,7 @@ class OpenAIAdapter @Inject constructor(
             stream = false,
             prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
         )
-        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
         val triedKeys = mutableSetOf(apiKey)
         val response = try {
@@ -137,7 +136,8 @@ class OpenAIAdapter @Inject constructor(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, _ -> switchKeyOnFailure(e, triedKeys) != null }
             ) {
-                api.createChatCompletion(url = url, authorization = "Bearer $apiKey", extraHeaders = extraHeaders(), request = request)
+                // 地址按当次取用的 Key 现算：切 Key 可能带出该 Key 自己的 Base URL 覆盖。
+                api.createChatCompletion(url = resolveApiUrl(), authorization = "Bearer $apiKey", extraHeaders = extraHeaders(), request = request)
             }
         } catch (e: CancellationException) {
             throw e
@@ -262,9 +262,8 @@ class OpenAIAdapter @Inject constructor(
         tools: List<AgentTool>,
         reasoningEffort: String?
     ): AIResponse {
-        val url = resolveApiUrl()
         val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = false)
-        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
         val triedKeys = mutableSetOf(apiKey)
         val response = try {
@@ -272,7 +271,7 @@ class OpenAIAdapter @Inject constructor(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, _ -> switchKeyOnFailure(e, triedKeys) != null }
             ) {
-                api.createResponses(url = url, authorization = "Bearer $apiKey", extraHeaders = extraHeaders(), request = request)
+                api.createResponses(url = resolveApiUrl(), authorization = "Bearer $apiKey", extraHeaders = extraHeaders(), request = request)
             }
         } catch (e: CancellationException) {
             throw e
@@ -334,8 +333,6 @@ class OpenAIAdapter @Inject constructor(
             )
         }
 
-        val url = resolveApiUrl()
-
         val streamReasoningPlan = chatReasoningPlan(reasoningEffort)
         val streamDisableToggle = streamReasoningPlan.wire as? ReasoningWire.DisableToggle
         val request = ChatCompletionRequest(
@@ -351,7 +348,7 @@ class OpenAIAdapter @Inject constructor(
             stream_options = StreamOptions(include_usage = true),
             prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
         )
-        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "OpenAI", seq)
 
@@ -382,7 +379,7 @@ class OpenAIAdapter @Inject constructor(
             var streamCacheCreationTokens = 0
 
             val body = firstContent.awaitBody(api.streamChatCompletion(
-                url = url,
+                url = resolveApiUrl(),
                 authorization = "Bearer $apiKey",
                 extraHeaders = extraHeaders(),
                 request = request
@@ -550,9 +547,8 @@ class OpenAIAdapter @Inject constructor(
         tools: List<AgentTool>,
         reasoningEffort: String?
     ) {
-        val url = resolveApiUrl()
         val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = true)
-        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "OpenAI", seq)
         try {
@@ -571,7 +567,7 @@ class OpenAIAdapter @Inject constructor(
                     val acc = ResponsesStreamAccumulator()
 
                     val body = firstContent.awaitBody(api.streamResponses(
-                        url = url,
+                        url = resolveApiUrl(),
                         authorization = "Bearer $apiKey",
                         extraHeaders = extraHeaders(),
                         request = request

@@ -89,7 +89,6 @@ class AnthropicAdapter @Inject constructor(
             )
         }
 
-        val url = if (useFullUrl) baseUrl else joinUrl(baseUrl, defaultProviderApiPath(ProviderType.ANTHROPIC))
         val (thinking, outputConfig) = buildThinkingConfig(reasoningEffort)
         val request = AnthropicMessageRequest(
             model = model,
@@ -102,7 +101,7 @@ class AnthropicAdapter @Inject constructor(
             tools = toolDefs,
             stream = false
         )
-        val seq = AILogger.logRequest(logSessionId, "Anthropic", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "Anthropic", model, "POST", resolveUrl(), request)
 
         val triedKeys = mutableSetOf(apiKey)
         val response = try {
@@ -110,7 +109,7 @@ class AnthropicAdapter @Inject constructor(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, _ -> switchKeyOnFailure(e, triedKeys) != null }
             ) {
-                api.createMessage(url = url, apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
+                api.createMessage(url = resolveUrl(), apiKey = apiKey, extraHeaders = extraHeaders(), request = request)
             }
         } catch (e: CancellationException) {
             throw e
@@ -174,7 +173,6 @@ class AnthropicAdapter @Inject constructor(
             )
         }
 
-        val url = if (useFullUrl) baseUrl else joinUrl(baseUrl, defaultProviderApiPath(ProviderType.ANTHROPIC))
         val (thinking, outputConfig) = buildThinkingConfig(reasoningEffort)
         val request = AnthropicMessageRequest(
             model = model,
@@ -187,7 +185,7 @@ class AnthropicAdapter @Inject constructor(
             tools = toolDefs,
             stream = true
         )
-        val seq = AILogger.logRequest(logSessionId, "Anthropic", model, "POST", url, request)
+        val seq = AILogger.logRequest(logSessionId, "Anthropic", model, "POST", resolveUrl(), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "Anthropic", seq)
 
@@ -220,7 +218,7 @@ class AnthropicAdapter @Inject constructor(
             // content block index -> thinking / redacted_thinking 累积；按 index 分槽，避免一轮多个思考块被合并。
             val thinkingBlocks = LinkedHashMap<Int, ThinkingBlockAcc>()
 
-            val body = firstContent.awaitBody(api.streamMessage(url = url, apiKey = apiKey, extraHeaders = extraHeaders(), request = request))
+            val body = firstContent.awaitBody(api.streamMessage(url = resolveUrl(), apiKey = apiKey, extraHeaders = extraHeaders(), request = request))
 
             body.use { rb ->
                 firstContent.attach { rb.close() }
@@ -426,6 +424,13 @@ class AnthropicAdapter @Inject constructor(
             data = data
         )
     }
+
+    /**
+     * 请求地址按当前 [baseUrl] 现算：多 Key 模式下每条 Key 可带自己的 Base URL，
+     * 切 Key 后地址会变，故不能在发起前只算一次。
+     */
+    private fun resolveUrl(): String =
+        if (useFullUrl) baseUrl else joinUrl(baseUrl, defaultProviderApiPath(ProviderType.ANTHROPIC))
 
     /**
      * 最大输出 token：优先用模型元数据的输出上限，缺失时回退 [DEFAULT_MAX_TOKENS]。

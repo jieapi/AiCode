@@ -1921,6 +1921,9 @@
     <string name="provider_multi_key_add">Add key</string>
     <string name="provider_multi_key_weight">Scheduling weight</string>
     <string name="provider_multi_key_weight_hint">Default 1 · ≤ 0 excluded · Max 1,000,000</string>
+    <string name="provider_multi_key_base_url">Custom Base URL</string>
+    <string name="provider_multi_key_base_url_placeholder">Leave blank to use the provider URL</string>
+    <string name="provider_multi_key_base_url_hint">When set, requests for this key go to this address only — handy for per-key proxies</string>
     <string name="provider_multi_key_strategy">Selection Strategy</string>
     <string name="provider_multi_key_strategy_sequential">Sequential</string>
     <string name="provider_multi_key_strategy_sequential_desc">Always use the earliest key; move on only after the failure threshold</string>

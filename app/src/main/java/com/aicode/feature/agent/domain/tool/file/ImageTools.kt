@@ -339,7 +339,7 @@ class ViewImageTool @Inject constructor(
             }
         }
         provider.apiKey = config.apiKey
-        provider.baseUrl = config.baseUrl
+        provider.baseUrl = config.effectiveBaseUrl(config.apiKey)
         provider.model = config.effectiveModel
         provider.useFullUrl = config.useFullUrl
         provider.useResponseApi = config.useResponseApi

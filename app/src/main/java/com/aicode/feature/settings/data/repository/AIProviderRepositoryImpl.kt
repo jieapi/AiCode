@@ -6,10 +6,7 @@ import com.aicode.feature.agent.data.local.database.AgentDatabase
 import com.aicode.feature.settings.data.local.dao.AIProviderDao
 import com.aicode.feature.settings.data.local.entity.AIProviderEntity
 import com.aicode.feature.settings.domain.model.AIProviderConfig
-import com.aicode.feature.settings.domain.model.DEFAULT_KEY_WEIGHT
 import com.aicode.feature.settings.domain.model.KeyRotationStrategy
-import com.aicode.feature.settings.domain.model.MAX_KEY_WEIGHT
-import com.aicode.feature.settings.domain.model.ProviderKey
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.ProxyType
 import com.aicode.feature.settings.domain.model.sanitized
@@ -41,19 +38,6 @@ class AIProviderRepositoryImpl @Inject constructor(
         private fun decodeMap(raw: String): Map<String, String> =
             if (raw.isBlank()) emptyMap()
             else runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrDefault(emptyMap())
-
-        /** 解析多 Key 存储串：每行 `值|权重`；旧数据无 `|` 时权重取默认值。 */
-        private fun parseProviderKeys(raw: String): List<ProviderKey> =
-            raw.split("\n").mapNotNull { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty()) return@mapNotNull null
-                val sep = trimmed.lastIndexOf('|')
-                if (sep < 0) return@mapNotNull ProviderKey(trimmed)
-                val value = trimmed.substring(0, sep).trim()
-                if (value.isEmpty()) return@mapNotNull null
-                val weight = trimmed.substring(sep + 1).trim().toIntOrNull() ?: DEFAULT_KEY_WEIGHT
-                ProviderKey(value, weight.coerceIn(0, MAX_KEY_WEIGHT))
-            }
     }
 
     override fun getAllProviders(): Flow<List<AIProviderConfig>> {
@@ -136,7 +120,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             type = try { ProviderType.valueOf(type) } catch (e: Exception) { ProviderType.OPENAI },
             apiKey = KeystoreCipher.decryptString(apiKey),
             multiKeyEnabled = multiKeyEnabled,
-            apiKeys = parseProviderKeys(KeystoreCipher.decryptString(apiKeys)),
+            apiKeys = decodeProviderKeys(KeystoreCipher.decryptString(apiKeys)),
             keyRotationStrategy = runCatching { KeyRotationStrategy.valueOf(keyRotationStrategy) }
                 .getOrDefault(KeyRotationStrategy.SEQUENTIAL),
             keyFailoverThreshold = keyFailoverThreshold,
@@ -173,7 +157,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             type = type.name,
             apiKey = KeystoreCipher.encryptString(apiKey),
             multiKeyEnabled = multiKeyEnabled,
-            apiKeys = KeystoreCipher.encryptString(apiKeys.joinToString("\n") { "${it.value}|${it.weight}" }),
+            apiKeys = KeystoreCipher.encryptString(encodeProviderKeys(apiKeys)),
             keyRotationStrategy = keyRotationStrategy.name,
             keyFailoverThreshold = keyFailoverThreshold,
             keyCooldownMinutes = keyCooldownMinutes,

@@ -1920,6 +1920,9 @@
     <string name="provider_multi_key_add">添加 Key</string>
     <string name="provider_multi_key_weight">调度权重</string>
     <string name="provider_multi_key_weight_hint">默认 1 · ≤ 0 时不参与 · 最大 1,000,000</string>
+    <string name="provider_multi_key_base_url">自定义 Base URL</string>
+    <string name="provider_multi_key_base_url_placeholder">留空则用提供商地址</string>
+    <string name="provider_multi_key_base_url_hint">填了就只用该地址发请求，适合不同 Key 走不同中转或反代</string>
     <string name="provider_multi_key_strategy">取用策略</string>
     <string name="provider_multi_key_strategy_sequential">顺序</string>
     <string name="provider_multi_key_strategy_sequential_desc">始终用靠前的 Key，失败达阈值才切下一个</string>
