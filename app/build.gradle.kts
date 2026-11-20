@@ -231,7 +231,8 @@ android {
                 "**/libproot-loader.so",
                 "**/libproot-loader32.so",
                 "**/libtalloc.so",
-                "**/libandroid-shmem.so"
+                "**/libandroid-shmem.so",
+                "**/libtawcroot.so"
             )
         }
         resources {
