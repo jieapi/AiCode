@@ -208,6 +208,8 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     AppPermissions(R.string.settings_app_permissions),
     BackgroundRun(R.string.settings_category_background),
     RemoteServers(R.string.settings_remote_servers),
+    SessionManagement(R.string.settings_session_management),
+    SessionDetail(R.string.settings_session_detail),
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
     Backup(R.string.settings_backup),
@@ -231,6 +233,7 @@ private fun SettingsSection.depth(): Int = when (this) {
     SettingsSection.PromptDetail,
     SettingsSection.SkillDetail,
     SettingsSection.SubAgentDetail,
+    SettingsSection.SessionDetail,
     SettingsSection.PluginDetail,
     SettingsSection.PluginStoreDetail,
     SettingsSection.PluginDevDetail,
@@ -245,6 +248,9 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
     onStopAllAndCloseTerminal: () -> Unit = {},
+    onOpenSessionInWorkspace: (com.aicode.feature.workspace.domain.model.Workspace, String) -> Unit = { _, _ -> },
+    onFollowMovedSession: (com.aicode.feature.workspace.domain.model.Workspace, String) -> Unit = { _, _ -> },
+    onSessionsMutated: () -> Unit = {},
     onRerunOnboarding: () -> Unit = {},
     onShowStarPrompt: () -> Unit = {},
     onboardingStep: OnboardingStep? = null,
@@ -570,6 +576,7 @@ fun SettingsScreen(
         SettingsSection.PluginDetail -> SettingsSection.Plugins
         SettingsSection.PluginStoreDetail -> SettingsSection.Plugins
         SettingsSection.PluginDevDetail -> SettingsSection.Plugins
+        SettingsSection.SessionDetail -> SettingsSection.SessionManagement
         SettingsSection.PluginPage -> if (expanded) null else SettingsSection.Menu
         SettingsSection.ContainerDownloads -> SettingsSection.Container
         else -> if (expanded) null else SettingsSection.Menu
@@ -870,6 +877,7 @@ fun SettingsScreen(
                 SettingsSection.PluginDevDetail -> "PluginDevDetail:${selectedDevProject?.dirName.orEmpty()}"
                 SettingsSection.PluginPage -> "PluginPage:${activePluginPage?.key.orEmpty()}"
                 SettingsSection.PromptDetail -> "PromptDetail:${selectedPrompt?.number ?: 0}"
+                SettingsSection.SessionDetail -> "SessionDetail"
                 else -> current.name
             }
             sectionStateHolder.SaveableStateProvider(stateKey) {
@@ -877,6 +885,12 @@ fun SettingsScreen(
             // 它的构造即触发一次全盘统计，不能提到 SettingsScreen 顶层（那样每次进设置页都会扫盘）。
             val storageViewModel: com.aicode.feature.settings.presentation.StorageViewModel? =
                 if (current == SettingsSection.Storage) androidx.hilt.navigation.compose.hiltViewModel() else null
+            val sessionManagementViewModel: com.aicode.feature.settings.presentation.SessionManagementViewModel? =
+                if (current == SettingsSection.SessionManagement || current == SettingsSection.SessionDetail) {
+                    androidx.hilt.navigation.compose.hiltViewModel()
+                } else null
+            val sessionDetailState = sessionManagementViewModel?.detailState?.collectAsStateWithLifecycle()?.value
+            val sessionBuckets = sessionManagementViewModel?.allBuckets?.collectAsStateWithLifecycle()?.value.orEmpty()
             Scaffold(
         containerColor = settingsPageBackground(),
         topBar = {
@@ -897,6 +911,8 @@ fun SettingsScreen(
                                 ?: stringResource(current.titleRes)
                         } else if (current == SettingsSection.PluginPage) {
                             activePluginPage?.title?.resolve(pluginLanguageTag) ?: stringResource(current.titleRes)
+                        } else if (current == SettingsSection.SessionDetail) {
+                            sessionDetailState?.session?.title ?: stringResource(current.titleRes)
                         } else if (expanded && current == SettingsSection.Menu) {
                             // 大屏左栏顶部已经写着「设置」，右栏空态不再重复
                             ""
@@ -1283,6 +1299,12 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        SettingsSection.SessionManagement -> {
+                            SelectionToggleAction(
+                                selectionFor(SettingsSection.SessionManagement),
+                                enabled = sessionBuckets.any { it.sessions.isNotEmpty() }
+                            )
+                        }
                         else -> {}
                     }
                 }
@@ -1596,6 +1618,27 @@ fun SettingsScreen(
                     onClearFilters = { viewModel.clearTokenStatsFilters() }
                 )
                 SettingsSection.Storage -> storageViewModel?.let { StorageSectionHost(viewModel = it) }
+                SettingsSection.SessionManagement -> sessionManagementViewModel?.let { vm ->
+                    SessionManagementSectionHost(
+                        viewModel = vm,
+                        selection = selectionFor(SettingsSection.SessionManagement),
+                        onOpenDetail = { section = SettingsSection.SessionDetail },
+                        onOpenInChat = onOpenSessionInWorkspace,
+                        onFollowMovedSession = onFollowMovedSession,
+                        onStopAllAndCloseTerminal = onStopAllAndCloseTerminal,
+                        onSessionsMutated = onSessionsMutated
+                    )
+                }
+                SettingsSection.SessionDetail -> sessionManagementViewModel?.let { vm ->
+                    SessionDetailSectionHost(
+                        viewModel = vm,
+                        onOpenInChat = onOpenSessionInWorkspace,
+                        onFollowMovedSession = onFollowMovedSession,
+                        onStopAllAndCloseTerminal = onStopAllAndCloseTerminal,
+                        onSessionsMutated = onSessionsMutated,
+                        onDeletedNavigateBack = { section = SettingsSection.SessionManagement }
+                    )
+                }
                 SettingsSection.ProviderEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SkillEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
@@ -2394,6 +2437,12 @@ internal fun SettingsMenu(
         // ── 数据与诊断 ──
         SettingsGroupHeader(text = stringResource(R.string.settings_category_data))
         SettingsGroup {
+            SettingsRow(
+                icon = FeatherIcons.MessageSquare,
+                title = stringResource(SettingsSection.SessionManagement.titleRes),
+                onClick = { onOpen(SettingsSection.SessionManagement) }
+            )
+            SettingsDivider()
             SettingsRow(
                 icon = FeatherIcons.BarChart2,
                 title = stringResource(SettingsSection.TokenStats.titleRes),

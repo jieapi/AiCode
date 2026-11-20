@@ -429,6 +429,32 @@ class AIAgentViewModel @Inject constructor(
     /** 容器初始化实时进度（解压/部署/装包），AI 页底部气泡展示。 */
     val containerInit: StateFlow<ContainerInitState> = containerEngine.initProgress
 
+    /** 从设置→会话管理页打开或移动当前会话并跟随切换时，暂存目标 `(workspacePath, sessionId)`，切区落地时优先选中。 */
+    @Volatile
+    private var pendingFollowSession: Pair<String, String>? = null
+
+    fun prepareFollowSession(workspacePath: String, sessionId: String) {
+        if (workspacePath.isBlank() || sessionId.isBlank()) return
+        if (_currentWorkspace.value == workspacePath) {
+            selectSession(sessionId)
+            return
+        }
+        pendingFollowSession = workspacePath to sessionId
+        leaveExternalSessionForLocalSwitch()
+    }
+
+    /** 若当前选中的本地会话已在会话管理页被删除或移走，切到当前工作区其余会话或补建空会话。 */
+    fun ensureCurrentSessionStillInWorkspace() = viewModelScope.launch {
+        if (_activeExternalSession.value != null) return@launch
+        val ws = _currentWorkspace.value
+        if (ws.isBlank()) return@launch
+        val curId = _currentSessionId.value
+        val cur = curId?.let { sessionUseCase.getSessionById(it) }
+        if (cur != null && cur.workspacePath == ws) return@launch
+        val nextId = sessionUseCase.getFirstSessionOfWorkspace(ws)?.id ?: createAndUpsertSession(ws)
+        updateSelectedSessionId(nextId)
+    }
+
     private val _currentWorkspace = MutableStateFlow<String>("")
     fun setWorkspace(path: String) {
         if (path.isBlank() || _currentWorkspace.value == path) return
@@ -1559,6 +1585,10 @@ class AIAgentViewModel @Inject constructor(
                 if (path.isBlank()) return@collectLatest
                 _activeExternalSession.value = null
                 externalLoadJob?.cancel()
+                val pending = pendingFollowSession?.takeIf { it.first == path }
+                if (pending != null) {
+                    pendingFollowSession = null
+                }
                 val recent = sessionUseCase.getMostRecentSessionOfWorkspace(path)
                 // Activity 被回收重建时，若原会话仍在运行，优先回到它，而不是跳去新会话。
                 val saved = sessionSelectionStore.load()
@@ -1567,9 +1597,11 @@ class AIAgentViewModel @Inject constructor(
                 }
                 val runningSaved = savedId?.takeIf { agentRunManager.isSessionRunning(it) }
                 // 立即确定并设置当前会话，确保首帧 UI 秒开、侧边栏立即出现新会话，彻底消除转圈卡顿。
+                // 若存在从会话管理页切过来的目标会话且已落在该工作区，优先直接选中它；
                 // 「打开最近会话」有历史就直接进最近那个（按 updatedAt，不受置顶影响）；
                 // 「新开会话」复用还没发过消息的空会话（避免每次启动都堆一个空会话），其余情况新建。
                 val targetId = when {
+                    pending != null && sessionUseCase.getSessionById(pending.second)?.workspacePath == path -> pending.second
                     runningSaved != null -> runningSaved
                     recent == null -> createAndUpsertSession(path)
                     generalSettingsRepository.startupSessionMode() == StartupSessionMode.RECENT_SESSION -> savedId ?: recent.id

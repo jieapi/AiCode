@@ -171,12 +171,15 @@ interface AgentMessageDao {
         SELECT m.id AS messageId,
                m.sessionId AS sessionId,
                s.title AS sessionTitle,
+               s.workspacePath AS workspacePath,
                m.role AS role,
                m.content AS content,
                m.timestamp AS timestamp
         FROM agent_messages m
         JOIN chat_sessions s ON s.id = m.sessionId
         WHERE s.workspacePath = :workspacePath
+          AND s.backendInstanceId IS NULL
+          AND s.workspaceId IS NULL
           AND m.isCompacted = 0
           AND m.isContextSummary = 0
           AND m.isCompactionMarker = 0
@@ -187,6 +190,70 @@ interface AgentMessageDao {
         """
     )
     suspend fun searchInWorkspace(workspacePath: String, escapedQuery: String, limit: Int): List<ChatSearchMatch>
+
+    /** 跨多个工作区搜索聊天记录，供「全部工作区」侧栏视图检索。 */
+    @Query(
+        """
+        SELECT m.id AS messageId,
+               m.sessionId AS sessionId,
+               s.title AS sessionTitle,
+               s.workspacePath AS workspacePath,
+               m.role AS role,
+               m.content AS content,
+               m.timestamp AS timestamp
+        FROM agent_messages m
+        JOIN chat_sessions s ON s.id = m.sessionId
+        WHERE s.workspacePath IN (:workspacePaths)
+          AND s.backendInstanceId IS NULL
+          AND s.workspaceId IS NULL
+          AND m.isCompacted = 0
+          AND m.isContextSummary = 0
+          AND m.isCompactionMarker = 0
+          AND m.role IN ('USER', 'ASSISTANT')
+          AND m.content LIKE '%' || :escapedQuery || '%' ESCAPE '!'
+        ORDER BY m.timestamp DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchInWorkspaces(workspacePaths: List<String>, escapedQuery: String, limit: Int): List<ChatSearchMatch>
+
+    /** 全库搜索所有工作区（含本地与离线远程历史）的聊天记录，供设置页「会话管理」使用。 */
+    @Query(
+        """
+        SELECT m.id AS messageId,
+               m.sessionId AS sessionId,
+               s.title AS sessionTitle,
+               s.workspacePath AS workspacePath,
+               m.role AS role,
+               m.content AS content,
+               m.timestamp AS timestamp
+        FROM agent_messages m
+        JOIN chat_sessions s ON s.id = m.sessionId
+        WHERE s.backendInstanceId IS NULL
+          AND s.workspaceId IS NULL
+          AND m.isCompacted = 0
+          AND m.isContextSummary = 0
+          AND m.isCompactionMarker = 0
+          AND m.role IN ('USER', 'ASSISTANT')
+          AND m.content LIKE '%' || :escapedQuery || '%' ESCAPE '!'
+        ORDER BY m.timestamp DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchAllWorkspaces(escapedQuery: String, limit: Int): List<ChatSearchMatch>
+
+    /** 实时统计各会话的可见消息条数，供设置页「会话管理」列表展示。 */
+    @Query(
+        """
+        SELECT sessionId, COUNT(*) AS messageCount
+        FROM agent_messages
+        WHERE isCompacted = 0
+          AND isContextSummary = 0
+          AND isCompactionMarker = 0
+        GROUP BY sessionId
+        """
+    )
+    fun getSessionMessageCountsFlow(): Flow<List<SessionMessageCount>>
 
     /** 指定会话中时间戳不早于 [timestamp] 的消息条数（含并列时间戳），供定位时确定所需分页上限。 */
     @Query("SELECT COUNT(*) FROM agent_messages WHERE sessionId = :sessionId AND timestamp >= :timestamp")
@@ -239,7 +306,14 @@ data class ChatSearchMatch(
     val sessionTitle: String,
     val role: String,
     val content: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val workspacePath: String = ""
+)
+
+/** 单个会话的消息条数投影（[AgentMessageDao.getSessionMessageCountsFlow] 的投影）。 */
+data class SessionMessageCount(
+    val sessionId: String,
+    val messageCount: Int
 )
 
 /** 单个会话的消息占用估算（[AgentMessageDao.sessionStorageUsage] 的投影）。 */

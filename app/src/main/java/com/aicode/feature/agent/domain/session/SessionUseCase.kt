@@ -9,6 +9,8 @@ import com.aicode.feature.agent.domain.model.GoalStatus
 import com.aicode.feature.agent.domain.model.ReasoningEffort
 import com.aicode.feature.agent.presentation.MessageRole
 import com.aicode.feature.workspace.domain.model.WorkspaceRef
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -298,5 +300,45 @@ class SessionUseCase @Inject constructor(
 
     suspend fun isSessionEmpty(sessionId: String): Boolean {
         return !agentMessageDao.hasMessages(sessionId)
+    }
+
+    fun getAllStandardSessionsFlow(): Flow<List<ChatSessionEntity>> =
+        chatSessionDao.getAllStandardSessionsFlow()
+
+    fun getAllSessionsByWorkspaces(workspacePaths: List<String>): Flow<List<ChatSessionEntity>> {
+        val paths = workspacePaths.filter { it.isNotBlank() }.distinct()
+        if (paths.isEmpty()) return flowOf(emptyList())
+        return chatSessionDao.getAllSessionsByWorkspaces(paths)
+    }
+
+    /**
+     * 将指定的根会话（连同其子代理会话）迁移到 [targetWorkspacePath]。
+     * 仅处理当前存在、属于根会话（`parentId == null`）且不在目标工作区的会话；不修改 `updatedAt`。
+     * 若迁入了空会话，按目标工作区最多保留一个空会话的规则回收多余空会话（优先保留 [preferredEmptyId] 或首个迁入空会话）。
+     * 返回实际迁移的根会话实体列表（迁移前快照）。
+     */
+    suspend fun moveSessionsToWorkspace(
+        sessionIds: Collection<String>,
+        targetWorkspacePath: String,
+        preferredEmptyId: String? = null
+    ): List<ChatSessionEntity> {
+        if (sessionIds.isEmpty() || targetWorkspacePath.isBlank()) return emptyList()
+        val movable = sessionIds.distinct().mapNotNull { id ->
+            chatSessionDao.getById(id)?.takeIf {
+                it.parentId == null &&
+                    it.backendInstanceId == null &&
+                    it.workspaceId == null &&
+                    it.workspacePath != targetWorkspacePath
+            }
+        }
+        if (movable.isEmpty()) return emptyList()
+        val movableIds = movable.map { it.id }
+        chatSessionDao.moveSessionsToWorkspace(movableIds, targetWorkspacePath)
+        val movedEmptyIds = movable.filter { !agentMessageDao.hasMessages(it.id) }.map { it.id }
+        if (movedEmptyIds.isNotEmpty()) {
+            val keepEmpty = preferredEmptyId?.takeIf { it in movedEmptyIds } ?: movedEmptyIds.first()
+            recycleEmptySessions(targetWorkspacePath, keepId = keepEmpty)
+        }
+        return movable
     }
 }

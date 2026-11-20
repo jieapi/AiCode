@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -14,6 +15,30 @@ interface ChatSessionDao {
 
     @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun getAllSessionsByWorkspace(workspacePath: String): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_sessions WHERE backendInstanceId IS NULL AND workspaceId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    fun getAllStandardSessionsFlow(): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_sessions WHERE workspacePath IN (:workspacePaths) AND backendInstanceId IS NULL AND workspaceId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
+    fun getAllSessionsByWorkspaces(workspacePaths: List<String>): Flow<List<ChatSessionEntity>>
+
+    @Query("UPDATE chat_sessions SET workspacePath = :targetWorkspacePath WHERE id IN (:sessionIds) AND backendInstanceId IS NULL AND workspaceId IS NULL")
+    suspend fun updateWorkspacePathByIds(sessionIds: List<String>, targetWorkspacePath: String): Int
+
+    @Query("UPDATE chat_sessions SET workspacePath = :targetWorkspacePath WHERE parentId IN (:parentIds) AND backendInstanceId IS NULL AND workspaceId IS NULL")
+    suspend fun updateWorkspacePathByParents(parentIds: List<String>, targetWorkspacePath: String): Int
+
+    /** 跨工作区迁移根会话及其派生子代理会话，保证父子归属在同一事务内同步切换。 */
+    @Transaction
+    suspend fun moveSessionsToWorkspace(sessionIds: List<String>, targetWorkspacePath: String): Int {
+        if (sessionIds.isEmpty()) return 0
+        var moved = 0
+        sessionIds.chunked(500).forEach { chunk ->
+            moved += updateWorkspacePathByIds(chunk, targetWorkspacePath)
+            updateWorkspacePathByParents(chunk, targetWorkspacePath)
+        }
+        return moved
+    }
 
     @Query("SELECT * FROM chat_sessions WHERE workspacePath = :workspacePath AND backendInstanceId IS NULL AND workspaceId IS NULL AND parentId IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun getRootSessionsByWorkspace(workspacePath: String): Flow<List<ChatSessionEntity>>
