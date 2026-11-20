@@ -12,17 +12,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License GPL-3.0" /></a>
   <img src="https://img.shields.io/badge/Platform-Android-green.svg" alt="Android Platform" />
   <a href="https://github.com/jieapi/aicode/releases"><img src="https://img.shields.io/github/v/release/jieapi/aicode?display_name=tag&include_prereleases" alt="Latest Release" /></a>
+  <a href="https://ifdian.net/a/jieapi"><img src="https://img.shields.io/badge/Sponsor-Afdian-946ce6.svg" alt="Sponsor on Afdian" /></a>
 </p>
 
 <p align="center">
   <a href="https://trendshift.io/repositories/193355?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-193355" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/193355" alt="jieapi%2FAiCode | Trendshift" width="250" height="55"/></a>
 </p>
-
-## Statement on Open-Source License Compliance
-
-We recently discovered that a closed-source commercial app makes extensive use of AiCode's code and static assets, even retaining class names and other identifiers from this project, without complying with its open-source license. Meanwhile, its developer claims never to have heard of AiCode.
-
-**AiCode permits commercial use under the terms of [GPL-3.0](LICENSE).** Our objection is not to commercialization, but to distributing derivative works as closed-source software without fulfilling obligations such as preserving copyright and license notices, licensing those works under GPL-3.0, and providing the corresponding source code. Open source does not mean giving up copyright. Please respect the license and the work of open-source developers.
 
 <p align="center">
   <table>
@@ -111,9 +106,9 @@ There is nothing to set up beforehand: install the app, configure a model under 
 | Changelog | [Releases](https://github.com/jieapi/aicode/releases) (all versions & notes) |
 | User guide | [Online docs](https://aicode.murk.top): quick start, user manual and advanced guides (same content as the in-app docs) |
 
-## Star
+## Support & Sponsor
 
-If AiCode is helpful to you, give it a [Star](https://github.com/jieapi/aicode) — it helps more developers discover the project.
+If AiCode is helpful to you, give it a [Star](https://github.com/jieapi/aicode) — it helps more developers discover the project. You can also support ongoing development on **[Afdian](https://ifdian.net/a/jieapi)**.
 
 ## Star History
 
