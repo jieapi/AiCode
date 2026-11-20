@@ -3,7 +3,6 @@ package com.aicode.feature.plugin.runtime
 import com.aicode.feature.agent.domain.container.ContainerInstaller
 import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
-import com.aicode.feature.workspace.domain.FileAccessProvider
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -681,48 +680,26 @@ class PluginBinaryChannelTest {
         every { installer.containerPathFor(any()) } answers {
             "/root/.aicode/" + firstArg<File>().relativeTo(root).invariantSeparatorsPath
         }
-        val backendFiles = mockk<FileAccessProvider>()
-        val manager = createRuntimeManager(installer, backendFiles)
+        val manager = createRuntimeManager(installer)
 
         assertEquals("/root/.aicode/plugins/data/demo.cloud", manager.dataDirectory("demo.cloud"))
         assertTrue(File(root, "plugins/data/demo.cloud").isDirectory)
         assertEquals("/root/.aicode/plugins/data/demo.cloud", manager.dataDirectory("demo.cloud"))
-        verify { backendFiles wasNot Called }
     }
 
-    private fun createRuntimeManager(
-        installer: ContainerInstaller,
-        backendFiles: FileAccessProvider = mockk(relaxed = true)
-    ): PluginRuntimeManager =
+    private fun createRuntimeManager(installer: ContainerInstaller): PluginRuntimeManager =
         PluginRuntimeManager(
             pluginManager = mockk(relaxed = true),
             installer = installer,
             engine = mockk(relaxed = true),
             containerSettingsRepository = mockk(relaxed = true),
-            fileAccess = backendFiles,
             homeResolver = mockk(relaxed = true),
-            commandEngine = mockk(relaxed = true),
             workspaceRepository = mockk(relaxed = true),
             executionModeHolder = mockk(relaxed = true),
             eventBus = mockk(relaxed = true),
             workflowEventBus = mockk(relaxed = true),
-            notifier = mockk(relaxed = true),
-            terminalRunner = mockk(relaxed = true),
-            shizukuRunner = mockk(relaxed = true),
-            tipManager = mockk(relaxed = true),
             overlayManager = mockk(relaxed = true),
-            chatService = mockk(relaxed = true),
-            modelService = mockk(relaxed = true),
-            providerService = mockk(relaxed = true),
-            secretStore = mockk(relaxed = true),
-            systemService = mockk(relaxed = true),
-            introspectionService = mockk(relaxed = true),
-            toolService = mockk(relaxed = true),
-            permissionService = mockk(relaxed = true),
-            httpService = mockk(relaxed = true),
-            portService = mockk(relaxed = true),
-            workspaceHostService = mockk(relaxed = true),
-            externalSessionHostService = mockk(relaxed = true)
+            hostApiDispatcher = mockk(relaxed = true)
         )
 
     private fun createChannel(sockPath: File, token: String): PluginBinaryChannel =

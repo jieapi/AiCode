@@ -20,12 +20,7 @@
 // 基础类型
 // ---------------------------------------------------------------------------
 
-export type JsonPrimitive = string | number | boolean | null;
-
-/** 可 JSON 序列化的值，对应宿主与插件进程之间的数据。 */
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-
-export type JsonObject = { [key: string]: JsonValue };
+export type { JsonObject, JsonPrimitive, JsonValue } from './common';
 
 export interface ToolBeforeHookResult {
   decision?: 'allow' | 'deny';

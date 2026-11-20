@@ -177,7 +177,8 @@ class PluginsViewModel @Inject constructor(
     private val introspectionService: PluginIntrospectionService,
     private val toolService: PluginToolService,
     private val permissionService: com.aicode.feature.plugin.runtime.PluginPermissionService,
-    private val httpService: PluginHttpService
+    private val httpService: PluginHttpService,
+    private val hostApiDispatcher: com.aicode.feature.plugin.runtime.PluginHostApiDispatcher
 ) : ViewModel() {
 
     val plugins: StateFlow<List<InstalledPlugin>> = manager.plugins
@@ -733,25 +734,13 @@ class PluginsViewModel @Inject constructor(
             languageTag = languageTag,
             fileAccess = fileAccess,
             homeResolver = pathHomeResolver,
-            commandEngine = commandEngine,
             workspacePath = { workspaceRepository.currentPath() },
             eventBus = eventBus,
             pluginManager = manager,
             pluginRuntimeManager = pluginRuntimeManager,
-            terminalRunner = pluginTerminalRunner,
-            shizukuRunner = shizukuRunner,
-            tipManager = tipManager,
-            overlayManager = overlayManager,
-            chatService = chatService,
             modelService = modelService,
-            providerService = providerService,
             agentRunStateStore = agentRunStateStore,
-            secretStore = secretStore,
-            systemService = systemService,
-            introspectionService = introspectionService,
-            toolService = toolService,
-            permissionService = permissionService,
-            httpService = httpService,
+            hostApiDispatcher = hostApiDispatcher,
             environment = pageEnvironment,
             theme = theme,
             onClosePage = onClosePage,

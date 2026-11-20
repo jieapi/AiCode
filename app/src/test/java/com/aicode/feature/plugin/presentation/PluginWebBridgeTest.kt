@@ -69,6 +69,7 @@ class PluginWebBridgeTest {
         val fileAccess: FileAccessProvider,
         val modelService: PluginModelService,
         val providerService: PluginProviderService,
+        val hostApiDispatcher: com.aicode.feature.plugin.runtime.PluginHostApiDispatcher,
         val eventBus: PluginEventBus,
         val environment: PluginPageEnvironment,
         val scripts: MutableList<String>
@@ -110,6 +111,19 @@ class PluginWebBridgeTest {
         val modelService = mockk<PluginModelService>(relaxed = true)
         val providerService = mockk<PluginProviderService>(relaxed = true)
         val eventBus = PluginEventBus()
+        val hostApiDispatcher = mockk<com.aicode.feature.plugin.runtime.PluginHostApiDispatcher>()
+        coEvery {
+            hostApiDispatcher.dispatch(any(), "bash", any(), any(), any(), any())
+        } returns buildJsonObject {
+            put("output", "ok")
+            put("exitCode", 0)
+            put("truncated", false)
+        }
+        coEvery {
+            hostApiDispatcher.dispatch(any(), "providers.setApiKey", any(), any(), any(), any())
+        } coAnswers {
+            providerService.setApiKey(pluginId, thirdArg())
+        }
         val scripts = mutableListOf<String>()
         val bridge = PluginWebBridge(
             context = ApplicationProvider.getApplicationContext(),
@@ -118,32 +132,20 @@ class PluginWebBridgeTest {
             languageTag = "zh-CN",
             fileAccess = fileAccess,
             homeResolver = home,
-            commandEngine = engine,
             workspacePath = { "/projects/a" },
             eventBus = eventBus,
             pluginManager = manager,
             pluginRuntimeManager = mockk(relaxed = true),
-            terminalRunner = mockk(relaxed = true),
-            shizukuRunner = mockk(relaxed = true),
-            tipManager = mockk(relaxed = true),
-            overlayManager = mockk(relaxed = true),
-            chatService = mockk(relaxed = true),
             modelService = modelService,
-            providerService = providerService,
             agentRunStateStore = runs,
-            secretStore = mockk(relaxed = true),
-            systemService = mockk(relaxed = true),
-            introspectionService = mockk(relaxed = true),
-            toolService = mockk(relaxed = true),
-            permissionService = mockk(relaxed = true),
-            httpService = mockk(relaxed = true),
+            hostApiDispatcher = hostApiDispatcher,
             environment = environment,
             theme = { "light" },
             onClosePage = {},
             post = { scripts += it }
         )
         bridges += bridge
-        return Env(bridge, plugins, engine, fileAccess, modelService, providerService, eventBus, environment, scripts)
+        return Env(bridge, plugins, engine, fileAccess, modelService, providerService, hostApiDispatcher, eventBus, environment, scripts)
     }
 
     private suspend fun assertInactive(bridge: PluginWebBridge, method: String, params: JsonObject) {
@@ -157,7 +159,16 @@ class PluginWebBridgeTest {
         val env = env()
         val result = env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") }) as JsonObject
         assertEquals("ok", result.getValue("output").jsonPrimitive.content)
-        coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit("pwd", "/projects/a", any()) }
+        coVerify(exactly = 1) {
+            env.hostApiDispatcher.dispatch(
+                pluginId,
+                "bash",
+                any(),
+                com.aicode.feature.plugin.runtime.PluginHostApiOrigin.PAGE,
+                any(),
+                "page:${env.bridge.javaClass.getDeclaredField("page").let { it.isAccessible = true; (it.get(env.bridge) as com.aicode.feature.plugin.domain.PluginPage).cacheKey } }"
+            )
+        }
     }
 
     @Test
@@ -173,7 +184,16 @@ class PluginWebBridgeTest {
             }
         )
 
-        coVerify(exactly = 1) { env.providerService.setApiKey(pluginId, any()) }
+        coVerify(exactly = 1) {
+            env.hostApiDispatcher.dispatch(
+                pluginId,
+                "providers.setApiKey",
+                any(),
+                com.aicode.feature.plugin.runtime.PluginHostApiOrigin.PAGE,
+                any(),
+                any()
+            )
+        }
     }
 
     @Test
@@ -240,7 +260,16 @@ class PluginWebBridgeTest {
         env.plugins.value = listOf(plugin.copy(record = plugin.record.copy(dependenciesReady = true, dependenciesHash = "deps")))
         assertTrue(env.bridge.isActive)
         env.bridge.dispatch("bash", buildJsonObject { put("command", "pwd") })
-        coVerify(exactly = 1) { env.commandEngine.runCommandSyncWithExit(any(), any(), any()) }
+        coVerify(exactly = 1) {
+            env.hostApiDispatcher.dispatch(
+                pluginId,
+                "bash",
+                any(),
+                com.aicode.feature.plugin.runtime.PluginHostApiOrigin.PAGE,
+                any(),
+                any()
+            )
+        }
     }
 
     @Test

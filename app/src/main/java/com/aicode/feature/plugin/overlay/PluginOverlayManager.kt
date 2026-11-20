@@ -54,6 +54,7 @@ class PluginOverlayManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val pluginManager: PluginManager,
     private val permissionService: com.aicode.feature.plugin.runtime.PluginPermissionService,
+    private val hostApiDispatcher: dagger.Lazy<com.aicode.feature.plugin.runtime.PluginHostApiDispatcher>,
     private val permissionRepository: PluginOverlayPermissionRepository,
     private val positionRepository: PluginOverlayPositionRepository,
     private val appForegroundMonitor: AppForegroundMonitor
@@ -377,7 +378,7 @@ class PluginOverlayManager @Inject constructor(
             page = page,
             density = density,
             window = window,
-            permissionService = permissionService,
+            hostApiDispatcher = hostApiDispatcher.get(),
             onPageMessage = { payload -> eventSink?.invoke(surface.pluginId, surface.key, payload) },
             onClose = { removeWindowById(surface.key) }
         )
