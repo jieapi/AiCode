@@ -148,6 +148,7 @@
     <string name="settings_shizuku_hint_denied">Tap to request Shizuku permission</string>
     <string name="settings_shizuku_hint_ready">Authorized — AI can run commands via adb shell</string>
     <string name="settings_backup">Backup &amp; Restore</string>
+    <string name="settings_sponsor">Sponsor</string>
     <string name="settings_about">About</string>
     <string name="settings_language">Language</string>
     <string name="settings_token_stats_title">Token Stats</string>
@@ -605,6 +606,19 @@
     <string name="about_update_mirror_invalid">Address must start with http:// or https://</string>
     <string name="about_update_mirror_default">Restore default</string>
     <string name="about_update_download_install">Download &amp; install</string>
+
+    <!-- Sponsor -->
+    <string name="sponsor_methods_header">Sponsor methods</string>
+    <string name="sponsor_users_header">Sponsors</string>
+    <string name="sponsor_method_afdian">Afdian</string>
+    <string name="sponsor_method_wechat">WeChat Sponsor</string>
+    <string name="sponsor_refresh">Refresh sponsors</string>
+    <string name="sponsor_refresh_failed">Refresh failed: %1$s</string>
+    <string name="sponsor_refresh_failed_short">Refresh failed, please try again later</string>
+    <string name="sponsor_users_empty_title">No sponsors yet</string>
+    <string name="sponsor_users_empty_hint">The list syncs from the repository periodically; tap below to refresh manually</string>
+    <string name="sponsor_qr_load_failed">Failed to load QR code, please try again later</string>
+    <string name="sponsor_open_link">Open link</string>
 
     <!-- Star Prompt -->
     <string name="star_prompt_title">Enjoying AiCode?</string>

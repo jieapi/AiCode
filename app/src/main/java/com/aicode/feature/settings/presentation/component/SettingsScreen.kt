@@ -133,6 +133,7 @@ import compose.icons.feathericons.Download
 import compose.icons.feathericons.FileText
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
+import compose.icons.feathericons.Heart
 import compose.icons.feathericons.Image
 import compose.icons.feathericons.Info
 import compose.icons.feathericons.Lock
@@ -213,6 +214,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
     Backup(R.string.settings_backup),
+    Sponsor(R.string.settings_sponsor),
     About(R.string.settings_about)
 }
 
@@ -885,6 +887,9 @@ fun SettingsScreen(
             // 它的构造即触发一次全盘统计，不能提到 SettingsScreen 顶层（那样每次进设置页都会扫盘）。
             val storageViewModel: com.aicode.feature.settings.presentation.StorageViewModel? =
                 if (current == SettingsSection.Storage) androidx.hilt.navigation.compose.hiltViewModel() else null
+            val sponsorViewModel: com.aicode.feature.settings.presentation.SponsorViewModel? =
+                if (current == SettingsSection.Sponsor) androidx.hilt.navigation.compose.hiltViewModel() else null
+            val sponsorState = sponsorViewModel?.uiState?.collectAsStateWithLifecycle()?.value
             val sessionManagementViewModel: com.aicode.feature.settings.presentation.SessionManagementViewModel? =
                 if (current == SettingsSection.SessionManagement || current == SettingsSection.SessionDetail) {
                     androidx.hilt.navigation.compose.hiltViewModel()
@@ -1297,6 +1302,23 @@ fun SettingsScreen(
                                     tint = MaterialTheme.colorScheme.onBackground,
                                     modifier = Modifier.size(22.dp)
                                 )
+                            }
+                        }
+                        SettingsSection.Sponsor -> {
+                            IconButton(
+                                onClick = { sponsorViewModel?.refresh() },
+                                enabled = sponsorState?.isRefreshing != true
+                            ) {
+                                if (sponsorState?.isRefreshing == true) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        FeatherIcons.RefreshCw,
+                                        contentDescription = stringResource(R.string.sponsor_refresh),
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
                         SettingsSection.SessionManagement -> {
@@ -1721,6 +1743,7 @@ fun SettingsScreen(
                         onInstall = { pluginsViewModel.installDevProject(project) }
                     )
                 }
+                SettingsSection.Sponsor -> sponsorViewModel?.let { SponsorSectionHost(viewModel = it) }
                 SettingsSection.About -> AboutSection(
                     updateCheckEnabled = updateCheckEnabled,
                     updateCheckChannel = updateCheckChannel,
@@ -2482,6 +2505,12 @@ internal fun SettingsMenu(
                 icon = FeatherIcons.Zap,
                 title = stringResource(R.string.settings_rerun_onboarding),
                 onClick = onRerunOnboarding
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Heart,
+                title = stringResource(SettingsSection.Sponsor.titleRes),
+                onClick = { onOpen(SettingsSection.Sponsor) }
             )
             SettingsDivider()
             SettingsRow(

@@ -1,0 +1,18 @@
+{
+  "methods": [
+    {
+      "id": "afdian",
+      "name": {
+        "zh": "爱发电",
+        "en": "Afdian"
+      },
+      "url": "https://ifdian.net/a/jieapi",
+      "icon": "heart"
+    }
+  ],
+  "users": [
+    {
+      "name": "arsnyeon"
+    }
+  ]
+}

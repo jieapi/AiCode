@@ -148,6 +148,7 @@
     <string name="settings_shizuku_hint_denied">点击申请 Shizuku 授权</string>
     <string name="settings_shizuku_hint_ready">已获授权，AI 可通过 adb shell 执行命令</string>
     <string name="settings_backup">备份与还原</string>
+    <string name="settings_sponsor">赞助</string>
     <string name="settings_about">关于</string>
     <string name="settings_language">语言</string>
     <string name="settings_token_stats_title">Token 统计</string>
@@ -605,6 +606,19 @@
     <string name="about_update_mirror_invalid">地址需以 http:// 或 https:// 开头</string>
     <string name="about_update_mirror_default">恢复默认</string>
     <string name="about_update_download_install">下载并安装</string>
+
+    <!-- Sponsor -->
+    <string name="sponsor_methods_header">赞助方式</string>
+    <string name="sponsor_users_header">赞助用户</string>
+    <string name="sponsor_method_afdian">爱发电</string>
+    <string name="sponsor_method_wechat">微信赞助</string>
+    <string name="sponsor_refresh">刷新赞助名单</string>
+    <string name="sponsor_refresh_failed">刷新失败：%1$s</string>
+    <string name="sponsor_refresh_failed_short">刷新失败，请稍后重试</string>
+    <string name="sponsor_users_empty_title">暂无赞助用户</string>
+    <string name="sponsor_users_empty_hint">名单会定期从仓库同步，点击下方可手动刷新</string>
+    <string name="sponsor_qr_load_failed">二维码加载失败，请稍后重试</string>
+    <string name="sponsor_open_link">打开链接</string>
 
     <!-- Star Prompt -->
     <string name="star_prompt_title">喜欢 AiCode 吗？</string>
