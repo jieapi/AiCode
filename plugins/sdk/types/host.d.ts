@@ -107,6 +107,7 @@ export type AicodeErrorCode =
   | 'IMAGE_TYPE_UNSUPPORTED'
   | 'ALL_KEYS_FAILED'
   // 终端与端口
+  | 'CONTAINER_NOT_INITIALIZED'
   | 'TERMINAL_NOT_FOUND'
   | 'TERMINAL_LIMIT'
   | 'PORT_INVALID'

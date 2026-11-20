@@ -3,6 +3,10 @@ package com.aicode.feature.agent.domain.container
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
+class ContainerNotInitializedException(
+    message: String = "容器未初始化（缺少 rootfs/proot）"
+) : IllegalStateException(message)
+
 /** 流式执行命令时产生的事件，供终端逐行实时渲染。 */
 sealed interface CommandEvent {
     /** 一行标准输出/错误（stderr 已合并到 stdout）。 */

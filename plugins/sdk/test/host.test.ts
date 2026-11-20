@@ -91,6 +91,9 @@ export type BackendErrorCodes = Assert<
 export type WorkflowErrorCodes = Assert<
   'WORKFLOW_NOT_FOUND' | 'WORKFLOW_FAILED' extends AicodeErrorCode ? true : false
 >;
+export type ContainerInitializationErrorCode = Assert<
+  'CONTAINER_NOT_INITIALIZED' extends AicodeErrorCode ? true : false
+>;
 export type SessionSourceErrorCodes = Assert<
   'SESSION_SOURCE_NOT_FOUND' | 'SESSION_SOURCE_INVALID' extends AicodeErrorCode ? true : false
 >;
@@ -346,9 +349,8 @@ function rejectedCalls(): void {
   const noTimeout: ExecutionBackendExecParams = { backendId: 'remote', command: 'pwd' };
   // @ts-expect-error createdAt 为正式时间字段
   const oldMessage: ExternalSessionMessage = { id: 'm1', role: 'assistant', blocks: [], timestamp: 1 };
-  // @ts-expect-error 游标必须为 JSON 数据
-  const badCursor: ExternalSessionPage = { messages: [], nextCursor: () => 'cursor' };
-  void [flatWorkspace, defaultCapabilities, oldFs, badRename, badResolve, oldExec, noTimeout, oldMessage, badCursor];
+  const validCursor: ExternalSessionPage = { messages: [], nextCursor: { page: 2 } };
+  void [flatWorkspace, defaultCapabilities, oldFs, badRename, badResolve, oldExec, noTimeout, oldMessage, validCursor];
 }
 
 void implicitInference;

@@ -565,7 +565,7 @@ class LinuxContainerEngine @Inject constructor(
             FileLogger.e(TAG, "ensureInstalled 失败：$reason（profile=${profile.id}）")
             logContainerDiagnostics("ensureInstalled 失败")
             _initProgress.value = ContainerInitState.Failed(reason)
-            throw IllegalStateException(reason)
+            throw ContainerNotInitializedException(reason)
         }
     }
 

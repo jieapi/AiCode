@@ -22,7 +22,6 @@
     "sdk/test/**/*.ts",
     "samples/**/*.ts",
     "samples/**/*.d.ts",
-    "../plugin-official/*/src/**/*.ts",
     "template/types/**/*.d.ts",
     "template/src/**/*.ts"
   ]

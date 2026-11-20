@@ -1,6 +1,7 @@
 import type {
   AicodeBridge,
   AicodeContext,
+  AicodeErrorCode,
   AicodeOverlayContext,
   AicodePageContext,
   FsChange,
@@ -18,6 +19,9 @@ type Assert<T extends true> = T;
 
 type Overlay = AicodeBridge['overlay'];
 
+export type ContainerInitializationErrorCode = Assert<
+  'CONTAINER_NOT_INITIALIZED' extends AicodeErrorCode ? true : false
+>;
 export type ModelInputTokens = Assert<Equal<ModelInfo['inputTokens'], number | null>>;
 export type ModelOutputTokens = Assert<Equal<ModelInfo['outputTokens'], number | null>>;
 export type ContextResult = Assert<Equal<

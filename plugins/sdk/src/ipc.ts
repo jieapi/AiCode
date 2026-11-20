@@ -1002,21 +1002,6 @@ export class PluginIpcServer {
   }
 }
 
-function waitForDrainOrClose(socket: Socket): Promise<void> {
-  if (socket.destroyed) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const done = () => {
-      socket.off('drain', done);
-      socket.off('close', done);
-      socket.off('error', done);
-      resolve();
-    };
-    socket.once('drain', done);
-    socket.once('close', done);
-    socket.once('error', done);
-  });
-}
-
 function raceWithAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal

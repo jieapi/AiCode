@@ -2,6 +2,7 @@ package com.aicode.feature.plugin.runtime
 
 import com.aicode.feature.plugin.domain.PluginHostPaths
 import com.aicode.feature.plugin.domain.PluginManager
+import com.aicode.feature.agent.domain.container.ContainerNotInitializedException
 import com.aicode.feature.terminal.domain.DelegatingTerminalSessionProvider
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
 import java.nio.ByteBuffer
@@ -162,7 +163,11 @@ class PluginTerminalRunner @Inject constructor(
         if (command.length > PluginHostPaths.MAX_COMMAND_CHARS) {
             throw PluginTerminalException("PARAM_INVALID", "command too long")
         }
-        val tabId = provider.startPluginCommand(command, title, pluginId)
+        val tabId = try {
+            provider.startPluginCommand(command, title, pluginId)
+        } catch (e: ContainerNotInitializedException) {
+            throw PluginTerminalException("CONTAINER_NOT_INITIALIZED", e.message.orEmpty())
+        }
         val run = Run(pluginId, provider, tabId, title ?: tabId, command)
         runs[tabId] = run
         run.collector = scope.launch {

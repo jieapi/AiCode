@@ -70,6 +70,8 @@ export type AicodeErrorCode =
   | 'IMAGE_TOO_LARGE'
   | 'IMAGE_TYPE_UNSUPPORTED'
   | 'ALL_KEYS_FAILED'
+  // 终端
+  | 'CONTAINER_NOT_INITIALIZED'
   // 工具
   | 'TOOL_NOT_ALLOWED'
   | 'TOOL_NOT_FOUND'

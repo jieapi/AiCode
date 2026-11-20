@@ -3,6 +3,7 @@ package com.aicode.feature.terminal.domain
 import android.content.Context
 import android.content.Intent
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.container.ContainerNotInitializedException
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
 import com.aicode.feature.terminal.presentation.component.AppTerminalSessionClient
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
@@ -360,7 +361,7 @@ class TerminalSessionManager @Inject constructor(
         val startedAt = System.currentTimeMillis()
         containerEngine.ensureInstalled()
         if (!containerEngine.isContainerInstalled()) {
-            throw IllegalStateException("容器未安装（缺少 rootfs/proot）")
+            throw ContainerNotInitializedException()
         }
         FileLogger.i(TAG, "容器就绪（耗时 ${System.currentTimeMillis() - startedAt}ms）")
     }
