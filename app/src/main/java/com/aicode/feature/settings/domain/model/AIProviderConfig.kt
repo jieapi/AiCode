@@ -81,16 +81,28 @@ data class AIProviderConfig(
 
     /** 拉取模型列表 / 连通性测试等无会话上下文的请求用第一个可用 Key。 */
     val firstUsableApiKey: String get() = effectiveApiKeys.firstOrNull()?.value ?: ""
+
+    /**
+     * 指定 Key 实际使用的 Base URL：多 Key 模式下该 Key 自带覆盖优先，否则回落到提供商主地址。
+     * [key] 缺省取首个可用 Key，供拉模型 / 测连通 / 余额等无会话上下文的旁路请求使用。
+     */
+    fun effectiveBaseUrl(key: String = firstUsableApiKey): String {
+        val override = if (multiKeyEnabled) apiKeys.firstOrNull { it.value == key }?.baseUrl else null
+        return override?.takeIf { it.isNotBlank() } ?: baseUrl
+    }
 }
 
 /**
- * 多 Key 模式下的一条候选 Key：值 + 调度权重。
+ * 多 Key 模式下的一条候选 Key：值 + 调度权重 + 可选的地址覆盖。
  *
  * [weight] 参与轮询调度：越大被分到的新会话越多；≤ 0 表示该 Key 暂不参与调度（保留但不选用）。
+ * [baseUrl] 为该 Key 专用的 Base URL：填了就用它发请求（适配「不同 Key 走不同中转 / 反代」的场景），
+ * 留空则沿用提供商自身的 [AIProviderConfig.baseUrl]。
  */
 data class ProviderKey(
     val value: String,
-    val weight: Int = DEFAULT_KEY_WEIGHT
+    val weight: Int = DEFAULT_KEY_WEIGHT,
+    val baseUrl: String = ""
 )
 
 /** 调度权重默认值与上限。 */
@@ -113,7 +125,14 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
     name = name.stripLineBreaks(),
     apiKey = apiKey.stripAllWhitespace(),
     apiKeys = apiKeys
-        .map { it.copy(value = it.value.stripAllWhitespace(), weight = it.weight.coerceIn(0, MAX_KEY_WEIGHT)) }
+        .map {
+            it.copy(
+                value = it.value.stripAllWhitespace(),
+                weight = it.weight.coerceIn(0, MAX_KEY_WEIGHT),
+                // Base URL 里不允许出现空白与 `|`：前者会拼出非法 URL，后者会破坏存储串的分段。
+                baseUrl = it.baseUrl.stripAllWhitespace().filterNot { ch -> ch == '|' }
+            )
+        }
         .filter { it.value.isNotEmpty() }
         .distinctBy { it.value },
     keySwitchStatusCodes = keySwitchStatusCodes.filter { it in 100..599 }.distinct(),

@@ -82,7 +82,7 @@ AI 助手与开发者可以依据此规范，编写面板脚本（Python / Node 
 | `AICODE_PROVIDER_NAME` | `OpenAI API` | 供应商名称 |
 | `AICODE_PROVIDER_TYPE` | `OPENAI` | 上游格式（OPENAI / ANTHROPIC / GEMINI） |
 | `AICODE_PROVIDER_API_KEY` | `sk-...` | 供应商 API Key |
-| `AICODE_PROVIDER_BASE_URL` | `https://api.openai.com/` | 供应商 Base URL |
+| `AICODE_PROVIDER_BASE_URL` | `https://api.openai.com/` | 当前 Key 使用的 Base URL（该 Key 配了自定义地址时用它，否则用供应商 Base URL） |
 
 #### 自定义脚本参数（面板 / DIY 脚本）
 
@@ -100,7 +100,7 @@ AI 助手与开发者可以依据此规范，编写面板脚本（Python / Node 
 | {{PROVIDER_ID}} | 供应商记录 ID |
 | {{PROVIDER_NAME}} | 供应商名称 |
 | {{PROVIDER_TYPE}} | 上游格式（OPENAI / ANTHROPIC / GEMINI） |
-| {{BASE_URL}} | 供应商 Base URL |
+| {{BASE_URL}} | 当前 Key 使用的 Base URL（含该 Key 的自定义地址覆盖） |
 | {{DEFAULT_MODEL}} | 默认模型 |
 | {{SELECTED_MODEL}} | 当前选中的模型 |
 | {{MODEL}} | 实际生效的模型（优先选中，其次默认） |

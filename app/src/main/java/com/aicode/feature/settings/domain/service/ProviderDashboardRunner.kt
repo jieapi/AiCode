@@ -148,13 +148,15 @@ class ProviderDashboardRunner @Inject constructor(
             ?: provider.selectedModel.ifBlank { provider.defaultModel }
         // 多 Key 模式下查当前活动的 Key，否则面板会报一个已被切走的 Key 的余额。
         val effectiveApiKey = keyRotator.currentKey(provider) ?: provider.apiKey
+        // 面板请求跟随该 Key 自己的地址覆盖（不同 Key 走不同中转时，余额要查对应端点）。
+        val effectiveBaseUrl = provider.effectiveBaseUrl(effectiveApiKey)
 
         val envs = mutableListOf(
             "AICODE_PROVIDER_ID=${escape(provider.id)}",
             "AICODE_PROVIDER_NAME=${escape(provider.name)}",
             "AICODE_PROVIDER_TYPE=${escape(provider.type.name)}",
             "AICODE_PROVIDER_API_KEY=${escape(effectiveApiKey)}",
-            "AICODE_PROVIDER_BASE_URL=${escape(provider.baseUrl)}",
+            "AICODE_PROVIDER_BASE_URL=${escape(effectiveBaseUrl)}",
             "AICODE_PROVIDER_DEFAULT_MODEL=${escape(provider.defaultModel)}",
             "AICODE_PROVIDER_SELECTED_MODEL=${escape(provider.selectedModel)}",
             "AICODE_MODEL=${escape(effectiveModel)}"
@@ -215,7 +217,7 @@ class ProviderDashboardRunner @Inject constructor(
             "{{PROVIDER_ID}}" to provider.id,
             "{{PROVIDER_NAME}}" to provider.name,
             "{{PROVIDER_TYPE}}" to provider.type.name,
-            "{{BASE_URL}}" to provider.baseUrl,
+            "{{BASE_URL}}" to provider.effectiveBaseUrl(effectiveApiKey),
             "{{DEFAULT_MODEL}}" to provider.defaultModel,
             "{{SELECTED_MODEL}}" to provider.selectedModel,
             "{{MODEL}}" to effectiveModel

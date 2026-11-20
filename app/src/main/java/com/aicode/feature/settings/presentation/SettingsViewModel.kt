@@ -3174,7 +3174,7 @@ class SettingsViewModel @Inject constructor(
     fun fetchModels(provider: AIProviderConfig) {
         viewModelScope.launch {
             _fetchState.value = FetchState.Loading
-            modelApiService.fetchModels(provider.baseUrl, provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.customHeaders)
+            modelApiService.fetchModels(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.customHeaders)
                 .onSuccess { result ->
                     _fetchState.value = FetchState.Success(result.models, result.debugInfo)
                     resolveModelMetadata(provider.id, provider.type, result.models)
@@ -3235,7 +3235,7 @@ class SettingsViewModel @Inject constructor(
     fun testModel(provider: AIProviderConfig, model: String) {
         viewModelScope.launch {
             _testing.update { it + model }
-            val result = modelApiService.testModel(provider.baseUrl, provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+            val result = modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
             _testResults.update { it + (model to result) }
             _testing.update { it - model }
         }
@@ -3247,7 +3247,7 @@ class SettingsViewModel @Inject constructor(
      * 测试中的行集合与结果由弹层自己按 provider+模型持有。
      */
     suspend fun runModelTest(provider: AIProviderConfig, model: String): ModelTestResult =
-        modelApiService.testModel(provider.baseUrl, provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+        modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
 
     fun clearTestResults() {
         _testResults.value = emptyMap()

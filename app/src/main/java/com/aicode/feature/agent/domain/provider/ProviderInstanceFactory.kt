@@ -39,8 +39,11 @@ class ProviderInstanceFactory @Inject constructor(
         }
         // 多 Key 模式下由轮换器决定本次用哪个 Key（同一作用域内粘住，Key 不可用时切下一个并重发）。
         val activeKeys = config.effectiveApiKeys
-        provider.apiKey = keyRotator.activeKey(config, scopeId)
+        val activeKey = keyRotator.activeKey(config, scopeId)
             ?: throw IllegalStateException("「${config.name}」的 Key 均在冷却中，请稍后重试")
+        provider.apiKey = activeKey
+        // Key 条目可选带自己的 Base URL（不同 Key 走不同中转），没填就回落到提供商主地址。
+        provider.baseUrl = config.effectiveBaseUrl(activeKey)
         // 只有真正的多 Key 才需要自动切换：单 Key 冷却后没有可切换目标，只会把用户锁死一段时间。
         val keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? =
             if (activeKeys.size > 1) {
@@ -55,14 +58,18 @@ class ProviderInstanceFactory @Inject constructor(
                                 error
                             )
                         }
-                        KeySwitchOutcome(switched.newKey, switched.newIndex, switched.total)
+                        KeySwitchOutcome(
+                            newKey = switched.newKey,
+                            newIndex = switched.newIndex,
+                            total = switched.total,
+                            newBaseUrl = config.effectiveBaseUrl(switched.newKey)
+                        )
                     }
                 }
             } else {
                 null
             }
         provider.keySwitcher = keySwitcher
-        provider.baseUrl = config.baseUrl
         provider.model = config.effectiveModel
         provider.useFullUrl = config.useFullUrl
         provider.useResponseApi = config.useResponseApi

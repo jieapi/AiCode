@@ -199,7 +199,9 @@ class GenerateImageTool @Inject constructor(
             }
             FileLogger.i(TAG, "generateImage provider=${provider.id} model=$model prompt=$prompt n=$n size=$size")
 
-            val url = if (provider.useFullUrl) provider.baseUrl else joinUrl(provider.baseUrl, "v1/images/generations")
+            // 地址跟随本次取用的 Key：不同 Key 可配不同中转。
+            val baseUrl = provider.effectiveBaseUrl(activeApiKey)
+            val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1/images/generations")
             // 兼容性规则：
             // 1. 只有真正的官方 GPT Image 系列模型（如 gpt-image-1 / gpt-image-1.5）才支持 output_format，且其默认就返回 base64、不支持 response_format；
             // 2. 其它模型（DALL-E、各类聚合网关如 agnes/OneAPI/NewAPI/Flux/SD 等）必须传 response_format=b64_json 才会返回 base64，
@@ -337,7 +339,8 @@ class GenerateImageTool @Inject constructor(
         outputPath: String?,
         sessionId: String?
     ): ToolResult {
-        val url = if (provider.useFullUrl) provider.baseUrl else joinUrl(provider.baseUrl, "v1beta/interactions")
+        val baseUrl = provider.effectiveBaseUrl(apiKey)
+        val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1beta/interactions")
         val effectiveBasePath = outputPath ?: createDefaultBasePath()
         val overwrite = outputPath != null
 
@@ -416,7 +419,8 @@ class GenerateImageTool @Inject constructor(
         outputPath: String?,
         sessionId: String?
     ): ToolResult {
-        val url = if (provider.useFullUrl) provider.baseUrl else joinUrl(provider.baseUrl, "v1beta/models/$model:generateContent")
+        val baseUrl = provider.effectiveBaseUrl(apiKey)
+        val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1beta/models/$model:generateContent")
         val effectiveBasePath = outputPath ?: createDefaultBasePath()
         val overwrite = outputPath != null
 
