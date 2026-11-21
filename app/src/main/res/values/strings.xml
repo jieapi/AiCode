@@ -2370,4 +2370,10 @@
 
     <string name="card_form_param_placeholder">参数</string>
     <string name="card_form_add_param">添加参数</string>
+
+    <string name="chat_touch_lock">防误触</string>
+    <string name="touch_lock_active_title">防误触模式已开启</string>
+    <string name="touch_lock_hold_hint">长按 %1$d 秒退出</string>
+    <string name="touch_lock_holding_countdown">继续按住（%1$d 秒）</string>
+    <string name="touch_lock_unlock_cd">长按 3 秒退出防误触模式</string>
 </resources>

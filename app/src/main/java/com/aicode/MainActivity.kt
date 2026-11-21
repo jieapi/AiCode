@@ -3,6 +3,8 @@ package com.aicode
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,6 +68,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -84,6 +88,7 @@ import com.aicode.core.ui.ImageViewerHost
 import com.aicode.core.ui.ImageViewerRequest
 import com.aicode.core.ui.LocalImageViewer
 import com.aicode.core.ui.PAGE_MOTION_MS
+import com.aicode.core.ui.TouchLockOverlay
 import com.aicode.core.ui.VerticalSplitHandle
 import com.aicode.core.ui.drawerWidth
 import com.aicode.core.ui.isExpandedWidth
@@ -92,6 +97,7 @@ import com.aicode.core.ui.pageExit
 import com.aicode.core.ui.rememberEndDrawerState
 import com.aicode.core.ui.rememberImageViewerState
 import com.aicode.core.ui.rememberViewerDecodeSpec
+import com.aicode.core.ui.resolveTouchLockTargetBrightness
 import com.aicode.core.util.ApkInstaller
 import com.aicode.feature.agent.presentation.AIAgentViewModel
 import com.aicode.feature.agent.presentation.AgentAttachment
@@ -153,6 +159,8 @@ import com.aicode.feature.terminal.presentation.component.TerminalScreen
 import com.aicode.feature.workspace.presentation.WorkspaceViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -206,6 +214,14 @@ class MainActivity : ComponentActivity() {
     lateinit var browserManager: com.aicode.feature.agent.domain.tool.browser.BrowserManager
 
     private var lastStoppedElapsedMs: Long = 0L
+    private val touchLockActiveFlow = MutableStateFlow(false)
+    private var savedScreenBrightness: Float? = null
+    private var currentDarkTheme: Boolean = false
+
+    private companion object {
+        const val KEY_TOUCH_LOCK_ACTIVE = "touch_lock_active"
+        const val KEY_SAVED_BRIGHTNESS = "touch_lock_saved_brightness"
+    }
 
     override fun attachBaseContext(newBase: android.content.Context) {
         // 在 Activity 创建前同步应用用户选择的语言，确保冷启动也生效。
@@ -234,6 +250,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        touchLockActiveFlow.value = savedInstanceState?.getBoolean(KEY_TOUCH_LOCK_ACTIVE) ?: false
+        if (savedInstanceState?.containsKey(KEY_SAVED_BRIGHTNESS) == true) {
+            savedScreenBrightness = savedInstanceState.getFloat(KEY_SAVED_BRIGHTNESS)
+        }
+
         // 挂载离屏 WebView 隐藏宿主，确保后台/离屏状态下 WebView 也能触发 onAttachedToWindow 完成首帧真实光栅化渲染
         val hiddenHost = android.widget.FrameLayout(this).apply {
             layoutParams = android.view.ViewGroup.LayoutParams(1, 1)
@@ -261,10 +282,13 @@ class MainActivity : ComponentActivity() {
                 recreate()
             }
         }
-        // 屏幕常亮：窗口标志只在 Activity 可见时约束屏幕，退到后台系统自动放开，无需手动释放。
+        // 屏幕常亮：窗口标志只在 Activity 可见时约束屏幕，退到后台系统自动放开，无需手动释放；
+        // 进入防误触模式期间即便设置开关未开启，也强制维持前台常亮。
         lifecycleScope.launch {
-            screenOnSettings.enabledFlow.collect { enabled ->
-                if (enabled) {
+            combine(screenOnSettings.enabledFlow, touchLockActiveFlow) { screenOn, touchLock ->
+                screenOn || touchLock
+            }.distinctUntilChanged().collect { keepScreenOn ->
+                if (keepScreenOn) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -287,11 +311,24 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.DARK -> true
                 AppThemeMode.LIGHT -> false
             }
+            val touchLockActive by touchLockActiveFlow.collectAsStateWithLifecycle()
             val view = LocalView.current
             SideEffect {
+                currentDarkTheme = darkTheme
                 val controller = WindowCompat.getInsetsController(window, view)
-                controller.isAppearanceLightStatusBars = !darkTheme
-                controller.isAppearanceLightNavigationBars = !darkTheme
+                controller.isAppearanceLightStatusBars = if (touchLockActive) false else !darkTheme
+                controller.isAppearanceLightNavigationBars = if (touchLockActive) false else !darkTheme
+            }
+
+            var appliedTouchLock by remember { mutableStateOf(false) }
+            LaunchedEffect(touchLockActive, view) {
+                if (touchLockActive) {
+                    appliedTouchLock = true
+                    applyTouchLockWindowMode(locked = true, darkTheme = currentDarkTheme, anchorView = view)
+                } else if (appliedTouchLock) {
+                    appliedTouchLock = false
+                    applyTouchLockWindowMode(locked = false, darkTheme = currentDarkTheme, anchorView = view)
+                }
             }
 
             LaunchedEffect(darkTheme) {
@@ -316,9 +353,11 @@ class MainActivity : ComponentActivity() {
                             AppNavigation(
                                 onboardingRepository = onboardingRepository,
                                 starPromptCoordinator = starPromptCoordinator,
-                                agreementAccepted = agreementAccepted
+                                agreementAccepted = agreementAccepted,
+                                touchLockActive = touchLockActive,
+                                onEnterTouchLock = { touchLockActiveFlow.value = true }
                             )
-                            if (agreementAccepted) {
+                            if (agreementAccepted && !touchLockActive) {
                                 // 全局凭据弹窗：覆盖所有页面，命令行 git 缺凭据在任意页面都能弹。
                                 com.aicode.feature.credentials.presentation.component.GlobalCredentialDialogHost(
                                     bridge = credentialRequestBridge
@@ -328,6 +367,11 @@ class MainActivity : ComponentActivity() {
                         BackgroundImageOverlay(path = bgPath, imageAlpha = bgAlpha)
                         // beta 包全局水印，置于最上层，不拦截触摸。
                         BetaWatermark()
+                        if (touchLockActive) {
+                            TouchLockOverlay(
+                                onUnlock = { touchLockActiveFlow.value = false }
+                            )
+                        }
                     }
                 }
             }
@@ -379,6 +423,76 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_TOUCH_LOCK_ACTIVE, touchLockActiveFlow.value)
+        savedScreenBrightness?.let { outState.putFloat(KEY_SAVED_BRIGHTNESS, it) }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && touchLockActiveFlow.value) {
+            applyTouchLockSystemBars(
+                locked = true,
+                darkTheme = currentDarkTheme,
+                anchorView = window.decorView
+            )
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (touchLockActiveFlow.value && event.keyCode == KeyEvent.KEYCODE_BACK) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun applyTouchLockWindowMode(
+        locked: Boolean,
+        darkTheme: Boolean,
+        anchorView: View = window.decorView
+    ) {
+        if (locked) {
+            if (savedScreenBrightness == null) {
+                savedScreenBrightness = window.attributes.screenBrightness
+            }
+            val target = resolveTouchLockTargetBrightness(
+                savedScreenBrightness ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            )
+            if (window.attributes.screenBrightness != target) {
+                window.attributes = window.attributes.apply { screenBrightness = target }
+            }
+        } else {
+            savedScreenBrightness?.let { previous ->
+                if (window.attributes.screenBrightness != previous) {
+                    window.attributes = window.attributes.apply { screenBrightness = previous }
+                }
+                savedScreenBrightness = null
+            }
+        }
+        applyTouchLockSystemBars(locked = locked, darkTheme = darkTheme, anchorView = anchorView)
+    }
+
+    private fun applyTouchLockSystemBars(
+        locked: Boolean,
+        darkTheme: Boolean,
+        anchorView: View = window.decorView
+    ) {
+        val controller = WindowCompat.getInsetsController(window, anchorView)
+        if (locked) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+        } else {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+
     override fun onDestroy() {
         val bgDurationMs = if (lastStoppedElapsedMs > 0L) {
             SystemClock.elapsedRealtime() - lastStoppedElapsedMs
@@ -421,7 +535,9 @@ private const val MAX_PANE_SPLIT = 0.7f
 fun AppNavigation(
     onboardingRepository: com.aicode.feature.onboarding.data.OnboardingRepository,
     starPromptCoordinator: StarPromptCoordinator,
-    agreementAccepted: Boolean
+    agreementAccepted: Boolean,
+    touchLockActive: Boolean = false,
+    onEnterTouchLock: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -943,6 +1059,7 @@ fun AppNavigation(
                                     showMenuButton = !permanentDrawer,
                                     onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                     onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
+                                    onEnterTouchLock = onEnterTouchLock,
                                     pluginEntries = headerPluginEntries,
                                     pluginLanguageTag = pluginLanguageTag,
                                     onPluginEntry = { entry -> runPluginEntry(entry, PluginEntryContext()) },
@@ -1344,7 +1461,8 @@ fun AppNavigation(
     // 检查更新弹窗（全局宿主：自动检测与关于页手动检查共用，覆盖所有页面）
     val updateCheckState by settingsViewModel.updateCheckState.collectAsStateWithLifecycle()
     val updateCheckVisible by settingsViewModel.updateCheckVisible.collectAsStateWithLifecycle()
-    val updateDialogShowing = agreementAccepted && updateCheckVisible && updateCheckState != UpdateCheckUiState.Idle
+    val updateDialogShowing =
+        agreementAccepted && !touchLockActive && updateCheckVisible && updateCheckState != UpdateCheckUiState.Idle
     if (updateDialogShowing) {
         val version = remember {
             runCatching {
@@ -1372,6 +1490,7 @@ fun AppNavigation(
         pluginActionPending = pendingPluginAction != null,
         activeSlotPageOpen = activeSlotPage != null,
         drawerOpen = (!permanentDrawer && drawerState.isOpen) || rightDrawerState.isOpen,
+        touchLockActive = touchLockActive,
         currentRoute = currentRoute
     )
     LaunchedEffect(uiGate) {
@@ -1391,7 +1510,7 @@ fun AppNavigation(
     }
 
     // 首次启动引导覆层（覆盖所有路由之上，全程常驻顶层，页面切换平滑过渡绝不闪烁）。
-    if (agreementAccepted && onboardingUiState.active) {
+    if (agreementAccepted && onboardingUiState.active && !touchLockActive) {
         OnboardingOverlay(
             stateHolder = onboardingStateHolder,
             coordinator = onboardingCoordinator,

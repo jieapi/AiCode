@@ -2371,4 +2371,10 @@
 
     <string name="card_form_param_placeholder">Parameter</string>
     <string name="card_form_add_param">Add Parameter</string>
+
+    <string name="chat_touch_lock">Touch lock</string>
+    <string name="touch_lock_active_title">Touch lock active</string>
+    <string name="touch_lock_hold_hint">Hold %1$d s to exit</string>
+    <string name="touch_lock_holding_countdown">Keep holding (%1$d s)</string>
+    <string name="touch_lock_unlock_cd">Hold for 3 seconds to exit touch lock</string>
 </resources>

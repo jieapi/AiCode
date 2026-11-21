@@ -47,13 +47,15 @@ data class StarPromptUiGate(
     val pluginActionPending: Boolean = false,
     val activeSlotPageOpen: Boolean = false,
     val drawerOpen: Boolean = false,
+    val touchLockActive: Boolean = false,
     val currentRoute: String? = null
 ) {
     fun allowsPrompt(manual: Boolean = false): Boolean =
         if (manual) {
             agreementAccepted &&
                 !onboardingActive &&
-                !updateDialogVisible
+                !updateDialogVisible &&
+                !touchLockActive
         } else {
             agreementAccepted &&
                 !onboardingActive &&
@@ -61,6 +63,7 @@ data class StarPromptUiGate(
                 !pluginActionPending &&
                 !activeSlotPageOpen &&
                 !drawerOpen &&
+                !touchLockActive &&
                 currentRoute == CHAT_ROUTE
         }
 

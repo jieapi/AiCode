@@ -58,6 +58,7 @@ import com.aicode.feature.settings.presentation.component.ModelLogoIcon
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.GitBranch
+import compose.icons.feathericons.Lock
 import compose.icons.feathericons.Menu
 import compose.icons.feathericons.MoreVertical
 import compose.icons.feathericons.Plus
@@ -73,6 +74,7 @@ internal fun ChatHeader(
     onNewChat: () -> Unit,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
+    onEnterTouchLock: () -> Unit = {},
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
     connectionState: com.aicode.feature.agent.domain.container.ConnectionState? = null,
@@ -146,6 +148,7 @@ internal fun ChatHeader(
                     gitActive = gitActive,
                     onNavigateToTerminal = onNavigateToTerminal,
                     onNavigateToGit = onNavigateToGit,
+                    onEnterTouchLock = onEnterTouchLock,
                     pluginEntries = pluginEntries,
                     pluginLanguageTag = pluginLanguageTag,
                     onPluginEntry = onPluginEntry
@@ -178,6 +181,7 @@ private fun WorkbenchMenuButton(
     gitActive: Boolean,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
+    onEnterTouchLock: () -> Unit,
     pluginEntries: List<PluginUiEntry>,
     pluginLanguageTag: String,
     onPluginEntry: (PluginUiEntry) -> Unit
@@ -212,6 +216,15 @@ private fun WorkbenchMenuButton(
                 onClick = {
                     expanded = false
                     onNavigateToGit()
+                }
+            )
+            WorkbenchMenuItem(
+                icon = FeatherIcons.Lock,
+                label = stringResource(R.string.chat_touch_lock),
+                active = false,
+                onClick = {
+                    expanded = false
+                    onEnterTouchLock()
                 }
             )
             if (pluginEntries.isNotEmpty()) {

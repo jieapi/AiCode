@@ -358,4 +358,11 @@ class StarPromptCoordinatorTest {
         assertFalse(coordinator.dialogVisible.value)
         assertEquals(StarPromptStatus.STARRED, store.state.value.status)
     }
+
+    @Test
+    fun `touchLockActive suppresses both automatic and manual star prompts`() {
+        val gate = defaultGate().copy(touchLockActive = true)
+        assertFalse(gate.allowsPrompt(manual = false))
+        assertFalse(gate.allowsPrompt(manual = true))
+    }
 }
