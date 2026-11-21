@@ -104,6 +104,11 @@
     <string name="settings_max_network_retries_desc">网络失败后的指数退避重试次数</string>
     <string name="settings_retries_count">%1$d 次</string>
     <string name="settings_retries_input_hint">填 0 表示不重试</string>
+    <string name="settings_general_remote">远程连接</string>
+    <string name="settings_sftp_channel_limit">SFTP 通道上限</string>
+    <string name="settings_sftp_channel_limit_desc">远程模式下并发读写文件的通道数，拥挤时按需新建、空闲 30 秒后回收</string>
+    <string name="settings_sftp_channel_limit_value">%1$d 条</string>
+    <string name="settings_sftp_channel_limit_input_hint">范围 1-20，默认 3</string>
     <string name="settings_general_input">输入</string>
     <string name="settings_enter_to_send">回车键发送消息</string>
     <string name="settings_enter_to_send_desc">关闭后回车换行，需点发送按钮发送</string>

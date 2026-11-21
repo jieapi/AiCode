@@ -8,7 +8,6 @@ import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.WorkspacePathMapper.Companion.CONTAINER_ROOT
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
@@ -46,20 +45,21 @@ class RemoteOutputTooLargeException(message: String) : IOException(message)
 /**
  * [FileAccessProvider] 的远程实现：走 SFTP 协议读写远程文件。
  *
- * **独立通道**：SFTP 跑在 [RemoteSshConnection.sftp] 建立的第二条 SSH transport 上，与 Bash/命令的
+ * **独立通道**：SFTP 跑在 [RemoteSshConnection] 维护的第二条 SSH transport 上，与 Bash/命令的
  * exec 通道隔离——sshj 的 SFTP 有间歇性 Buffer 溢出（hierynomus/sshj#461），共用 transport 时崩溃会
- * 一并拖垮命令通道；分开后只影响文件读写，通道失效时丢弃、下次调用自动重建。
+ * 一并拖垮命令通道；分开后只影响文件读写。
+ *
+ * 同一条 transport 上按需开多条 SFTP channel（上限见「偏好设置」），每次操作租用一条；
+ * sshj 的 [SFTPClient] 非线程安全，租约保证同一通道同一时刻只被一个调用方使用。
  *
  * 路径映射：AI 给的 `~/workspace/...` 映射到当前选中工作区的远程绝对路径；其它绝对路径（如 `/etc/...`）
- * 直接作为远程绝对路径使用。sshj 的 [SFTPClient] 非线程安全，所有操作经 [sftpMutex] 串行化。
+ * 直接作为远程绝对路径使用。
  */
 class RemoteSftpFileAccess @Inject constructor(
     private val connection: RemoteSshConnection,
     private val workspaceRepository: WorkspaceRepository,
     private val agentConfigCache: RemoteAgentConfigCache
 ) : FileAccessProvider {
-
-    private val sftpMutex get() = connection.sftpOperationMutex
 
     override fun agentConfigSnapshot(path: String, kind: AgentConfigKind, forceRefresh: Boolean): AgentConfigSnapshot =
         agentConfigCache.directory(path, kind, forceRefresh)
@@ -86,63 +86,74 @@ class RemoteSftpFileAccess @Inject constructor(
         displayPathFor(remotePath, currentWorkspaceRoot())
 
     /**
-     * 在独立 SFTP 通道上串行执行 [block]。传输层异常时丢弃当前通道（下次调用自动重建）后原样抛出；
-     * 业务错误（文件不存在/已存在、SFTP 状态码错误）不重建。不做自动重试——写操作重试可能重复落盘。
+     * 租用一条 SFTP 通道执行 [block]。传输层异常时丢弃该通道（下次调用自动重建）后原样抛出；
+     * 业务错误（文件不存在/已存在、SFTP 状态码错误）不丢弃。不做自动重试——写操作重试可能重复落盘。
      */
     private fun <T> withSftp(block: (SFTPClient) -> T): T = runBlocking {
         withContext(Dispatchers.IO) {
-            sftpMutex.withLock {
-                val sftp = try {
-                    connection.sftp()
-                } catch (e: Exception) {
-                    throw IOException(friendlySshError(e), e)
-                }
-                guarded { block(sftp) }
+            val lease = acquireSftpLease()
+            try {
+                guarded(lease.client) { block(lease.client) }
+            } finally {
+                lease.release()
             }
         }
     }
 
     /**
-     * 复用已打开的 SFTP 通道执行一次操作（不重新取 client）。供 [readLines] 惰性迭代使用：每次只锁住
-     * 一次读取，`yield` 在锁外，调用方中途放弃迭代时不会把 [sftpMutex] 永久占住。
+     * 在已租用的通道上执行一次阻塞操作（不再重新租用）。供 [readLines] 惰性迭代使用：
+     * 整个序列持有同一个通道，`yield` 在操作之外。
      */
-    private fun <T> onSftp(block: () -> T): T = runBlocking {
-        withContext(Dispatchers.IO) { sftpMutex.withLock { guarded(block) } }
+    private fun <T> onSftp(client: SFTPClient, block: () -> T): T = runBlocking {
+        withContext(Dispatchers.IO) { guarded(client) { block() } }
     }
 
-    /** 传输层异常时丢弃 SFTP 通道（下次调用自动重建）后原样抛出；业务错误不重建。 */
-    private suspend fun <T> guarded(block: () -> T): T = try {
+    private suspend fun acquireSftpLease(): RemoteSshConnection.SftpLease = try {
+        connection.acquireSftp()
+    } catch (e: Exception) {
+        throw IOException(friendlySshError(e), e)
+    }
+
+    /** 传输层异常时丢弃该通道（下次自动重建）后原样抛出；业务错误不丢弃。 */
+    private suspend fun <T> guarded(client: SFTPClient, block: () -> T): T = try {
         block()
     } catch (e: Exception) {
-        if (e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException &&
-            e !is FileReadTooLargeException && e !is FileSystemLoopException
-        ) {
-            runCatching { connection.invalidateSftp() }
-        }
+        if (isChannelFailure(e)) runCatching { connection.invalidateSftpChannel(client) }
         throw e
     }
+
+    private fun isChannelFailure(e: Exception): Boolean =
+        e !is SFTPException && e !is NoSuchFileException && e !is FileAlreadyExistsException &&
+            e !is FileReadTooLargeException && e !is FileSystemLoopException
 
     override fun readFile(path: String): String = String(readAll(toRemotePath(path)), Charsets.UTF_8)
 
     /**
      * 惰性逐行读取：每次只物化当前一行（单行封顶 64K 字符），读到哪算哪，整文件不进内存。
-     * 序列可重复迭代（每次迭代重新打开远程文件）；调用方需在 IO 线程上迭代。
+     * 序列可重复迭代（每次迭代重新租用通道并打开远程文件）；调用方需在 IO 线程上迭代。
+     *
+     * 整条迭代期间持有同一个通道：RemoteFile 句柄绑定在打开它的 channel 上，不能跨通道使用。
      */
     override fun readLines(path: String): Sequence<String> {
         val remote = toRemotePath(path)
         return sequence {
-            val reader = withSftp { sftp ->
-                val attrs = sftp.statExistence(remote) ?: throw NoSuchFileException(File(remote))
-                if (attrs.type == FileMode.Type.DIRECTORY) throw IOException("是目录，无法按文件读取: $remote")
-                BoundedLineReader(InputStreamReader(RemoteFileInputStream(sftp.open(remote))))
-            }
+            val lease = runBlocking { withContext(Dispatchers.IO) { acquireSftpLease() } }
             try {
-                while (true) {
-                    val line = onSftp { reader.readLine() } ?: break
-                    yield(line.text)
+                val reader = onSftp(lease.client) {
+                    val attrs = lease.client.statExistence(remote) ?: throw NoSuchFileException(File(remote))
+                    if (attrs.type == FileMode.Type.DIRECTORY) throw IOException("是目录，无法按文件读取: $remote")
+                    BoundedLineReader(InputStreamReader(RemoteFileInputStream(lease.client.open(remote))))
+                }
+                try {
+                    while (true) {
+                        val line = onSftp(lease.client) { reader.readLine() } ?: break
+                        yield(line.text)
+                    }
+                } finally {
+                    runCatching { onSftp(lease.client) { reader.close() } }
                 }
             } finally {
-                runCatching { onSftp { reader.close() } }
+                runBlocking { runCatching { lease.release() } }
             }
         }
     }

@@ -288,6 +288,7 @@ fun SettingsScreen(
     val firstByteTimeoutSec by viewModel.firstByteTimeoutSec.collectAsStateWithLifecycle()
     val streamIdleTimeoutSec by viewModel.streamIdleTimeoutSec.collectAsStateWithLifecycle()
     val maxNetworkRetries by viewModel.maxNetworkRetries.collectAsStateWithLifecycle()
+    val sftpChannelLimit by viewModel.sftpChannelLimit.collectAsStateWithLifecycle()
     val enterToSend by viewModel.enterToSend.collectAsStateWithLifecycle()
     val autoExpandReasoning by viewModel.autoExpandReasoning.collectAsStateWithLifecycle()
     val compactionThresholdPercent by viewModel.compactionThresholdPercent.collectAsStateWithLifecycle()
@@ -1358,6 +1359,8 @@ fun SettingsScreen(
                     onSetStreamIdleTimeoutSec = { viewModel.setStreamIdleTimeoutSec(it) },
                     maxNetworkRetries = maxNetworkRetries,
                     onSetMaxNetworkRetries = { viewModel.setMaxNetworkRetries(it) },
+                    sftpChannelLimit = sftpChannelLimit,
+                    onSetSftpChannelLimit = { viewModel.setSftpChannelLimit(it) },
                     enterToSend = enterToSend,
                     onToggleEnterToSend = { viewModel.setEnterToSend(it) },
                     autoExpandReasoning = autoExpandReasoning,

@@ -19,6 +19,11 @@ private val Context.generalDataStore by preferencesDataStore(
     corruptionHandler = preferencesCorruptionHandler
 )
 
+/** 远程模式下并发的 SFTP 通道上限：默认 3，最多 20。 */
+internal const val DEFAULT_SFTP_CHANNEL_LIMIT = 3
+internal const val MIN_SFTP_CHANNEL_LIMIT = 1
+internal const val MAX_SFTP_CHANNEL_LIMIT = 20
+
 /** App 启动（含切换工作区）时进入哪个会话。 */
 enum class StartupSessionMode {
     /** 新开会话：复用当前工作区里还没发过消息的空会话，否则新建。 */
@@ -31,11 +36,12 @@ enum class StartupSessionMode {
 /**
  * 「偏好设置」里的用户偏好。
  *
- * 目前九项：拉取模型成功后是否自动移除远端已不存在的本地模型（默认开启）、
+ * 目前十项：拉取模型成功后是否自动移除远端已不存在的本地模型（默认开启）、
  * 启动时进入新会话还是最近会话（默认新开会话）、首字 / 数据块间隔超时（秒）、
  * 网络请求的最大重试次数（默认 6）、回车发送、思考卡片是否默认展开（默认开启）、
- * 自动压缩阈值、sendFile 单个文件大小上限（默认 100MB），
- * 以及移除外部本地工作区时是否一并删除其聊天记录（默认关闭）。
+ * 自动压缩阈值、sendFile 单个文件大小上限（默认 100MB）、
+ * 移除外部本地工作区时是否一并删除其聊天记录（默认关闭），
+ * 以及远程模式下并发的 SFTP 通道上限（默认 3）。
  * DataStore 用法与 [KeepaliveSettingsRepository] 一致。
  */
 @Singleton
@@ -48,6 +54,7 @@ class GeneralSettingsRepository @Inject constructor(
         val FIRST_BYTE_TIMEOUT_SEC_KEY = intPreferencesKey("first_byte_timeout_sec")
         val STREAM_IDLE_TIMEOUT_SEC_KEY = intPreferencesKey("stream_idle_timeout_sec")
         val MAX_NETWORK_RETRIES_KEY = intPreferencesKey("max_network_retries")
+        val SFTP_CHANNEL_LIMIT_KEY = intPreferencesKey("sftp_channel_limit")
         val ENTER_TO_SEND_KEY = booleanPreferencesKey("enter_to_send")
         val AUTO_EXPAND_REASONING_KEY = booleanPreferencesKey("auto_expand_reasoning")
         val COMPACTION_THRESHOLD_PERCENT_KEY = intPreferencesKey("compaction_threshold_percent")
@@ -159,6 +166,18 @@ class GeneralSettingsRepository @Inject constructor(
 
     suspend fun setMaxNetworkRetries(count: Int) {
         context.generalDataStore.edit { it[MAX_NETWORK_RETRIES_KEY] = count.coerceAtLeast(0) }
+    }
+
+    /** 远程模式下并发的 SFTP 通道数上限；未设置时回退到 [DEFAULT_SFTP_CHANNEL_LIMIT]。 */
+    val sftpChannelLimitFlow: Flow<Int> = context.generalDataStore.data.map {
+        (it[SFTP_CHANNEL_LIMIT_KEY] ?: DEFAULT_SFTP_CHANNEL_LIMIT)
+            .coerceIn(MIN_SFTP_CHANNEL_LIMIT, MAX_SFTP_CHANNEL_LIMIT)
+    }
+
+    suspend fun setSftpChannelLimit(limit: Int) {
+        context.generalDataStore.edit {
+            it[SFTP_CHANNEL_LIMIT_KEY] = limit.coerceIn(MIN_SFTP_CHANNEL_LIMIT, MAX_SFTP_CHANNEL_LIMIT)
+        }
     }
 
     /** 装配 provider 前读取一次最大重试次数。 */

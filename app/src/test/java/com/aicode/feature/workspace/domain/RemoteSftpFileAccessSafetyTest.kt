@@ -9,7 +9,6 @@ import io.mockk.mockk
 import io.mockk.verify
 import java.io.IOException
 import java.nio.file.FileSystemLoopException
-import kotlinx.coroutines.sync.Mutex
 import net.schmizz.sshj.sftp.FileAttributes
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.RemoteFile
@@ -25,14 +24,16 @@ class RemoteSftpFileAccessSafetyTest {
     private val connection = mockk<RemoteSshConnection>(relaxed = true)
     private val workspace = mockk<WorkspaceRepository>()
     private val sftp = mockk<SFTPClient>(relaxed = true)
+    private val lease = mockk<RemoteSshConnection.SftpLease>(relaxed = true) {
+        every { client } returns sftp
+    }
     private val access = RemoteSftpFileAccess(connection, workspace, mockk(relaxed = true))
     private val directory = FileAttributes.Builder().withType(FileMode.Type.DIRECTORY).build()
     private val symlink = FileAttributes.Builder().withType(FileMode.Type.SYMLINK).build()
 
     @Before
     fun setUp() {
-        every { connection.sftpOperationMutex } returns Mutex()
-        coEvery { connection.sftp() } returns sftp
+        coEvery { connection.acquireSftp() } returns lease
         every { connection.remoteHome } returns "/root"
         every { connection.config } returns mockk(relaxed = true)
         every { workspace.currentPath() } returns "/root/workspace"
@@ -128,7 +129,7 @@ class RemoteSftpFileAccessSafetyTest {
             FileAttributes.Builder().withType(FileMode.Type.REGULAR).withSize(256L * 1024 * 1024).build()
         assertThrows(FileReadTooLargeException::class.java) { access.readBytes("large", 8L * 1024 * 1024) }
         verify(exactly = 0) { sftp.open(any<String>()) }
-        coVerify(exactly = 0) { connection.invalidateSftp() }
+        coVerify(exactly = 0) { connection.invalidateSftpChannel(any()) }
     }
 
     @Test
@@ -144,7 +145,7 @@ class RemoteSftpFileAccessSafetyTest {
         assertThrows(FileReadTooLargeException::class.java) { access.readBytes("growing", 8192) }
         assertEquals(8193L, bytesRead)
         verify(exactly = 1) { remote.close() }
-        coVerify(exactly = 0) { connection.invalidateSftp() }
+        coVerify(exactly = 0) { connection.invalidateSftpChannel(any()) }
     }
 
     @Test

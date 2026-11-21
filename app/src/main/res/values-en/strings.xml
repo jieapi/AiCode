@@ -104,6 +104,11 @@
     <string name="settings_max_network_retries_desc">Exponential-backoff retries after a network failure</string>
     <string name="settings_retries_count">%1$d</string>
     <string name="settings_retries_input_hint">0 disables retries</string>
+    <string name="settings_general_remote">Remote</string>
+    <string name="settings_sftp_channel_limit">SFTP channels</string>
+    <string name="settings_sftp_channel_limit_desc">Concurrent file-transfer channels in remote mode; opened on demand, reclaimed after 30s idle</string>
+    <string name="settings_sftp_channel_limit_value">%1$d</string>
+    <string name="settings_sftp_channel_limit_input_hint">Range 1-20, default 3</string>
     <string name="settings_general_input">Input</string>
     <string name="settings_enter_to_send">Enter key sends message</string>
     <string name="settings_enter_to_send_desc">When off, Enter inserts a newline and you send with the button</string>
