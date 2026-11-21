@@ -26,13 +26,14 @@
         android:usesCleartextTraffic="true"
         android:localeConfig="@xml/locales_config">
 
-        <!-- configChanges 自行接管旋转与窗口尺寸变化：Compose 会跟着新 Configuration 重组，
+        <!-- configChanges 自行接管旋转、窗口尺寸与系统深浅色切换：Compose 会跟着新 Configuration 重组，
              不重建 Activity 才能保住终端 TerminalView、编辑器未保存内容与聊天列表位置。
              故意不含 locale —— 语言切换仍走 MainActivity 里的 recreate 路径。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode"
             android:theme="@style/Theme.AICode.Splash"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

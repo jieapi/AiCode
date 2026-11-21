@@ -1,7 +1,6 @@
 package com.aicode.feature.terminal.domain
 
 import android.content.Context
-import android.content.Intent
 import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ContainerNotInitializedException
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
@@ -505,18 +504,13 @@ class TerminalSessionManager @Inject constructor(
     }
 
     private fun startKeepaliveService() {
-        val intent = Intent(appContext, TerminalKeepaliveService::class.java).apply {
-            action = TerminalKeepaliveService.ACTION_START_SESSION
+        if (TerminalKeepaliveService.startSession(appContext)) {
+            FileLogger.i(TAG, "后台保活 Service 已启动")
         }
-        appContext.startService(intent)
-        FileLogger.i(TAG, "后台保活 Service 已启动")
     }
 
     private fun stopKeepaliveService() {
-        val intent = Intent(appContext, TerminalKeepaliveService::class.java).apply {
-            action = TerminalKeepaliveService.ACTION_STOP_SESSION
-        }
-        appContext.startService(intent)
+        TerminalKeepaliveService.stopSession(appContext)
         FileLogger.i(TAG, "后台保活 Service 已停止")
     }
 

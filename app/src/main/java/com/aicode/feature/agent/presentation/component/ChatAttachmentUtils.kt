@@ -75,14 +75,15 @@ internal fun AgentAttachment.toPendingAttachment(): PendingUploadAttachment {
         val file = File(localPath)
         if (file.exists() && file.isFile && file.length() > 0) {
             try {
-                val (mime, base64) = ImageDownscaler.downscaleToBase64(
-                    file.readBytes(), mimeType.ifBlank { "image/jpeg" }
-                )
-                AgentImage(
-                    mimeType = mime,
-                    base64Data = base64,
-                    path = containerPath
-                )
+                ImageDownscaler.downscaleFileToBase64(
+                    file, mimeType.ifBlank { "image/jpeg" }
+                )?.let { (mime, base64) ->
+                    AgentImage(
+                        mimeType = mime,
+                        base64Data = base64,
+                        path = containerPath
+                    )
+                }
             } catch (e: Exception) {
                 null
             }
@@ -194,18 +195,42 @@ internal suspend fun copyUriToWorkspace(
     val sizeBytes: Long
     val image: AgentImage?
     if (includeImageData) {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: error(unreadableFileMessage(context))
-        if (bytes.size > MAX_IMAGE_SOURCE_BYTES) error(imageLimitError(context, MAX_IMAGE_SOURCE_BYTES))
-        val scaled = ImageDownscaler.downscale(bytes, mimeType)
-        if (scaled.bytes.size > MAX_IMAGE_UPLOAD_BYTES) error(imageLimitError(context, MAX_IMAGE_UPLOAD_BYTES))
-        fileAccess.writeBytes(containerPath, bytes, overwrite = true)
-        sizeBytes = bytes.size.toLong()
-        image = AgentImage(
-            mimeType = scaled.mimeType,
-            base64Data = Base64.getEncoder().encodeToString(scaled.bytes),
-            path = containerPath
-        )
+        // 先流式落入 cache 临时文件再走 BitmapFactory.decodeFile，避免最高 40MB 原图整份读入 Java 堆。
+        val tempFile = File.createTempFile("aicode-img-", ".upload", context.cacheDir)
+        try {
+            val totalWritten = context.contentResolver.openInputStream(uri)?.use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(16 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_IMAGE_SOURCE_BYTES) {
+                            error(imageLimitError(context, MAX_IMAGE_SOURCE_BYTES))
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                    total
+                }
+            } ?: error(unreadableFileMessage(context))
+            val scaled = ImageDownscaler.downscaleFile(tempFile, mimeType, maxFallbackBytes = MAX_IMAGE_UPLOAD_BYTES)
+                ?: error(imageLimitError(context, MAX_IMAGE_UPLOAD_BYTES))
+            if (scaled.bytes.size > MAX_IMAGE_UPLOAD_BYTES) {
+                error(imageLimitError(context, MAX_IMAGE_UPLOAD_BYTES))
+            }
+            tempFile.inputStream().use { input ->
+                fileAccess.writeStream(containerPath, input, overwrite = true)
+            }
+            sizeBytes = totalWritten
+            image = AgentImage(
+                mimeType = scaled.mimeType,
+                base64Data = Base64.getEncoder().encodeToString(scaled.bytes),
+                path = containerPath
+            )
+        } finally {
+            tempFile.delete()
+        }
     } else {
         // 普通附件流式落盘：不再整份读进内存，于是文件多大都不会顶爆堆
         sizeBytes = context.contentResolver.openInputStream(uri)?.use { input ->

@@ -2,6 +2,7 @@ package com.aicode
 
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -204,6 +205,8 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var browserManager: com.aicode.feature.agent.domain.tool.browser.BrowserManager
 
+    private var lastStoppedElapsedMs: Long = 0L
+
     override fun attachBaseContext(newBase: android.content.Context) {
         // 在 Activity 创建前同步应用用户选择的语言，确保冷启动也生效。
         // Hilt 尚未注入，直接从 SharedPreferences 同步读取。
@@ -221,6 +224,10 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION") // 全局更新 application resources locale，createConfigurationContext 无法替代
     override fun onCreate(savedInstanceState: Bundle?) {
+        com.aicode.core.util.FileLogger.i(
+            "MainActivity",
+            "onCreate: restored=${savedInstanceState != null}, mem=${AIEditorApp.collectMemorySummary(this)}"
+        )
         // 从冷启动闪屏主题恢复为应用主主题
         setTheme(R.style.Theme_AICode)
         // 绘制到系统状态栏/导航栏之下，让应用背景与系统栏融为一体（消除割裂的色块）。
@@ -334,6 +341,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        browserManager.setAppForeground(true)
+        (applicationContext as? AIEditorApp)?.syncSshKeepalive()
+    }
+
     override fun onResume() {
         super.onResume()
         // 远程模式回到前台时，若 SSH 断了立即触发重连，不等 supervisor 轮询
@@ -347,7 +360,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        lastStoppedElapsedMs = SystemClock.elapsedRealtime()
+        browserManager.setAppForeground(false)
+        super.onStop()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN ||
+            level in android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW..android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+        ) {
+            com.aicode.core.util.FileLogger.i(
+                "MainActivity",
+                "onTrimMemory: level=$level, mem=${AIEditorApp.collectMemorySummary(this)}"
+            )
+        }
+    }
+
     override fun onDestroy() {
+        val bgDurationMs = if (lastStoppedElapsedMs > 0L) {
+            SystemClock.elapsedRealtime() - lastStoppedElapsedMs
+        } else {
+            -1L
+        }
+        com.aicode.core.util.FileLogger.i(
+            "MainActivity",
+            "onDestroy: finishing=$isFinishing, changingConfigs=$isChangingConfigurations, " +
+                "mask=0x${Integer.toHexString(changingConfigurations)}, bgMs=$bgDurationMs, " +
+                "mem=${AIEditorApp.collectMemorySummary(this)}"
+        )
         browserManager.detachHiddenHost()
         PluginWebViewCache.clear()
         super.onDestroy()

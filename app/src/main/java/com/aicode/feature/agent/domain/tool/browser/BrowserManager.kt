@@ -34,6 +34,7 @@ import com.aicode.feature.workspace.domain.PathHomeResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -192,7 +193,7 @@ class BrowserManager @Inject constructor(
 
     private class TabHolder(
         val id: String,
-        val webView: WebView,
+        var webView: WebView,
         val themedContext: ContextThemeWrapper,
         /** WebView context 的基座：有 Activity 时切为 Activity context，
          *  `<select>` 下拉、JS 对话框等依赖 Activity 窗口的能力才不会失效。 */
@@ -225,6 +226,8 @@ class BrowserManager @Inject constructor(
     private var tabSeq = 1
     private var containerView: FrameLayout? = null
     private var hiddenHost: ViewGroup? = null
+    private var appForeground: Boolean = true
+    private var activeAutomationCount: Int = 0
 
     /** App 外观是否为深色，由 UI 层通过 [setAppDarkTheme] 推送。 */
     private var appDarkTheme: Boolean = false
@@ -341,10 +344,80 @@ class BrowserManager @Inject constructor(
     }
 
     private fun resolveTab(tabId: String?): TabHolder {
-        if (tabId.isNullOrBlank()) {
-            return ensureActiveTab()
+        val tab = if (tabId.isNullOrBlank()) {
+            ensureActiveTab()
+        } else {
+            findTab(tabId) ?: throw IllegalArgumentException("标签页不存在: $tabId")
         }
-        return findTab(tabId) ?: throw IllegalArgumentException("标签页不存在: $tabId")
+        ensureTabReadyForAutomation(tab)
+        return tab
+    }
+
+    /** 标记当前正在执行浏览器自动化调用，保证后台状态下也能临时保持目标 WebView 渲染激活。 */
+    suspend fun <T> withAutomation(block: suspend () -> T): T {
+        withContext(Dispatchers.Main.immediate) {
+            val wakeNeeded = !appForeground && activeAutomationCount == 0
+            activeAutomationCount++
+            if (wakeNeeded) {
+                updateContainerView()
+            }
+        }
+        try {
+            return block()
+        } finally {
+            withContext(NonCancellable + Dispatchers.Main.immediate) {
+                activeAutomationCount = (activeAutomationCount - 1).coerceAtLeast(0)
+                if (!appForeground && activeAutomationCount == 0) {
+                    pauseOffscreenTabs()
+                }
+            }
+        }
+    }
+
+    /** 由 Activity 前后台生命周期回调同步状态：退后台且无自动化任务时暂停所有 WebView 管线。 */
+    fun setAppForeground(foreground: Boolean) {
+        if (appForeground == foreground) return
+        appForeground = foreground
+        if (foreground) {
+            updateContainerView()
+        } else if (activeAutomationCount == 0) {
+            pauseOffscreenTabs()
+        }
+    }
+
+    private fun ensureTabReadyForAutomation(tab: TabHolder) {
+        if (tab.webView.layerType != View.LAYER_TYPE_HARDWARE) {
+            tab.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
+        tab.webView.onResume()
+        if (tab.webView.parent == null) {
+            val host = hiddenHost
+            if (host != null) {
+                attachToHiddenHost(host, tab.webView)
+            }
+        }
+    }
+
+    private fun attachToHiddenHost(host: ViewGroup, wv: WebView) {
+        if (wv.parent === host) return
+        (wv.parent as? ViewGroup)?.removeView(wv)
+        val density = appContext.resources.displayMetrics.density
+        val width = (HEADLESS_WIDTH_DP * density).toInt().coerceAtLeast(1)
+        val height = (HEADLESS_HEIGHT_DP * density).toInt().coerceAtLeast(1)
+        host.addView(wv, ViewGroup.LayoutParams(width, height))
+    }
+
+    private fun pauseOffscreenTabs() {
+        val host = hiddenHost
+        tabs.forEach { tab ->
+            if (tab.webView.parent !== containerView) {
+                if (host != null && tab.webView.parent === host) {
+                    host.removeView(tab.webView)
+                }
+                tab.webView.onPause()
+                tab.webView.setLayerType(View.LAYER_TYPE_NONE, null)
+            }
+        }
     }
 
     private fun configureWebView(wv: WebView, tabId: String) {
@@ -396,6 +469,16 @@ class BrowserManager @Inject constructor(
                     tab.loadDeferred = null
                     publishState()
                 }
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView?,
+                detail: android.webkit.RenderProcessGoneDetail?
+            ): Boolean {
+                val didCrash = detail?.didCrash() ?: false
+                FileLogger.e(TAG, "WebView 渲染进程退出: tab=$tabId didCrash=$didCrash")
+                handleRenderProcessGone(tabId, view)
+                return true
             }
         }
 
@@ -482,6 +565,42 @@ class BrowserManager @Inject constructor(
         wv.layout(0, 0, width, height)
     }
 
+    /**
+     * Chromium 渲染进程被系统回收或崩溃时销毁失效 WebView 并就地替换新实例，
+     * 避免默认行为把整个宿主 App 进程一并杀掉。
+     */
+    private fun handleRenderProcessGone(tabId: String, deadView: WebView?) {
+        val msg = appContext.getString(R.string.browser_render_process_gone)
+        val tab = findTab(tabId)
+        if (deadView != null) {
+            (deadView.parent as? ViewGroup)?.removeView(deadView)
+            runCatching {
+                deadView.stopLoading()
+                deadView.removeJavascriptInterface("__browserBridge__")
+                deadView.destroy()
+            }
+        }
+        if (tab == null) return
+
+        tab.loading = false
+        tab.error = msg
+        tab.loadDeferred?.complete(Result.failure(RuntimeException(msg)))
+        tab.loadDeferred = null
+        tab.pendingJsCalls.values.forEach { it.completeExceptionally(RuntimeException(msg)) }
+        tab.pendingJsCalls.clear()
+        tab.dialogTimeout?.let { mainHandler.removeCallbacks(it) }
+        tab.dialogTimeout = null
+        runCatching { tab.pendingDialogResult?.cancel() }
+        tab.pendingDialogResult = null
+        tab.pendingDialog = null
+
+        val replacement = WebView(tab.themedContext)
+        configureWebView(replacement, tabId)
+        tab.webView = replacement
+        updateContainerView()
+        publishState()
+    }
+
     private fun holdDialog(tab: TabHolder, type: String, message: String, defaultValue: String?, result: JsResult) {
         tab.dialogTimeout?.let { mainHandler.removeCallbacks(it) }
         tab.pendingDialog = BrowserDialog(type, message, defaultValue)
@@ -512,16 +631,9 @@ class BrowserManager @Inject constructor(
         tabs.add(tab)
         activeTabId = id
 
-        // 若当前前端面板未打开，自动挂到 hiddenHost 激活 Chromium 渲染管线
-        if (containerView == null && hiddenHost != null) {
-            val density = appContext.resources.displayMetrics.density
-            val width = (HEADLESS_WIDTH_DP * density).toInt().coerceAtLeast(1)
-            val height = (HEADLESS_HEIGHT_DP * density).toInt().coerceAtLeast(1)
-            hiddenHost?.addView(wv, ViewGroup.LayoutParams(width, height))
-        }
-
-        publishState()
+        // 若当前前端面板未打开且处于前景或自动化中，只挂当前激活 Tab 激活渲染管线
         updateContainerView()
+        publishState()
         FileLogger.i(TAG, "Tab created: $id (initialUrl=$initialUrl)")
         return tab
     }
@@ -790,42 +902,53 @@ class BrowserManager @Inject constructor(
         if (container != null && active != null && active.webView.parent !== container) {
             container.removeAllViews()
             (active.webView.parent as? ViewGroup)?.removeView(active.webView)
+            if (active.webView.layerType != View.LAYER_TYPE_HARDWARE) {
+                active.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            }
+            active.webView.onResume()
             container.addView(
                 active.webView,
                 ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             )
+        } else if (container != null && active != null) {
+            if (active.webView.layerType != View.LAYER_TYPE_HARDWARE) {
+                active.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            }
+            active.webView.onResume()
         }
 
-        // 离屏的 Tab 一律挂回 hiddenHost：面板未打开时是全部 Tab（含激活 Tab），面板打开时是非激活 Tab。
-        // 只有 attached 到窗口的 WebView 才被视为可见，否则页面被判为 hidden、Chromium 不合成，截图会整张空白。
-        hiddenHost?.let { host ->
-            val density = appContext.resources.displayMetrics.density
-            val width = (HEADLESS_WIDTH_DP * density).toInt().coerceAtLeast(1)
-            val height = (HEADLESS_HEIGHT_DP * density).toInt().coerceAtLeast(1)
-            tabs.forEach { t ->
-                val offscreen = container == null || t.id != activeTabId
-                if (offscreen && t.webView.parent !== host) {
-                    (t.webView.parent as? ViewGroup)?.removeView(t.webView)
-                    host.addView(t.webView, ViewGroup.LayoutParams(width, height))
+        // 仅在「前景或自动化运行中」才把当前激活的离屏 Tab 挂到 hiddenHost；
+        // 非激活且未在加载中的后台 Tab 摘除并暂停，避免最多 10 个硬件加速 WebView 长期空占内存与 GPU 图层。
+        val host = hiddenHost
+        val keepActiveOffscreen = appForeground || activeAutomationCount > 0
+        tabs.forEach { t ->
+            if (container != null && t.id == activeTabId) return@forEach
+            val shouldKeepAttached = container == null && t.id == activeTabId && keepActiveOffscreen
+            if (shouldKeepAttached && host != null) {
+                if (t.webView.layerType != View.LAYER_TYPE_HARDWARE) {
+                    t.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                }
+                t.webView.onResume()
+                attachToHiddenHost(host, t.webView)
+            } else if (t.id != activeTabId || !keepActiveOffscreen) {
+                if (host != null && t.webView.parent === host) {
+                    host.removeView(t.webView)
+                }
+                if (!t.loading && activeAutomationCount == 0) {
+                    t.webView.onPause()
+                    t.webView.setLayerType(View.LAYER_TYPE_NONE, null)
                 }
             }
         }
     }
 
-    /** 注册 Activity 级的隐藏宿主容器，让离屏 WebView 在后台也能触发 onAttachedToWindow 激活光栅化渲染。 */
+    /** 注册 Activity 级的隐藏宿主容器，让离屏 WebView 在前台或自动化时触发 onAttachedToWindow 激活光栅化渲染。 */
     fun attachHiddenHost(host: ViewGroup) {
         hiddenHost = host
         // 面板未打开（离屏）一律用 Application context：WebView 弹不出原生 UI（如下拉列表、对话框），
         // 后台页面就无法把弹窗伪装成 App 自己的界面
         tabs.forEach { it.contextWrapper.baseContext = appContext }
-        val density = appContext.resources.displayMetrics.density
-        val width = (HEADLESS_WIDTH_DP * density).toInt().coerceAtLeast(1)
-        val height = (HEADLESS_HEIGHT_DP * density).toInt().coerceAtLeast(1)
-        tabs.forEach { tab ->
-            if (tab.webView.parent == null) {
-                host.addView(tab.webView, ViewGroup.LayoutParams(width, height))
-            }
-        }
+        updateContainerView()
     }
 
     fun detachHiddenHost() {
@@ -866,18 +989,8 @@ class BrowserManager @Inject constructor(
         tabs.forEach { it.contextWrapper.baseContext = appContext }
         publishState()
 
-        // 前端面板关闭后，把当前激活 Tab 移回 hiddenHost 保持渲染管线激活
-        hiddenHost?.let { host ->
-            val density = appContext.resources.displayMetrics.density
-            val width = (HEADLESS_WIDTH_DP * density).toInt().coerceAtLeast(1)
-            val height = (HEADLESS_HEIGHT_DP * density).toInt().coerceAtLeast(1)
-            findTab(activeTabId)?.let { active ->
-                if (active.webView.parent !== host) {
-                    (active.webView.parent as? ViewGroup)?.removeView(active.webView)
-                    host.addView(active.webView, ViewGroup.LayoutParams(width, height))
-                }
-            }
-        }
+        // 前端面板关闭后，按前后台与自动化状态整理 hiddenHost，避免离屏页持续占硬件层
+        updateContainerView()
     }
 
     fun destroy() {
@@ -1789,6 +1902,10 @@ class BrowserManager @Inject constructor(
 
     suspend fun reload(tabId: String? = null): String = withContext(Dispatchers.Main) {
         val tab = resolveTab(tabId)
+        // 渲染进程退出后重建的新 WebView 没有历史记录，reload() 为空操作，需按原 URL 重新加载。
+        if (tab.webView.url.isNullOrBlank() && tab.url.isNotBlank()) {
+            return@withContext loadInto(tab, tab.url)
+        }
         val deferred = CompletableDeferred<Result<String>>()
         tab.loadDeferred = deferred
         tab.webView.reload()

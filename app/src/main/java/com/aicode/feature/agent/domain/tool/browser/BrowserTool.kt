@@ -106,7 +106,9 @@ class BrowserTool @Inject constructor(
         val tabId = args["tabId"]?.jsonPrimitive?.contentOrNull?.trim()
 
         return try {
-            executeAction(action, tabId, args)
+            browserManager.withAutomation {
+                executeAction(action, tabId, args)
+            }
         } catch (e: TimeoutCancellationException) {
             ToolResult.Error("操作超时：$action", "TIMEOUT")
         } catch (e: CancellationException) {

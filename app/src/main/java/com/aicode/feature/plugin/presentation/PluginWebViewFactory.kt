@@ -40,7 +40,8 @@ internal object PluginWebViewFactory {
         context: Context,
         page: PluginPage,
         onPageFinished: (WebView) -> Unit,
-        onMainFrameError: () -> Unit
+        onMainFrameError: () -> Unit,
+        onRenderProcessGone: (WebView) -> Unit = {}
     ): WebView = create(
         context = context,
         page = page,
@@ -48,7 +49,8 @@ internal object PluginWebViewFactory {
         backgroundColor = android.graphics.Color.TRANSPARENT,
         themeVariables = { emptyMap() },
         onPageFinished = onPageFinished,
-        onMainFrameError = onMainFrameError
+        onMainFrameError = onMainFrameError,
+        onRenderProcessGone = onRenderProcessGone
     ).apply {
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
         settings.domStorageEnabled = true
@@ -66,7 +68,8 @@ internal object PluginWebViewFactory {
         backgroundColor: Int,
         themeVariables: () -> Map<String, String>,
         onPageFinished: (WebView) -> Unit,
-        onMainFrameError: () -> Unit
+        onMainFrameError: () -> Unit,
+        onRenderProcessGone: (WebView) -> Unit = {}
     ): WebView {
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/plugin/", PluginPageAssetHandler(page.installDir.canonicalFile))
@@ -115,8 +118,32 @@ internal object PluginWebViewFactory {
                 ) {
                     if (request.isForMainFrame) onMainFrameError()
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView?,
+                    detail: android.webkit.RenderProcessGoneDetail?
+                ): Boolean {
+                    FileLogger.e(
+                        "PluginWebView",
+                        "[${page.pluginId}] 渲染进程退出: didCrash=${detail?.didCrash()}"
+                    )
+                    if (view != null) {
+                        (view.parent as? android.view.ViewGroup)?.removeView(view)
+                        runCatching {
+                            view.stopLoading()
+                            view.destroy()
+                        }
+                        onRenderProcessGone(view)
+                    }
+                    onMainFrameError()
+                    return true
+                }
             }
         }
+    }
+
+    fun clearResourceCache() {
+        ResourceCache.clear()
     }
 
     fun webViewThemeRes(dark: Boolean): Int =
@@ -237,6 +264,11 @@ internal object PluginWebViewFactory {
                 totalBytes -= entry.value.bytes.size
                 iterator.remove()
             }
+        }
+        @Synchronized
+        fun clear() {
+            entries.clear()
+            totalBytes = 0
         }
     }
 }

@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.aicode.MainActivity
 import com.aicode.core.util.FileLogger
 import com.aicode.R
@@ -36,9 +37,9 @@ class TerminalKeepaliveService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    /** 前台保活期间持有的 Wi-Fi 锁：避免切后台/息屏后 Wi-Fi 进入省电使长连接被回收。 */
-    private val wifiLocks = mutableListOf<WifiManager.WifiLock>()
-    private var wifiLocksInitialized = false
+    /** 前台保活期间持有的单把 Wi-Fi 锁（API 29+ 用低延迟锁，低版本回退兼容锁），避免双锁并持触发厂商功耗治理。 */
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var wifiLockInitialized = false
 
     inner class LocalBinder : Binder() {
         fun getService(): TerminalKeepaliveService = this@TerminalKeepaliveService
@@ -59,6 +60,7 @@ class TerminalKeepaliveService : Service() {
     }
 
     override fun onDestroy() {
+        startRequested = false
         serviceScope.cancel()
         releaseWifiLocks()
         super.onDestroy()
@@ -152,27 +154,28 @@ class TerminalKeepaliveService : Service() {
     }
 
     /**
-     * 获取 Wi-Fi 锁，尽量保持 Wi-Fi 不休眠。延后到首次进入前台时惰性创建：只有真正保活期间
-     * 才需要，避免无谓占用。API 29+ 同时持低延迟锁（前台亮屏时生效）与兼容锁（后台/息屏时生效）。
+     * 获取单把 Wi-Fi 锁，尽量保持 Wi-Fi 不休眠。延后到首次进入前台时惰性创建：
+     * API 29+ `WIFI_MODE_FULL_LOW_LATENCY` 已取代旧的 `WIFI_MODE_FULL_HIGH_PERF`，
+     * 不再双锁并持以降低后台功耗查杀概率。
      */
     private fun acquireWifiLocks() {
         runCatching {
-            if (!wifiLocksInitialized) {
+            if (!wifiLockInitialized) {
                 val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    wifiLocks += wm.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "AiCode:Keepalive:low-latency")
-                }
-                @Suppress("DEPRECATION")
-                wifiLocks += wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AiCode:Keepalive")
-                wifiLocks.forEach { it.setReferenceCounted(false) }
-                wifiLocksInitialized = true
+                wifiLock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    wm.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "AiCode:Keepalive:low-latency")
+                } else {
+                    @Suppress("DEPRECATION")
+                    wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AiCode:Keepalive")
+                }.apply { setReferenceCounted(false) }
+                wifiLockInitialized = true
             }
-            wifiLocks.forEach { lock -> if (!lock.isHeld) lock.acquire() }
+            wifiLock?.let { lock -> if (!lock.isHeld) lock.acquire() }
         }.onFailure { FileLogger.w(TAG, "acquireWifiLock failed", it) }
     }
 
     private fun releaseWifiLocks() {
-        wifiLocks.forEach { lock ->
+        wifiLock?.let { lock ->
             runCatching { if (lock.isHeld) lock.release() }
         }
     }
@@ -186,57 +189,89 @@ class TerminalKeepaliveService : Service() {
         const val ACTION_ENABLE_PERSISTENT = "com.aicode.action.ENABLE_PERSISTENT"
         const val ACTION_DISABLE_PERSISTENT = "com.aicode.action.DISABLE_PERSISTENT"
 
-        /** 开启常驻保活（幂等）。 */
-        fun enablePersistent(context: Context) {
+        @Volatile
+        private var startRequested = false
+
+        /** 开启常驻保活（幂等）。返回是否成功投递启动请求。 */
+        fun enablePersistent(context: Context): Boolean {
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_ENABLE_PERSISTENT
             }
-            runCatching { context.startService(intent) }
-                .onFailure {
-                    // 后台冷启动时系统拒绝 startService（Android 8+ 后台执行限制），属预期场景，
-                    // 保活会在 App 回到前台或 WorkManager 兜底时恢复，不必刷全栈吓人日志。
-                    if (it.message?.contains("app is in background") == true) {
-                        FileLogger.i(TAG, "enablePersistent skipped: app in background, keepalive deferred")
-                    } else {
-                        FileLogger.e(TAG, "enablePersistent startService failed", it)
-                    }
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+                startRequested = true
+                true
+            }.onFailure {
+                if (isBackgroundStartRestriction(it)) {
+                    FileLogger.i(TAG, "enablePersistent skipped: app in background, keepalive deferred")
+                } else {
+                    FileLogger.e(TAG, "enablePersistent startService failed", it)
                 }
+            }.getOrDefault(false)
         }
 
-        /** 关闭常驻保活（幂等）。仅在确曾开启过时调用，避免为关闭而凭空拉起 Service。 */
+        /** 关闭常驻保活（幂等）。仅在确曾启动或服务运行中时发送停止动作，避免后台凭空拉起服务。 */
         fun disablePersistent(context: Context) {
+            if (!startRequested && !isRunning(context)) return
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_DISABLE_PERSISTENT
             }
             runCatching { context.startService(intent) }
-                .onFailure { FileLogger.e(TAG, "disablePersistent startService failed", it) }
+                .onFailure {
+                    if (isBackgroundStartRestriction(it)) {
+                        startRequested = false
+                    } else {
+                        FileLogger.e(TAG, "disablePersistent startService failed", it)
+                    }
+                }
         }
 
-        /** 登记一个后台会话（不改变用户常驻开关）。由调用方按状态迁移保证不重复计数。 */
-        fun startSession(context: Context) {
+        /** 登记一个后台会话（不改变用户常驻开关）。由调用方按状态迁移保证不重复计数；返回是否投递成功。 */
+        fun startSession(context: Context): Boolean {
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_START_SESSION
             }
-            runCatching { context.startService(intent) }
-                .onFailure { FileLogger.e(TAG, "startSession startService failed", it) }
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+                startRequested = true
+                true
+            }.onFailure {
+                if (isBackgroundStartRestriction(it)) {
+                    FileLogger.i(TAG, "startSession skipped: app in background, deferred")
+                } else {
+                    FileLogger.e(TAG, "startSession startService failed", it)
+                }
+            }.getOrDefault(false)
         }
 
-        /** 结束一个后台会话。 */
+        /** 结束一个后台会话。服务未启动且未运行中时跳过，避免在后台拉起已停止服务。 */
         fun stopSession(context: Context) {
+            if (!startRequested && !isRunning(context)) return
             val intent = Intent(context, TerminalKeepaliveService::class.java).apply {
                 action = ACTION_STOP_SESSION
             }
             runCatching { context.startService(intent) }
-                .onFailure { FileLogger.e(TAG, "stopSession startService failed", it) }
+                .onFailure {
+                    if (isBackgroundStartRestriction(it)) {
+                        startRequested = false
+                    } else {
+                        FileLogger.e(TAG, "stopSession startService failed", it)
+                    }
+                }
         }
+
+        private fun isBackgroundStartRestriction(error: Throwable): Boolean =
+            error.message?.contains("app is in background") == true ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    error is android.app.ForegroundServiceStartNotAllowedException)
 
         /** 判断保活服务当前是否在运行。WorkManager 兜底拉起前先探测，避免反复 startService。 */
         @Suppress("DEPRECATION")
-        fun isRunning(context: Context): Boolean {
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        fun isRunning(context: Context): Boolean = runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
             val serviceName = TerminalKeepaliveService::class.java.name
-            return am.getRunningServices(Int.MAX_VALUE)
+            am.getRunningServices(Int.MAX_VALUE)
                 .any { it.service.packageName == context.packageName && it.service.className == serviceName }
-        }
+        }.getOrDefault(false)
     }
 }

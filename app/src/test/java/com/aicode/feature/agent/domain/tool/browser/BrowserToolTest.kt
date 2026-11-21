@@ -37,6 +37,9 @@ class BrowserToolTest {
         every { FileLogger.i(any(), any()) } returns Unit
         every { FileLogger.e(any(), any(), any()) } returns Unit
         browserManager = mockk()
+        coEvery { browserManager.withAutomation<ToolResult>(any()) } coAnswers {
+            firstArg<suspend () -> ToolResult>().invoke()
+        }
         val fileAccess: FileAccessProvider = mockk()
         val context: Context = mockk()
         tool = BrowserTool(browserManager, fileAccess, context)

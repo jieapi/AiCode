@@ -5,15 +5,22 @@ import android.app.Application
 import android.app.ApplicationExitInfo
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentCallbacks2
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
 import androidx.work.Configuration
 import androidx.hilt.work.HiltWorkerFactory
 import com.aicode.core.net.AppProxy
+import com.aicode.core.ui.ThumbnailCache
 import com.aicode.core.util.AILogger
 import com.aicode.core.util.FileLogger
 import com.aicode.core.util.TombstoneParser
+import com.aicode.feature.agent.presentation.component.trimLatexBitmapMemoryCache
+import com.aicode.feature.plugin.presentation.PluginWebViewCache
+import com.aicode.feature.plugin.presentation.PluginWebViewFactory
+import com.aicode.feature.settings.presentation.component.trimSponsorImageMemoryCache
 import net.schmizz.sshj.common.SecurityUtils
 import com.aicode.feature.agent.domain.container.BuiltinDocsSync
 import com.aicode.feature.agent.domain.container.ContainerInstaller
@@ -133,6 +140,23 @@ class AIEditorApp : Application(), Configuration.Provider {
         /** 判断当前进程是否为专门渲染崩溃错误页的子进程。 */
         fun isCrashProcess(context: android.content.Context): Boolean =
             getProcessNameCompat(context).endsWith(":crash")
+
+        /** 采集当前进程堆与 PSS 内存摘要，供崩溃上报及生命周期销毁排查复用。 */
+        fun collectMemorySummary(context: Context): String = runCatching {
+            val runtime = Runtime.getRuntime()
+            val maxMb = runtime.maxMemory() / 1024 / 1024
+            val usedMb = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
+            val am = context.getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            val pssMb = runCatching {
+                am.getProcessMemoryInfo(intArrayOf(Process.myPid())).firstOrNull()?.totalPss?.toLong()?.div(1024)
+            }.getOrNull()
+            buildString {
+                append("heap ").append(usedMb).append('/').append(maxMb).append("MB")
+                if (pssMb != null) append(", PSS ").append(pssMb).append("MB")
+                append(", memoryClass ").append(am.memoryClass).append("MB")
+                append(", lowRam ").append(am.isLowRamDevice)
+            }
+        }.getOrDefault("unavailable")
     }
 
     override fun attachBaseContext(base: android.content.Context) {
@@ -292,6 +316,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     private val docsSyncLock = Any()
     private var docsSyncJob: Job? = null
     private var docsSyncTarget: RemoteSshConnection.DocsSyncTarget? = null
+    private val sshKeepaliveLock = Any()
+    @Volatile
+    private var sshKeepaliveHeld = false
 
     override fun onCreate() {
         if (isCrashProcess(this)) {
@@ -491,16 +518,8 @@ class AIEditorApp : Application(), Configuration.Provider {
         // 远程 SSH 连接期间维持前台服务：否则远程模式下的空闲会话切后台会被冻结、连接被切断。
         // 用会话计数（而非用户常驻开关）表达，连接断开即释放，不影响用户对保活开关的选择。
         appScope.launch {
-            var held = false
-            remoteSshConnection.connectionState.collect { state ->
-                val connected = state == com.aicode.feature.agent.domain.container.ConnectionState.CONNECTED
-                if (connected && !held) {
-                    TerminalKeepaliveService.startSession(this@AIEditorApp)
-                    held = true
-                } else if (!connected && held) {
-                    TerminalKeepaliveService.stopSession(this@AIEditorApp)
-                    held = false
-                }
+            remoteSshConnection.connectionState.collect {
+                syncSshKeepalive()
             }
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。
@@ -532,6 +551,52 @@ class AIEditorApp : Application(), Configuration.Provider {
         // MainActivity 继承 ComponentActivity（非 AppCompatActivity），
         // AppCompatDelegate.setApplicationLocales 的自动 recreate 不生效，
         // 且两者同时设置 locale 会竞争导致偶发语言错乱。
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (isCrashProcess(this)) return
+        val lowMemoryPressure = level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
+            level in ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW..ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+        val uiHidden = level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
+        if (!lowMemoryPressure && !uiHidden) return
+
+        PluginWebViewCache.trimIdle()
+        PluginWebViewFactory.clearResourceCache()
+        ThumbnailCache.trim(clearAll = lowMemoryPressure)
+        trimLatexBitmapMemoryCache(clearAll = lowMemoryPressure)
+        trimSponsorImageMemoryCache(clearAll = lowMemoryPressure)
+        if (lowMemoryPressure) {
+            FileLogger.i(TAG, "onTrimMemory level=$level, mem=${collectMemorySummary(this)}")
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        if (isCrashProcess(this)) return
+        PluginWebViewCache.trimIdle()
+        PluginWebViewFactory.clearResourceCache()
+        ThumbnailCache.trim(clearAll = true)
+        trimLatexBitmapMemoryCache(clearAll = true)
+        trimSponsorImageMemoryCache(clearAll = true)
+        FileLogger.i(TAG, "onLowMemory, mem=${collectMemorySummary(this)}")
+    }
+
+    /** 根据当前 SSH 连接态同步保活会话计数；后台重连被系统限制时保留未持有态，待回到前台补登记。 */
+    internal fun syncSshKeepalive() {
+        val connected = remoteSshConnection.connectionState.value ==
+            com.aicode.feature.agent.domain.container.ConnectionState.CONNECTED
+        synchronized(sshKeepaliveLock) {
+            if (connected && !sshKeepaliveHeld) {
+                if (TerminalKeepaliveService.startSession(this)) {
+                    sshKeepaliveHeld = true
+                }
+            } else if (!connected && sshKeepaliveHeld) {
+                TerminalKeepaliveService.stopSession(this)
+                sshKeepaliveHeld = false
+            }
+        }
     }
 
     /** 记录设备/版本信息：用户报「某系统版本上容器起不来」时，日志里得先有系统与 ABI 上下文。 */
@@ -871,21 +936,7 @@ class AIEditorApp : Application(), Configuration.Provider {
      * 崩溃进程的内存快照，随报告带出。必须在主进程采集——错误页跑在 :crash 独立进程，
      * 在那里读到的只是汇报进程的堆，对定位 OOM 无意义。
      */
-    private fun memorySummary(): String = runCatching {
-        val runtime = Runtime.getRuntime()
-        val maxMb = runtime.maxMemory() / 1024 / 1024
-        val usedMb = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
-        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
-        val pssMb = runCatching {
-            am.getProcessMemoryInfo(intArrayOf(Process.myPid())).firstOrNull()?.totalPss?.toLong()?.div(1024)
-        }.getOrNull()
-        buildString {
-            append("heap ").append(usedMb).append('/').append(maxMb).append("MB")
-            if (pssMb != null) append(", PSS ").append(pssMb).append("MB")
-            append(", memoryClass ").append(am.memoryClass).append("MB")
-            append(", lowRam ").append(am.isLowRamDevice)
-        }
-    }.getOrDefault("unavailable")
+    private fun memorySummary(): String = collectMemorySummary(this)
 
     private fun stackTraceOf(throwable: Throwable): String {
         val sw = java.io.StringWriter()

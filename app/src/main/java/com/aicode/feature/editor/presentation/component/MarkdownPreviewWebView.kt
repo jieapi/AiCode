@@ -2,6 +2,8 @@ package com.aicode.feature.editor.presentation.component
 
 import android.net.Uri
 import android.view.ContextThemeWrapper
+import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -12,8 +14,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -43,8 +47,9 @@ internal fun MarkdownPreviewWebView(
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val bgColor = if (dark) BG_DARK else BG_LIGHT
     val exitPreview by rememberUpdatedState(onExitPreview)
+    var webViewEpoch by remember { mutableIntStateOf(0) }
 
-    val webView = remember {
+    val webView = remember(webViewEpoch) {
         val themedContext = ContextThemeWrapper(context, webViewThemeRes(dark))
         WebView(themedContext).apply {
             settings.javaScriptEnabled = true
@@ -79,21 +84,36 @@ internal fun MarkdownPreviewWebView(
                     // 其余（外链等）一律拦下
                     return true
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView?,
+                    detail: RenderProcessGoneDetail?
+                ): Boolean {
+                    FileLogger.e(TAG, "Markdown 预览渲染进程退出: didCrash=${detail?.didCrash()}")
+                    (view?.parent as? ViewGroup)?.removeView(view)
+                    runCatching { view?.destroy() }
+                    if (webViewEpoch < 1) {
+                        webViewEpoch += 1
+                    } else {
+                        exitPreview()
+                    }
+                    return true
+                }
             }
         }
     }
 
     // WebView 的 isLightTheme 由上下文主题决定，深色切换时同步更新，避免滚动条等控件配色不匹配。
-    LaunchedEffect(dark) {
+    LaunchedEffect(webView, dark) {
         (webView.context as? ContextThemeWrapper)?.setTheme(webViewThemeRes(dark))
         webView.setBackgroundColor(bgColor)
     }
 
     DisposableEffect(webView) {
-        onDispose { webView.destroy() }
+        onDispose { runCatching { webView.destroy() } }
     }
 
-    LaunchedEffect(text, path, dark) {
+    LaunchedEffect(webView, text, path, dark) {
         val html = viewModel.buildHtml(text, dark)
         webView.loadDataWithBaseURL(viewModel.baseUrl(path), html, "text/html", "utf-8", null)
     }
@@ -102,7 +122,9 @@ internal fun MarkdownPreviewWebView(
         if (webView.canGoBack()) webView.goBack() else exitPreview()
     }
 
-    AndroidView(factory = { webView }, modifier = modifier)
+    androidx.compose.runtime.key(webViewEpoch) {
+        AndroidView(factory = { webView }, modifier = modifier)
+    }
 }
 
 private fun webViewThemeRes(dark: Boolean): Int =

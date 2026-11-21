@@ -117,6 +117,26 @@ private object LatexBitmapCache {
     fun prewarm(link: String, colorArgb: Int, textSizePx: Float, render: suspend () -> Bitmap?) {
         getOrStartBitmap(link, colorArgb, textSizePx, render)
     }
+
+    /** 响应内存压力释放公式位图缓存（尺寸表 [LatexMeasureCache] 保留，避免重排版跳动）。 */
+    fun trim(clearAll: Boolean) {
+        synchronized(bitmaps) {
+            if (clearAll) {
+                bitmaps.clear()
+                return
+            }
+            val target = bitmaps.size / 2
+            val iterator = bitmaps.entries.iterator()
+            while (bitmaps.size > target && iterator.hasNext()) {
+                iterator.next()
+                iterator.remove()
+            }
+        }
+    }
+}
+
+internal fun trimLatexBitmapMemoryCache(clearAll: Boolean) {
+    LatexBitmapCache.trim(clearAll)
 }
 
 internal class MathImageTransformer(

@@ -143,6 +143,24 @@ object ThumbnailCache {
         synchronized(cache) { cache[path] = decoded }
         return decoded
     }
+
+    /** 响应系统内存压力裁剪缓存：后台隐藏时留一半热图，低内存时全清。 */
+    fun trim(clearAll: Boolean) {
+        synchronized(cache) {
+            if (clearAll) {
+                cache.clear()
+                return
+            }
+            val target = cache.size / 2
+            val iterator = cache.entries.iterator()
+            while (cache.size > target && iterator.hasNext()) {
+                iterator.next()
+                iterator.remove()
+            }
+        }
+    }
+
+    internal fun size(): Int = synchronized(cache) { cache.size }
 }
 
 /**

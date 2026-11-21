@@ -2101,6 +2101,7 @@
     <string name="browser_back">后退</string>
     <string name="browser_forward">前进</string>
     <string name="browser_reload">刷新</string>
+    <string name="browser_render_process_gone">网页渲染进程已退出，请点击刷新重新加载</string>
     <string name="browser_not_ready">浏览器未就绪，请在地址栏输入网址开始浏览</string>
     <string name="browser_new_tab">新建标签页</string>
     <string name="browser_close_tab">关闭标签页</string>

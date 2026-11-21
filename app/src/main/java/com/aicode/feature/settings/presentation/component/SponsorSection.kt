@@ -418,4 +418,16 @@ private object SponsorImageLoader {
             }
         }
     }
+
+    fun trim(clearAll: Boolean) {
+        if (clearAll) {
+            memoryCache.evictAll()
+        } else {
+            memoryCache.trimToSize(memoryCache.size() / 2)
+        }
+    }
+}
+
+internal fun trimSponsorImageMemoryCache(clearAll: Boolean) {
+    SponsorImageLoader.trim(clearAll)
 }

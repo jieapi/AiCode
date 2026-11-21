@@ -22,6 +22,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -86,8 +87,10 @@ fun PluginWebPanelScreen(
     val currentVariables by rememberUpdatedState(variables)
     val backgroundColor = semantic.pageBackground.toArgb()
     val pageUrl = PluginWebViewFactory.pageUrl(page)
-    val cached = remember(page.cacheKey) { PluginWebViewCache.take(page.cacheKey) }
-    val cachedBridge = remember(page.cacheKey) {
+    var webViewEpoch by remember(page.cacheKey) { mutableIntStateOf(0) }
+    var renderGone by remember(page.cacheKey) { mutableStateOf(false) }
+    val cached = remember(page.cacheKey, webViewEpoch) { PluginWebViewCache.take(page.cacheKey) }
+    val cachedBridge = remember(page.cacheKey, webViewEpoch) {
         if (cached != null) PluginWebViewCache.takeBridge(page.cacheKey) else null
     }
     var failed by remember(page.cacheKey) { mutableStateOf(false) }
@@ -98,7 +101,7 @@ fun PluginWebPanelScreen(
     // 返回键派发给页面后要等 JS 结果；期间重复触发不再派发，避免连续退出。
     var backDispatching by remember(page.cacheKey) { mutableStateOf(false) }
 
-    val webView = remember(page.cacheKey) {
+    val webView = remember(page.cacheKey, webViewEpoch) {
         (cached ?: PluginWebViewFactory.create(
             context = context,
             page = page,
@@ -107,10 +110,16 @@ fun PluginWebPanelScreen(
             themeVariables = { currentVariables },
             onPageFinished = { view ->
                 failed = false
+                renderGone = false
                 PluginWebViewCache.markLoaded(page.cacheKey, pageUrl, view)
                 view.evaluateJavascript(PluginThemeTokens.applyScript(currentVariables), null)
             },
-            onMainFrameError = { failed = true }
+            onMainFrameError = { failed = true },
+            onRenderProcessGone = { dead ->
+                PluginWebViewCache.evictView(dead)
+                renderGone = true
+                failed = true
+            }
         )).also { PluginWebViewCache.put(page.cacheKey, it) }
     }
 
@@ -253,22 +262,24 @@ fun PluginWebPanelScreen(
                 }
             )
     ) {
-        AndroidView(
-            factory = { webView },
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-                .onGloballyPositioned { coordinates ->
-                    val origin = coordinates.positionInWindow()
-                    if (webViewOrigin.getAndSet(origin) != origin) {
-                        PluginOverlayController.refresh(page.cacheKey)
+        androidx.compose.runtime.key(webViewEpoch) {
+            AndroidView(
+                factory = { webView },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .onGloballyPositioned { coordinates ->
+                        val origin = coordinates.positionInWindow()
+                        if (webViewOrigin.getAndSet(origin) != origin) {
+                            PluginOverlayController.refresh(page.cacheKey)
+                        }
                     }
-                }
-                .onSizeChanged { size ->
-                    webViewSize.set(IntSize(size.width, size.height))
-                    if (size.width > 0 && size.height > 0) viewportReady = true
-                }
-        )
+                    .onSizeChanged { size ->
+                        webViewSize.set(IntSize(size.width, size.height))
+                        if (size.width > 0 && size.height > 0) viewportReady = true
+                    }
+            )
+        }
 
         if (failed) {
             Column(
@@ -286,7 +297,12 @@ fun PluginWebPanelScreen(
                 )
                 TextButton(onClick = {
                     failed = false
-                    webView.loadUrl(pageUrl)
+                    if (renderGone) {
+                        renderGone = false
+                        webViewEpoch += 1
+                    } else {
+                        webView.loadUrl(pageUrl)
+                    }
                 }) {
                     Text(stringResource(R.string.plugin_web_page_retry))
                 }

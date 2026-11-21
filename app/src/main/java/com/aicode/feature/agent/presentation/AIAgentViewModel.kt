@@ -388,7 +388,12 @@ class AIAgentViewModel @Inject constructor(
      */
     val turnExpansionOverrides = mutableStateMapOf<String, Boolean>()
 
-    val turnMessageKeys = mutableMapOf<String, MutableMap<String, String>>()
+    val turnMessageKeys: MutableMap<String, MutableMap<String, String>> =
+        object : LinkedHashMap<String, MutableMap<String, String>>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, MutableMap<String, String>>?
+            ): Boolean = size > MAX_CACHED_TURN_KEY_SESSIONS
+        }
 
     /** 记录一次整轮折叠的手动展开/收起。 */
     fun setTurnExpanded(key: String, expanded: Boolean) {
@@ -400,7 +405,12 @@ class AIAgentViewModel @Inject constructor(
      * 使思考卡片划出视口回收、切页返回后仍保持展开/收起。
      */
     val reasoningExpansionOverrides = mutableStateMapOf<String, Boolean>()
-    val reasoningScrollStates = mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>()
+    val reasoningScrollStates: MutableMap<String, androidx.compose.foundation.lazy.LazyListState> =
+        object : LinkedHashMap<String, androidx.compose.foundation.lazy.LazyListState>(32, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, androidx.compose.foundation.lazy.LazyListState>?
+            ): Boolean = size > MAX_REASONING_SCROLL_STATES
+        }
 
     /** 记录一次思考卡片的展开/收起。 */
     fun setReasoningExpanded(messageId: String, expanded: Boolean) {
@@ -1515,6 +1525,8 @@ class AIAgentViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "AIAgentViewModel"
+        const val MAX_CACHED_TURN_KEY_SESSIONS = 8
+        const val MAX_REASONING_SCROLL_STATES = 24
 
         /** 文件浏览排序：目录在前，同类按名称不区分大小写。 */
         val BROWSE_ORDER: Comparator<FileEntry> =

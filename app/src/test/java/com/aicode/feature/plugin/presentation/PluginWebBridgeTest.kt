@@ -421,4 +421,46 @@ class PluginWebBridgeTest {
         assertNull(PluginWebViewCache.take("page"))
         verify { secondBridge.close() }
     }
+
+    @Test
+    fun trimIdleDropsDetachedEntriesButPreservesAttachedView() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val attachedParent = android.widget.FrameLayout(context)
+        val mountedView = WebView(context)
+        attachedParent.addView(mountedView)
+        val idleView = WebView(context)
+        val mountedBridge = mockk<PluginWebBridge>(relaxed = true)
+        val idleBridge = mockk<PluginWebBridge>(relaxed = true)
+        every { mountedBridge.isActive } returns true
+        every { idleBridge.isActive } returns true
+
+        PluginWebViewCache.put("mounted", mountedView)
+        PluginWebViewCache.putBridge("mounted", mountedBridge)
+        PluginWebViewCache.put("idle", idleView)
+        PluginWebViewCache.putBridge("idle", idleBridge)
+
+        PluginWebViewCache.trimIdle()
+
+        assertSame(mountedView, PluginWebViewCache.take("mounted"))
+        assertNull(PluginWebViewCache.take("idle"))
+        verify(exactly = 0) { mountedBridge.close() }
+        verify { idleBridge.close() }
+        attachedParent.removeAllViews()
+    }
+
+    @Test
+    fun evictViewRemovesDeadWebViewAndClosesItsBridge() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dead = WebView(context)
+        val bridge = mockk<PluginWebBridge>(relaxed = true)
+        every { bridge.isActive } returns true
+
+        PluginWebViewCache.put("dead", dead)
+        PluginWebViewCache.putBridge("dead", bridge)
+
+        PluginWebViewCache.evictView(dead)
+
+        assertNull(PluginWebViewCache.take("dead"))
+        verify { bridge.close() }
+    }
 }

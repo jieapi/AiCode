@@ -2102,6 +2102,7 @@
     <string name="browser_back">Back</string>
     <string name="browser_forward">Forward</string>
     <string name="browser_reload">Reload</string>
+    <string name="browser_render_process_gone">Web render process exited. Tap reload to recover.</string>
     <string name="browser_not_ready">Browser not ready. Enter a URL in the address bar to start browsing.</string>
     <string name="browser_new_tab">New tab</string>
     <string name="browser_close_tab">Close tab</string>

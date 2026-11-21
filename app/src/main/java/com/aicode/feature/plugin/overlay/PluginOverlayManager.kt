@@ -352,7 +352,11 @@ class PluginOverlayManager @Inject constructor(
             context = context,
             page = page,
             onPageFinished = { FileLogger.d(TAG, "[${surface.key}] overlay page finished") },
-            onMainFrameError = { FileLogger.w(TAG, "[${surface.key}] overlay page failed") }
+            onMainFrameError = { FileLogger.w(TAG, "[${surface.key}] overlay page failed") },
+            onRenderProcessGone = {
+                FileLogger.e(TAG, "[${surface.key}] overlay render process gone, closing window")
+                mainHandler.post { removeWindowById(surface.key) }
+            }
         )
         val window = PluginOverlayWindow(
             context = context,

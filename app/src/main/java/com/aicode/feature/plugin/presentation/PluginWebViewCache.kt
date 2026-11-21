@@ -1,5 +1,7 @@
 package com.aicode.feature.plugin.presentation
 
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.WebView
 
@@ -19,7 +21,7 @@ import android.webkit.WebView
 internal object PluginWebViewCache {
 
     /** 同时保留的页面实例上限；超出后按最近使用顺序淘汰已脱离容器的实例。 */
-    private const val MAX_ENTRIES = 3
+    private const val MAX_ENTRIES = 2
 
     private class CachedPage(val view: WebView) {
         var bridge: PluginWebBridge? = null
@@ -109,6 +111,35 @@ internal object PluginWebViewCache {
         }
     }
 
+    /** 渲染进程异常退出时摘除已销毁的 WebView 并关闭其孤立桥，避免复用死实例。 */
+    fun evictView(view: WebView) {
+        val pageIterator = pages.entries.iterator()
+        while (pageIterator.hasNext()) {
+            val entry = pageIterator.next().value
+            if (entry.view === view) {
+                pageIterator.remove()
+                closeBridgeIfUnreferenced(entry.bridge)
+                entry.bridge = null
+            }
+        }
+        val retiredIterator = superseded.iterator()
+        while (retiredIterator.hasNext()) {
+            val entry = retiredIterator.next()
+            if (entry.view === view) {
+                retiredIterator.remove()
+                closeBridgeIfUnreferenced(entry.bridge)
+                entry.bridge = null
+            }
+        }
+    }
+
+    private fun closeBridgeIfUnreferenced(bridge: PluginWebBridge?) {
+        if (bridge == null) return
+        if (pages.values.none { it.bridge === bridge } && superseded.none { it.bridge === bridge }) {
+            bridge.close()
+        }
+    }
+
     /** 页面离开时只从父容器摘掉，保留实例与已加载内容。 */
     fun release(view: WebView) {
         (view.parent as? ViewGroup)?.removeView(view)
@@ -125,6 +156,34 @@ internal object PluginWebViewCache {
         val retired = superseded.toList()
         superseded.clear()
         retired.forEach { destroy(it) }
+    }
+
+    /** 释放当前未挂载到任何容器的空闲页面实例，保留用户正在查看的页面。 */
+    fun trimIdle() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { trimIdleInternal() }
+        } else {
+            trimIdleInternal()
+        }
+    }
+
+    private fun trimIdleInternal() {
+        val iterator = pages.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.value.view.parent == null) {
+                iterator.remove()
+                destroy(entry.value)
+            }
+        }
+        val retiredIterator = superseded.iterator()
+        while (retiredIterator.hasNext()) {
+            val entry = retiredIterator.next()
+            if (entry.view.parent == null) {
+                retiredIterator.remove()
+                destroy(entry)
+            }
+        }
     }
 
     /** 淘汰超出上限、且已经脱离容器的实例；仍在显示的实例留在缓存里等 [release]。 */
