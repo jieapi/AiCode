@@ -103,10 +103,11 @@ class ToolPermissionPolicyEngine @Inject constructor(
         const val REASON_UNANALYZABLE_DESTRUCTIVE =
             "安全防护：命令含命令替换、子 shell 或绝对路径重定向等无法静态判定的构造，且疑似破坏性操作，无法确认安全"
 
-        /** 疑似破坏性程序（仅在命令不可静态判定时用于保守拦截）。 */
+        /** 疑似破坏性程序只在 shell 命令位置匹配，避免把参数/搜索词里的名字当成待执行程序。 */
         val DESTRUCTIVE_PROGRAM = Regex(
-            "(^|[\\s;&|()`<>])(rm|dd|shred|truncate|mkfs(?:\\.[a-z0-9]+)?|wipefs|fdisk|sfdisk|parted|mkswap|blkdiscard)([\\s;&|()`<>]|$)"
+            "(?:^|[;&|()\\n]|`|\\$\\()\\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\\S*)\\s+)*(?:(?:sudo|command|exec|env|busybox)\\s+)*(?:rm|dd|shred|truncate|mkfs(?:\\.[a-z0-9]+)?|wipefs|fdisk|sfdisk|parted|mkswap|blkdiscard)(?=$|[\\s;&|()`<>])"
         )
+        val FIND_DELETE_COMMAND = Regex("(?:^|[;&|()\\n]|`|\\$\\()\\s*(?:find)\\b[^;&|()]*\\s(?<!['\"\\\\])-delete(?=$|[\\s;&|()])")
     }
 
     enum class Verdict { ALLOW, DENY, ASK }
@@ -154,7 +155,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
                     checkCatastrophicRm(analysis.segments)?.let { return elevationOrDeny(it, args) }
                     // 命令替换/子 shell/绝对路径重定向等无法静态判定的构造，删除目标不可知；
                     // 若同时疑似破坏性，宁可拦下（可提权），避免绕过安全防护。
-                    if (!analysis.analyzable && looksDestructive(command)) {
+                    if (!analysis.analyzable && looksDestructive(command, analysis)) {
                         return elevationOrDeny(unanalyzableReason(analysis), args)
                     }
                 }
@@ -254,11 +255,14 @@ class ToolPermissionPolicyEngine @Inject constructor(
         (args[ELEVATE_ARG] as? JsonPrimitive)?.content?.trim()?.lowercase() == "true"
 
     /**
-     * 该命令是否疑似破坏性（仅在命令不可静态判定时使用）：含输出重定向、`-delete`
-     * 或常见破坏性程序名。宁可多问，不误放。
+     * 该命令是否疑似破坏性（仅在命令不可静态判定时使用）：含实际文件输出重定向（排除 `/dev/null`、
+     * `/dev/stdout`、`/dev/stderr`、fd 复制如 `2>&1`）、`find -delete` 或命令位置上的
+     * 常见破坏性程序名。参数和搜索词不作为命令执行。
      */
-    private fun looksDestructive(command: String): Boolean =
-        command.contains('>') || command.contains("-delete") || DESTRUCTIVE_PROGRAM.containsMatchIn(command)
+    private fun looksDestructive(command: String, analysis: ShellCommandParser.Analysis): Boolean =
+        analysis.hasUnsafeOutputRedirect ||
+            FIND_DELETE_COMMAND.containsMatchIn(command) ||
+            DESTRUCTIVE_PROGRAM.containsMatchIn(command)
 
     /**
      * 不可静态判定时的拦截原因：附带具体触发构造。

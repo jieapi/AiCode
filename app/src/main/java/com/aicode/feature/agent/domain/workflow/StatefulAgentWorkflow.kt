@@ -193,6 +193,16 @@ class StatefulAgentWorkflow @Inject constructor(
         val images: List<AgentImage> = emptyList()
     )
 
+    private data class LlmCallResult(
+        val state: AgentSessionState,
+        val baselineEstimate: Int,
+        val baselineUsage: Int,
+        val compactionAttemptFailed: Boolean,
+        val overflowRecoveryAttempted: Boolean,
+        val toolCalls: Int,
+        val nextAction: AgentAction
+    )
+
     /** 批量工具执行结果：携带 toolCall 元信息，供最后按原始顺序组装 ToolResultMessage。 */
     data class ToolBatchResult(
         val id: String,
@@ -562,263 +572,29 @@ class StatefulAgentWorkflow @Inject constructor(
                         }
                     }
                     is AgentSideEffect.CallLlm -> {
-                        val providerInUse = aiProvider
-                        // 压缩轮：若配置了压缩专用模型，使用独立压缩模型压缩
-                        val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
-                        var compactedMessages = state.messages
-                        if (!compactionAttemptFailed) {
-                            val estimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                                ContextTokenEstimator.estimate(systemPrompt, state.messages, currentTools)
-                            }
-                            val predictedInput = ContextTokenEstimator.calibrated(estimate, baselineEstimate, baselineUsage)
-                            val compaction = contextCompactor.compactIfNeeded(
-                                state.messages,
-                                compactionProvider,
-                                currentContext.sessionId.takeIf { currentContext.turn == null },
-                                windowProvider = aiProvider,
-                                systemPrompt = systemPrompt,
-                                tools = currentTools,
-                                currentInputTokens = predictedInput,
-                                persistence = currentContext.turn?.persistence,
-                                onEvent = { event ->
-                                    if (event is AgentEvent.CompactionFailed) compactionAttemptFailed = true
-                                    send(event)
-                                }
-                            )
-                            compactedMessages = compaction.messages
-                            if (compaction.compacted) {
-                                state = state.copy(messages = compaction.messages)
-                                baselineUsage = 0
-                                baselineEstimate = 0
-                                pluginHookDispatcher.dispatchCompaction(
-                                    sessionId = hookSessionId,
-                                    runId = hookRunId,
-                                    mode = currentContext.mode.name,
-                                    scope = hookScope,
-                                    agentName = hookAgentName,
-                                    estimatedInputTokens = predictedInput
-                                )
-                            }
-                        }
-                        val requestEstimate = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                            ContextTokenEstimator.estimate(systemPrompt, compactedMessages, currentTools)
-                        }
-                        val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, baselineEstimate, baselineUsage)
-                        send(AgentEvent.ContextUsage(predictedInput, inputBudget, true))
-                        if (predictedInput >= inputBudget) {
-                            actionQueue.addLast(AgentAction.LlmError("", "input_budget_exceeded"))
-                            continue
-                        }
-
-                        val hookRequestId = UUID.randomUUID().toString()
-                        pluginHookDispatcher.dispatchRequestStarted(
-                            sessionId = hookSessionId,
-                            runId = hookRunId,
-                            requestId = hookRequestId,
-                            mode = currentContext.mode.name,
-                            scope = hookScope,
-                            agentName = hookAgentName,
-                            messageCount = compactedMessages.size,
-                            toolCount = currentTools.size,
-                            estimatedInputTokens = predictedInput
-                        )
-
-                        // 调用统计埋点：记录请求发出/首字/结束时刻与 usage，失败与取消同样留痕。
-                        val callStartElapsed = SystemClock.elapsedRealtime()
-                        val callStartWall = System.currentTimeMillis()
-                        val callKind = "chat"
-                        var callError: String? = null
-                        var callCompleted = false
-                        val responseMessageId = UUID.randomUUID().toString()
-                        val stream = StreamAccumulator(callStartElapsed, responseMessageId) { send(it) }
-
-                        try {
-                            // 发送前按实际模型的视觉能力处理图片（同 execute 路径）。
-                            val supportsVision = activeModelSupportsVision(currentContext)
-                            val messagesToSend = sanitizeImagesForModel(compactedMessages, supportsVision)
-                            providerInUse.completeStream(systemPrompt, messagesToSend, currentTools, currentContext.reasoningEffort)
-                                .collect { stream.onChunk(it) }
-                            // 节流窗口内可能还压着最新累积文本：补发，保证 UI 尾巴拿到完整文本再交接落库。
-                            stream.flush()
-                            val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
-                            hookToolCalls += aiResponse.toolCalls.size
-                            // 模型直出图片（Gemini 图像模型）不随流式增量到达，整块在 Final 里：
-                            // 先把 base64 落盘到 ~/.aicode/generated-images/ 并构造 UI 附件（只存路径不存 base64），
-                            // 再随 LlmResponse 把带 path 的 images 交 reduce 挂上 AssistantMessage 供下一回放。
-                            val (persistedImages, attachments) =
-                                if (aiResponse.images.isNotEmpty()) persistModelImages(aiResponse.images) else emptyList<AgentImage>() to emptyList()
-                            callCompleted = true
-                            // 将本轮 reasoning 附加到 AIResponse，以便 reduce 时存入 AssistantMessage 并在下一轮回传
-                            if (aiResponse.stopReason == "model_context_window_exceeded" && !overflowRecoveryAttempted) {
-                                overflowRecoveryAttempted = true
-                                val recovery = contextCompactor.compactIfNeeded(
-                                    state.messages,
-                                    compactionProvider,
-                                    currentContext.sessionId.takeIf { currentContext.turn == null },
-                                    force = true,
-                                    windowProvider = aiProvider,
-                                    systemPrompt = systemPrompt,
-                                    tools = currentTools,
-                                    currentInputTokens = predictedInput,
-                                    onEvent = { event -> send(event) },
-                                    persistence = currentContext.turn?.persistence
-                                )
-                                if (recovery.compacted) {
-                                    state = state.copy(messages = recovery.messages)
-                                    baselineUsage = 0
-                                    baselineEstimate = 0
-                                    actionQueue.addLast(AgentAction.InitRequest(recovery.messages))
-                                    continue
-                                }
-                            }
-                            baselineEstimate = requestEstimate
-                            baselineUsage = aiResponse.inputTokens
-                            send(AgentEvent.ContextUsage(
-                                if (baselineUsage > 0) baselineUsage else requestEstimate, inputBudget, baselineUsage <= 0
-                            ))
-                            val responseWithReasoning = if (stream.reasoning.isNotEmpty()) {
-                                aiResponse.copy(reasoning = stream.reasoning.toString())
-                            } else aiResponse
-
-                            if (aiResponse.content.isNotBlank() || aiResponse.toolCalls.isNotEmpty() || attachments.isNotEmpty()) {
-                                val persisted = kotlinx.coroutines.CompletableDeferred<Unit>()
-                                send(
-                                    AgentEvent.AssistantText(
-                                        aiResponse.content,
-                                        aiResponse.toolCalls,
-                                        stream.reasoning.toString(),
-                                        aiResponse.signature ?: "",
-                                        aiResponse.inputTokens,
-                                        aiResponse.outputTokens,
-                                        aiResponse.cachedInputTokens,
-                                        aiResponse.thinkingBlocksJson ?: "",
-                                        attachments = attachments,
-                                        messageId = responseMessageId,
-                                        persisted = persisted
-                                    )
-                                )
-                                persisted.await()
-                            }
-                            actionQueue.addLast(
-                                AgentAction.LlmResponse(
-                                    if (persistedImages.isNotEmpty()) responseWithReasoning.copy(images = persistedImages)
-                                    else responseWithReasoning,
-                                    messageId = responseMessageId
-                                )
-                            )
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            if (!overflowRecoveryAttempted && stream.text.isEmpty() && stream.reasoning.isEmpty() && isContextOverflow(e)) {
-                                overflowRecoveryAttempted = true
-                                val recovery = contextCompactor.compactIfNeeded(
-                                    state.messages,
-                                    compactionProvider,
-                                    currentContext.sessionId.takeIf { currentContext.turn == null },
-                                    force = true,
-                                    windowProvider = aiProvider,
-                                    systemPrompt = systemPrompt,
-                                    tools = currentTools,
-                                    currentInputTokens = predictedInput,
-                                    onEvent = { event -> send(event) },
-                                    persistence = currentContext.turn?.persistence
-                                )
-                                if (recovery.compacted) {
-                                    state = state.copy(messages = recovery.messages)
-                                    baselineUsage = 0
-                                    baselineEstimate = 0
-                                    actionQueue.addLast(AgentAction.InitRequest(recovery.messages))
-                                    callError = e.message
-                                    continue
-                                }
-                            }
-                            val partial = stream.text.toString()
-                            val reasoning = stream.reasoning.toString()
-                            // 流式被中断时也要落库已收到的思考：否则下方 finally 会清空流式思考气泡，
-                            // 而落库的接力消息又没产生，表现为「思考显示后凭空消失且无报错」。
-                            // 有正文或有思考其一即落库；两者皆空则不写空消息。
-                            if (partial.isNotEmpty() || reasoning.isNotBlank()) {
-                                send(AgentEvent.AssistantText(partial, emptyList(), reasoning, messageId = responseMessageId))
-                            }
-                            // 多 Key 的自动切换与重发已在 adapter 内完成（见 AIProvider.keySwitcher）；
-                            // 走到这里说明不是 Key 问题、或候选 Key 已全部失败，直接上报原始错误。
-                            val errorText = "LLM 调用失败: ${e.message}"
-                            actionQueue.addLast(AgentAction.LlmError(errorText))
-                            callError = e.message ?: e.javaClass.simpleName
-                        } finally {
-                            val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
-                            val usage = stream.finalResponse
-                            pluginHookDispatcher.dispatchRequestFinished(
-                                sessionId = hookSessionId,
-                                runId = hookRunId,
-                                requestId = hookRequestId,
-                                mode = currentContext.mode.name,
-                                scope = hookScope,
-                                agentName = hookAgentName,
-                                status = when {
-                                    callCompleted -> "success"
-                                    callError != null -> "error"
-                                    else -> "cancelled"
-                                },
-                                inputTokens = usage?.inputTokens ?: 0,
-                                outputTokens = usage?.outputTokens ?: 0,
-                                toolCalls = usage?.toolCalls?.size ?: 0,
-                                durationMs = durationMillis,
-                                stopReason = usage?.stopReason,
-                                errorCode = callError
-                            )
-                            runCatching {
-                                // 与适配器同源算一次「实际会发什么」：落库后能在统计页分辨
-                                // 「选了但没生效」「被降级」这些静默问题。
-                                val reasoningPlan = reasoningPlanFor(providerInUse, currentContext.reasoningEffort)
-                                if (currentContext.turn != null) {
-                                    currentContext.turn.persistence.recordLlmCall(
-                                        LlmCallStats(
-                                            providerId = providerInUse.providerId.ifBlank { null },
-                                            model = providerInUse.model,
-                                            kind = callKind,
-                                            inputTokens = usage?.inputTokens ?: 0,
-                                            outputTokens = usage?.outputTokens ?: 0,
-                                            cachedInputTokens = usage?.cachedInputTokens ?: 0,
-                                            durationMillis = durationMillis,
-                                            status = when {
-                                                callCompleted -> "success"
-                                                callError != null -> "error"
-                                                else -> "cancelled"
-                                            },
-                                            errorMessage = callError,
-                                            stopReason = usage?.stopReason,
-                                            createdAt = callStartWall
-                                        )
-                                    )
-                                } else llmCallRecordDao.insert(
-                                    LlmCallRecordEntity(
-                                        sessionId = currentContext.sessionId,
-                                        providerId = providerInUse.providerId.ifBlank { null },
-                                        model = providerInUse.model,
-                                        reasoningEffort = currentContext.reasoningEffort,
-                                        reasoningWire = reasoningPlan.wireSummary(),
-                                        reasoningClampedFrom = reasoningPlan.clampedFrom(currentContext.reasoningEffort),
-                                        kind = callKind,
-                                        inputTokens = usage?.inputTokens ?: 0,
-                                        outputTokens = usage?.outputTokens ?: 0,
-                                        cachedInputTokens = usage?.cachedInputTokens ?: 0,
-                                        cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
-                                        ttfbMillis = stream.ttfbElapsed?.toInt(),
-                                        durationMillis = durationMillis,
-                                        status = when {
-                                            callCompleted -> "success"
-                                            callError != null -> "error"
-                                            else -> "cancelled"
-                                        },
-                                        errorMessage = callError,
-                                        stopReason = usage?.stopReason,
-                                        retryCount = stream.retryAttempts,
-                                        createdAt = callStartWall
-                                    )
-                                )
-                            }
-                        }
+                        val result = executeLlmCall(
+                            state = state,
+                            context = currentContext,
+                            tools = currentTools,
+                            provider = aiProvider,
+                            systemPrompt = systemPrompt,
+                            inputBudget = inputBudget,
+                            baselineEstimate = baselineEstimate,
+                            baselineUsage = baselineUsage,
+                            compactionAttemptFailed = compactionAttemptFailed,
+                            overflowRecoveryAttempted = overflowRecoveryAttempted,
+                            hookSessionId = hookSessionId,
+                            hookRunId = hookRunId,
+                            hookScope = hookScope,
+                            hookAgentName = hookAgentName
+                        ) { send(it) }
+                        state = result.state
+                        baselineEstimate = result.baselineEstimate
+                        baselineUsage = result.baselineUsage
+                        compactionAttemptFailed = result.compactionAttemptFailed
+                        overflowRecoveryAttempted = result.overflowRecoveryAttempted
+                        hookToolCalls += result.toolCalls
+                        actionQueue.addLast(result.nextAction)
                     }
                     is AgentSideEffect.RequestPermission -> {
                         val tool = toolRegistry.getTool(effect.toolCall.name)
@@ -896,179 +672,16 @@ class StatefulAgentWorkflow @Inject constructor(
                         }
                     }
                     is AgentSideEffect.ExecuteToolBatch -> {
-                        // 并行执行本批已批准的工具。先统一记录 checkpoint（editFile/writeFile 修改前快照），
-                        // 再并行执行；mode 切换检查在结果收集后于主协程串行处理（planApproval 单例）。
-                        val toolCalls = effect.toolCalls
-                        val toolStartedAt = ConcurrentHashMap<String, Long>()
-                        toolCalls.forEach { toolCall ->
-                            if (toolCall.id !in delegations && (toolCall.name == "editFile" || toolCall.name == "writeFile")) {
-                                (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
-                                    currentContext.sessionId?.let { sid ->
-                                        if (currentContext.turn == null || currentContext.turn.sessionRef is SessionRef.Room) {
-                                            checkpointManager.beforeFileModified(sid, path)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        val runResults = if (toolCalls.isEmpty()) {
-                            emptyList()
-                        } else {
-                            coroutineScope {
-                                val pathLocks = ConcurrentHashMap<String, Mutex>()
-                                toolCalls.map { toolCall ->
-                                    async {
-                                        toolStartedAt[toolCall.id] = SystemClock.elapsedRealtime()
-                                        pluginHookDispatcher.dispatchToolStarted(
-                                            sessionId = hookSessionId,
-                                            runId = hookRunId,
-                                            callId = toolCall.id,
-                                            toolName = toolCall.name,
-                                            mode = currentContext.mode.name,
-                                            scope = hookScope,
-                                            agentName = hookAgentName
-                                        )
-                                        val run: suspend () -> ToolRunResult = {
-                                            val delegation = delegations[toolCall.id]
-                                            val tool = toolRegistry.getTool(toolCall.name)
-                                            if (delegation != null) {
-                                                runToolDelegate(delegation, hookRunId, toolCall) { send(it) }
-                                            } else if (tool is StreamingAgentTool) {
-                                                runToolStream(tool, toolCall, currentContext) { send(it) }
-                                            } else {
-                                                runToolSync(tool, toolCall, currentContext)
-                                            }
-                                        }
-                                        // 同一批里针对同一路径的调用必须串行：并行会让「读-改-写」互相覆盖，
-                                        // 并让写入方的回读校验看到别人的内容而误报失败。不同路径仍并行。
-                                        val path = (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull
-                                        if (path.isNullOrBlank()) run()
-                                        else pathLocks.computeIfAbsent(path) { Mutex() }.withLock { run() }
-                                    }
-                                }.awaitAll()
-                            }
-                        }
-
-                        // 串行处理 mode 切换并组装批量结果。
-                        val batchResults = mutableListOf<ToolBatchResult>()
-                        toolCalls.forEachIndexed { index, toolCall ->
-                            delegations.remove(toolCall.id)
-                            val runResult = runResults.getOrNull(index)
-                                ?: ToolRunResult(ToolResult.Error("工具未执行", "TOOL_NOT_EXECUTED").toTransportString(), true)
-                            var rawResult = runResult.raw
-                            var isError = runResult.isError
-                            val (newCtx, updated) = checkAndUpdateMode(toolCall, isError, currentContext)
-                            if (updated) {
-                                val reason = (toolCall.arguments["reason"] as? JsonPrimitive)?.content?.trim()
-                                    ?: toolCall.arguments["reason"]?.toString()?.replace("\"", "")?.trim()
-                                    ?: ""
-                                send(AgentEvent.ModeChanged(newCtx.mode, reason))
-
-                                // 退出 PLAN 时挂起 workflow，等待用户在计划审查面板批准后才继续
-                                if (currentContext.mode == AgentMode.PLAN && newCtx.mode != AgentMode.PLAN) {
-                                    val choice = planApprovalManager.awaitApproval(reason, currentContext.sessionId)
-                                    if (choice == PlanApprovalChoice.APPROVE) {
-                                        currentContext = newCtx
-                                        // system 与 mode 已解耦（SystemPromptProvider 不再注入模式提示词），
-                                        // 切换不重建 systemPrompt，避免 system 前缀变化打断缓存；模式状态通过工具结果与下轮消息提醒告知。
-                                        rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newCtx.mode))
-                                    } else {
-                                        // 用户选择继续反馈，回滚到 PLAN 模式，修正工具结果让 AI 知道切换被取消并等待用户反馈
-                                        currentContext = currentContext.copy(mode = AgentMode.PLAN)
-                                        rawResult = ToolResult.Error(
-                                            appContext.getString(R.string.plan_mode_refinement_requested),
-                                            "MODE_SWITCH_REJECTED"
-                                        ).toTransportString()
-                                        isError = true
-                                    }
-                                } else {
-                                    currentContext = newCtx
-                                    rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newCtx.mode))
-                                }
-                            }
-                            if (!isError && hookSessionId != null) {
-                                val transform = pluginHookDispatcher.afterToolCall(
-                                    sessionId = hookSessionId,
-                                    runId = hookRunId,
-                                    callId = toolCall.id,
-                                    toolName = toolCall.name,
-                                    mode = currentContext.mode.name,
-                                    scope = hookScope,
-                                    agentName = hookAgentName,
-                                    data = { toolResultSuccessData(rawResult) }
-                                )
-                                transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
-                            }
-                            batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
-                        }
-
-                        batchResults.forEach { result ->
-                            val startedAt = toolStartedAt.remove(result.id)
-                            val duration = startedAt?.let { (SystemClock.elapsedRealtime() - it).toInt() } ?: 0
-                            pluginHookDispatcher.dispatchToolFinished(
-                                sessionId = hookSessionId,
-                                runId = hookRunId,
-                                callId = result.id,
-                                toolName = result.toolName,
-                                mode = currentContext.mode.name,
-                                scope = hookScope,
-                                agentName = hookAgentName,
-                                status = if (result.isError) "error" else "success",
-                                durationMs = duration
-                            )
-                        }
-
-                        // 本轮内到达的后台任务/子代理完成通知：搭在本批最后一条工具结果上立即送达，
-                        // AI 当轮即可感知，不必等本轮结束再起新一轮。ack 放到完成事件发出（结果已落库）之后：
-                        // 中途被取消时通知仍留在队列里，由后续批次或本轮结束的兜底路径送达。
-                        val notifySessionId = currentContext.sessionId
-                        val notifications = if (notifySessionId != null && batchResults.isNotEmpty()) {
-                            agentNotificationCenter.peek(notifySessionId)
-                        } else {
-                            emptyList()
-                        }
-                        if (notifications.isNotEmpty()) {
-                            val modeChange = notifications.lastOrNull { it.kind == AgentNotificationKind.MODE_CHANGE }
-                            val newMode = modeChange?.newMode
-                            if (newMode != null) {
-                                // 用户在工作期间切换模式：本轮后续批次的权限判定立即改用新模式。
-                                // 与 SessionUseCase.updateMode 保持同一套语义：进入 PLAN 记下进入前的模式，其余情况清空。
-                                val prevMode = currentContext.mode
-                                currentContext = if (newMode == AgentMode.PLAN) {
-                                    currentContext.copy(
-                                        mode = AgentMode.PLAN,
-                                        modeBeforePlan = if (prevMode != AgentMode.PLAN) prevMode else currentContext.modeBeforePlan
-                                    )
-                                } else {
-                                    currentContext.copy(mode = newMode, modeBeforePlan = null)
-                                }
-                            }
-                            val last = batchResults.last()
-                            val outgoingNotifications = if (newMode != null) {
-                                notifications.map { item ->
-                                    if (item === modeChange) {
-                                        item.copy(detail = listOfNotNull(
-                                            item.detail?.takeIf { it.isNotBlank() },
-                                            buildExternalModeSwitchNotice(newMode).trim()
-                                        ).joinToString("\n\n"))
-                                    } else item
-                                }
-                            } else notifications
-                            val injected = eventInjector.inject(last.result, outgoingNotifications)
-                            batchResults[batchResults.lastIndex] = last.copy(result = injected)
-                        }
-
-                        // 逐个推送完成事件（保持与 batchToolCalls 一致顺序），并进入收尾。
-                        batchResults.forEach { br ->
-                            val persisted = kotlinx.coroutines.CompletableDeferred<Unit>()
-                            send(AgentEvent.ToolCallFinished(br.id, br.toolName, br.result, br.isError,
-                                attachments = br.attachments, persisted = persisted))
-                            persisted.await()
-                        }
-                        if (notifySessionId != null && notifications.isNotEmpty()) {
-                            agentNotificationCenter.ack(notifySessionId, notifications.map { it.seq })
-                        }
+                        val (updatedContext, batchResults) = executeToolBatch(
+                            toolCalls = effect.toolCalls,
+                            context = currentContext,
+                            delegations = delegations,
+                            hookSessionId = hookSessionId,
+                            hookRunId = hookRunId,
+                            hookScope = hookScope,
+                            hookAgentName = hookAgentName
+                        ) { send(it) }
+                        currentContext = updatedContext
                         actionQueue.addLast(AgentAction.ToolBatchFinished(batchResults))
                     }
                 }
@@ -1108,6 +721,493 @@ class StatefulAgentWorkflow @Inject constructor(
             errorCode = code
         )
     }
+    }
+
+    private suspend fun executeLlmCall(
+        state: AgentSessionState,
+        context: AgentContext,
+        tools: List<AgentTool>,
+        provider: AIProvider,
+        systemPrompt: String,
+        inputBudget: Int,
+        baselineEstimate: Int,
+        baselineUsage: Int,
+        compactionAttemptFailed: Boolean,
+        overflowRecoveryAttempted: Boolean,
+        hookSessionId: String?,
+        hookRunId: String,
+        hookScope: String,
+        hookAgentName: String?,
+        sendEvent: suspend (AgentEvent) -> Unit
+    ): LlmCallResult {
+        val compactionProvider = resolveCompactionFallbackProvider(context.sessionId) ?: provider
+        var currentState = state
+        var currentBaselineEstimate = baselineEstimate
+        var currentBaselineUsage = baselineUsage
+        var didCompactionAttemptFail = compactionAttemptFailed
+        var didAttemptOverflowRecovery = overflowRecoveryAttempted
+        var compactedMessages = currentState.messages
+
+        if (!didCompactionAttemptFail) {
+            val estimate = kotlinx.coroutines.withContext(Dispatchers.Default) {
+                ContextTokenEstimator.estimate(systemPrompt, currentState.messages, tools)
+            }
+            val predictedInput = ContextTokenEstimator.calibrated(
+                estimate,
+                currentBaselineEstimate,
+                currentBaselineUsage
+            )
+            val compaction = contextCompactor.compactIfNeeded(
+                currentState.messages,
+                compactionProvider,
+                context.sessionId.takeIf { context.turn == null },
+                windowProvider = provider,
+                systemPrompt = systemPrompt,
+                tools = tools,
+                currentInputTokens = predictedInput,
+                persistence = context.turn?.persistence,
+                onEvent = { event ->
+                    if (event is AgentEvent.CompactionFailed) didCompactionAttemptFail = true
+                    sendEvent(event)
+                }
+            )
+            compactedMessages = compaction.messages
+            if (compaction.compacted) {
+                currentState = currentState.copy(messages = compaction.messages)
+                currentBaselineUsage = 0
+                currentBaselineEstimate = 0
+                pluginHookDispatcher.dispatchCompaction(
+                    sessionId = hookSessionId,
+                    runId = hookRunId,
+                    mode = context.mode.name,
+                    scope = hookScope,
+                    agentName = hookAgentName,
+                    estimatedInputTokens = predictedInput
+                )
+            }
+        }
+
+        val requestEstimate = kotlinx.coroutines.withContext(Dispatchers.Default) {
+            ContextTokenEstimator.estimate(systemPrompt, compactedMessages, tools)
+        }
+        val predictedInput = ContextTokenEstimator.calibrated(
+            requestEstimate,
+            currentBaselineEstimate,
+            currentBaselineUsage
+        )
+        sendEvent(AgentEvent.ContextUsage(predictedInput, inputBudget, true))
+        if (predictedInput >= inputBudget) {
+            return LlmCallResult(
+                currentState,
+                currentBaselineEstimate,
+                currentBaselineUsage,
+                didCompactionAttemptFail,
+                didAttemptOverflowRecovery,
+                0,
+                AgentAction.LlmError("", "input_budget_exceeded")
+            )
+        }
+
+        val requestId = UUID.randomUUID().toString()
+        pluginHookDispatcher.dispatchRequestStarted(
+            sessionId = hookSessionId,
+            runId = hookRunId,
+            requestId = requestId,
+            mode = context.mode.name,
+            scope = hookScope,
+            agentName = hookAgentName,
+            messageCount = compactedMessages.size,
+            toolCount = tools.size,
+            estimatedInputTokens = predictedInput
+        )
+
+        val callStartElapsed = SystemClock.elapsedRealtime()
+        val callStartWall = System.currentTimeMillis()
+        var callError: String? = null
+        var callCompleted = false
+        var hookToolCalls = 0
+        val responseMessageId = UUID.randomUUID().toString()
+        val stream = StreamAccumulator(callStartElapsed, responseMessageId, emit = sendEvent)
+        var nextAction: AgentAction? = null
+
+        try {
+            val supportsVision = activeModelSupportsVision(context)
+            val messagesToSend = sanitizeImagesForModel(compactedMessages, supportsVision)
+            provider.completeStream(systemPrompt, messagesToSend, tools, context.reasoningEffort)
+                .collect { stream.onChunk(it) }
+            stream.flush()
+            val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
+            hookToolCalls = aiResponse.toolCalls.size
+            val (persistedImages, attachments) = if (aiResponse.images.isNotEmpty()) {
+                persistModelImages(aiResponse.images)
+            } else {
+                emptyList<AgentImage>() to emptyList()
+            }
+            callCompleted = true
+
+            if (aiResponse.stopReason == "model_context_window_exceeded" && !didAttemptOverflowRecovery) {
+                didAttemptOverflowRecovery = true
+                val recovery = contextCompactor.compactIfNeeded(
+                    currentState.messages,
+                    compactionProvider,
+                    context.sessionId.takeIf { context.turn == null },
+                    force = true,
+                    windowProvider = provider,
+                    systemPrompt = systemPrompt,
+                    tools = tools,
+                    currentInputTokens = predictedInput,
+                    onEvent = sendEvent,
+                    persistence = context.turn?.persistence
+                )
+                if (recovery.compacted) {
+                    currentState = currentState.copy(messages = recovery.messages)
+                    currentBaselineUsage = 0
+                    currentBaselineEstimate = 0
+                    nextAction = AgentAction.InitRequest(recovery.messages)
+                }
+            }
+
+            if (nextAction == null) {
+                currentBaselineEstimate = requestEstimate
+                currentBaselineUsage = aiResponse.inputTokens
+                sendEvent(
+                    AgentEvent.ContextUsage(
+                        if (currentBaselineUsage > 0) currentBaselineUsage else requestEstimate,
+                        inputBudget,
+                        currentBaselineUsage <= 0
+                    )
+                )
+                val responseWithReasoning = if (stream.reasoning.isNotEmpty()) {
+                    aiResponse.copy(reasoning = stream.reasoning.toString())
+                } else {
+                    aiResponse
+                }
+
+                if (aiResponse.content.isNotBlank() || aiResponse.toolCalls.isNotEmpty() || attachments.isNotEmpty()) {
+                    val persisted = kotlinx.coroutines.CompletableDeferred<Unit>()
+                    sendEvent(
+                        AgentEvent.AssistantText(
+                            aiResponse.content,
+                            aiResponse.toolCalls,
+                            stream.reasoning.toString(),
+                            aiResponse.signature ?: "",
+                            aiResponse.inputTokens,
+                            aiResponse.outputTokens,
+                            aiResponse.cachedInputTokens,
+                            aiResponse.thinkingBlocksJson ?: "",
+                            attachments = attachments,
+                            messageId = responseMessageId,
+                            persisted = persisted
+                        )
+                    )
+                    persisted.await()
+                }
+                nextAction = AgentAction.LlmResponse(
+                    if (persistedImages.isNotEmpty()) responseWithReasoning.copy(images = persistedImages)
+                    else responseWithReasoning,
+                    messageId = responseMessageId
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (!didAttemptOverflowRecovery && stream.text.isEmpty() && stream.reasoning.isEmpty() && isContextOverflow(error)) {
+                didAttemptOverflowRecovery = true
+                val recovery = contextCompactor.compactIfNeeded(
+                    currentState.messages,
+                    compactionProvider,
+                    context.sessionId.takeIf { context.turn == null },
+                    force = true,
+                    windowProvider = provider,
+                    systemPrompt = systemPrompt,
+                    tools = tools,
+                    currentInputTokens = predictedInput,
+                    onEvent = sendEvent,
+                    persistence = context.turn?.persistence
+                )
+                if (recovery.compacted) {
+                    currentState = currentState.copy(messages = recovery.messages)
+                    currentBaselineUsage = 0
+                    currentBaselineEstimate = 0
+                    callError = error.message
+                    nextAction = AgentAction.InitRequest(recovery.messages)
+                }
+            }
+            if (nextAction == null) {
+                val partial = stream.text.toString()
+                val reasoning = stream.reasoning.toString()
+                if (partial.isNotEmpty() || reasoning.isNotBlank()) {
+                    sendEvent(AgentEvent.AssistantText(partial, emptyList(), reasoning, messageId = responseMessageId))
+                }
+                nextAction = AgentAction.LlmError("LLM 调用失败: ${error.message}")
+                callError = error.message ?: error.javaClass.simpleName
+            }
+        } finally {
+            val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
+            val usage = stream.finalResponse
+            pluginHookDispatcher.dispatchRequestFinished(
+                sessionId = hookSessionId,
+                runId = hookRunId,
+                requestId = requestId,
+                mode = context.mode.name,
+                scope = hookScope,
+                agentName = hookAgentName,
+                status = when {
+                    callCompleted -> "success"
+                    callError != null -> "error"
+                    else -> "cancelled"
+                },
+                inputTokens = usage?.inputTokens ?: 0,
+                outputTokens = usage?.outputTokens ?: 0,
+                toolCalls = usage?.toolCalls?.size ?: 0,
+                durationMs = durationMillis,
+                stopReason = usage?.stopReason,
+                errorCode = callError
+            )
+            runCatching {
+                val reasoningPlan = reasoningPlanFor(provider, context.reasoningEffort)
+                if (context.turn != null) {
+                    context.turn.persistence.recordLlmCall(
+                        LlmCallStats(
+                            providerId = provider.providerId.ifBlank { null },
+                            model = provider.model,
+                            kind = "chat",
+                            inputTokens = usage?.inputTokens ?: 0,
+                            outputTokens = usage?.outputTokens ?: 0,
+                            cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                            durationMillis = durationMillis,
+                            status = when {
+                                callCompleted -> "success"
+                                callError != null -> "error"
+                                else -> "cancelled"
+                            },
+                            errorMessage = callError,
+                            stopReason = usage?.stopReason,
+                            createdAt = callStartWall
+                        )
+                    )
+                } else {
+                    llmCallRecordDao.insert(
+                        LlmCallRecordEntity(
+                            sessionId = context.sessionId,
+                            providerId = provider.providerId.ifBlank { null },
+                            model = provider.model,
+                            reasoningEffort = context.reasoningEffort,
+                            reasoningWire = reasoningPlan.wireSummary(),
+                            reasoningClampedFrom = reasoningPlan.clampedFrom(context.reasoningEffort),
+                            kind = "chat",
+                            inputTokens = usage?.inputTokens ?: 0,
+                            outputTokens = usage?.outputTokens ?: 0,
+                            cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                            cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
+                            ttfbMillis = stream.ttfbElapsed?.toInt(),
+                            durationMillis = durationMillis,
+                            status = when {
+                                callCompleted -> "success"
+                                callError != null -> "error"
+                                else -> "cancelled"
+                            },
+                            errorMessage = callError,
+                            stopReason = usage?.stopReason,
+                            retryCount = stream.retryAttempts,
+                            createdAt = callStartWall
+                        )
+                    )
+                }
+            }
+        }
+
+        return LlmCallResult(
+            currentState,
+            currentBaselineEstimate,
+            currentBaselineUsage,
+            didCompactionAttemptFail,
+            didAttemptOverflowRecovery,
+            hookToolCalls,
+            checkNotNull(nextAction)
+        )
+    }
+
+    // Keep batch orchestration outside channelFlow so its suspend state machine stays bounded.
+    private suspend fun executeToolBatch(
+        toolCalls: List<ToolCall>,
+        context: AgentContext,
+        delegations: MutableMap<String, ToolDelegation>,
+        hookSessionId: String?,
+        hookRunId: String,
+        hookScope: String,
+        hookAgentName: String?,
+        sendEvent: suspend (AgentEvent) -> Unit
+    ): Pair<AgentContext, List<ToolBatchResult>> {
+        var currentContext = context
+        val toolStartedAt = ConcurrentHashMap<String, Long>()
+        toolCalls.forEach { toolCall ->
+            if (toolCall.id !in delegations && (toolCall.name == "editFile" || toolCall.name == "writeFile")) {
+                (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull?.let { path ->
+                    currentContext.sessionId?.let { sessionId ->
+                        if (currentContext.turn == null || currentContext.turn.sessionRef is SessionRef.Room) {
+                            checkpointManager.beforeFileModified(sessionId, path)
+                        }
+                    }
+                }
+            }
+        }
+
+        val runResults = if (toolCalls.isEmpty()) {
+            emptyList()
+        } else {
+            coroutineScope {
+                val pathLocks = ConcurrentHashMap<String, Mutex>()
+                toolCalls.map { toolCall ->
+                    async {
+                        toolStartedAt[toolCall.id] = SystemClock.elapsedRealtime()
+                        pluginHookDispatcher.dispatchToolStarted(
+                            sessionId = hookSessionId,
+                            runId = hookRunId,
+                            callId = toolCall.id,
+                            toolName = toolCall.name,
+                            mode = currentContext.mode.name,
+                            scope = hookScope,
+                            agentName = hookAgentName
+                        )
+                        val run: suspend () -> ToolRunResult = {
+                            val delegation = delegations[toolCall.id]
+                            val tool = toolRegistry.getTool(toolCall.name)
+                            if (delegation != null) {
+                                runToolDelegate(delegation, hookRunId, toolCall, sendEvent)
+                            } else if (tool is StreamingAgentTool) {
+                                runToolStream(tool, toolCall, currentContext, sendEvent)
+                            } else {
+                                runToolSync(tool, toolCall, currentContext)
+                            }
+                        }
+                        // Same-path calls must remain serial; calls for different paths can still run concurrently.
+                        val path = (toolCall.arguments["path"] as? JsonPrimitive)?.contentOrNull
+                        if (path.isNullOrBlank()) run()
+                        else pathLocks.computeIfAbsent(path) { Mutex() }.withLock { run() }
+                    }
+                }.awaitAll()
+            }
+        }
+
+        val batchResults = mutableListOf<ToolBatchResult>()
+        toolCalls.forEachIndexed { index, toolCall ->
+            delegations.remove(toolCall.id)
+            val runResult = runResults.getOrNull(index)
+                ?: ToolRunResult(ToolResult.Error("工具未执行", "TOOL_NOT_EXECUTED").toTransportString(), true)
+            var rawResult = runResult.raw
+            var isError = runResult.isError
+            val (newContext, updated) = checkAndUpdateMode(toolCall, isError, currentContext)
+            if (updated) {
+                val reason = (toolCall.arguments["reason"] as? JsonPrimitive)?.content?.trim()
+                    ?: toolCall.arguments["reason"]?.toString()?.replace("\"", "")?.trim()
+                    ?: ""
+                sendEvent(AgentEvent.ModeChanged(newContext.mode, reason))
+
+                if (currentContext.mode == AgentMode.PLAN && newContext.mode != AgentMode.PLAN) {
+                    val choice = planApprovalManager.awaitApproval(reason, currentContext.sessionId)
+                    if (choice == PlanApprovalChoice.APPROVE) {
+                        currentContext = newContext
+                        rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newContext.mode))
+                    } else {
+                        currentContext = currentContext.copy(mode = AgentMode.PLAN)
+                        rawResult = ToolResult.Error(
+                            appContext.getString(R.string.plan_mode_refinement_requested),
+                            "MODE_SWITCH_REJECTED"
+                        ).toTransportString()
+                        isError = true
+                    }
+                } else {
+                    currentContext = newContext
+                    rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newContext.mode))
+                }
+            }
+            if (!isError && hookSessionId != null) {
+                val transform = pluginHookDispatcher.afterToolCall(
+                    sessionId = hookSessionId,
+                    runId = hookRunId,
+                    callId = toolCall.id,
+                    toolName = toolCall.name,
+                    mode = currentContext.mode.name,
+                    scope = hookScope,
+                    agentName = hookAgentName,
+                    data = { toolResultSuccessData(rawResult) }
+                )
+                transform.data?.let { rawResult = replaceToolResultData(rawResult, it) }
+            }
+            batchResults.add(ToolBatchResult(toolCall.id, toolCall.name, rawResult, isError, runResult.attachments, runResult.images))
+        }
+
+        batchResults.forEach { result ->
+            val startedAt = toolStartedAt.remove(result.id)
+            val duration = startedAt?.let { (SystemClock.elapsedRealtime() - it).toInt() } ?: 0
+            pluginHookDispatcher.dispatchToolFinished(
+                sessionId = hookSessionId,
+                runId = hookRunId,
+                callId = result.id,
+                toolName = result.toolName,
+                mode = currentContext.mode.name,
+                scope = hookScope,
+                agentName = hookAgentName,
+                status = if (result.isError) "error" else "success",
+                durationMs = duration
+            )
+        }
+
+        val notifySessionId = currentContext.sessionId
+        val notifications = if (notifySessionId != null && batchResults.isNotEmpty()) {
+            agentNotificationCenter.peek(notifySessionId)
+        } else {
+            emptyList()
+        }
+        if (notifications.isNotEmpty()) {
+            val modeChange = notifications.lastOrNull { it.kind == AgentNotificationKind.MODE_CHANGE }
+            val newMode = modeChange?.newMode
+            if (newMode != null) {
+                val previousMode = currentContext.mode
+                currentContext = if (newMode == AgentMode.PLAN) {
+                    currentContext.copy(
+                        mode = AgentMode.PLAN,
+                        modeBeforePlan = if (previousMode != AgentMode.PLAN) previousMode else currentContext.modeBeforePlan
+                    )
+                } else {
+                    currentContext.copy(mode = newMode, modeBeforePlan = null)
+                }
+            }
+            val last = batchResults.last()
+            val outgoingNotifications = if (newMode != null) {
+                notifications.map { item ->
+                    if (item === modeChange) {
+                        item.copy(detail = listOfNotNull(
+                            item.detail?.takeIf { it.isNotBlank() },
+                            buildExternalModeSwitchNotice(newMode).trim()
+                        ).joinToString("\n\n"))
+                    } else item
+                }
+            } else notifications
+            batchResults[batchResults.lastIndex] = last.copy(
+                result = eventInjector.inject(last.result, outgoingNotifications)
+            )
+        }
+
+        batchResults.forEach { result ->
+            val persisted = kotlinx.coroutines.CompletableDeferred<Unit>()
+            sendEvent(
+                AgentEvent.ToolCallFinished(
+                    result.id,
+                    result.toolName,
+                    result.result,
+                    result.isError,
+                    attachments = result.attachments,
+                    persisted = persisted
+                )
+            )
+            persisted.await()
+        }
+        if (notifySessionId != null && notifications.isNotEmpty()) {
+            agentNotificationCenter.ack(notifySessionId, notifications.map { it.seq })
+        }
+        return currentContext to batchResults
     }
 
     /**

@@ -26,6 +26,7 @@ import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -212,6 +213,25 @@ class StatefulAgentWorkflowTest {
         assertEquals("final thinking", response.reasoning)
         assertEquals(1, events.filterIsInstance<AgentEvent.Retrying>().size)
         assertEquals(1, events.filterIsInstance<AgentEvent.KeySwitched>().size)
+    }
+
+    @Test
+    fun cancellationDuringModelStreamPropagatesWithoutWorkflowFailureEvents() = runTest {
+        val streamStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+            streamStarted.complete(Unit)
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val events = mutableListOf<AgentEvent>()
+        val job = launch {
+            workflow.executeEvents("request", context, emptyList()).collect { events.add(it) }
+        }
+        streamStarted.await()
+        job.cancel()
+        job.join()
+
+        assertTrue(events.none { it is AgentEvent.Failed || it is AgentEvent.Completed })
     }
 
     @Test

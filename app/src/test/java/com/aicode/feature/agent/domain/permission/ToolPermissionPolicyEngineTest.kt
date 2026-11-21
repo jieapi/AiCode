@@ -398,6 +398,56 @@ class ToolPermissionPolicyEngineTest {
     }
 
     @Test
+    fun devNullAndFdDupRedirects_notBlockedInAutoOrBuild() = runTest {
+        val e = engine()
+        listOf(
+            "ls -la 2>/dev/null",
+            "which python3 >/dev/null 2>&1",
+            "git status &>/dev/null",
+            "rm -f cache.tmp 2>/dev/null",
+            "find . -name '*.tmp' -delete 2>/dev/null",
+            "VER=\$(git rev-parse --short HEAD 2>/dev/null)",
+            "(./gradlew test 2>&1)",
+            "(ls -la >/dev/null)",
+            "grep -rn \"a > b\" \$(git ls-files)",
+            "echo \"\$(date)\" >/dev/null",
+            "echo \"\$(date)\" > result.txt",
+            "VER=\$(git rev-parse --short HEAD) && printf '%s\\n' \"\$VER\" > build/version.txt",
+            "grep -rn 'rm -rf' \$(git ls-files)",
+            "grep -rn -- '-delete' \$(git ls-files)"
+        ).forEach { cmd ->
+            val autoVerdict = e.evaluate(tool(ToolCapability.EXECUTE_COMMANDS), "Bash", bash(cmd), AgentMode.AUTO).verdict
+            assertEquals("AUTO 模式不应误拦截常见安全命令: $cmd", ToolPermissionPolicyEngine.Verdict.ALLOW, autoVerdict)
+        }
+
+        // BUILD 模式下白名单命令带 >/dev/null 或 2>&1 应直接走内置白名单自动放行
+        listOf(
+            "ls -la 2>/dev/null",
+            "which python3 >/dev/null 2>&1",
+            "git rev-parse --verify HEAD &>/dev/null",
+            "grep -rn foo src/ 2>&1"
+        ).forEach { cmd ->
+            val buildVerdict = e.evaluate(tool(ToolCapability.EXECUTE_COMMANDS), "Bash", bash(cmd), AgentMode.BUILD).verdict
+            assertEquals("BUILD 模式安全白名单命令带 /dev/null 或 2>&1 应自动放行: $cmd", ToolPermissionPolicyEngine.Verdict.ALLOW, buildVerdict)
+        }
+
+        // 真实包含未静态判定 + 不安全输出重定向时，AUTO 模式仍必须拦截
+        listOf(
+            "echo \"\$(cat x > /etc/passwd)\"",
+            "cat x > \$(echo /etc/passwd)",
+            "cat x >& /etc/passwd",
+            "echo \$(date) > ../outside.txt",
+            "echo \$(date) > \$OUTPUT_FILE",
+            "find . -type f -name '*.tmp' -delete \$(git rev-parse --show-toplevel)",
+            "rm -rf \$(echo /etc) >/dev/null",
+            "(rm -rf /etc)"
+        ).forEach { cmd ->
+            val autoVerdict = e.evaluate(tool(ToolCapability.EXECUTE_COMMANDS), "Bash", bash(cmd), AgentMode.AUTO).verdict
+            assertEquals("AUTO 模式真实高危命令仍必须拦截: $cmd", ToolPermissionPolicyEngine.Verdict.DENY, autoVerdict)
+        }
+    }
+
+    @Test
     fun autoMode_safetyDisabled_unanalyzable_allowed() = runTest {
         val e = engine(safetyDisabled = true)
         assertEquals(
