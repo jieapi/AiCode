@@ -7,6 +7,7 @@ import com.aicode.feature.plugin.data.index.NoMatchingReleaseException
 import com.aicode.feature.plugin.data.index.PluginIndexClient
 import com.aicode.feature.plugin.data.index.PluginIndexException
 import com.aicode.feature.plugin.data.index.PluginIndexPlugin
+import com.aicode.feature.plugin.data.index.PluginLogoCacheEntry
 import com.aicode.feature.plugin.data.index.PluginIndexSource
 import com.aicode.feature.plugin.data.index.PluginOfficialRepositories
 import com.aicode.feature.plugin.data.index.PluginIndexSourceRepository
@@ -66,6 +67,7 @@ data class PluginStoreUiState(
     /** 首次读取来源前就显示加载态，避免先闪一下空列表。 */
     val loading: Boolean = true,
     val refreshing: Boolean = false,
+    val logoRefreshVersion: Long = 0,
     val sources: List<PluginIndexSource> = emptyList(),
     val items: List<PluginStoreItem> = emptyList(),
     /** 每个已安装插件可用的最高版本更新条目；供已安装页展示「可更新」。 */
@@ -125,10 +127,22 @@ class PluginStoreViewModel @Inject constructor(
     }
 
     fun refresh() {
+        _state.update { it.copy(logoRefreshVersion = it.logoRefreshVersion + 1) }
         loadAll(force = true)
     }
 
-    /** 按来源顺序依次拉取，条目也按来源顺序叠加；单个来源失败时保留它上次的条目。 */
+    fun openStore() {
+        if (_state.value.loading) return
+        refresh()
+    }
+
+    suspend fun readPluginLogoCache(url: String): PluginLogoCacheEntry? =
+        client.readPluginLogoCache(url)
+
+    suspend fun refreshPluginLogo(url: String): PluginLogoCacheEntry? =
+        client.refreshPluginLogo(url)
+
+    /** 按来源顺序先展示磁盘缓存，再拉取网络索引并叠加结果。 */
     private fun loadAll(force: Boolean) {
         val sources = _state.value.sources
         if (sources.isEmpty()) return
@@ -137,6 +151,26 @@ class PluginStoreViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val installed = manager.plugins.value.associate { it.id to it.record.version }
             val previous = _state.value.items.groupBy { it.source.id }
+            val cachedItems = mutableListOf<PluginStoreItem>()
+            sources.forEach { source ->
+                if (token != loadToken) return@launch
+                val cached = runCatching { client.readCachedIndex(source) }.getOrNull()
+                if (cached != null) {
+                    cachedItems += storeItems(source, cached.index.plugins, installed)
+                } else {
+                    cachedItems += previous[source.id].orEmpty()
+                }
+            }
+            if (token != loadToken) return@launch
+            _state.update {
+                it.copy(
+                    items = cachedItems,
+                    updatesByPluginId = updatesOf(cachedItems),
+                    refreshing = cachedItems.isNotEmpty()
+                )
+            }
+            val cachedItemsBySource = cachedItems.groupBy { it.source.id }
+
             val items = mutableListOf<PluginStoreItem>()
             var firstError: PluginStoreError? = null
             var failureCount = 0
@@ -144,17 +178,7 @@ class PluginStoreViewModel @Inject constructor(
                 val result = runCatching { client.fetchIndex(source, forceRefresh = force) }
                 if (token != loadToken) return@launch
                 result.onSuccess { snapshot ->
-                    items += snapshot.index.plugins.map { plugin ->
-                        val installedVersion = installed[plugin.id]
-                        PluginStoreItem(
-                            plugin = plugin,
-                            source = source,
-                            installedVersion = installedVersion,
-                            updateAvailable = isNewer(plugin.version, installedVersion),
-                            compatible = client.isCompatible(plugin),
-                            official = PluginOfficialRepositories.isOfficial(plugin.repository)
-                        )
-                    }
+                    items += storeItems(source, snapshot.index.plugins, installed)
                     if (!snapshot.stale) {
                         sourceRepository.markFetched(source.id, snapshot.fetchedAt)
                     }
@@ -171,7 +195,7 @@ class PluginStoreViewModel @Inject constructor(
                             detail = e.message
                         )
                     }
-                    items += previous[source.id].orEmpty()
+                    items += cachedItemsBySource[source.id].orEmpty()
                 }
             }
             _state.update {
@@ -187,6 +211,22 @@ class PluginStoreViewModel @Inject constructor(
                 _refreshResult.tryEmit(failureCount)
             }
         }
+    }
+
+    private fun storeItems(
+        source: PluginIndexSource,
+        plugins: List<PluginIndexPlugin>,
+        installed: Map<String, String>
+    ): List<PluginStoreItem> = plugins.map { plugin ->
+        val installedVersion = installed[plugin.id]
+        PluginStoreItem(
+            plugin = plugin,
+            source = source,
+            installedVersion = installedVersion,
+            updateAvailable = isNewer(plugin.version, installedVersion),
+            compatible = client.isCompatible(plugin),
+            official = PluginOfficialRepositories.isOfficial(plugin.repository)
+        )
     }
 
     fun install(item: PluginStoreItem) {

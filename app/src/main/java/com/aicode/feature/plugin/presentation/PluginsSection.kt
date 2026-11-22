@@ -168,6 +168,9 @@ internal fun PluginsSection(
         // 开发者侧载开关会改变 tab 数量；连同底栏一起重建，避免底栏内部缓存的 tab 位置残留。
         key(pageCount) {
             val pagerState = rememberPagerState { pageCount }
+            LaunchedEffect(pagerState.currentPage) {
+                if (pagerState.currentPage == pageCount - 1) storeViewModel.openStore()
+            }
             val listScrolling by remember {
                 derivedStateOf {
                     when {

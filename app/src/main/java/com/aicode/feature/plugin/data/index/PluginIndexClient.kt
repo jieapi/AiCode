@@ -1,17 +1,22 @@
 package com.aicode.feature.plugin.data.index
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import com.aicode.feature.plugin.data.PluginStoreSettingsRepository
 import com.aicode.feature.plugin.domain.SemVer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URI
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
@@ -25,6 +30,17 @@ data class PluginIndexSnapshot(
     val stale: Boolean,
     val fetchedAt: Long
 )
+
+data class PluginLogoCacheEntry(
+    val file: File,
+    val isFresh: Boolean,
+    val lastModified: Long
+)
+
+internal const val PLUGIN_LOGO_CACHE_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
+internal fun isPluginLogoCacheFresh(lastModified: Long, now: Long): Boolean =
+    now - lastModified < PLUGIN_LOGO_CACHE_TTL_MS
 
 data class PluginReleaseAsset(
     val version: String,
@@ -56,10 +72,18 @@ class PluginIndexClient @Inject constructor(
         .build()
 
     private val cacheRoot = File(context.filesDir, "plugin-index-cache")
+    private val logoCacheRoot = File(context.cacheDir, "plugin-store-icons")
+    private val logoRefreshLocks = ConcurrentHashMap<String, Mutex>()
 
     private val hostAppVersion: SemVer? = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName?.let(SemVer::parse)
     }.getOrNull()
+
+    suspend fun readCachedIndex(source: PluginIndexSource): PluginIndexSnapshot? = withContext(Dispatchers.IO) {
+        val file = cacheFile(source)
+        val index = readCache(file) ?: return@withContext null
+        PluginIndexSnapshot(index, stale = true, fetchedAt = file.lastModified())
+    }
 
     suspend fun fetchIndex(source: PluginIndexSource, forceRefresh: Boolean = false): PluginIndexSnapshot =
         withContext(Dispatchers.IO) {
@@ -76,6 +100,25 @@ class PluginIndexClient @Inject constructor(
             writeCache(cached, bytes)
             PluginIndexSnapshot(index, stale = false, fetchedAt = System.currentTimeMillis())
         }
+
+    suspend fun readPluginLogoCache(url: String): PluginLogoCacheEntry? = withContext(Dispatchers.IO) {
+        logoCacheFile(url)?.let(::logoCacheEntry)
+    }
+
+    suspend fun refreshPluginLogo(url: String): PluginLogoCacheEntry? = withContext(Dispatchers.IO) {
+        val file = logoCacheFile(url) ?: return@withContext null
+        val lock = logoRefreshLocks.computeIfAbsent(url) { Mutex() }
+        lock.withLock {
+            logoCacheEntry(file)?.takeIf { it.isFresh } ?: run {
+                try {
+                    downloadLogo(url, file)
+                } catch (_: IOException) {
+                    return@withLock logoCacheEntry(file)
+                }
+                logoCacheEntry(file)
+            }
+        }
+    }
 
     fun isCompatible(plugin: PluginIndexPlugin): Boolean {
         val minimum = plugin.minAppVersion?.let { SemVer.parse(it) ?: return false } ?: return true
@@ -216,6 +259,49 @@ class PluginIndexClient @Inject constructor(
         }
     }
 
+    private fun logoCacheFile(url: String): File? {
+        if (url.length > MAX_LOGO_URL_LENGTH) return null
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) return null
+        val key = sha256(url.toByteArray(Charsets.UTF_8))
+        return File(logoCacheRoot, "$key.img")
+    }
+
+    private fun logoCacheEntry(file: File): PluginLogoCacheEntry? {
+        if (!file.isFile || file.length() == 0L) return null
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeFile(file.absolutePath, options) }
+        if (options.outWidth <= 0 || options.outHeight <= 0) {
+            file.delete()
+            return null
+        }
+        val lastModified = file.lastModified()
+        return PluginLogoCacheEntry(
+            file = file,
+            isFresh = isPluginLogoCacheFresh(lastModified, System.currentTimeMillis()),
+            lastModified = lastModified
+        )
+    }
+
+    private suspend fun downloadLogo(url: String, file: File) {
+        val bytes = getBytes(accelerated(url), MAX_LOGO_BYTES, noCache = true)
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }
+        if (options.outWidth <= 0 || options.outHeight <= 0) throw IOException("插件图标格式无效")
+
+        file.parentFile?.mkdirs()
+        val temp = File(file.parentFile, "${file.name}.tmp")
+        try {
+            FileOutputStream(temp).use { output ->
+                output.write(bytes)
+                output.fd.sync()
+            }
+            if (!temp.renameTo(file)) throw IOException("无法写入插件图标缓存")
+        } finally {
+            temp.delete()
+        }
+    }
+
     private fun cacheFile(source: PluginIndexSource): File = File(File(cacheRoot, source.id), "index.json")
 
     private fun writeCache(file: File, bytes: ByteArray) {
@@ -258,5 +344,7 @@ class PluginIndexClient @Inject constructor(
         )
         const val MAX_INDEX_BYTES = 2L * 1024 * 1024
         const val MAX_ARCHIVE_BYTES = 16L * 1024 * 1024
+        const val MAX_LOGO_BYTES = 5L * 1024 * 1024
+        const val MAX_LOGO_URL_LENGTH = 1024
     }
 }

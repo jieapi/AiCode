@@ -1,6 +1,7 @@
 package com.aicode.feature.plugin.presentation
 
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,8 +41,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +57,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
+import com.aicode.core.ui.THUMBNAIL_MAX_EDGE
+import com.aicode.core.ui.decodeSampledBitmap
 import com.aicode.feature.settings.presentation.component.LazyGroupItem
 import com.aicode.feature.settings.presentation.component.McpPill
 import com.aicode.feature.settings.presentation.component.ModelSearchField
@@ -70,6 +78,8 @@ import compose.icons.feathericons.Package
 import compose.icons.feathericons.Server
 import compose.icons.feathericons.ShoppingBag
 import compose.icons.feathericons.Tag
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 非官方徽标固定用黄色，与主题主色区分开。 */
 private val UnofficialBadgeBackground = Color(0xFFFFE082)
@@ -185,6 +195,8 @@ internal fun PluginStoreSection(
                                 StorePluginRow(
                                     item = item,
                                     languageTag = languageTag,
+                                    viewModel = viewModel,
+                                    refreshVersion = state.logoRefreshVersion,
                                     onClick = { onOpenDetail(item) }
                                 )
                             }
@@ -200,9 +212,59 @@ internal fun PluginStoreSection(
 private fun pluginVersionText(version: String?): String =
     version?.let { "v$it" } ?: stringResource(R.string.plugins_store_version_latest)
 
+@Composable
+private fun StorePluginLogo(
+    url: String?,
+    viewModel: PluginStoreViewModel,
+    iconSize: Dp,
+    shape: Shape,
+    refreshVersion: Long
+) {
+    val bitmap = remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(url, refreshVersion) {
+        val imageUrl = url?.takeIf { it.startsWith("https://", ignoreCase = true) }
+            ?: return@LaunchedEffect
+        val cached = viewModel.readPluginLogoCache(imageUrl)
+        val cachedBitmap = cached?.let { entry ->
+            withContext(Dispatchers.IO) { decodeSampledBitmap(entry.file.absolutePath, THUMBNAIL_MAX_EDGE) }
+        }
+        bitmap.value = cachedBitmap
+        if (cached?.isFresh == true) return@LaunchedEffect
+
+        val refreshed = viewModel.refreshPluginLogo(imageUrl) ?: return@LaunchedEffect
+        if (cachedBitmap == null || refreshed.lastModified != cached.lastModified) {
+            bitmap.value = withContext(Dispatchers.IO) {
+                decodeSampledBitmap(refreshed.file.absolutePath, THUMBNAIL_MAX_EDGE)
+            }
+        }
+    }
+    val loaded = bitmap.value
+    if (loaded != null) {
+        Image(
+            bitmap = loaded,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().clip(shape)
+        )
+    } else {
+        Icon(
+            imageVector = FeatherIcons.Package,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(iconSize)
+        )
+    }
+}
+
 /** 商店列表与已安装列表同版式：图标 + 名称 + 描述；商店不需要开关，点击进入独立详情页。 */
 @Composable
-private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: () -> Unit) {
+private fun StorePluginRow(
+    item: PluginStoreItem,
+    languageTag: String,
+    viewModel: PluginStoreViewModel,
+    refreshVersion: Long,
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -219,11 +281,12 @@ private fun StorePluginRow(item: PluginStoreItem, languageTag: String, onClick: 
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = FeatherIcons.Package,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+            StorePluginLogo(
+                url = item.plugin.logo,
+                viewModel = viewModel,
+                iconSize = 22.dp,
+                shape = RoundedCornerShape(8.dp),
+                refreshVersion = refreshVersion
             )
         }
 
@@ -302,7 +365,12 @@ internal fun PluginStoreDetailSection(
             .padding(horizontal = Spacing.lg)
             .padding(top = Spacing.md, bottom = Spacing.xl)
     ) {
-        StoreHeaderCard(item = latest, languageTag = languageTag)
+        StoreHeaderCard(
+            item = latest,
+            languageTag = languageTag,
+            viewModel = viewModel,
+            refreshVersion = state.logoRefreshVersion
+        )
 
         SettingsGroupHeader(text = stringResource(R.string.plugins_section_info))
         SettingsGroup {
@@ -396,7 +464,12 @@ internal fun PluginStoreDetailSection(
 }
 
 @Composable
-private fun StoreHeaderCard(item: PluginStoreItem, languageTag: String) {
+private fun StoreHeaderCard(
+    item: PluginStoreItem,
+    languageTag: String,
+    viewModel: PluginStoreViewModel,
+    refreshVersion: Long
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -417,11 +490,12 @@ private fun StoreHeaderCard(item: PluginStoreItem, languageTag: String) {
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = FeatherIcons.Package,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(26.dp)
+                StorePluginLogo(
+                    url = item.plugin.logo,
+                    viewModel = viewModel,
+                    iconSize = 26.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    refreshVersion = refreshVersion
                 )
             }
             Spacer(modifier = Modifier.width(Spacing.lg))
