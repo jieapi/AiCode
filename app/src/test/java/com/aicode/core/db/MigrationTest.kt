@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aicode.feature.agent.data.local.database.AgentDatabase
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.BeforeClass
@@ -104,6 +105,26 @@ class MigrationTest {
      * 未来新增迁移（51+）时把 @AutoMigration/新迁移加进来后在此补升级用例：
      * createDatabase(50) → 跑迁移数组 → 断言新列/新表存在。
      */
+    @Test
+    fun migrate_66_to_67_addsFastModeDefaultingOff() {
+        helper.createDatabase(dbName, 66).close()
+
+        val db = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .build()
+        var fastModeDefault: String? = null
+        db.openHelper.writableDatabase
+            .query("PRAGMA table_info(`chat_sessions`)")
+            .use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == "fastMode") fastModeDefault = cursor.getString(4)
+                }
+            }
+        db.close()
+
+        assertEquals("迁移 67 应新增默认关闭的 fastMode 列", "0", fastModeDefault)
+    }
+
     @Test
     fun migrate_58_to_59_adds_backup_targets() {
         helper.createDatabase(dbName, 58).close()

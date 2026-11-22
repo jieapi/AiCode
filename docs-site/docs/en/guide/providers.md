@@ -81,6 +81,8 @@ The "Options" in the edit page lets you switch to a vendor's newer protocol:
 
 Keep them off by default. Enable only when you've confirmed the official direct service or relay you're using supports the corresponding new protocol.
 
+When OpenAI's Responses API is enabled, an additional **Responses WebSocket** option is available. It reuses one connection for a single Agent run and sends only new input on follow-up tool turns, which is intended for long tool-heavy runs. It is off by default and requires an upstream that supports Responses WebSocket. If continuation state is lost, AiCode rebuilds the request from local conversation history. An unexpected disconnect after a request is sent is reported without automatically replaying that turn.
+
 ## Other Options
 
 ::: v-pre
@@ -106,6 +108,8 @@ Switch to the "Models" tab of the edit page.
 Your values take priority; unfilled ones fall back to auto-detected results. If auto-detection can't match the model name, it retries after stripping common suffixes like `-thinking`, `-preview`, `-high` — so most renamed relay models are still recognized.
 
 **Thinking effort**: the lightning icon above the input box controls reasoning depth, and the label right of it always shows the level in effect (e.g. **High**; it reads **Off** when thinking is turned off, or the lowest level actually sent when the model can't be turned off). Tapping it opens a sheet with a **Thinking** switch at the top (only shown for models that can actually turn thinking off) and, below it, only the levels the model really supports — the provider default is tagged **Default**.
+
+For OpenAI providers, the same sheet also has a manual **Fast** switch. It is independent of reasoning effort, off by default, and saved per session. Enabled requests use the Fast service tier with either Chat Completions or Responses; this may incur additional charges. OpenAI-compatible relays may ignore or reject the parameter.
 
 - Pick a level above what the model supports and it clamps to the nearest lower level; the sheet states the outcome, e.g. **Effective: High**.
 - For models that always think, the sheet says so and marks the level that will actually be sent.

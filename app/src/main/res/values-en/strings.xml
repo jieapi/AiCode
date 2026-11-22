@@ -280,6 +280,8 @@
     <string name="provider_cache_anthropic_subtitle">Mark system/tools/messages prefixes with explicit cache breakpoints to cut repeated input cost</string>
     <string name="provider_cache_openai_chat_title">OpenAI-compatible cache key</string>
     <string name="provider_cache_openai_chat_subtitle">Send prompt_cache_key with requests</string>
+    <string name="provider_response_websocket_title">Responses WebSocket</string>
+    <string name="provider_response_websocket_subtitle">Reuse a connection and continue response state in long runs to reduce repeated context transfer</string>
     <string name="provider_section_dashboard">Custom Dashboard</string>
     <string name="provider_dashboard_script">Dashboard Script</string>
     <string name="provider_dashboard_script_placeholder">e.g. demo_balance.py</string>
@@ -533,6 +535,10 @@
     <string name="chat_add_attachment">Add attachment</string>
     <string name="chat_take_photo">Take photo</string>
     <string name="chat_reasoning_effort">Reasoning effort</string>
+    <string name="chat_fast_mode_title">Fast mode</string>
+    <string name="chat_fast_mode_label">Fast</string>
+    <string name="chat_fast_mode_cost_hint">Faster responses may incur additional charges</string>
+    <string name="chat_fast_mode_active_description">Fast mode on, reasoning %1$s</string>
     <string name="chat_reasoning_effort_none">None</string>
     <string name="chat_reasoning_effort_minimal">Minimal</string>
     <string name="chat_reasoning_effort_low">Low</string>

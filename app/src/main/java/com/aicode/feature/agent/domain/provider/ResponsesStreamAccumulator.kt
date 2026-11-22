@@ -174,6 +174,7 @@ internal class ResponsesStreamAccumulator {
     /** 终止事件里兜底解析出的工具调用（流中 delta 事件缺失时的补齐来源）。 */
     private val finalCalls = mutableListOf<ToolCall>()
     private var status: String? = null
+    private var responseId: String? = null
     private var incompleteReason: String? = null
     private var usage = ResponsesUsage()
 
@@ -210,6 +211,7 @@ internal class ResponsesStreamAccumulator {
                         item.str("call_id")?.takeIf { it.isNotEmpty() }?.let { acc.callId = it }
                         item.str("arguments")?.takeIf { it.isNotEmpty() }?.let { budget.add(it); acc.args = StringBuilder(it) }
                         item.str("name")?.takeIf { it.isNotEmpty() }?.let { name ->
+                            receivedContent = true
                             val first = acc.name.isEmpty()
                             acc.name = name
                             // 工具名先于参数到达：让 UI 提前把状态说具体（每个调用只推一次）
@@ -271,10 +273,13 @@ internal class ResponsesStreamAccumulator {
             }
 
             // 传输层错误事件：code / message 就在事件自身上（不嵌在 error 对象里）。
-            ResponsesEvent.ERROR, ResponsesEvent.RESPONSE_ERROR -> throw StreamApiException(
-                code = event.str("code"),
-                message = event.str("message") ?: "Responses 流返回 error 事件"
-            )
+            ResponsesEvent.ERROR, ResponsesEvent.RESPONSE_ERROR -> {
+                val error = event.obj("error")
+                throw StreamApiException(
+                    code = event.str("code") ?: error?.str("code"),
+                    message = event.str("message") ?: error?.str("message") ?: "Responses 流返回 error 事件"
+                )
+            }
         }
         return null
     }
@@ -296,7 +301,8 @@ internal class ResponsesStreamAccumulator {
             outputTokens = usage.outputTokens,
             cachedInputTokens = usage.cachedInputTokens,
             cacheCreationTokens = usage.cacheCreationTokens,
-            images = images.values.filter { it.base64Data.isNotEmpty() }.ifEmpty { finalImages }
+            images = images.values.filter { it.base64Data.isNotEmpty() }.ifEmpty { finalImages },
+            responseId = responseId
         )
     }
 
@@ -304,6 +310,7 @@ internal class ResponsesStreamAccumulator {
     private fun absorbFinalResponse(response: JsonObject?) {
         if (response == null) return
         status = response.str("status")
+        responseId = response.str("id")
         incompleteReason = response.obj("incomplete_details")?.str("reason")
         usage = parseResponsesUsage(response.obj("usage"))
 

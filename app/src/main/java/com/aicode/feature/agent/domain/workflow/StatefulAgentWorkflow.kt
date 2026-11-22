@@ -475,6 +475,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var hookStarted = false
         var hookCompleted = false
         var hookTerminalError = false
+        var runProvider: AIProvider? = null
         var hookErrorCode: String? = null
         var hookToolCalls = 0
         var hookMode = context.mode.name
@@ -524,6 +525,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val providerStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "provider.start", details = "operation=$providerStartedNs")
         val aiProvider = getEffectiveProvider(currentContext)
+        runProvider = aiProvider
         FileLogger.memoryCheckpoint(
             TAG,
             "provider.ready",
@@ -697,6 +699,7 @@ class StatefulAgentWorkflow @Inject constructor(
         send(AgentEvent.Completed)
         hookCompleted = true
     }.onCompletion { cause ->
+        runCatching { runProvider?.close() }
         if (!hookStarted || hookSessionId == null) return@onCompletion
         val status = when {
             hookCompleted -> if (hookTerminalError) "error" else "success"
@@ -833,8 +836,13 @@ class StatefulAgentWorkflow @Inject constructor(
         try {
             val supportsVision = activeModelSupportsVision(context)
             val messagesToSend = sanitizeImagesForModel(compactedMessages, supportsVision)
-            provider.completeStream(systemPrompt, messagesToSend, tools, context.reasoningEffort)
-                .collect { stream.onChunk(it) }
+            provider.completeStream(
+                systemPrompt = systemPrompt,
+                messages = messagesToSend,
+                tools = tools,
+                reasoningEffort = context.reasoningEffort,
+                fastMode = context.fastMode
+            ).collect { stream.onChunk(it) }
             stream.flush()
             val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
             hookToolCalls = aiResponse.toolCalls.size

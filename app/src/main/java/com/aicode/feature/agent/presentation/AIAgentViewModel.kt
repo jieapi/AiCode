@@ -1375,6 +1375,10 @@ class AIAgentViewModel @Inject constructor(
         currentSessionState.map { it?.reasoningEffort ?: ReasoningEffort.MEDIUM }
             .stateIn(viewModelScope, SharingStarted.Eagerly, ReasoningEffort.MEDIUM)
 
+    val currentSessionFastMode: StateFlow<Boolean> = currentSessionState
+        .map { it?.fastMode ?: false }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     /** 「思考自动展开」偏好：没有手动展开/收起记录的思考卡片默认是否展开正文。 */
     val autoExpandReasoning: StateFlow<Boolean> = generalSettingsRepository.autoExpandReasoningFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -1849,6 +1853,13 @@ class AIAgentViewModel @Inject constructor(
             if (!pid.isNullOrBlank() && !model.isNullOrBlank()) {
                 modelReasoningEffortRepository.set(pid, model, effort.name)
             }
+        }
+    }
+
+    fun setSessionFastMode(enabled: Boolean) {
+        val sid = _currentSessionId.value ?: return
+        viewModelScope.launch {
+            sessionUseCase.updateFastMode(sid, enabled)
         }
     }
 

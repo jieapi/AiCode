@@ -270,6 +270,14 @@ object AgentModule {
 
     @Provides
     @Singleton
+    @Named("OpenAIResponsesWebSocket")
+    fun provideOpenAIResponsesWebSocketClient(client: OkHttpClient): OkHttpClient =
+        client.newBuilder()
+            .proxyAuthenticator(com.aicode.core.net.AppProxy.okHttpAuthenticator)
+            .build()
+
+    @Provides
+    @Singleton
     @Named("OpenAI")
     fun provideOpenAIRetrofit(client: OkHttpClient): Retrofit {
         return Retrofit.Builder()

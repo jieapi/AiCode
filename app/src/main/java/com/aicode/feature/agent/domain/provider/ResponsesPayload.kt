@@ -147,6 +147,45 @@ internal fun buildResponsesInput(
     return items
 }
 
+internal data class ResponsesContinuationInput(
+    val canContinue: Boolean,
+    val input: List<Map<String, Any?>>,
+    val previousResponseId: String?
+)
+
+internal fun prepareResponsesContinuationInput(
+    fullInput: List<Map<String, Any?>>,
+    messages: List<AgentMessage>,
+    submittedMessages: List<AgentMessage>,
+    previousResponseId: String?
+): ResponsesContinuationInput {
+    val canContinue = previousResponseId != null && submittedMessages.size <= messages.size &&
+        submittedMessages.indices.all { submittedMessages[it] == messages[it] }
+    val input = if (canContinue) {
+        buildResponsesContinuationInput(messages.drop(submittedMessages.size))
+    } else {
+        fullInput
+    }
+    return ResponsesContinuationInput(input = input, canContinue = canContinue, previousResponseId = previousResponseId.takeIf { canContinue })
+}
+
+/** 新 WebSocket response 续传时只发送上轮完成后新增的用户消息与工具结果。 */
+internal fun buildResponsesContinuationInput(messages: List<AgentMessage>): List<Map<String, Any?>> =
+    messages.mapNotNull { message ->
+        when (message) {
+            is AgentMessage.UserMessage -> mapOf(
+                "role" to "user",
+                "content" to message.toResponsesContent()
+            )
+            is AgentMessage.ToolResultMessage -> mapOf(
+                "type" to ResponsesItem.FUNCTION_CALL_OUTPUT,
+                "call_id" to message.id,
+                "output" to message.toResponsesOutput()
+            )
+            is AgentMessage.AssistantMessage -> null
+        }
+    }
+
 /**
  * 从快照 JSON 中反序列化出 OpenAI 官方 Responses 规范的加密 reasoning item。
  * 严格按照 OpenCode / OpenAI 防御规则：只有当包含非空字符串 `encrypted_content` 时才被允许回传；

@@ -58,6 +58,7 @@ class ResponsesStreamAccumulatorTest {
     ): JsonObject {
         val response = JsonObject().apply {
             addProperty("status", status)
+            addProperty("id", "resp_test")
             add("output", output)
             usage?.let { add("usage", it) }
             incompleteReason?.let {
@@ -92,6 +93,7 @@ class ResponsesStreamAccumulatorTest {
         val response = acc.toResponse()
         assertEquals("Hello world", response.content)
         assertEquals("stop", response.stopReason)
+        assertEquals("resp_test", response.responseId)
         assertEquals(12, response.inputTokens)
         assertEquals(3, response.outputTokens)
         assertEquals(8, response.cachedInputTokens)

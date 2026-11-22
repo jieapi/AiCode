@@ -132,6 +132,9 @@ interface ChatSessionDao {
     @Query("UPDATE chat_sessions SET reasoningEffort = :effort WHERE id = :id")
     suspend fun updateReasoningEffort(id: String, effort: String)
 
+    @Query("UPDATE chat_sessions SET fastMode = :enabled WHERE id = :id")
+    suspend fun updateFastMode(id: String, enabled: Boolean)
+
     /** 设定/覆盖 goal：同时重置轮次计数与 token 快照。goal 为 null 表示清除。 */
     @Query("UPDATE chat_sessions SET goal = :goal, goalStatus = :status, goalTurnCount = 0, goalStartInputTokens = :startInput, goalStartOutputTokens = :startOutput WHERE id = :id")
     suspend fun updateGoal(id: String, goal: String?, status: String?, startInput: Int, startOutput: Int)

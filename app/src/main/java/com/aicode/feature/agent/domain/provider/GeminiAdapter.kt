@@ -90,7 +90,8 @@ class GeminiAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): AIResponse {
         if (useResponseApi) {
             return completeViaInteractions(systemPrompt, messages, tools, reasoningEffort)
@@ -198,7 +199,8 @@ class GeminiAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): Flow<AIStreamChunk> = channelFlow {
         if (useResponseApi) {
             streamViaInteractions(systemPrompt, messages, tools, reasoningEffort)

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -71,6 +72,21 @@ class ChatSessionWorkspaceRefTest {
         assertEquals(listOf(b), useCase.getSessionsOfWorkspace(second).first())
         assertEquals(1, messages.getMessagesBySessionOnce(b.id).size)
         assertEquals(c, sessions.getById(c.id))
+    }
+
+    @Test
+    fun fastModePersistsPerSessionAndNewSubSessionsDefaultToStandard() = runTest {
+        val root = useCase.newSessionEntity(path).copy(id = "fast-root")
+        sessions.upsert(root)
+        useCase.updateFastMode(root.id, true)
+
+        val restored = sessions.getById(root.id)!!
+        val child = useCase.newSubSessionEntity("child", root.id, restored, "explore")
+
+        assertTrue(restored.toDomain().fastMode)
+        assertTrue(ChatSessionEntity.fromDomain(restored.toDomain()).fastMode)
+        assertFalse(useCase.newSessionEntity(path).fastMode)
+        assertFalse(child.fastMode)
     }
 
     @Test

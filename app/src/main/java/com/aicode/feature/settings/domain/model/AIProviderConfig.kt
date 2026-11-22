@@ -26,6 +26,8 @@ data class AIProviderConfig(
     val isEnabled: Boolean = true,
     val useFullUrl: Boolean = false,
     val useResponseApi: Boolean = false,
+    /** OpenAI Responses 长链工作流通过持久 WebSocket 续传。 */
+    val useResponseWebSocket: Boolean = false,
     /** Anthropic 显式缓存断点（cache_control）。仅 ANTHROPIC 类型生效，默认开启。 */
     val anthropicCacheBreakpoints: Boolean = true,
     /** Chat Completion 路径发送 prompt_cache_key（shard 路由）。仅 OPENAI 类型生效，默认关闭。 */

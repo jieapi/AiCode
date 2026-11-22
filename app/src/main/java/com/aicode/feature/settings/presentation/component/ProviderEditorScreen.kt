@@ -216,6 +216,7 @@ fun ProviderEditorScreen(
     var baseUrl by remember { mutableStateOf(initialProvider?.baseUrl ?: presetPrefill?.baseUrl ?: "") }
     var useFullUrl by remember { mutableStateOf(initialProvider?.useFullUrl ?: false) }
     var useResponseApi by remember { mutableStateOf(initialProvider?.useResponseApi ?: false) }
+    var useResponseWebSocket by remember { mutableStateOf(initialProvider?.useResponseWebSocket ?: false) }
     var anthropicCacheBreakpoints by remember { mutableStateOf(initialProvider?.anthropicCacheBreakpoints ?: true) }
     var openaiChatCacheKey by remember { mutableStateOf(initialProvider?.openaiChatCacheKey ?: false) }
     var dashboardScriptPath by remember { mutableStateOf(initialProvider?.dashboardScriptPath ?: "") }
@@ -328,6 +329,7 @@ fun ProviderEditorScreen(
         models = models.toList(),
         selectedModel = initialProvider?.selectedModel ?: "",
         useResponseApi = useResponseApi,
+        useResponseWebSocket = useResponseWebSocket,
         anthropicCacheBreakpoints = anthropicCacheBreakpoints,
         openaiChatCacheKey = openaiChatCacheKey,
         dashboardScriptPath = dashboardScriptPath,
@@ -589,6 +591,15 @@ fun ProviderEditorScreen(
                                 ),
                                 checked = useResponseApi,
                                 onCheckedChange = { useResponseApi = it }
+                            )
+                        }
+                        if (type == ProviderType.OPENAI && useResponseApi) {
+                            SettingsDivider()
+                            ProviderSwitchRow(
+                                title = stringResource(R.string.provider_response_websocket_title),
+                                subtitle = stringResource(R.string.provider_response_websocket_subtitle),
+                                checked = useResponseWebSocket,
+                                onCheckedChange = { useResponseWebSocket = it }
                             )
                         }
                         if (type == ProviderType.OPENAI) {

@@ -112,6 +112,9 @@ internal fun ReasoningEffortSelector(
     protocol: ReasoningProtocol,
     model: String,
     onChange: (ReasoningEffort) -> Unit,
+    fastMode: Boolean,
+    showFastMode: Boolean,
+    onFastModeChange: (Boolean) -> Unit,
     enabled: Boolean
 ) {
     var showSheet by remember { mutableStateOf(false) }
@@ -122,14 +125,17 @@ internal fun ReasoningEffortSelector(
     val levels = remember(capability) { capability.selectableLevelsForUi() }
     val thinkingOn = effort != ReasoningEffort.NONE
     // 输入栏里只显示「实际会生效」的短名：真被降级时显示降级后的档位，关得掉才显示「不思考」。
-    val barLabel = when {
+    val reasoningLabel = when {
         plan.isDisableRequested && plan.reason != ReasoningPlan.Reason.CANNOT_DISABLE ->
             stringResource(R.string.chat_reasoning_off_short)
         plan.effectiveLevel != null -> stringResource(plan.effectiveLevel!!.labelRes())
         else -> stringResource(effort.labelRes())
     }
+    val fastModeActive = showFastMode && fastMode
+    val fastModeLabel = stringResource(R.string.chat_fast_mode_label)
     val tint = when {
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        fastModeActive -> MaterialTheme.colorScheme.primary
         thinkingOn -> MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
     }
@@ -145,19 +151,32 @@ internal fun ReasoningEffortSelector(
     ) {
         Icon(
             FeatherIcons.Zap,
-            contentDescription = stringResource(effort.labelRes()),
+            contentDescription = if (fastModeActive) {
+                stringResource(R.string.chat_fast_mode_active_description, reasoningLabel)
+            } else {
+                stringResource(effort.labelRes())
+            },
             tint = tint,
             modifier = Modifier.size(20.dp)
         )
         Spacer(Modifier.width(2.dp))
         Text(
-            text = barLabel,
+            text = reasoningLabel,
             style = MaterialTheme.typography.labelMedium,
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 64.dp)
         )
+        if (fastModeActive) {
+            Spacer(Modifier.width(Spacing.xs))
+            Text(
+                text = fastModeLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1
+            )
+        }
     }
 
     if (showSheet) {
@@ -262,6 +281,35 @@ internal fun ReasoningEffortSelector(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
+                }
+
+                if (showFastMode) {
+                    Spacer(Modifier.height(Spacing.sm))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.chat_fast_mode_title),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.chat_fast_mode_cost_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(Spacing.md))
+                        AppSwitch(
+                            checked = fastMode,
+                            enabled = enabled,
+                            onCheckedChange = onFastModeChange
+                        )
                     }
                 }
             }

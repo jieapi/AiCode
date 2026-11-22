@@ -280,6 +280,8 @@
     <string name="provider_cache_anthropic_subtitle">为 system/工具/消息前缀打显式缓存断点，降低重复输入成本</string>
     <string name="provider_cache_openai_chat_title">OpenAI 兼容缓存键</string>
     <string name="provider_cache_openai_chat_subtitle">为请求携带 prompt_cache_key 缓存键</string>
+    <string name="provider_response_websocket_title">Responses WebSocket</string>
+    <string name="provider_response_websocket_subtitle">长任务复用连接并续传响应状态，减少重复上下文传输</string>
     <string name="provider_section_dashboard">自定义面板</string>
     <string name="provider_dashboard_script">面板脚本</string>
     <string name="provider_dashboard_script_placeholder">例如 demo_balance.py</string>
@@ -533,6 +535,10 @@
     <string name="chat_add_attachment">添加附件</string>
     <string name="chat_take_photo">拍照</string>
     <string name="chat_reasoning_effort">思考强度</string>
+    <string name="chat_fast_mode_title">快速模式</string>
+    <string name="chat_fast_mode_label">Fast</string>
+    <string name="chat_fast_mode_cost_hint">响应更快，可能产生额外费用</string>
+    <string name="chat_fast_mode_active_description">Fast 模式已开启，思考强度 %1$s</string>
     <string name="chat_reasoning_effort_none">不思考</string>
     <string name="chat_reasoning_effort_minimal">极低</string>
     <string name="chat_reasoning_effort_low">低</string>

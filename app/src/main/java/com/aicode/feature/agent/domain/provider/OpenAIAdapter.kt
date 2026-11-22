@@ -25,6 +25,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.Json
@@ -37,14 +40,19 @@ import com.aicode.feature.agent.data.remote.openai.OpenAIImagePart
 import com.aicode.feature.agent.data.remote.openai.StreamOptions
 
 class OpenAIAdapter @Inject constructor(
-    private val api: OpenAIApi
+    private val api: OpenAIApi,
+    private val okHttpClient: OkHttpClient,
+    private val webSocketClient: OkHttpClient
 ) : AIProvider {
+    constructor(api: OpenAIApi) : this(api, OkHttpClient.Builder().build(), OkHttpClient.Builder().build())
+    constructor(api: OpenAIApi, client: OkHttpClient) : this(api, client, client)
 
     override var apiKey = ""
     override var keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? = null
     override var baseUrl = "https://api.openai.com/"
     override var useFullUrl = false
     override var useResponseApi = false
+    var useResponseWebSocket = false
     override var model = "gpt-4-turbo"
     override var providerId = ""
     override var logSessionId: String? = null
@@ -75,6 +83,17 @@ class OpenAIAdapter @Inject constructor(
     // null 时请求体不带 temperature（Gson 跳过 null 字段），交由服务端默认。
     override var temperature: Float? = null
 
+    private var responsesSocket: ResponsesWebSocketConnection? = null
+    private var previousResponseId: String? = null
+    private var submittedMessages: List<AgentMessage> = emptyList()
+
+    override suspend fun close() {
+        responsesSocket?.close()
+        responsesSocket = null
+        previousResponseId = null
+        submittedMessages = emptyList()
+    }
+
     private fun extraHeaders(): Map<String, String> =
         resolveCustomHeaders(customHeaders, logSessionId, apiKey)
 
@@ -93,9 +112,10 @@ class OpenAIAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): AIResponse {
-        if (useResponseApi) return completeViaResponses(systemPrompt, messages, tools, reasoningEffort)
+        if (useResponseApi) return completeViaResponses(systemPrompt, messages, tools, reasoningEffort, fastMode)
 
         val openAIMessages = buildList {
             if (systemPrompt.isNotBlank()) {
@@ -126,7 +146,8 @@ class OpenAIAdapter @Inject constructor(
             tools = toolDefs,
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = false,
-            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
+            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null,
+            service_tier = "fast".takeIf { fastMode }
         )
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
@@ -197,7 +218,8 @@ class OpenAIAdapter @Inject constructor(
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
         reasoningEffort: String?,
-        stream: Boolean
+        stream: Boolean,
+        fastMode: Boolean = false
     ): Map<String, Any?> {
         val isDeepSeek = model.contains("deepseek", ignoreCase = true)
         val request = mutableMapOf<String, Any?>(
@@ -218,6 +240,7 @@ class OpenAIAdapter @Inject constructor(
             request["tool_choice"] = "auto"
         }
         if (stream) request["stream"] = true
+        if (fastMode) request["service_tier"] = "fast"
         // Responses 端点的思考字段：effort 走 reasoning.effort；厂商私有开关走 thinking / enable_thinking。
         when (val wire = responsesReasoningPlan(reasoningEffort).wire) {
             is ReasoningWire.Effort -> {
@@ -260,9 +283,10 @@ class OpenAIAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): AIResponse {
-        val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = false)
+        val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = false, fastMode = fastMode)
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
         val triedKeys = mutableSetOf(apiKey)
@@ -299,7 +323,8 @@ class OpenAIAdapter @Inject constructor(
             outputTokens = usage.outputTokens,
             cachedInputTokens = usage.cachedInputTokens,
             cacheCreationTokens = usage.cacheCreationTokens,
-            images = parsed.images
+            images = parsed.images,
+            responseId = response.get("id")?.takeIf { it.isJsonPrimitive }?.asString
         )
     }
 
@@ -310,10 +335,15 @@ class OpenAIAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): Flow<AIStreamChunk> = channelFlow {
         if (useResponseApi) {
-            streamViaResponses(systemPrompt, messages, tools, reasoningEffort)
+            if (useResponseWebSocket) {
+                streamViaResponsesWebSocket(systemPrompt, messages, tools, reasoningEffort, fastMode)
+            } else {
+                streamViaResponses(systemPrompt, messages, tools, reasoningEffort, fastMode)
+            }
             return@channelFlow
         }
 
@@ -346,7 +376,8 @@ class OpenAIAdapter @Inject constructor(
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = true,
             stream_options = StreamOptions(include_usage = true),
-            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
+            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null,
+            service_tier = "fast".takeIf { fastMode }
         )
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
@@ -545,9 +576,10 @@ class OpenAIAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ) {
-        val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = true)
+        val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = true, fastMode = fastMode)
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "OpenAI", seq)
@@ -658,6 +690,241 @@ class OpenAIAdapter @Inject constructor(
             throw enriched
         } finally {
             sseLog.finish()
+        }
+    }
+
+    private data class ResponsesRequestState(
+        val fullInput: List<Map<String, Any?>>,
+        val request: MutableMap<String, Any?>,
+        val sentMessages: List<AgentMessage>,
+        val previousResponseId: String?
+    )
+
+    private fun prepareResponsesSocketRequest(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ): ResponsesRequestState {
+        val fullInput = buildResponsesInput(
+            systemPrompt = systemPrompt,
+            systemRole = systemRoleForModel(),
+            messages = messages,
+            includeReasoningItems = model.contains("deepseek", ignoreCase = true)
+        )
+        val continuation = prepareResponsesContinuationInput(
+            fullInput = fullInput,
+            messages = messages,
+            submittedMessages = submittedMessages,
+            previousResponseId = previousResponseId
+        )
+        val request = buildResponsesRequest(
+            "",
+            if (continuation.canContinue) emptyList() else messages,
+            tools,
+            reasoningEffort,
+            stream = false,
+            fastMode = fastMode
+        ).toMutableMap()
+        if (continuation.canContinue && systemPrompt.isNotBlank()) request["instructions"] = systemPrompt
+        request["type"] = "response.create"
+        request.remove("stream")
+        request["input"] = continuation.input
+        continuation.previousResponseId?.let { request["previous_response_id"] = it }
+        return ResponsesRequestState(fullInput, request, messages.toList(), continuation.previousResponseId)
+    }
+
+    private fun responsesWebSocketUrl(): String {
+        val httpUrl = resolveApiUrl()
+        val wsUrl = when {
+            httpUrl.startsWith("https://", ignoreCase = true) -> "wss://${httpUrl.substring(8)}"
+            httpUrl.startsWith("http://", ignoreCase = true) -> "ws://${httpUrl.substring(7)}"
+            else -> throw IllegalArgumentException("Responses WebSocket requires an http(s) API URL")
+        }
+        return wsUrl
+    }
+
+    private fun webSocketRequest(): Request {
+        val headers = linkedMapOf("Authorization" to "Bearer $apiKey")
+        extraHeaders().forEach { (name, value) ->
+            headers.keys.firstOrNull { it.equals(name, ignoreCase = true) }?.let(headers::remove)
+            headers[name] = value
+        }
+        val betaKey = headers.keys.firstOrNull { it.equals("OpenAI-Beta", ignoreCase = true) }
+        val betaValue = betaKey?.let(headers::remove).orEmpty()
+        headers["OpenAI-Beta"] = listOf(betaValue, "responses_websockets=2026-02-06")
+            .filter { it.isNotBlank() }
+            .joinToString(", ")
+        return Request.Builder().url(responsesWebSocketUrl()).apply {
+            headers.forEach { (name, value) -> header(name, value) }
+        }.build()
+    }
+
+    private suspend fun ProducerScope<AIStreamChunk>.openResponsesSocket(
+        triedKeys: MutableSet<String>
+    ): ResponsesWebSocketConnection {
+        var attempt = 0
+        while (true) {
+            val connection = ResponsesWebSocketConnection(
+                client = webSocketClient,
+                request = webSocketRequest(),
+                connectTimeoutMs = firstByteTimeoutMs
+            )
+            try {
+                connection.awaitOpen()
+                return connection
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                connection.cancel()
+                if (e is WebSocketHandshakeException) {
+                    val switched = switchKeyOnFailure(e, triedKeys)
+                    if (switched != null) {
+                        send(AIStreamChunk.KeySwitched(switched.newIndex, switched.total))
+                        continue
+                    }
+                    if (e.statusCode !in setOf(408, 429, 500, 502, 503, 504) || attempt >= maxNetworkRetries) throw e
+                } else if (attempt >= maxNetworkRetries || e !is IOException) {
+                    throw e
+                }
+                send(AIStreamChunk.Retrying(attempt + 1, maxNetworkRetries, e.toRetryErrorInfo()))
+                delay(retryDelayMillis(attempt, e))
+                attempt++
+            }
+        }
+    }
+
+    private suspend fun ProducerScope<AIStreamChunk>.streamViaResponsesWebSocket(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ) {
+        val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "WS", responsesWebSocketUrl(), messages)
+        val triedKeys = mutableSetOf(apiKey)
+        var contentReceived = false
+        val watchdog = launchStreamIdleWatchdog(streamIdleTimeoutMs) { responsesSocket?.cancel() }
+        try {
+            var socket = responsesSocket?.takeIf { it.isOpen }
+                ?: openResponsesSocket(triedKeys).also { responsesSocket = it }
+            var state = prepareResponsesSocketRequest(systemPrompt, messages, tools, reasoningEffort, fastMode)
+            socket.send(state.request)
+            var accumulator = ResponsesStreamAccumulator()
+            var requestStartedAt = System.nanoTime()
+            watchdog.touch()
+            while (!accumulator.terminated) {
+                coroutineContext.ensureActive()
+                val event = if (!contentReceived && firstByteTimeoutMs > 0) {
+                    val elapsed = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - requestStartedAt)
+                    val remaining = firstByteTimeoutMs - elapsed
+                    if (remaining <= 0) throw java.net.SocketTimeoutException("Responses WebSocket first-content timeout")
+                    socket.nextEvent(remaining)
+                } else {
+                    socket.nextEvent(0L)
+                }
+                watchdog.touch()
+                val delta = try {
+                    accumulator.accept(event)
+                } catch (e: StreamApiException) {
+                    if (e.code == "websocket_connection_limit_reached" && !contentReceived) {
+                        responsesSocket?.close()
+                        val replacement = openResponsesSocket(triedKeys).also { responsesSocket = it }
+                        previousResponseId = null
+                        submittedMessages = emptyList()
+                        state = state.copy(
+                            request = state.request.toMutableMap().apply {
+                                remove("previous_response_id")
+                                remove("instructions")
+                                put("input", buildResponsesInput(
+                                    systemPrompt = systemPrompt,
+                                    systemRole = systemRoleForModel(),
+                                    messages = messages,
+                                    includeReasoningItems = model.contains("deepseek", ignoreCase = true)
+                                ))
+                            },
+                            previousResponseId = null
+                        )
+                        accumulator = ResponsesStreamAccumulator()
+                        requestStartedAt = System.nanoTime()
+                        replacement.send(state.request)
+                        socket = replacement
+                        continue
+                    }
+                    val switched = if (!contentReceived) switchKeyOnFailure(e, triedKeys) else null
+                    if (switched != null) {
+                        send(AIStreamChunk.KeySwitched(switched.newIndex, switched.total))
+                        responsesSocket?.close()
+                        val replacement = openResponsesSocket(triedKeys).also { responsesSocket = it }
+                        previousResponseId = null
+                        submittedMessages = emptyList()
+                        state = state.copy(
+                            request = state.request.toMutableMap().apply {
+                                remove("previous_response_id")
+                                remove("instructions")
+                                put("input", state.fullInput)
+                            },
+                            previousResponseId = null
+                        )
+                        accumulator = ResponsesStreamAccumulator()
+                        requestStartedAt = System.nanoTime()
+                        replacement.send(state.request)
+                        socket = replacement
+                        continue
+                    }
+                    if (e.code == "previous_response_not_found" && state.previousResponseId != null && !contentReceived) {
+                        previousResponseId = null
+                        submittedMessages = emptyList()
+                        val fullRequest = state.request.toMutableMap().apply {
+                            remove("previous_response_id")
+                            remove("instructions")
+                            put("input", state.fullInput)
+                        }
+                        state = state.copy(
+                            fullInput = buildResponsesInput(
+                                systemPrompt = systemPrompt,
+                                systemRole = systemRoleForModel(),
+                                messages = messages,
+                                includeReasoningItems = model.contains("deepseek", ignoreCase = true)
+                            ),
+                            request = fullRequest,
+                            previousResponseId = null
+                        )
+                        fullRequest["input"] = state.fullInput
+                        accumulator = ResponsesStreamAccumulator()
+                        requestStartedAt = System.nanoTime()
+                        socket.send(fullRequest)
+                        continue
+                    }
+                    throw e
+                }
+                if (accumulator.receivedContent && !contentReceived) contentReceived = true
+                when (delta) {
+                    is ResponsesDelta.Text -> send(AIStreamChunk.TextDelta(delta.text))
+                    is ResponsesDelta.Reasoning -> send(AIStreamChunk.ReasoningDelta(delta.text))
+                    is ResponsesDelta.ToolCallDeclared -> send(AIStreamChunk.ToolCallDeclared(delta.name))
+                    null -> Unit
+                }
+            }
+            val response = accumulator.toResponse()
+            previousResponseId = response.responseId
+            submittedMessages = state.sentMessages
+            AILogger.logResponse(logSessionId, "OpenAI WebSocket", response, seq)
+            send(AIStreamChunk.Final(response))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            responsesSocket?.cancel()
+            responsesSocket = null
+            previousResponseId = null
+            submittedMessages = emptyList()
+            val enriched = e.enrichWithHttpErrorBody()
+            AILogger.logError(logSessionId, "OpenAI", enriched, seq)
+            ReasoningLearning.observe(providerId, model, enriched, effectiveReasoningCapability())
+            throw enriched
+        } finally {
+            watchdog.cancel()
         }
     }
 

@@ -951,6 +951,7 @@ fun AIChatPanel(
     val canUploadFiles = projectRoot.isNotBlank() && activeModelMetadata?.supportsTools == true
     val canUploadImages = projectRoot.isNotBlank()
     val reasoningEffort by viewModel.currentSessionReasoningEffort.collectAsStateWithLifecycle()
+    val fastMode by viewModel.currentSessionFastMode.collectAsStateWithLifecycle()
 
     val providerDashboards by (settingsViewModel?.providerDashboards?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) })
     val currentDashboardState = activeProvider?.let { providerDashboards[it.id] } ?: ProviderDashboardState.Idle
@@ -1866,6 +1867,8 @@ fun AIChatPanel(
                 onClearGoal = { viewModel.clearGoal() },
                 reasoningEffort = reasoningEffort,
                 onReasoningEffortChange = { viewModel.setSessionReasoningEffort(it) },
+                fastMode = fastMode,
+                onFastModeChange = { viewModel.setSessionFastMode(it) },
                 pendingAttachments = pendingAttachments,
                 onRemoveAttachment = ::removePendingAttachment,
                 canUploadFiles = canUploadFiles,

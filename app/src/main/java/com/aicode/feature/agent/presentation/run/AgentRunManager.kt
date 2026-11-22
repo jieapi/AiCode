@@ -1595,6 +1595,7 @@ class AgentRunManager @Inject constructor(
                 goal = sessionDomain?.goal,
                 goalStatus = sessionDomain?.goalStatus,
                 reasoningEffort = sessionDomain?.reasoningEffort?.apiValue,
+                fastMode = sessionDomain?.fastMode ?: false,
                 agentDefinition = agentDefinition,
                 turn = WorkflowTurnContext(
                     runId = runToken.toString(),

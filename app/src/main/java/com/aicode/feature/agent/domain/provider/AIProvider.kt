@@ -50,7 +50,8 @@ data class AIResponse(
      * 本轮模型直接输出的图片（Gemini Nano Banana 图像模型走 Interactions 时产出）。
      * 元素带 base64 数据；工作流负责落盘并构造 UI 附件。其他 provider / 模型恒为空。
      */
-    val images: List<AgentImage> = emptyList()
+    val images: List<AgentImage> = emptyList(),
+    val responseId: String? = null
 ) {
     val isTruncated: Boolean
         get() = stopReason in TRUNCATION_STOP_REASONS
@@ -137,6 +138,7 @@ interface AIProvider {
      * Gemini 走 Interactions API（`v1beta/interactions`）。Anthropic 忽略。
      */
     var useResponseApi: Boolean
+
     var model: String
 
     /**
@@ -213,7 +215,8 @@ interface AIProvider {
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool> = emptyList(),
-        reasoningEffort: String? = null
+        reasoningEffort: String? = null,
+        fastMode: Boolean = false
     ): AIResponse
 
     /**
@@ -226,8 +229,11 @@ interface AIProvider {
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool> = emptyList(),
-        reasoningEffort: String? = null
+        reasoningEffort: String? = null,
+        fastMode: Boolean = false
     ): Flow<AIStreamChunk>
+
+    suspend fun close() = Unit
 }
 
 private val VERSION_SEGMENT_REGEX = Regex("""^v\d+.*$""", RegexOption.IGNORE_CASE)

@@ -313,7 +313,7 @@ class PluginModelService internal constructor(
         }
         val scopeId = "plugin-$pluginId-${handle.id}"
         val provider = try {
-            providerFactory.create(config.copy(selectedModel = model), scopeId)
+            providerFactory.create(config.copy(selectedModel = model, useResponseWebSocket = false), scopeId)
         } catch (e: IllegalStateException) {
             throw PluginHostException("PROVIDER_NO_KEY", e.message ?: "provider has no usable key")
         }
@@ -516,6 +516,8 @@ class PluginModelService internal constructor(
         } catch (e: Exception) {
             flushDelta()
             finishError(stream, e, accumulated.toString(), secretValues)
+        } finally {
+            runCatching { provider.close() }
         }
     }
 

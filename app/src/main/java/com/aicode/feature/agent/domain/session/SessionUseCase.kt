@@ -269,6 +269,10 @@ class SessionUseCase @Inject constructor(
         chatSessionDao.updateReasoningEffort(sessionId, effort)
     }
 
+    suspend fun updateFastMode(sessionId: String, enabled: Boolean) {
+        chatSessionDao.updateFastMode(sessionId, enabled)
+    }
+
     suspend fun updateWorkflow(id: String, workflowId: String?, workflowState: String? = null) {
         chatSessionDao.updateWorkflow(id, workflowId, workflowState)
     }

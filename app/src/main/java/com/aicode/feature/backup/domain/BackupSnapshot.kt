@@ -145,6 +145,7 @@ data class ProviderDto(
     val isEnabled: Boolean = true,
     val useFullUrl: Boolean = false,
     val useResponseApi: Boolean = false,
+    val useResponseWebSocket: Boolean? = null,
     /** 提供商级缓存开关；null 表示旧备份无此字段，导入时回退默认值。 */
     val anthropicCacheBreakpoints: Boolean? = null,
     val openaiChatCacheKey: Boolean? = null,
@@ -203,6 +204,7 @@ data class ChatSessionDto(
     val mode: String = "BUILD",
     val modeBeforePlan: String? = null,
     val reasoningEffort: String = "MEDIUM",
+    val fastMode: Boolean = false,
     val providerId: String? = null,
     val model: String? = null,
     val isPinned: Boolean = false,

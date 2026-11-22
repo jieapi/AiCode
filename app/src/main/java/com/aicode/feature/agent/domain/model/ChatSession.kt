@@ -64,6 +64,7 @@ data class ChatSession(
     /** 设定 goal 时本会话累计输出 token 快照。 */
     val goalStartOutputTokens: Int = 0,
     val reasoningEffort: ReasoningEffort = ReasoningEffort.MEDIUM,
+    val fastMode: Boolean = false,
     val providerId: String? = null,
     val model: String? = null,
     val totalInputTokens: Int = 0,

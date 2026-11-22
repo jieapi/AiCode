@@ -118,6 +118,88 @@ class ResponsesPayloadTest {
     }
 
     @Test
+    fun websocket_continuation_input_contains_only_new_user_and_tool_items() {
+        val continuation = buildResponsesContinuationInput(
+            listOf(
+                AgentMessage.UserMessage(id = "u2", content = "继续"),
+                AgentMessage.AssistantMessage(id = "a2", content = "先查一下"),
+                AgentMessage.ToolResultMessage(id = "call_2", toolName = "readFile", result = "新文件内容")
+            )
+        )
+        assertEquals(2, continuation.size)
+        assertEquals("user", continuation[0]["role"])
+        assertEquals("继续", continuation[0]["content"])
+        assertEquals(ResponsesItem.FUNCTION_CALL_OUTPUT, continuation[1]["type"])
+        assertEquals("call_2", continuation[1]["call_id"])
+        assertEquals("新文件内容", continuation[1]["output"])
+    }
+
+    @Test
+    fun continuation_uses_only_messages_after_the_matching_snapshot() {
+        val first = AgentMessage.UserMessage(id = "u1", content = "开始")
+        val assistant = AgentMessage.AssistantMessage(id = "a1", content = "调用工具")
+        val tool = AgentMessage.ToolResultMessage(id = "call_1", toolName = "readFile", result = "结果")
+        val prior = listOf(first, assistant)
+        val result = prepareResponsesContinuationInput(
+            fullInput = listOf(mapOf("role" to "user", "content" to "完整历史")),
+            messages = prior + tool,
+            submittedMessages = prior,
+            previousResponseId = "resp_prev"
+        )
+        assertTrue(result.canContinue)
+        assertEquals("resp_prev", result.previousResponseId)
+        assertEquals(1, result.input.size)
+        assertEquals(ResponsesItem.FUNCTION_CALL_OUTPUT, result.input.single()["type"])
+        assertEquals("call_1", result.input.single()["call_id"])
+    }
+
+    @Test
+    fun continuation_falls_back_to_full_input_when_compaction_changes_history() {
+        val result = prepareResponsesContinuationInput(
+            fullInput = listOf(mapOf("role" to "user", "content" to "压缩后的上下文")),
+            messages = listOf(AgentMessage.UserMessage(id = "new", content = "压缩后的上下文")),
+            submittedMessages = listOf(AgentMessage.UserMessage(id = "old", content = "旧上下文")),
+            previousResponseId = "resp_old"
+        )
+        assertFalse(result.canContinue)
+        assertNull(result.previousResponseId)
+        assertEquals("压缩后的上下文", result.input.single()["content"])
+    }
+
+    @Test
+    fun continuation_input_keeps_new_image_user_content() {
+        val continuation = buildResponsesContinuationInput(
+            listOf(
+                AgentMessage.UserMessage(
+                    id = "u2",
+                    content = "比较这张图",
+                    images = listOf(AgentImage(mimeType = "image/png", base64Data = "PIC"))
+                )
+            )
+        )
+        val content = parts(continuation.single()["content"])
+        assertEquals(ResponsesPart.INPUT_TEXT, content[0]["type"])
+        assertEquals(ResponsesPart.INPUT_IMAGE, content[1]["type"])
+    }
+
+    @Test
+    fun continuation_input_preserves_images_from_new_tool_results() {
+        val continuation = buildResponsesContinuationInput(
+            listOf(
+                AgentMessage.ToolResultMessage(
+                    id = "call_1",
+                    toolName = "viewImage",
+                    result = "图像分析",
+                    images = listOf(AgentImage(mimeType = "image/png", base64Data = "DATA"))
+                )
+            )
+        )
+        val output = parts(continuation.single()["output"])
+        assertEquals(ResponsesPart.INPUT_TEXT, output[0]["type"])
+        assertEquals(ResponsesPart.INPUT_IMAGE, output[1]["type"])
+    }
+
+    @Test
     fun orphan_tool_result_is_dropped() {
         val items = buildResponsesInput(
             systemPrompt = "",

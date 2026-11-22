@@ -10,7 +10,8 @@ import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ProviderType
 import javax.inject.Inject
 import javax.inject.Singleton
-
+import javax.inject.Named
+import okhttp3.OkHttpClient
 /**
  * 按提供商配置装配一个新的 [AIProvider] 实例。
  *
@@ -20,6 +21,8 @@ import javax.inject.Singleton
 @Singleton
 class ProviderInstanceFactory @Inject constructor(
     private val openAIApi: OpenAIApi,
+    private val okHttpClient: OkHttpClient,
+    @Named("OpenAIResponsesWebSocket") private val webSocketClient: OkHttpClient,
     private val anthropicApi: AnthropicApi,
     private val geminiApi: GeminiApi,
     private val keyRotator: ProviderKeyRotator,
@@ -33,7 +36,7 @@ class ProviderInstanceFactory @Inject constructor(
                 it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
             }
             ProviderType.GEMINI -> GeminiAdapter(geminiApi)
-            else -> OpenAIAdapter(openAIApi).also {
+            else -> OpenAIAdapter(openAIApi, okHttpClient, webSocketClient).also {
                 it.chatCacheKeyEnabled = config.openaiChatCacheKey
             }
         }
@@ -73,6 +76,9 @@ class ProviderInstanceFactory @Inject constructor(
         provider.model = config.effectiveModel
         provider.useFullUrl = config.useFullUrl
         provider.useResponseApi = config.useResponseApi
+        if (provider is OpenAIAdapter) {
+            provider.useResponseWebSocket = config.useResponseApi && config.useResponseWebSocket
+        }
         provider.providerId = config.id
         provider.logSessionId = scopeId
         provider.customHeaders = config.customHeaders

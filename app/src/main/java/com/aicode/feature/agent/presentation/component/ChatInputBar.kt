@@ -111,6 +111,7 @@ import com.aicode.feature.settings.domain.model.AIProviderConfig
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.domain.model.modelMetadataKey
 import com.aicode.feature.settings.domain.model.ProviderDashboardState
+import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.workspace.presentation.WorkspaceViewModel
 import com.aicode.feature.workspace.presentation.component.WorkspaceIconButton
 import com.aicode.core.ui.ExpandableChevronIcon
@@ -168,6 +169,8 @@ internal fun ChatInputBar(
     onClearGoal: () -> Unit = {},
     reasoningEffort: ReasoningEffort,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
+    fastMode: Boolean,
+    onFastModeChange: (Boolean) -> Unit,
     pendingAttachments: List<PendingUploadAttachment>,
     onRemoveAttachment: (Int) -> Unit,
     canUploadFiles: Boolean,
@@ -625,13 +628,16 @@ internal fun ChatInputBar(
                         val capability = reasoningCapabilityOf(activeProvider, activeProvider?.effectiveModel.orEmpty(), modelMetadata)
                         val hasReasoningControl = !capability.isKnown ||
                             capability.levels.isNotEmpty() || capability.canDisable
-                        if (hasReasoningControl) {
+                        if (hasReasoningControl || activeProvider?.type == ProviderType.OPENAI) {
                             ReasoningEffortSelector(
                                 effort = reasoningEffort,
                                 capability = capability,
                                 protocol = activeProvider?.let { reasoningProtocolOf(it) } ?: ReasoningProtocol.OPENAI_CHAT,
                                 model = activeProvider?.effectiveModel.orEmpty(),
                                 onChange = onReasoningEffortChange,
+                                fastMode = fastMode,
+                                showFastMode = activeProvider?.type == ProviderType.OPENAI,
+                                onFastModeChange = onFastModeChange,
                                 enabled = !isBusy
                             )
                         }

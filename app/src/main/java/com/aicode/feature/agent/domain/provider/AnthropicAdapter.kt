@@ -75,7 +75,8 @@ class AnthropicAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): AIResponse {
         val anthropicMessages = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
 
@@ -161,7 +162,8 @@ class AnthropicAdapter @Inject constructor(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
-        reasoningEffort: String?
+        reasoningEffort: String?,
+        fastMode: Boolean
     ): Flow<AIStreamChunk> = channelFlow {
         val anthropicMessages = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
         val toolDefs = tools.takeIf { it.isNotEmpty() }?.mapIndexed { index, tool ->

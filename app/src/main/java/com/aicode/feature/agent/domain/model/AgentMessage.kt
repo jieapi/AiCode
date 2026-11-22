@@ -82,6 +82,8 @@ data class AgentContext(
     val goalStatus: GoalStatus? = null,
     /** 思考强度（"low"/"medium"/"high"），随每次 LLM 请求传给支持的 provider。 */
     val reasoningEffort: String? = null,
+    /** 当前会话是否为 OpenAI 请求启用 Fast 服务档位。 */
+    val fastMode: Boolean = false,
     /**
      * 本会话绑定的自定义子代理定义；非空表示这是一个按定义运行的子代理会话，
      * 系统提示词与工具集都按其配置组装（见 [com.aicode.feature.agent.domain.prompt.SystemPromptProvider]）。

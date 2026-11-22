@@ -1,5 +1,6 @@
 package com.aicode.feature.agent.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.Index
@@ -31,6 +32,8 @@ data class ChatSessionEntity(
     val goalStartInputTokens: Int = 0,
     val goalStartOutputTokens: Int = 0,
     val reasoningEffort: String = ReasoningEffort.MEDIUM.name,
+    @ColumnInfo(defaultValue = "0")
+    val fastMode: Boolean = false,
     val providerId: String? = null,
     val model: String? = null,
     val totalInputTokens: Int = 0,
@@ -67,6 +70,7 @@ data class ChatSessionEntity(
         goalStartInputTokens = goalStartInputTokens,
         goalStartOutputTokens = goalStartOutputTokens,
         reasoningEffort = runCatching { ReasoningEffort.valueOf(reasoningEffort) }.getOrDefault(ReasoningEffort.MEDIUM),
+        fastMode = fastMode,
         providerId = providerId,
         model = model,
         totalInputTokens = totalInputTokens,
@@ -96,6 +100,7 @@ data class ChatSessionEntity(
             goalStartInputTokens = session.goalStartInputTokens,
             goalStartOutputTokens = session.goalStartOutputTokens,
             reasoningEffort = session.reasoningEffort.name,
+            fastMode = session.fastMode,
             providerId = session.providerId,
             model = session.model,
             totalInputTokens = session.totalInputTokens,
