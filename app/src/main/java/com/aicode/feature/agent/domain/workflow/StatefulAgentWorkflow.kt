@@ -599,6 +599,14 @@ class StatefulAgentWorkflow @Inject constructor(
                         actionQueue.addLast(result.nextAction)
                     }
                     is AgentSideEffect.RequestPermission -> {
+                        if (hookSessionId != null) {
+                            agentNotificationCenter.peek(hookSessionId)
+                                .lastOrNull { it.kind == AgentNotificationKind.MODE_CHANGE }
+                                ?.newMode
+                                ?.let { newMode ->
+                                    currentContext = applyExternalModeChange(currentContext, newMode)
+                                }
+                        }
                         val tool = toolRegistry.getTool(effect.toolCall.name)
                         var toolCall = effect.toolCall
                         val hookDecision = if (tool != null && hookSessionId != null) {
@@ -1118,7 +1126,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         currentContext = newContext
                         rawResult = appendPlanModeNotice(rawResult, buildModeSwitchNotice(newContext.mode))
                     } else {
-                        currentContext = currentContext.copy(mode = AgentMode.PLAN)
+                        currentContext = currentContext.withMode(AgentMode.PLAN)
                         rawResult = ToolResult.Error(
                             appContext.getString(R.string.plan_mode_refinement_requested),
                             "MODE_SWITCH_REJECTED"
@@ -1172,15 +1180,7 @@ class StatefulAgentWorkflow @Inject constructor(
             val modeChange = notifications.lastOrNull { it.kind == AgentNotificationKind.MODE_CHANGE }
             val newMode = modeChange?.newMode
             if (newMode != null) {
-                val previousMode = currentContext.mode
-                currentContext = if (newMode == AgentMode.PLAN) {
-                    currentContext.copy(
-                        mode = AgentMode.PLAN,
-                        modeBeforePlan = if (previousMode != AgentMode.PLAN) previousMode else currentContext.modeBeforePlan
-                    )
-                } else {
-                    currentContext.copy(mode = newMode, modeBeforePlan = null)
-                }
+                currentContext = applyExternalModeChange(currentContext, newMode)
             }
             val last = batchResults.last()
             val outgoingNotifications = if (newMode != null) {
@@ -1608,6 +1608,18 @@ class StatefulAgentWorkflow @Inject constructor(
         else -> "png"
     }
 
+    private fun applyExternalModeChange(context: AgentContext, newMode: AgentMode): AgentContext {
+        val previousMode = context.mode
+        return if (newMode == AgentMode.PLAN) {
+            context.withMode(
+                mode = AgentMode.PLAN,
+                modeBeforePlan = if (previousMode != AgentMode.PLAN) previousMode else context.modeBeforePlan
+            )
+        } else {
+            context.withMode(mode = newMode, modeBeforePlan = null)
+        }
+    }
+
     private fun checkAndUpdateMode(toolCall: ToolCall, isError: Boolean, currentContext: AgentContext): Pair<AgentContext, Boolean> {
         if (toolCall.name == "planMode" && !isError) {
             val action = (toolCall.arguments["action"] as? JsonPrimitive)?.content?.trim()?.lowercase()
@@ -1615,10 +1627,16 @@ class StatefulAgentWorkflow @Inject constructor(
             when (action) {
                 // 进入 PLAN 时记住当前模式；退出时恢复到它（AUTO→PLAN 的规划往返结束后回到 AUTO 而非 BUILD）。
                 "enter" -> if (currentContext.mode != AgentMode.PLAN) {
-                    return currentContext.copy(mode = AgentMode.PLAN, modeBeforePlan = currentContext.mode) to true
+                    return currentContext.withMode(
+                        mode = AgentMode.PLAN,
+                        modeBeforePlan = currentContext.mode
+                    ) to true
                 }
                 "exit" -> if (currentContext.mode == AgentMode.PLAN) {
-                    return currentContext.copy(mode = currentContext.modeBeforePlan ?: AgentMode.BUILD) to true
+                    return currentContext.withMode(
+                        mode = currentContext.modeBeforePlan ?: AgentMode.BUILD,
+                        modeBeforePlan = null
+                    ) to true
                 }
             }
         }

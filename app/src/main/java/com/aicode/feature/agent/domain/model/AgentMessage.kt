@@ -97,4 +97,13 @@ data class AgentContext(
      */
     val permissionMode: AgentMode
         get() = turn?.permissionMode ?: if (goalStatus == GoalStatus.ACTIVE) AgentMode.AUTO else mode
+
+    fun withMode(mode: AgentMode, modeBeforePlan: AgentMode? = this.modeBeforePlan): AgentContext {
+        val nextPermissionMode = if (goalStatus == GoalStatus.ACTIVE) AgentMode.AUTO else mode
+        return copy(
+            mode = mode,
+            modeBeforePlan = modeBeforePlan,
+            turn = turn?.copy(permissionMode = nextPermissionMode)
+        )
+    }
 }

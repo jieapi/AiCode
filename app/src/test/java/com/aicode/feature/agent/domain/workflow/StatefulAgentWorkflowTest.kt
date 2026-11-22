@@ -51,6 +51,9 @@ class StatefulAgentWorkflowTest {
     private val outputStore = mockk<com.aicode.feature.agent.domain.tool.ToolOutputStore>(relaxed = true)
     private val policy = mockk<com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine>(relaxed = true)
     private val sessions = mockk<com.aicode.feature.agent.domain.session.SessionUseCase>(relaxed = true)
+    private val planApprovalManager = mockk<com.aicode.feature.agent.domain.tool.mode.PlanApprovalManager>(relaxed = true)
+    private val notificationCenter = mockk<com.aicode.feature.agent.domain.notification.AgentNotificationCenter>(relaxed = true)
+    private val eventInjector = mockk<com.aicode.feature.agent.domain.notification.AgentEventInjector>(relaxed = true)
     private val workflow = StatefulAgentWorkflow(
         toolRegistry = tools,
         aiProviderRepository = providers,
@@ -59,7 +62,7 @@ class StatefulAgentWorkflowTest {
         permissionManager = mockk(relaxed = true),
         policyEngine = policy,
         contextCompactor = compactor,
-        planApprovalManager = mockk(relaxed = true),
+        planApprovalManager = planApprovalManager,
         toolOutputStore = outputStore,
         modelMetadataService = metadata,
         compactionModelSettingsRepository = compactionSettings,
@@ -69,8 +72,8 @@ class StatefulAgentWorkflowTest {
         messagePersistenceUseCase = mockk(relaxed = true),
         checkpointManager = checkpoints,
         llmCallRecordDao = mockk(relaxed = true),
-        agentNotificationCenter = mockk(relaxed = true),
-        eventInjector = mockk(relaxed = true),
+        agentNotificationCenter = notificationCenter,
+        eventInjector = eventInjector,
         fileAccess = mockk(relaxed = true),
         pluginHookDispatcher = hooks,
         appContext = mockk(relaxed = true)
@@ -95,7 +98,7 @@ class StatefulAgentWorkflowTest {
         coEvery { compactionSettings.getCompactionProviderId() } returns ""
         coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata(id = "model", contextTokens = 128_000)
         coEvery {
-            compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any())
+            compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
         } answers { CompactionResult(firstArg(), compacted = false) }
     }
 
@@ -381,5 +384,223 @@ class StatefulAgentWorkflowTest {
         assertEquals(response.messageId, events.filterIsInstance<AgentEvent.ReasoningDelta>().single().messageId)
         assertTrue(events.none { it is AgentEvent.AssistantDelta })
         assertEquals(1, events.filterIsInstance<AgentEvent.Failed>().size)
+    }
+
+    @Test
+    fun exitingPlanWithTurnContextSyncsPermissionModeToAutoForSubsequentBash() = runTest {
+        every { prompts.resolvePrompt(any()) } returns ""
+        every { outputStore.process(any(), any(), any()) } answers { thirdArg() }
+        coEvery { hooks.beforeToolCall(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            com.aicode.feature.plugin.runtime.ToolBeforeHookResult()
+
+        val planTool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { planTool.name } returns "planMode"
+        coEvery { planTool.executeWithContext(any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("exited"))
+
+        val bashTool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { bashTool.name } returns "Bash"
+        coEvery { bashTool.executeWithContext(any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("ok"))
+
+        every { tools.getTool("planMode") } returns planTool
+        every { tools.getTool("Bash") } returns bashTool
+        coEvery {
+            planApprovalManager.awaitApproval(any(), any())
+        } returns com.aicode.feature.agent.domain.tool.mode.PlanApprovalChoice.APPROVE
+
+        val evaluatedModes = mutableListOf<com.aicode.feature.agent.domain.model.AgentMode>()
+        coEvery { policy.evaluate(bashTool, "Bash", any(), capture(evaluatedModes)) } answers {
+            val mode = arg<com.aicode.feature.agent.domain.model.AgentMode>(3)
+            if (mode == com.aicode.feature.agent.domain.model.AgentMode.PLAN) {
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                    com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.DENY,
+                    emptyList(),
+                    denyReason = "denied in plan"
+                )
+            } else {
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                    com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.ALLOW,
+                    emptyList()
+                )
+            }
+        }
+
+        val exitArgs = mapOf(
+            "action" to kotlinx.serialization.json.JsonPrimitive("exit"),
+            "reason" to kotlinx.serialization.json.JsonPrimitive("ready")
+        )
+        val bashArgs = mapOf("command" to kotlinx.serialization.json.JsonPrimitive("ls"))
+        every { provider.completeStream(any(), any(), any(), any()) } returnsMany listOf(
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c1", "planMode", exitArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c2", "Bash", bashArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("done")))
+        )
+
+        val runContext = context.copy(
+            sessionId = "sess-1",
+            mode = com.aicode.feature.agent.domain.model.AgentMode.PLAN,
+            modeBeforePlan = com.aicode.feature.agent.domain.model.AgentMode.AUTO,
+            turn = WorkflowTurnContext(
+                runId = "run-1",
+                sessionRef = SessionRef.Room("sess-1"),
+                providerId = null,
+                model = null,
+                workflowState = null,
+                permissionMode = com.aicode.feature.agent.domain.model.AgentMode.PLAN,
+                persistence = TurnPersistence.Noop
+            )
+        )
+
+        val events = collectEvents(runContext)
+        val finished = events.filterIsInstance<AgentEvent.ToolCallFinished>()
+        assertEquals(listOf(com.aicode.feature.agent.domain.model.AgentMode.AUTO), evaluatedModes)
+        assertTrue(finished.none { it.isError })
+    }
+
+    @Test
+    fun pendingManualModeChangeToAutoSyncsTurnPermissionBeforeRequestPermission() = runTest {
+        every { prompts.resolvePrompt(any()) } returns ""
+        every { outputStore.process(any(), any(), any()) } answers { thirdArg() }
+        every { eventInjector.inject(any(), any()) } answers { firstArg() }
+        coEvery { hooks.beforeToolCall(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            com.aicode.feature.plugin.runtime.ToolBeforeHookResult()
+
+        val bashTool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { bashTool.name } returns "Bash"
+        coEvery { bashTool.executeWithContext(any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("ok"))
+        every { tools.getTool("Bash") } returns bashTool
+
+        val pendingModeChange = com.aicode.feature.agent.domain.notification.PendingNotification(
+            kind = com.aicode.feature.agent.domain.notification.AgentNotificationKind.MODE_CHANGE,
+            sourceId = "user",
+            title = "AUTO",
+            outcome = com.aicode.feature.agent.domain.notification.NotificationOutcome.COMPLETED,
+            newMode = com.aicode.feature.agent.domain.model.AgentMode.AUTO,
+            seq = 1L
+        )
+        every { notificationCenter.peek("sess-1") } returns listOf(pendingModeChange)
+
+        val evaluatedModes = mutableListOf<com.aicode.feature.agent.domain.model.AgentMode>()
+        coEvery { policy.evaluate(bashTool, "Bash", any(), capture(evaluatedModes)) } returns
+            com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.ALLOW,
+                emptyList()
+            )
+
+        val bashArgs = mapOf("command" to kotlinx.serialization.json.JsonPrimitive("ls"))
+        every { provider.completeStream(any(), any(), any(), any()) } returnsMany listOf(
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c1", "Bash", bashArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("done")))
+        )
+
+        val runContext = context.copy(
+            sessionId = "sess-1",
+            mode = com.aicode.feature.agent.domain.model.AgentMode.PLAN,
+            turn = WorkflowTurnContext(
+                runId = "run-1",
+                sessionRef = SessionRef.Room("sess-1"),
+                providerId = null,
+                model = null,
+                workflowState = null,
+                permissionMode = com.aicode.feature.agent.domain.model.AgentMode.PLAN,
+                persistence = TurnPersistence.Noop
+            )
+        )
+
+        val events = collectEvents(runContext)
+        val finished = events.filterIsInstance<AgentEvent.ToolCallFinished>().single()
+        assertEquals(listOf(com.aicode.feature.agent.domain.model.AgentMode.AUTO), evaluatedModes)
+        assertTrue(!finished.isError)
+        io.mockk.verify(exactly = 1) { notificationCenter.ack("sess-1", listOf(1L)) }
+    }
+
+    @Test
+    fun rejectedPlanExitRollsBackPermissionModeToPlanAndPreservesModeBeforePlan() = runTest {
+        every { prompts.resolvePrompt(any()) } returns ""
+        every { outputStore.process(any(), any(), any()) } answers { thirdArg() }
+        coEvery { hooks.beforeToolCall(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            com.aicode.feature.plugin.runtime.ToolBeforeHookResult()
+
+        val planTool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { planTool.name } returns "planMode"
+        coEvery { planTool.executeWithContext(any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("ok"))
+
+        val bashTool = mockk<com.aicode.feature.agent.domain.tool.AgentTool>(relaxed = true)
+        every { bashTool.name } returns "Bash"
+        coEvery { bashTool.executeWithContext(any(), any()) } returns
+            com.aicode.feature.agent.domain.tool.ToolResult.Success(kotlinx.serialization.json.JsonPrimitive("ok"))
+
+        every { tools.getTool("planMode") } returns planTool
+        every { tools.getTool("Bash") } returns bashTool
+        coEvery {
+            planApprovalManager.awaitApproval(any(), any())
+        } returnsMany listOf(
+            com.aicode.feature.agent.domain.tool.mode.PlanApprovalChoice.REFINE,
+            com.aicode.feature.agent.domain.tool.mode.PlanApprovalChoice.APPROVE
+        )
+
+        val evaluatedModes = mutableListOf<com.aicode.feature.agent.domain.model.AgentMode>()
+        coEvery { policy.evaluate(bashTool, "Bash", any(), capture(evaluatedModes)) } answers {
+            val mode = arg<com.aicode.feature.agent.domain.model.AgentMode>(3)
+            if (mode == com.aicode.feature.agent.domain.model.AgentMode.PLAN) {
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                    com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.DENY,
+                    emptyList(),
+                    denyReason = "denied in plan"
+                )
+            } else {
+                com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.EvalResult(
+                    com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.ALLOW,
+                    emptyList()
+                )
+            }
+        }
+
+        val enterArgs = mapOf(
+            "action" to kotlinx.serialization.json.JsonPrimitive("enter"),
+            "reason" to kotlinx.serialization.json.JsonPrimitive("plan")
+        )
+        val exitArgs = mapOf(
+            "action" to kotlinx.serialization.json.JsonPrimitive("exit"),
+            "reason" to kotlinx.serialization.json.JsonPrimitive("ready")
+        )
+        val bashArgs = mapOf("command" to kotlinx.serialization.json.JsonPrimitive("ls"))
+        every { provider.completeStream(any(), any(), any(), any()) } returnsMany listOf(
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c1", "planMode", enterArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c2", "planMode", exitArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c3", "Bash", bashArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c4", "planMode", exitArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("", toolCalls = listOf(ToolCall("c5", "Bash", bashArgs))))),
+            flowOf(AIStreamChunk.Final(AIResponse("done")))
+        )
+
+        val runContext = context.copy(
+            sessionId = "sess-1",
+            mode = com.aicode.feature.agent.domain.model.AgentMode.AUTO,
+            turn = WorkflowTurnContext(
+                runId = "run-1",
+                sessionRef = SessionRef.Room("sess-1"),
+                providerId = null,
+                model = null,
+                workflowState = null,
+                permissionMode = com.aicode.feature.agent.domain.model.AgentMode.AUTO,
+                persistence = TurnPersistence.Noop
+            )
+        )
+
+        val events = collectEvents(runContext)
+        val finished = events.filterIsInstance<AgentEvent.ToolCallFinished>()
+        assertEquals(
+            listOf(
+                com.aicode.feature.agent.domain.model.AgentMode.PLAN,
+                com.aicode.feature.agent.domain.model.AgentMode.AUTO
+            ),
+            evaluatedModes
+        )
+        assertTrue(finished.first { it.id == "c3" }.isError)
+        assertTrue(!finished.first { it.id == "c5" }.isError)
     }
 }
