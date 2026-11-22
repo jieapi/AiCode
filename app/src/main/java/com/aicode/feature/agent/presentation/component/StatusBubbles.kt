@@ -13,7 +13,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -29,7 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
@@ -671,23 +669,8 @@ private val REASONING_PREVIEW_MARKERS = charArrayOf(' ', '\t', '#', '*', '-', '>
 /** 思考展开窗口的最大高度：超出后在窗口内滚动，不再无限撑高、拖走整页滚动。 */
 private val ReasoningWindowMaxHeight = 300.dp
 
-/**
- * 思考窗口内层懒列表的预组合窗口。
- *
- * 长思考由大量 Markdown 段落组成，滚动时每个新段落首次进入视口都要做一次注解与文本测量，
- * 这段工作落在滚动帧里就会掉帧。视口前后各预组合一屏，把首次组合提前到滚动之前，
- * 同时让来回滚动时已看过的段落继续留在组合树里，不再反复冷启动。
- */
-@OptIn(ExperimentalFoundationApi::class)
-private val ReasoningCacheWindow = LazyLayoutCacheWindow(
-    ahead = ReasoningWindowMaxHeight,
-    behind = ReasoningWindowMaxHeight / 2
-)
-
-/** 新建思考窗口的滚动状态：带预组合窗口，长思考滚动更稳。 */
-@OptIn(ExperimentalFoundationApi::class)
-internal fun newReasoningScrollState(): LazyListState =
-    LazyListState(ReasoningCacheWindow, 0, 0)
+/** 新建思考窗口的滚动状态，供会话切换时保留各自的滚动位置。 */
+internal fun newReasoningScrollState(): LazyListState = LazyListState()
 
 /**
  * 思考过程折叠行：左对齐、浅色弱化，与正式回复区分。默认展开态由 [defaultExpanded] 决定
@@ -702,7 +685,6 @@ internal fun newReasoningScrollState(): LazyListState =
  * [live] 表示思考仍在进行中：折叠行的预览取最后一行、跟着内容滚动，不展开也能看到模型在想什么；
  * 思考结束后预览固定为第一行。
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ReasoningBubble(
     text: String,
@@ -723,7 +705,7 @@ internal fun ReasoningBubble(
     defaultExpanded: Boolean = false,
     /** 手动展开/收起时回传新状态，由上层持久化。 */
     onExpandedChange: ((Boolean) -> Unit)? = null,
-    scrollState: LazyListState = rememberLazyListState(ReasoningCacheWindow, 0, 0),
+    scrollState: LazyListState = rememberLazyListState(),
     streamingCacheKey: String? = null,
 ) {
     var localExpanded by remember { mutableStateOf(defaultExpanded) }
