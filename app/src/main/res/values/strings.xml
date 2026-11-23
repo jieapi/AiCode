@@ -2218,10 +2218,13 @@
     <string name="plugins_store_incompatible">不兼容</string>
     <string name="plugins_store_requires_min_version">要求 AiCode >= %1$s</string>
     <string name="plugins_store_retry">重试</string>
+    <string name="plugins_store_download_preparing">正在查找并准备插件包…</string>
+    <string name="plugins_store_download_progress">正在下载：%1$d%%</string>
+    <string name="plugins_store_download_cancel">取消下载</string>
     <string name="plugins_store_error_network">无法连接索引仓库，请检查网络或地址。</string>
     <string name="plugins_store_error_invalid">索引内容无效，已拒绝加载。</string>
     <string name="plugins_store_error_no_release">未找到可安装的插件版本。</string>
-    <string name="plugins_store_error_download">插件包下载失败，请稍后重试。</string>
+    <string name="plugins_store_error_download">插件包下载失败，请检查网络连接后重试。</string>
     <string name="plugins_store_error_preview">插件包无法读取，安装已取消。</string>
     <string name="plugins_store_refresh_done">索引刷新完成</string>
     <string name="plugins_store_refresh_done_failed">索引刷新完成，失败 %1$d 个</string>
@@ -2245,6 +2248,17 @@
     <string name="plugins_install_repository_label">插件源码仓库</string>
     <string name="plugins_install_repository_hint">请输入上方显示的完整源码仓库地址</string>
     <string name="plugins_install_repository_mismatch">地址不匹配，无法继续</string>
+    <string name="plugins_repository_short_hint">owner/repository</string>
+    <string name="plugins_unofficial_install_title">安装 %1$s</string>
+    <string name="plugins_unofficial_install_step">第 %1$d 步，共 3 步</string>
+    <string name="plugins_unofficial_risk_notice">如果你不阅读以下内容，可能会发生意料之外的危险后果。</string>
+    <string name="plugins_unofficial_risk_execution">此插件将在你的设备环境中运行第三方代码。AiCode 无法对其行为进行隔离或安全审计，请仅在完全信任作者与来源时继续。</string>
+    <string name="plugins_unofficial_risk_source">该插件并非官方团队发布或审核。官方不对其稳定性、安全性、合规性及后续版本行为承担担保责任。</string>
+    <string name="plugins_unofficial_risk_files">插件声明的运行时、工具和页面可能访问它获准使用的宿主能力，并处理文件、网络请求或会话数据。</string>
+    <string name="plugins_unofficial_risk_footer">该插件并非官方团队发布。请仅在你完全信任其作者与来源时继续。</string>
+    <string name="plugins_unofficial_repository_prompt">如需确认，请在下方输入框中键入该插件的仓库地址</string>
+    <string name="plugins_unofficial_acknowledge">我已阅读并理解上述风险</string>
+    <string name="plugins_unofficial_continue">继续</string>
 
     <string name="plugins_permissions_section">权限</string>
     <string name="plugins_shizuku_section">Shizuku</string>

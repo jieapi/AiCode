@@ -44,12 +44,20 @@ import java.net.URI
 /** 单次最多逐条列出的导入问题数，其余折叠成「还有 N 个问题」。 */
 private const val MAX_LISTED_ERRORS = 5
 
-/** 只做明确的等价归一：去空白、末尾斜杠与 .git 后缀，scheme/host 小写。 */
-private fun normalizeRepositoryInput(raw: String): String {
+/** GitHub 仓库地址允许 `owner/repository` 简写，其余只归一化 scheme/host 大小写及尾部斜杠、`.git`。 */
+internal fun normalizeRepositoryInput(raw: String): String {
     val text = raw.trim().trimEnd('/').removeSuffix(".git")
+    if (text.matches(Regex("^[^/:]+/[^/:]+$"))) return "https://github.com/$text"
     return runCatching {
         val uri = URI(text)
-        "${uri.scheme.lowercase()}://${uri.host.lowercase()}${uri.path.orEmpty().trimEnd('/')}"
+        val scheme = uri.scheme ?: return@runCatching text
+        val host = uri.host ?: return@runCatching text
+        val userInfo = uri.rawUserInfo?.let { "$it@" }.orEmpty()
+        val port = uri.port.takeIf { it >= 0 }?.let { ":$it" }.orEmpty()
+        val path = uri.rawPath.orEmpty().trimEnd('/')
+        val query = uri.rawQuery?.let { "?$it" }.orEmpty()
+        val fragment = uri.rawFragment?.let { "#$it" }.orEmpty()
+        "${scheme.lowercase()}://$userInfo${host.lowercase()}$port$path$query$fragment"
     }.getOrDefault(text)
 }
 
@@ -61,11 +69,15 @@ internal fun PluginImportHost(viewModel: PluginsViewModel) {
         PluginImportState.Idle -> Unit
         PluginImportState.Reading -> ProgressDialog(R.string.plugins_reading)
         is PluginImportState.Failed -> ImportFailedDialog(current.errors, onDismiss = viewModel::dismissImport)
-        is PluginImportState.Preview -> PluginPreviewSheet(
-            state = current,
-            onInstall = viewModel::confirmInstall,
-            onDismiss = viewModel::dismissImport
-        )
+        is PluginImportState.Preview -> if (current.installImmediately && current.installing) {
+            ProgressDialog(R.string.plugins_installing)
+        } else {
+            PluginPreviewSheet(
+                state = current,
+                onInstall = viewModel::confirmInstall,
+                onDismiss = viewModel::dismissImport
+            )
+        }
     }
 }
 
@@ -115,7 +127,9 @@ private fun PluginPreviewSheet(
     val languageTag = currentLanguageTag()
     val expectedRepository = state.expectedRepository
     val requiresManualRepository = expectedRepository != null && !state.officialSource
-    var repositoryInput by rememberSaveable(state.preview.token) { mutableStateOf("") }
+    var repositoryInput by rememberSaveable(state.preview.token) {
+        mutableStateOf(state.expectedRepository.takeIf { state.installImmediately }.orEmpty())
+    }
     val repositoryMatches = !requiresManualRepository ||
         normalizeRepositoryInput(repositoryInput) == normalizeRepositoryInput(expectedRepository.orEmpty())
 

@@ -11,6 +11,7 @@ import com.aicode.feature.plugin.data.index.PluginLogoCacheEntry
 import com.aicode.feature.plugin.data.index.PluginIndexSource
 import com.aicode.feature.plugin.data.index.PluginOfficialRepositories
 import com.aicode.feature.plugin.data.index.PluginIndexSourceRepository
+import com.aicode.feature.plugin.data.index.isPluginIndexCacheFresh
 import com.aicode.feature.plugin.domain.PluginError
 import com.aicode.feature.plugin.domain.PluginInstallOrigin
 import com.aicode.feature.plugin.domain.PluginManager
@@ -19,7 +20,12 @@ import com.aicode.feature.plugin.domain.PluginPreviewResult
 import com.aicode.feature.plugin.domain.SemVer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -44,7 +50,8 @@ data class PluginStorePreview(
     val origin: PluginInstallOrigin,
     val expectedRepository: String?,
     val sourceLabel: String,
-    val officialSource: Boolean
+    val officialSource: Boolean,
+    val installImmediately: Boolean
 )
 
 enum class PluginStoreErrorCode {
@@ -74,6 +81,7 @@ data class PluginStoreUiState(
     val updatesByPluginId: Map<String, PluginStoreItem> = emptyMap(),
     val error: PluginStoreError? = null,
     val installingPluginId: String? = null,
+    val downloadProgress: Float? = null,
     val preview: PluginStorePreview? = null
 )
 
@@ -94,6 +102,7 @@ class PluginStoreViewModel @Inject constructor(
     /** 来源地址列表变化时才重新拉取；markFetched 等只改时间戳的写入不会触发加载。 */
     private var loadedUrls: List<String>? = null
     private var loadToken = 0
+    private var installJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -133,7 +142,10 @@ class PluginStoreViewModel @Inject constructor(
 
     fun openStore() {
         if (_state.value.loading) return
-        refresh()
+        val now = System.currentTimeMillis()
+        if (_state.value.sources.any { !isPluginIndexCacheFresh(it.lastFetchedAt, now) }) {
+            loadAll(force = false)
+        }
     }
 
     suspend fun readPluginLogoCache(url: String): PluginLogoCacheEntry? =
@@ -229,15 +241,28 @@ class PluginStoreViewModel @Inject constructor(
         )
     }
 
-    fun install(item: PluginStoreItem) {
+    fun install(item: PluginStoreItem, confirmedUnofficial: Boolean = false) {
         if (!item.compatible) return
         if (_state.value.installingPluginId != null) return
-        _state.update { it.copy(installingPluginId = item.plugin.id, error = null) }
-        viewModelScope.launch(Dispatchers.IO) {
+        _state.update {
+            it.copy(installingPluginId = item.plugin.id, downloadProgress = null, error = null)
+        }
+        val job = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            val currentJob = currentCoroutineContext()[Job]
             try {
                 val asset = client.resolveRelease(item.plugin)
-                val packageFile = client.download(asset)
+                val packageFile = client.download(asset) { downloadedBytes, totalBytes ->
+                    val progress = (downloadedBytes.toFloat() / totalBytes.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                    _state.update { current ->
+                        if (current.installingPluginId == item.plugin.id) {
+                            current.copy(downloadProgress = progress)
+                        } else {
+                            current
+                        }
+                    }
+                }
                 val result = packageFile.file.inputStream().use { manager.preview(it) }
+                currentCoroutineContext().ensureActive()
                 when (result) {
                     is PluginPreviewResult.Ready -> {
                         val preview = result.preview
@@ -251,6 +276,7 @@ class PluginStoreViewModel @Inject constructor(
                             _state.update {
                                 it.copy(
                                     installingPluginId = null,
+                                    downloadProgress = null,
                                     error = PluginStoreError(
                                         code = PluginStoreErrorCode.PREVIEW_FAILED,
                                         pluginId = item.plugin.id
@@ -263,6 +289,7 @@ class PluginStoreViewModel @Inject constructor(
                         _state.update {
                             it.copy(
                                 installingPluginId = null,
+                                downloadProgress = null,
                                 preview = PluginStorePreview(
                                     preview = preview,
                                     origin = PluginInstallOrigin(
@@ -275,7 +302,8 @@ class PluginStoreViewModel @Inject constructor(
                                     ),
                                     expectedRepository = if (official) null else item.plugin.repository,
                                     sourceLabel = item.source.name,
-                                    officialSource = official
+                                    officialSource = official,
+                                    installImmediately = official || confirmedUnofficial
                                 )
                             )
                         }
@@ -283,6 +311,7 @@ class PluginStoreViewModel @Inject constructor(
                     is PluginPreviewResult.Failed -> _state.update {
                         it.copy(
                             installingPluginId = null,
+                            downloadProgress = null,
                             error = PluginStoreError(
                                 code = PluginStoreErrorCode.PREVIEW_FAILED,
                                 pluginError = result.errors.firstOrNull(),
@@ -291,10 +320,13 @@ class PluginStoreViewModel @Inject constructor(
                         )
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: NoMatchingReleaseException) {
                 _state.update {
                     it.copy(
                         installingPluginId = null,
+                        downloadProgress = null,
                         error = PluginStoreError(
                             code = PluginStoreErrorCode.NO_COMPATIBLE_RELEASE,
                             detail = e.message,
@@ -307,6 +339,7 @@ class PluginStoreViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         installingPluginId = null,
+                        downloadProgress = null,
                         error = PluginStoreError(
                             code = PluginStoreErrorCode.DOWNLOAD_FAILED,
                             detail = e.message,
@@ -314,6 +347,24 @@ class PluginStoreViewModel @Inject constructor(
                         )
                     )
                 }
+            } finally {
+                if (installJob === currentJob) installJob = null
+            }
+        }
+        installJob = job
+        job.start()
+    }
+
+    fun cancelInstall() {
+        val pluginId = _state.value.installingPluginId ?: return
+        val job = installJob ?: return
+        installJob = null
+        job.cancel()
+        _state.update { current ->
+            if (current.installingPluginId == pluginId) {
+                current.copy(installingPluginId = null, downloadProgress = null, error = null)
+            } else {
+                current
             }
         }
     }

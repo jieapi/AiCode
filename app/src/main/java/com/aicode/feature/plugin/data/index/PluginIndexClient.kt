@@ -15,15 +15,21 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.Serializable
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 data class PluginIndexSnapshot(
     val index: PluginIndexDocument,
@@ -38,6 +44,10 @@ data class PluginLogoCacheEntry(
 )
 
 internal const val PLUGIN_LOGO_CACHE_TTL_MS = 7L * 24 * 60 * 60 * 1000
+internal const val PLUGIN_INDEX_CACHE_TTL_MS = 60L * 60 * 1000
+
+internal fun isPluginIndexCacheFresh(lastFetchedAt: Long, now: Long): Boolean =
+    lastFetchedAt > 0L && now - lastFetchedAt < PLUGIN_INDEX_CACHE_TTL_MS
 
 internal fun isPluginLogoCacheFresh(lastModified: Long, now: Long): Boolean =
     now - lastModified < PLUGIN_LOGO_CACHE_TTL_MS
@@ -70,6 +80,10 @@ class PluginIndexClient @Inject constructor(
         .callTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .cache(null)
         .build()
+    private val downloadHttp = http.newBuilder()
+        // 慢速镜像可能耗时超过一分钟；readTimeout 仍会中断长时间无数据的连接。
+        .callTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
 
     private val cacheRoot = File(context.filesDir, "plugin-index-cache")
     private val logoCacheRoot = File(context.cacheDir, "plugin-store-icons")
@@ -88,6 +102,11 @@ class PluginIndexClient @Inject constructor(
     suspend fun fetchIndex(source: PluginIndexSource, forceRefresh: Boolean = false): PluginIndexSnapshot =
         withContext(Dispatchers.IO) {
             val cached = cacheFile(source)
+            if (!forceRefresh && isPluginIndexCacheFresh(source.lastFetchedAt, System.currentTimeMillis())) {
+                readCache(cached)?.let { index ->
+                    return@withContext PluginIndexSnapshot(index, stale = true, fetchedAt = source.lastFetchedAt)
+                }
+            }
             val url = accelerated(source.indexUrl)
             val bytes = try {
                 getBytes(url, MAX_INDEX_BYTES, noCache = forceRefresh)
@@ -169,11 +188,21 @@ class PluginIndexClient @Inject constructor(
         )
     }
 
-    suspend fun download(asset: PluginReleaseAsset): DownloadedPluginPackage = withContext(Dispatchers.IO) {
+    suspend fun download(
+        asset: PluginReleaseAsset,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ): DownloadedPluginPackage = withContext(Dispatchers.IO) {
         if (asset.size <= 0 || asset.size > MAX_ARCHIVE_BYTES) {
             throw PluginIndexException("资产大小非法: ${asset.size}")
         }
-        val bytes = getBytes(accelerated(asset.url), asset.size, noCache = true, expectedSize = asset.size)
+        val bytes = getBytes(
+            accelerated(asset.url),
+            asset.size,
+            noCache = true,
+            expectedSize = asset.size,
+            onProgress = onProgress,
+            client = downloadHttp
+        )
         val file = File(context.cacheDir, "plugin-${sha256(bytes).take(16)}.zip")
         file.writeBytes(bytes)
         DownloadedPluginPackage(file, asset)
@@ -205,58 +234,98 @@ class PluginIndexClient @Inject constructor(
         return segments[0] to segments[1].removeSuffix(".git")
     }
 
-    private inline fun <reified T> apiGet(url: String): T {
+    private suspend inline fun <reified T> apiGet(url: String): T = suspendCancellableCoroutine { cont ->
         val request = Request.Builder()
             .url(url)
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "aicode-plugin-index")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw NoMatchingReleaseException("GitHub Release 请求失败: HTTP ${response.code}")
+        val call = http.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!cont.isCancelled) cont.resumeWithException(e)
             }
-            val body = response.body?.string() ?: throw NoMatchingReleaseException("GitHub Release 响应为空")
-            return try {
-                PluginIndexJson.decodeFromString<T>(body)
-            } catch (e: Exception) {
-                throw NoMatchingReleaseException("GitHub Release 响应解析失败")
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val result = response.use {
+                        if (!it.isSuccessful) {
+                            throw NoMatchingReleaseException("GitHub Release 请求失败: HTTP ${it.code}")
+                        }
+                        val body = it.body?.string()
+                            ?: throw NoMatchingReleaseException("GitHub Release 响应为空")
+                        try {
+                            PluginIndexJson.decodeFromString<T>(body)
+                        } catch (e: Exception) {
+                            throw NoMatchingReleaseException("GitHub Release 响应解析失败")
+                        }
+                    }
+                    if (!cont.isCancelled) cont.resume(result)
+                } catch (e: Exception) {
+                    if (!cont.isCancelled) cont.resumeWithException(e)
+                }
             }
-        }
+        })
     }
 
-    private fun getBytes(
+    private suspend fun getBytes(
         url: String,
         maxBytes: Long,
         noCache: Boolean,
-        expectedSize: Long? = null
-    ): ByteArray {
+        expectedSize: Long? = null,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+        client: OkHttpClient = http
+    ): ByteArray = suspendCancellableCoroutine { cont ->
         val builder = Request.Builder().url(url).header("User-Agent", "aicode-plugin-index")
         if (noCache) builder.cacheControl(CacheControl.Builder().noCache().build())
-        http.newCall(builder.build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code}: $url")
-            val body = response.body ?: throw IOException("空响应: $url")
-            val declared = body.contentLength()
-            if (declared > maxBytes) throw IOException("响应超过大小限制: $url")
-            if (expectedSize != null && declared > 0 && declared != expectedSize) {
-                throw IOException("响应大小 $declared 与声明 $expectedSize 不一致")
+        val call = client.newCall(builder.build())
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!cont.isCancelled) cont.resumeWithException(e)
             }
-            val stream = body.byteStream()
-            val output = java.io.ByteArrayOutputStream(if (declared in 1..maxBytes) declared.toInt() else 8192)
-            val buffer = ByteArray(64 * 1024)
-            var total = 0L
-            while (true) {
-                val read = stream.read(buffer)
-                if (read < 0) break
-                total += read
-                if (total > maxBytes) throw IOException("响应超过大小限制: $url")
-                output.write(buffer, 0, read)
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val bytes = response.use { currentResponse ->
+                        if (!currentResponse.isSuccessful) {
+                            throw IOException("HTTP ${currentResponse.code}: $url")
+                        }
+                        val body = currentResponse.body ?: throw IOException("空响应: $url")
+                        val declared = body.contentLength()
+                        if (declared > maxBytes) throw IOException("响应超过大小限制: $url")
+                        if (expectedSize != null && declared > 0 && declared != expectedSize) {
+                            throw IOException("响应大小 $declared 与声明 $expectedSize 不一致")
+                        }
+                        val output = java.io.ByteArrayOutputStream(
+                            if (declared in 1..maxBytes) declared.toInt() else 8192
+                        )
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        body.byteStream().use { stream ->
+                            while (true) {
+                                if (cont.isCancelled) return
+                                val read = stream.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > maxBytes) throw IOException("响应超过大小限制: $url")
+                                output.write(buffer, 0, read)
+                                onProgress(total, expectedSize ?: declared)
+                            }
+                        }
+                        if (expectedSize != null && total != expectedSize) {
+                            throw IOException("响应大小 $total 与声明 $expectedSize 不一致")
+                        }
+                        output.toByteArray()
+                    }
+                    if (!cont.isCancelled) cont.resume(bytes)
+                } catch (e: Exception) {
+                    if (!cont.isCancelled) cont.resumeWithException(e)
+                }
             }
-            if (expectedSize != null && total != expectedSize) {
-                throw IOException("响应大小 $total 与声明 $expectedSize 不一致")
-            }
-            return output.toByteArray()
-        }
+        })
     }
 
     private fun logoCacheFile(url: String): File? {

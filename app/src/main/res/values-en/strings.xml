@@ -2219,10 +2219,13 @@
     <string name="plugins_store_incompatible">Incompatible</string>
     <string name="plugins_store_requires_min_version">Requires AiCode >= %1$s</string>
     <string name="plugins_store_retry">Retry</string>
+    <string name="plugins_store_download_preparing">Finding and preparing the plugin package…</string>
+    <string name="plugins_store_download_progress">Downloading: %1$d%%</string>
+    <string name="plugins_store_download_cancel">Cancel download</string>
     <string name="plugins_store_error_network">Cannot reach the index repository. Check the network or URL.</string>
     <string name="plugins_store_error_invalid">The index is invalid and was rejected.</string>
     <string name="plugins_store_error_no_release">No installable release found.</string>
-    <string name="plugins_store_error_download">Failed to download the plugin package. Try again later.</string>
+    <string name="plugins_store_error_download">Could not download the plugin package. Check your connection and try again.</string>
     <string name="plugins_store_error_preview">The plugin package cannot be read. Installation was cancelled.</string>
     <string name="plugins_store_refresh_done">Index refreshed</string>
     <string name="plugins_store_refresh_done_failed">Index refreshed, %1$d failed</string>
@@ -2246,6 +2249,17 @@
     <string name="plugins_install_repository_label">Plugin source repository</string>
     <string name="plugins_install_repository_hint">Type the full source repository shown above</string>
     <string name="plugins_install_repository_mismatch">The addresses do not match</string>
+    <string name="plugins_repository_short_hint">owner/repository</string>
+    <string name="plugins_unofficial_install_title">Install %1$s</string>
+    <string name="plugins_unofficial_install_step">Step %1$d of 3</string>
+    <string name="plugins_unofficial_risk_notice">If you skip the information below, unexpected and potentially harmful behavior may occur.</string>
+    <string name="plugins_unofficial_risk_execution">This plugin runs third-party code in your device environment. AiCode cannot isolate or audit its behavior. Continue only if you fully trust its author and source.</string>
+    <string name="plugins_unofficial_risk_source">This plugin was not published or reviewed by the official team. The official team makes no guarantees about its stability, security, compliance, or future versions.</string>
+    <string name="plugins_unofficial_risk_files">The plugin\'s declared runtimes, tools, and pages may access the host capabilities granted to them and process files, network requests, or session data.</string>
+    <string name="plugins_unofficial_risk_footer">This plugin is not published by the official team. Continue only if you fully trust its author and source.</string>
+    <string name="plugins_unofficial_repository_prompt">To confirm, type the plugin\'s repository address below</string>
+    <string name="plugins_unofficial_acknowledge">I have read and understand these risks</string>
+    <string name="plugins_unofficial_continue">Continue</string>
 
     <string name="plugins_permissions_section">Permissions</string>
     <string name="plugins_shizuku_section">Shizuku</string>

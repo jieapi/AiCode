@@ -102,7 +102,9 @@ sealed interface PluginImportState {
         /** 展示用来源名称，例如「AiCode Plugins」。 */
         val sourceLabel: String? = null,
         /** 来源是否在宿主官方白名单内；只有它为 true 时跳过手输仓库。 */
-        val officialSource: Boolean = false
+        val officialSource: Boolean = false,
+        /** 官方商店插件通过包校验后自动安装。 */
+        val installImmediately: Boolean = false
     ) : PluginImportState
 
     data class Failed(val errors: List<PluginError>) : PluginImportState
@@ -332,13 +334,16 @@ class PluginsViewModel @Inject constructor(
 
     /** 在线商店已完成下载与包校验后，把暂存包交给统一预览/安装弹层。 */
     fun showPreview(storePreview: PluginStorePreview) {
+        if (_importState.value !is PluginImportState.Idle && _importState.value !is PluginImportState.Failed) return
         showPreview(
             preview = storePreview.preview,
             origin = storePreview.origin,
             expectedRepository = storePreview.expectedRepository,
             sourceLabel = storePreview.sourceLabel,
-            officialSource = storePreview.officialSource
+            officialSource = storePreview.officialSource,
+            installImmediately = storePreview.installImmediately
         )
+        if (storePreview.installImmediately) confirmInstall()
     }
 
     fun showPreview(
@@ -346,7 +351,8 @@ class PluginsViewModel @Inject constructor(
         origin: PluginInstallOrigin,
         expectedRepository: String?,
         sourceLabel: String?,
-        officialSource: Boolean
+        officialSource: Boolean,
+        installImmediately: Boolean = false
     ) {
         if (_importState.value !is PluginImportState.Idle && _importState.value !is PluginImportState.Failed) return
         _importState.value = PluginImportState.Preview(
@@ -354,7 +360,8 @@ class PluginsViewModel @Inject constructor(
             origin = origin,
             expectedRepository = expectedRepository,
             sourceLabel = sourceLabel,
-            officialSource = officialSource
+            officialSource = officialSource,
+            installImmediately = installImmediately
         )
     }
 

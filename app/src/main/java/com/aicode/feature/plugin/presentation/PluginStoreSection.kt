@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,13 +25,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -46,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.res.stringResource
@@ -55,8 +62,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aicode.R
+import com.aicode.core.theme.Radius
 import com.aicode.core.theme.Spacing
 import com.aicode.core.theme.semanticColors
+import com.aicode.core.ui.AdaptiveModalBottomSheet
+import com.aicode.core.ui.AppTextField
+import com.aicode.core.ui.dialogTextFieldColors
 import com.aicode.core.ui.THUMBNAIL_MAX_EDGE
 import com.aicode.core.ui.decodeSampledBitmap
 import com.aicode.feature.settings.presentation.component.LazyGroupItem
@@ -68,7 +79,9 @@ import com.aicode.feature.settings.presentation.component.SettingsGroup
 import com.aicode.feature.settings.presentation.component.SettingsGroupHeader
 import com.aicode.feature.settings.presentation.component.SettingsRow
 import com.aicode.feature.settings.presentation.component.openUrl
+import java.net.URI
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.AlertCircle
 import compose.icons.feathericons.Book
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.CloudOff
@@ -349,6 +362,9 @@ internal fun PluginStoreDetailSection(
     val context = LocalContext.current
     val languageTag = currentLanguageTag()
     val installing = state.installingPluginId == latest.plugin.id
+    var confirmingUnofficialInstall by rememberSaveable(latest.source.id, latest.plugin.id) {
+        mutableStateOf(false)
+    }
 
     LaunchedEffect(state.preview) {
         // 预览是全局单槽状态；只弹出当前插件的预览，避免 A 的安装结果覆盖到 B 的详情页。
@@ -418,7 +434,10 @@ internal fun PluginStoreDetailSection(
         }
 
         Button(
-            onClick = { viewModel.install(latest) },
+            onClick = {
+                if (latest.official) viewModel.install(latest)
+                else confirmingUnofficialInstall = true
+            },
             enabled = latest.compatible && !installing &&
                 (latest.installedVersion == null || latest.updateAvailable),
             modifier = Modifier
@@ -452,15 +471,311 @@ internal fun PluginStoreDetailSection(
                     it.code == PluginStoreErrorCode.NO_COMPATIBLE_RELEASE ||
                     it.code == PluginStoreErrorCode.PREVIEW_FAILED)
         }
+        if (installing) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                val progress = state.downloadProgress
+                if (progress == null) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.plugins_store_download_preparing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = stringResource(R.string.plugins_store_download_progress, (progress * 100).toInt()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            TextButton(
+                onClick = viewModel::cancelInstall,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.plugins_store_download_cancel))
+            }
+        }
         if (installError != null) {
-            Text(
-                text = storeErrorMessage(installError),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = Spacing.sm, start = Spacing.xs, end = Spacing.xs)
-            )
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.md),
+                shape = RoundedCornerShape(Radius.mdLarge),
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    Icon(FeatherIcons.AlertCircle, contentDescription = null)
+                    Text(
+                        text = storeErrorMessage(installError),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = {
+                            if (latest.official) viewModel.install(latest)
+                            else confirmingUnofficialInstall = true
+                        }
+                    ) {
+                        Text(stringResource(R.string.plugins_store_retry))
+                    }
+                }
+            }
         }
     }
+
+    if (confirmingUnofficialInstall) {
+        UnofficialPluginInstallSheet(
+            item = latest,
+            viewModel = viewModel,
+            refreshVersion = state.logoRefreshVersion,
+            onInstall = {
+                confirmingUnofficialInstall = false
+                viewModel.install(latest, confirmedUnofficial = true)
+            },
+            onDismiss = { confirmingUnofficialInstall = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UnofficialPluginInstallSheet(
+    item: PluginStoreItem,
+    viewModel: PluginStoreViewModel,
+    refreshVersion: Long,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var step by rememberSaveable(item.source.id, item.plugin.id) { mutableStateOf(0) }
+    var repositoryInput by rememberSaveable(item.source.id, item.plugin.id) { mutableStateOf("") }
+    val repositoryValue = repositoryConfirmationValue(item.plugin.repository)
+    val repositoryMatches = normalizeRepositoryInput(repositoryInput) ==
+        normalizeRepositoryInput(item.plugin.repository)
+    val languageTag = currentLanguageTag()
+    val context = LocalContext.current
+    val lastStep = 2
+
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)
+                .imePadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                Text(
+                    text = stringResource(R.string.plugins_unofficial_install_title, item.plugin.name.resolve(languageTag)),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = stringResource(R.string.plugins_unofficial_install_step, step + 1),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                when (step) {
+                    0 -> {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .size(64.dp)
+                                .background(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(Radius.mdLarge)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            StorePluginLogo(
+                                url = item.plugin.logo,
+                                viewModel = viewModel,
+                                iconSize = 30.dp,
+                                shape = RoundedCornerShape(Radius.mdLarge),
+                                refreshVersion = refreshVersion
+                            )
+                        }
+                        Text(
+                            text = item.plugin.name.resolve(languageTag),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${pluginVersionText(item.plugin.version)} · ${item.plugin.author}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = item.plugin.description.resolve(languageTag),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        HorizontalDivider()
+                        Text(
+                            text = stringResource(R.string.plugins_store_detail_source),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = repositoryValue,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = stringResource(R.string.plugins_store_detail_index_source) + "  " + item.source.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    1 -> {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.semanticColors.warningContainer,
+                            contentColor = MaterialTheme.semanticColors.onWarningContainer,
+                            shape = RoundedCornerShape(Radius.mdLarge)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(Spacing.md),
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(FeatherIcons.AlertCircle, contentDescription = null)
+                                Text(
+                                    text = stringResource(R.string.plugins_unofficial_risk_notice),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        Text(
+                            text = stringResource(R.string.plugins_unofficial_risk_execution),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = stringResource(R.string.plugins_unofficial_risk_source),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = stringResource(R.string.plugins_unofficial_risk_files),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            shape = RoundedCornerShape(Radius.mdLarge)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(Spacing.md),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.plugins_unofficial_risk_footer),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = stringResource(R.string.plugins_store_detail_source) + "  " + item.plugin.repository,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = stringResource(R.string.plugins_store_detail_index_source) + "  " + item.source.name,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Text(
+                            text = stringResource(R.string.plugins_unofficial_repository_prompt),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        SelectionContainer {
+                            Text(
+                                text = repositoryValue,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        AppTextField(
+                            value = repositoryInput,
+                            onValueChange = { repositoryInput = it },
+                            label = stringResource(R.string.plugins_install_repository_label),
+                            placeholder = stringResource(R.string.plugins_repository_short_hint),
+                            colors = dialogTextFieldColors(),
+                            isError = repositoryInput.isNotBlank() && !repositoryMatches,
+                            supportingText = {
+                                if (repositoryInput.isNotBlank() && !repositoryMatches) {
+                                    Text(stringResource(R.string.plugins_install_repository_mismatch))
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+            ) {
+                Button(
+                    onClick = { if (step == lastStep) onInstall() else step++ },
+                    enabled = step != lastStep || repositoryMatches,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        stringResource(
+                            when {
+                                step == lastStep -> R.string.plugins_install
+                                step == 1 -> R.string.plugins_unofficial_acknowledge
+                                else -> R.string.plugins_unofficial_continue
+                            }
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun repositoryConfirmationValue(repository: String): String {
+    val uri = runCatching { URI(repository) }.getOrNull() ?: return repository
+    if (!uri.host.equals("github.com", ignoreCase = true)) return repository
+    return uri.path.trim('/').removeSuffix(".git")
 }
 
 @Composable
@@ -564,7 +879,6 @@ private fun StoreErrorState(
     SettingsEmptyState(
         icon = FeatherIcons.CloudOff,
         title = storeErrorMessage(error),
-        hint = error.detail?.takeIf { it.isNotBlank() },
         actions = {
             TextButton(onClick = onRetry) {
                 Text(stringResource(R.string.plugins_store_retry))
