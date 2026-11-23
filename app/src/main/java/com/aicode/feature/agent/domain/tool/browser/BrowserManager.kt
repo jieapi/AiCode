@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -166,6 +167,9 @@ class BrowserManager @Inject constructor(
         private const val SCREENSHOT_QUALITY = 80
         private const val SCREENSHOT_LOAD_TIMEOUT_MS = 10_000L
         private const val SCREENSHOT_SETTLE_MS = 250L
+        private const val SCREENSHOT_VISUAL_TIMEOUT_MS = 1_000L
+        private const val OFFSCREEN_PAUSE_DELAY_MS = 5_000L
+        private const val JS_CALLBACK_TIMEOUT_MS = 10_000L
         private const val MAX_CONTENT_CHARS = 100_000
         private const val MAX_BACKBONE_NODES = 600
         private const val DOM_STABLE_QUIET_MS = 500L
@@ -228,6 +232,8 @@ class BrowserManager @Inject constructor(
     private var hiddenHost: ViewGroup? = null
     private var appForeground: Boolean = true
     private var activeAutomationCount: Int = 0
+    private var pendingOffscreenPause: Runnable? = null
+    private var visualStateRequestId = 0L
 
     /** App 外观是否为深色，由 UI 层通过 [setAppDarkTheme] 推送。 */
     private var appDarkTheme: Boolean = false
@@ -356,6 +362,7 @@ class BrowserManager @Inject constructor(
     /** 标记当前正在执行浏览器自动化调用，保证后台状态下也能临时保持目标 WebView 渲染激活。 */
     suspend fun <T> withAutomation(block: suspend () -> T): T {
         withContext(Dispatchers.Main.immediate) {
+            cancelScheduledOffscreenPause()
             val wakeNeeded = !appForeground && activeAutomationCount == 0
             activeAutomationCount++
             if (wakeNeeded) {
@@ -368,7 +375,7 @@ class BrowserManager @Inject constructor(
             withContext(NonCancellable + Dispatchers.Main.immediate) {
                 activeAutomationCount = (activeAutomationCount - 1).coerceAtLeast(0)
                 if (!appForeground && activeAutomationCount == 0) {
-                    pauseOffscreenTabs()
+                    scheduleOffscreenPause()
                 }
             }
         }
@@ -379,13 +386,34 @@ class BrowserManager @Inject constructor(
         if (appForeground == foreground) return
         appForeground = foreground
         if (foreground) {
+            cancelScheduledOffscreenPause()
             updateContainerView()
         } else if (activeAutomationCount == 0) {
-            pauseOffscreenTabs()
+            scheduleOffscreenPause()
         }
     }
 
+    private fun cancelScheduledOffscreenPause() {
+        pendingOffscreenPause?.let(mainHandler::removeCallbacks)
+        pendingOffscreenPause = null
+    }
+
+    private fun scheduleOffscreenPause() {
+        cancelScheduledOffscreenPause()
+        val pause = Runnable {
+            pendingOffscreenPause = null
+            if (!appForeground && activeAutomationCount == 0) {
+                pauseOffscreenTabs()
+            }
+        }
+        pendingOffscreenPause = pause
+        mainHandler.postDelayed(pause, OFFSCREEN_PAUSE_DELAY_MS)
+    }
+
     private fun ensureTabReadyForAutomation(tab: TabHolder) {
+        if (containerView == null && hiddenHost == null) {
+            throw IllegalStateException("浏览器宿主尚未就绪")
+        }
         if (tab.webView.layerType != View.LAYER_TYPE_HARDWARE) {
             tab.webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         }
@@ -594,10 +622,14 @@ class BrowserManager @Inject constructor(
         tab.pendingDialogResult = null
         tab.pendingDialog = null
 
+        val restoreUrl = tab.url.ifBlank { deadView?.url.orEmpty() }
         val replacement = WebView(tab.themedContext)
         configureWebView(replacement, tabId)
         tab.webView = replacement
         updateContainerView()
+        if (restoreUrl.isNotBlank() && restoreUrl != "about:blank") {
+            replacement.loadUrl(restoreUrl)
+        }
         publishState()
     }
 
@@ -944,6 +976,7 @@ class BrowserManager @Inject constructor(
 
     /** 注册 Activity 级的隐藏宿主容器，让离屏 WebView 在前台或自动化时触发 onAttachedToWindow 激活光栅化渲染。 */
     fun attachHiddenHost(host: ViewGroup) {
+        cancelScheduledOffscreenPause()
         hiddenHost = host
         // 面板未打开（离屏）一律用 Application context：WebView 弹不出原生 UI（如下拉列表、对话框），
         // 后台页面就无法把弹窗伪装成 App 自己的界面
@@ -952,6 +985,7 @@ class BrowserManager @Inject constructor(
     }
 
     fun detachHiddenHost() {
+        cancelScheduledOffscreenPause()
         hiddenHost?.removeAllViews()
         hiddenHost = null
         tabs.forEach { it.contextWrapper.baseContext = appContext }
@@ -1276,9 +1310,20 @@ class BrowserManager @Inject constructor(
             wv.evaluateJavascriptSync(fallbackScript)
         }
 
-        // 等待 300ms 检测是否有 SPA 路由切换
-        delay(300)
-        val afterUrl = wv.url.orEmpty()
+        delay(SCREENSHOT_SETTLE_MS)
+        var afterUrl = wv.url.orEmpty()
+        if (afterUrl == beforeUrl) {
+            val hrefAfterClick = currentHref(tab)
+            if (hrefAfterClick.isNotEmpty() && hrefAfterClick != beforeUrl) {
+                afterUrl = hrefAfterClick
+            }
+        }
+        if (afterUrl.isNotEmpty() && afterUrl != beforeUrl && !awaitPageLoaded(tab)) {
+            throw IllegalStateException("页面导航超时，目标页面尚未完成加载")
+        }
+        if (!waitForVisualState(wv, SCREENSHOT_VISUAL_TIMEOUT_MS)) {
+            FileLogger.w(TAG, "Visual callback timed out after click (tab=${tab.id})")
+        }
         val navigatedTo = if (afterUrl.isNotEmpty() && afterUrl != beforeUrl) afterUrl else null
 
         val tag = (prep?.get("tag") as? JsonPrimitive)?.content
@@ -1772,7 +1817,10 @@ class BrowserManager @Inject constructor(
         val wv = tab.webView
 
         // 导航进行中 WebView 显示的仍是上一个页面，此时绘制会截到旧画面，先等加载结束
-        awaitPageLoaded(tab)
+        if (!awaitPageLoaded(tab)) {
+            FileLogger.w(TAG, "Screenshot skipped: page load did not finish (tab=${tab.id})")
+            return@withContext null
+        }
 
         // 离屏兜底尺寸：若未被系统布局过（w/h <= 0），手动测量布局
         if (wv.width <= 0 || wv.height <= 0) {
@@ -1786,9 +1834,9 @@ class BrowserManager @Inject constructor(
             wv.layout(0, 0, width, height)
         }
         if (wv.width <= 0 || wv.height <= 0) return@withContext null
-
-        // 等待视觉状态就绪（API 23+ 原生机制，保证光栅化合成完毕）
-        waitForVisualState(wv)
+        if (!wv.isAttachedToWindow) {
+            FileLogger.w(TAG, "Capturing detached WebView (tab=${tab.id})")
+        }
 
         val bitmap = Bitmap.createBitmap(wv.width, wv.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -1796,10 +1844,12 @@ class BrowserManager @Inject constructor(
         // 关键：WebView 处于硬件层时，software Canvas 回读不到 GPU 帧缓冲——离屏未挂载、或挂载到窗口（打开过浏览器面板）都会白屏；
         // 因此截图期间一律临时切为 LAYER_TYPE_SOFTWARE 遍历 display list 真实绘制到 Bitmap，画完还原。
         val oldLayerType = wv.layerType
-        wv.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         try {
-            // 切层会触发一次重绘；等视觉状态与最新内容一致后再绘制，否则会截到切换前的旧帧
-            waitForVisualState(wv)
+            wv.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            wv.invalidate()
+            if (!waitForVisualState(wv, SCREENSHOT_VISUAL_TIMEOUT_MS)) {
+                FileLogger.w(TAG, "Screenshot visual callback timed out; drawing current WebView state (tab=${tab.id})")
+            }
             wv.draw(canvas)
         } finally {
             wv.setLayerType(oldLayerType, null)
@@ -1812,27 +1862,26 @@ class BrowserManager @Inject constructor(
     }
 
     /** 页面仍在加载时等待其结束：导航过程中 WebView 呈现的还是上一个页面，直接绘制会截到旧内容。 */
-    private suspend fun awaitPageLoaded(tab: TabHolder, timeoutMs: Long = SCREENSHOT_LOAD_TIMEOUT_MS) {
-        // 导航可能刚被触发、loading 状态还没来得及更新，先让出一小段再判断
+    private suspend fun awaitPageLoaded(tab: TabHolder, timeoutMs: Long = SCREENSHOT_LOAD_TIMEOUT_MS): Boolean {
         delay(SCREENSHOT_SETTLE_MS)
         val deadline = System.currentTimeMillis() + timeoutMs
         while (tab.loading && System.currentTimeMillis() < deadline) {
             delay(GO_POLL_MS)
         }
+        return !tab.loading
     }
 
-    private suspend fun waitForVisualState(wv: WebView, timeoutMs: Long = 1_000L) {
+    private suspend fun waitForVisualState(wv: WebView, timeoutMs: Long): Boolean {
         val deferred = CompletableDeferred<Unit>()
-        wv.postVisualStateCallback(1L, object : WebView.VisualStateCallback() {
+        wv.postVisualStateCallback(++visualStateRequestId, object : WebView.VisualStateCallback() {
             override fun onComplete(requestId: Long) {
                 deferred.complete(Unit)
             }
         })
-        try {
-            withTimeout(timeoutMs) { deferred.await() }
-        } catch (_: Exception) {
-            // 超时兜底，直接继续绘制
-        }
+        return withTimeoutOrNull(timeoutMs) {
+            deferred.await()
+            true
+        } ?: false
     }
 
     suspend fun screenshotIfVisible(tabId: String? = null): AgentImage? =
@@ -1932,7 +1981,7 @@ class BrowserManager @Inject constructor(
     private suspend fun WebView.evaluateJavascriptSync(script: String): String? {
         val deferred = CompletableDeferred<String?>()
         evaluateJavascript(script) { result -> deferred.complete(result) }
-        return deferred.await()
+        return withTimeout(JS_CALLBACK_TIMEOUT_MS) { deferred.await() }
     }
 
     /**
