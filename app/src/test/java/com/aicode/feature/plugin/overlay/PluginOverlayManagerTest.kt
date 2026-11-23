@@ -24,6 +24,7 @@ import io.mockk.mockk
 import io.mockk.justRun
 import dagger.Lazy
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -59,7 +60,7 @@ class PluginOverlayManagerTest {
     val tmp = TemporaryFolder()
 
     @Test
-    fun replacingAPluginRecreatesItsOpenSurfaceWithTheNewPageAndSize() = runTest {
+    fun replacingAPluginRecreatesItsOpenSurfaceWithTheNewPageAndPreviousSize() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         ShadowSettings.setCanDrawOverlays(true)
         val plugins = MutableStateFlow(listOf(plugin("1.0.0", 64, "ball.html")))
@@ -81,7 +82,7 @@ class PluginOverlayManagerTest {
             runCurrent()
             val current = windows.getValue("test.approval:ball")
             assertNotSame(old, current)
-            assertEquals(48 to 48, current.sizeDp())
+            assertEquals(64 to 64, current.sizeDp())
             assertEquals("40", current.describe().getValue("x").toString())
             assertEquals("50", current.describe().getValue("y").toString())
             assertEquals("background", current.visibilityPolicy())
@@ -99,6 +100,74 @@ class PluginOverlayManagerTest {
             manager.reloadPlugin("test.approval")
             runCurrent()
             assertFalse(manager.hasOverlays())
+        } finally {
+            manager.closeAll()
+            shadowOf(Looper.getMainLooper()).idle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun revokingPermissionDuringReloadClosesTheRecreatedWindow() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        ShadowSettings.setCanDrawOverlays(true)
+        val plugins = MutableStateFlow(listOf(plugin("1.0.0", 64, "ball.html")))
+        val permissions = mockk<PluginOverlayPermissionRepository>()
+        val manager = createManager(plugins, permissions)
+        var granted = true
+        var pauseNextCheck = false
+        val permissionCheckStarted = CompletableDeferred<Unit>()
+        val continuePermissionCheck = CompletableDeferred<Unit>()
+        coEvery { permissions.isGranted(any()) } coAnswers {
+            val grantedAtCheck = granted
+            if (pauseNextCheck) {
+                pauseNextCheck = false
+                permissionCheckStarted.complete(Unit)
+                continuePermissionCheck.await()
+            }
+            grantedAtCheck
+        }
+        coEvery { permissions.revoke(any()) } coAnswers { granted = false }
+        try {
+            manager.create("test.approval", "ball", buildJsonObject {})
+            pauseNextCheck = true
+            manager.reloadPlugin("test.approval")
+            runCurrent()
+            permissionCheckStarted.await()
+
+            val revoke = async { manager.revokePermissionAndClosePlugin("test.approval") }
+            runCurrent()
+            assertFalse(revoke.isCompleted)
+
+            continuePermissionCheck.complete(Unit)
+            runCurrent()
+            revoke.await()
+            assertFalse(manager.hasOverlays())
+        } finally {
+            manager.closeAll()
+            shadowOf(Looper.getMainLooper()).idle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun updateRejectsWhenPluginOverlayPermissionHasBeenRevoked() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        ShadowSettings.setCanDrawOverlays(true)
+        val plugins = MutableStateFlow(listOf(plugin("1.0.0", 64, "ball.html")))
+        val permissions = mockk<PluginOverlayPermissionRepository>()
+        val manager = createManager(plugins, permissions)
+        var granted = true
+        coEvery { permissions.isGranted(any()) } coAnswers { granted }
+        try {
+            manager.create("test.approval", "ball", buildJsonObject {})
+            granted = false
+
+            val error = runCatching {
+                manager.update("test.approval", "test.approval:ball", buildJsonObject {})
+            }.exceptionOrNull()
+            assertEquals("OVERLAY_NOT_AUTHORIZED", (error as PluginOverlayException).code)
+            assertEquals(true, manager.hasOverlays())
         } finally {
             manager.closeAll()
             shadowOf(Looper.getMainLooper()).idle()
@@ -171,12 +240,14 @@ class PluginOverlayManagerTest {
         }
     }
 
-    private fun createManager(plugins: MutableStateFlow<List<InstalledPlugin>>): PluginOverlayManager {
+    private fun createManager(
+        plugins: MutableStateFlow<List<InstalledPlugin>>,
+        permissions: PluginOverlayPermissionRepository = mockk()
+    ): PluginOverlayManager {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val pluginManager = mockk<PluginManager>()
         every { pluginManager.plugins } returns plugins
         justRun { pluginManager.ensureLoaded() }
-        val permissions = mockk<PluginOverlayPermissionRepository>()
         coEvery { permissions.isGranted(any()) } returns true
         val positions = mockk<PluginOverlayPositionRepository>(relaxed = true)
         coEvery { positions.get(any(), any()) } returns null

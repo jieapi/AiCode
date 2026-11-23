@@ -203,39 +203,49 @@ class PluginOverlayManager @Inject constructor(
         }
     }
 
+    suspend fun revokePermissionAndClosePlugin(pluginId: String) {
+        createMutex.withLock {
+            permissionRepository.revoke(pluginId)
+            closePlugin(pluginId)
+        }
+    }
+
     fun reloadPlugin(pluginId: String) {
         scope.launch {
-            val granted = permissionRepository.isGranted(pluginId) && Settings.canDrawOverlays(context)
-            val plugin = pluginManager.plugins.value.firstOrNull { it.id == pluginId && it.isActive }
-            if (!granted || plugin == null) {
-                closePlugin(pluginId)
-                return@launch
-            }
-            windows.values.filter { it.pluginId == pluginId }.forEach { window ->
-                val surface = plugin.content.overlay?.surfaces?.firstOrNull { it.key == window.overlayId }
-                val previous = window.describe()
-                val policy = window.visibilityPolicy()
-                if (!windows.remove(window.overlayId, window)) return@forEach
-                detachWindow(window, stopServiceIfEmpty = false)
-                if (surface != null) {
-                    runCatching {
-                        createWindow(
-                            surface = surface,
-                            params = buildJsonObject {
-                                put("x", previous.getValue("x"))
-                                put("y", previous.getValue("y"))
-                            },
-                            widthDp = surface.width,
-                            heightDp = surface.height,
-                            visibilityPolicy = policy,
-                            savedPosition = null
-                        )
-                    }.onFailure { FileLogger.w(TAG, "reload overlay failed: ${window.overlayId}", it) }
+            createMutex.withLock {
+                val granted = permissionRepository.isGranted(pluginId) && Settings.canDrawOverlays(context)
+                val plugin = pluginManager.plugins.value.firstOrNull { it.id == pluginId && it.isActive }
+                if (!granted || plugin == null) {
+                    closePlugin(pluginId)
+                    return@withLock
                 }
-            }
-            if (windows.isEmpty() && serviceStarted) {
-                serviceStarted = false
-                runCatching { context.stopService(Intent(context, PluginOverlayService::class.java)) }
+                windows.values.filter { it.pluginId == pluginId }.forEach { window ->
+                    val surface = plugin.content.overlay?.surfaces?.firstOrNull { it.key == window.overlayId }
+                    val previous = window.describe()
+                    val (previousWidth, previousHeight) = window.sizeDp()
+                    val policy = window.visibilityPolicy()
+                    if (!windows.remove(window.overlayId, window)) return@forEach
+                    detachWindow(window, stopServiceIfEmpty = false)
+                    if (surface != null) {
+                        runCatching {
+                            createWindow(
+                                surface = surface,
+                                params = buildJsonObject {
+                                    put("x", previous.getValue("x"))
+                                    put("y", previous.getValue("y"))
+                                },
+                                widthDp = previousWidth,
+                                heightDp = previousHeight,
+                                visibilityPolicy = policy,
+                                savedPosition = null
+                            )
+                        }.onFailure { FileLogger.w(TAG, "reload overlay failed: ${window.overlayId}", it) }
+                    }
+                }
+                if (windows.isEmpty() && serviceStarted) {
+                    serviceStarted = false
+                    runCatching { context.stopService(Intent(context, PluginOverlayService::class.java)) }
+                }
             }
         }
     }
@@ -272,7 +282,13 @@ class PluginOverlayManager @Inject constructor(
         return buildJsonObject { put("ok", true) }
     }
 
-    fun update(pluginId: String, overlayId: String, params: JsonObject): JsonObject {
+    suspend fun update(pluginId: String, overlayId: String, params: JsonObject): JsonObject = createMutex.withLock {
+        if (!permissionRepository.isGranted(pluginId)) {
+            throw PluginOverlayException("OVERLAY_NOT_AUTHORIZED", "user did not grant overlay for this plugin")
+        }
+        if (!Settings.canDrawOverlays(context)) {
+            throw PluginOverlayException("OVERLAY_SYSTEM_PERMISSION_MISSING", "system overlay permission is not granted")
+        }
         val window = windows[overlayId]
             ?: throw PluginOverlayException("OVERLAY_NOT_FOUND", "overlay not found: $overlayId")
         if (window.pluginId != pluginId) {
@@ -305,7 +321,7 @@ class PluginOverlayManager @Inject constructor(
             val policy = validateVisibilityPolicy(visibilityPolicy)
             mainHandler.post { window.setVisibilityPolicy(policy) }
         }
-        return buildJsonObject { put("ok", true) }
+        buildJsonObject { put("ok", true) }
     }
 
     private fun createWindow(

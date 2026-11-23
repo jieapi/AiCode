@@ -308,8 +308,7 @@ class PluginsViewModel @Inject constructor(
                     if (installSourceChanged(state.preview, state.origin)) {
                         // 来源变了就不沿用旧包拿到的高危授权，启用状态保持原样
                         shizukuPermissionRepository.revoke(result.pluginId)
-                        overlayPermissionRepository.revoke(result.pluginId)
-                        overlayManager.closePlugin(result.pluginId)
+                        overlayManager.revokePermissionAndClosePlugin(result.pluginId)
                     }
                     syncProviders(result.pluginId)
                     pluginHookDispatcher.dispatchPluginInstalled(
@@ -481,12 +480,13 @@ class PluginsViewModel @Inject constructor(
             if (manager.plugins.value.none { it.id == id }) {
                 removeProviders(id)
                 shizukuPermissionRepository.revoke(id)
-                overlayPermissionRepository.revoke(id)
+                overlayManager.revokePermissionAndClosePlugin(id)
                 backupPermissionRepository.revoke(id)
+            } else {
+                overlayManager.closePlugin(id)
             }
             pluginTerminalRunner.closePlugin(id)
             tipManager.dismissPlugin(id)
-            overlayManager.closePlugin(id)
         }
     }
 
@@ -509,8 +509,7 @@ class PluginsViewModel @Inject constructor(
             if (granted) {
                 overlayPermissionRepository.grant(plugin.id)
             } else {
-                overlayPermissionRepository.revoke(plugin.id)
-                overlayManager.closePlugin(plugin.id)
+                overlayManager.revokePermissionAndClosePlugin(plugin.id)
             }
         }
     }
