@@ -2230,7 +2230,9 @@ class AIAgentViewModel @Inject constructor(
                         attachments = event.attachments,
                         inputTokens = event.inputTokens,
                         outputTokens = event.outputTokens,
-                        cachedInputTokens = event.cachedInputTokens
+                        cachedInputTokens = event.cachedInputTokens,
+                        ttfbMillis = event.ttfbMillis,
+                        generationWindowMillis = event.generationWindowMillis
                     )
                     is AgentEvent.ToolCallFinished -> AgentUIMessage(
                         id = "tool_${event.id}",

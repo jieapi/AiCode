@@ -37,7 +37,13 @@ data class LlmCallStats(
     val status: String,
     val errorMessage: String? = null,
     val stopReason: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    val cacheCreationTokens: Int = 0,
+    val reasoningEffort: String? = null,
+    val reasoningWire: String? = null,
+    val reasoningClampedFrom: String? = null,
+    val ttfbMillis: Int? = null,
+    val retryCount: Int = 0
 )
 
 interface TurnPersistence {
@@ -76,7 +82,10 @@ sealed class AgentEvent {
         /** 模型直出图片（Gemini 图像模型）落盘后构造的文件卡片，随消息落库供 UI 渲染。 */
         val attachments: List<com.aicode.feature.agent.presentation.AgentAttachment> = emptyList(),
         val messageId: String = java.util.UUID.randomUUID().toString(),
-        val persisted: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        val persisted: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
+        /** 首个内容事件的延迟和首字节后可用于估算生成速率的窗口，仅成功流式调用有值。 */
+        val ttfbMillis: Int? = null,
+        val generationWindowMillis: Int? = null
     ) : AgentEvent()
 
     /** 流式过程中模型逐字吐出的文字（[accumulated] 为本轮已累积的完整文本，用于 UI 实时渲染，不落库）。 */

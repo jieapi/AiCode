@@ -1769,7 +1769,9 @@ class AgentRunManager @Inject constructor(
                             attachments = event.attachments,
                             inputTokens = event.inputTokens,
                             outputTokens = event.outputTokens,
-                            cachedInputTokens = event.cachedInputTokens
+                            cachedInputTokens = event.cachedInputTokens,
+                            ttfbMillis = event.ttfbMillis,
+                            generationWindowMillis = event.generationWindowMillis
                         )
                         streamingAssistantStore.markPersisted(sessionId, msgId, normalized, reasoning.orEmpty())
                         if (event.inputTokens > 0 || event.outputTokens > 0) {
@@ -2393,6 +2395,12 @@ class AgentRunManager @Inject constructor(
                 inputTokens = stats.inputTokens,
                 outputTokens = stats.outputTokens,
                 cachedInputTokens = stats.cachedInputTokens,
+                cacheCreationTokens = stats.cacheCreationTokens,
+                reasoningEffort = stats.reasoningEffort,
+                reasoningWire = stats.reasoningWire,
+                reasoningClampedFrom = stats.reasoningClampedFrom,
+                ttfbMillis = stats.ttfbMillis,
+                retryCount = stats.retryCount,
                 durationMillis = stats.durationMillis,
                 status = stats.status,
                 errorMessage = stats.errorMessage,

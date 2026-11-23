@@ -96,7 +96,8 @@ private data class AgentTurn(
 internal data class TurnUsage(
     val inputTokens: Int = 0,
     val outputTokens: Int = 0,
-    val cachedInputTokens: Int = 0
+    val cachedInputTokens: Int = 0,
+    val outputTokensPerSecond: Int? = null
 )
 
 /**
@@ -164,11 +165,24 @@ internal fun computeTurnUsage(
     messages: List<AgentUIMessage>,
     lastTurnFinished: Boolean
 ): Map<String, TurnUsage> = splitTurns(messages, lastTurnFinished).associate { turn ->
-    turn.endMessage.id to TurnUsage(
-        inputTokens = turn.assistantMessages.sumOf { it.inputTokens },
-        outputTokens = turn.assistantMessages.sumOf { it.outputTokens },
-        cachedInputTokens = turn.assistantMessages.sumOf { it.cachedInputTokens }
-    )
+    turn.endMessage.id to turn.assistantMessages.let { calls ->
+        val outputCalls = calls.filter { it.outputTokens > 0 }
+        val hasCompleteTiming = outputCalls.isNotEmpty() && outputCalls.all {
+            (it.generationWindowMillis ?: 0) > 0
+        }
+        val generationWindowMillis = outputCalls.sumOf { it.generationWindowMillis?.toLong() ?: 0L }
+        val totalOutputTokens = calls.sumOf { it.outputTokens }
+        TurnUsage(
+            inputTokens = calls.sumOf { it.inputTokens },
+            outputTokens = totalOutputTokens,
+            cachedInputTokens = calls.sumOf { it.cachedInputTokens },
+            outputTokensPerSecond = if (hasCompleteTiming && generationWindowMillis > 0) {
+                (totalOutputTokens.toDouble() * 1000 / generationWindowMillis)
+                    .roundToInt()
+                    .coerceAtLeast(1)
+            } else null
+        )
+    }
 }
 
 /** 任务耗时格式化：不足 1 分钟显示 `12s`，不足 1 小时显示 `2:05`，更长显示 `1:02:05`。 */
@@ -409,8 +423,10 @@ internal fun AgentMessageItem(
                 val cacheHitRate = turnUsage?.let {
                     formatCacheHitRate(it.inputTokens, it.cachedInputTokens)
                 }
+                val outputRate = turnUsage?.outputTokensPerSecond
                 val durationText = taskDurationMs?.let { formatTaskDuration(it) }
-                val hasMeta = isUser || tokenStats != null || cacheHitRate != null || durationText != null
+                val hasMeta = isUser || tokenStats != null || cacheHitRate != null ||
+                    outputRate != null || durationText != null
                 val actionsVisible = isUser || showActions
                 if ((hasContent || hasAttachments) && message.role != MessageRole.TOOL && isChunkFooter &&
                     (actionsVisible || hasMeta)
@@ -468,6 +484,11 @@ internal fun AgentMessageItem(
                             )
                             Spacer(Modifier.width(2.dp))
                             ChatMetaText(text = cacheHitRate)
+                            emitted = true
+                        }
+                        if (outputRate != null) {
+                            if (emitted) Spacer(Modifier.width(Spacing.sm))
+                            ChatMetaText(text = stringResource(R.string.chat_output_rate, outputRate))
                             emitted = true
                         }
                         if (durationText != null) {

@@ -26,6 +26,7 @@ class TurnUsageTest {
         input: Int = 0,
         output: Int = 0,
         cached: Int = 0,
+        generationWindow: Int? = null,
         summary: Boolean = false
     ) = AgentUIMessage(
         id = id,
@@ -35,6 +36,7 @@ class TurnUsageTest {
         inputTokens = input,
         outputTokens = output,
         cachedInputTokens = cached,
+        generationWindowMillis = generationWindow,
         isContextSummary = summary
     )
 
@@ -66,6 +68,46 @@ class TurnUsageTest {
         assertEquals(6_000, total.inputTokens)
         assertEquals(600, total.outputTokens)
         assertEquals(2_800, total.cachedInputTokens)
+    }
+
+    @Test
+    fun outputRateUsesWeightedGenerationWindow() {
+        val messages = listOf(
+            user("u1", 1_000),
+            assistant("a1", 2_000, output = 100, generationWindow = 1_000),
+            tool("t1", 3_000),
+            assistant("a2", 4_000, output = 300, generationWindow = 6_000)
+        )
+
+        val total = computeTurnUsage(messages, lastTurnFinished = true).getValue("a2")
+
+        assertEquals(400, total.outputTokens)
+        assertEquals(57, total.outputTokensPerSecond)
+    }
+
+    @Test
+    fun outputRateIsHiddenIfAnyOutputCallHasMissingTiming() {
+        val messages = listOf(
+            user("u1", 1_000),
+            assistant("a1", 2_000, output = 100, generationWindow = 1_000),
+            tool("t1", 3_000),
+            assistant("a2", 4_000, output = 300, generationWindow = null)
+        )
+
+        val total = computeTurnUsage(messages, lastTurnFinished = true).getValue("a2")
+
+        assertEquals(400, total.outputTokens)
+        assertNull(total.outputTokensPerSecond)
+    }
+
+    @Test
+    fun outputRateIsUnavailableWhenNoCallHasPositiveOutputAndGenerationWindow() {
+        val messages = listOf(
+            user("u1", 1_000),
+            assistant("a1", 2_000, output = 50, generationWindow = 0)
+        )
+
+        assertNull(computeTurnUsage(messages, lastTurnFinished = true).getValue("a1").outputTokensPerSecond)
     }
 
     @Test

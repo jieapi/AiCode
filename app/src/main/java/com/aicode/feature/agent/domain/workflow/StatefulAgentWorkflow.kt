@@ -837,6 +837,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var callError: String? = null
         var callCompleted = false
         var hookToolCalls = 0
+        var callDurationMillis: Int? = null
         val responseMessageId = UUID.randomUUID().toString()
         val stream = StreamAccumulator(callStartElapsed, responseMessageId, emit = sendEvent)
         var nextAction: AgentAction? = null
@@ -851,6 +852,8 @@ class StatefulAgentWorkflow @Inject constructor(
                 reasoningEffort = context.reasoningEffort,
                 fastMode = context.fastMode
             ).collect { stream.onChunk(it) }
+            callDurationMillis = stream.durationElapsed?.toInt()
+                ?: (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
             stream.flush()
             val aiResponse = stream.finalResponse ?: AIResponse(content = stream.text.toString())
             hookToolCalls = aiResponse.toolCalls.size
@@ -913,7 +916,9 @@ class StatefulAgentWorkflow @Inject constructor(
                             aiResponse.thinkingBlocksJson ?: "",
                             attachments = attachments,
                             messageId = responseMessageId,
-                            persisted = persisted
+                            persisted = persisted,
+                            ttfbMillis = stream.ttfbElapsed?.toInt(),
+                            generationWindowMillis = stream.generationWindowMillis(callDurationMillis)
                         )
                     )
                     persisted.await()
@@ -927,6 +932,7 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            callDurationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
             if (!didAttemptOverflowRecovery && stream.text.isEmpty() && stream.reasoning.isEmpty() && isContextOverflow(error)) {
                 didAttemptOverflowRecovery = true
                 val recovery = contextCompactor.compactIfNeeded(
@@ -959,7 +965,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 callError = error.message ?: error.javaClass.simpleName
             }
         } finally {
-            val durationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
+            val durationMillis = callDurationMillis ?: (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
             val usage = stream.finalResponse
             pluginHookDispatcher.dispatchRequestFinished(
                 sessionId = hookSessionId,
@@ -999,7 +1005,13 @@ class StatefulAgentWorkflow @Inject constructor(
                             },
                             errorMessage = callError,
                             stopReason = usage?.stopReason,
-                            createdAt = callStartWall
+                            createdAt = callStartWall,
+                            cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
+                            reasoningEffort = context.reasoningEffort,
+                            reasoningWire = reasoningPlan.wireSummary(),
+                            reasoningClampedFrom = reasoningPlan.clampedFrom(context.reasoningEffort),
+                            ttfbMillis = stream.ttfbElapsed?.toInt(),
+                            retryCount = stream.retryAttempts
                         )
                     )
                 } else {
@@ -1246,6 +1258,7 @@ class StatefulAgentWorkflow @Inject constructor(
 
         var finalResponse: AIResponse? = null
         var ttfbElapsed: Long? = null
+        var durationElapsed: Long? = null
         var retryAttempts = 0
 
         private var textDirty = false
@@ -1288,6 +1301,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 is AIStreamChunk.Final -> {
                     // 纯工具调用轮没有文本/思考增量，Final 是首个内容事件，兜底记为 TTFB
                     markTtfb()
+                    durationElapsed = SystemClock.elapsedRealtime() - callStartElapsed
                     finalResponse = chunk.response
                 }
                 is AIStreamChunk.ToolCallDeclared -> {
@@ -1305,8 +1319,16 @@ class StatefulAgentWorkflow @Inject constructor(
             flushReasoning()
         }
 
+        fun generationWindowMillis(totalDurationMillis: Int?): Int? {
+            val ttfb = ttfbElapsed ?: return null
+            val duration = totalDurationMillis ?: return null
+            return (duration - ttfb.toInt()).takeIf { it > 0 }
+        }
+
         private fun markTtfb() {
-            if (ttfbElapsed == null) ttfbElapsed = SystemClock.elapsedRealtime() - callStartElapsed
+            if (ttfbElapsed == null) {
+                ttfbElapsed = SystemClock.elapsedRealtime() - callStartElapsed
+            }
         }
 
         /** 重试/换 Key 后重放：丢弃已推送内容，避免新旧文本拼接。 */
@@ -1315,6 +1337,8 @@ class StatefulAgentWorkflow @Inject constructor(
             reasoning.setLength(0)
             textDirty = false
             reasoningDirty = false
+            ttfbElapsed = null
+            durationElapsed = null
             lastTextSentAt = 0L
             lastReasoningSentAt = 0L
         }

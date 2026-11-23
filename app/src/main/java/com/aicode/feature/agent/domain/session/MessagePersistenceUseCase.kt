@@ -100,6 +100,8 @@ class MessagePersistenceUseCase @Inject constructor(
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         cachedInputTokens: Int = 0,
+        ttfbMillis: Int? = null,
+        generationWindowMillis: Int? = null,
         isCompacted: Boolean = false,
         isContextExcluded: Boolean = false
     ) {
@@ -122,6 +124,8 @@ class MessagePersistenceUseCase @Inject constructor(
                 inputTokens = inputTokens,
                 outputTokens = outputTokens,
                 cachedInputTokens = cachedInputTokens,
+                ttfbMillis = ttfbMillis,
+                generationWindowMillis = generationWindowMillis,
                 isCompacted = isCompacted,
                 isContextExcluded = isContextExcluded
             )

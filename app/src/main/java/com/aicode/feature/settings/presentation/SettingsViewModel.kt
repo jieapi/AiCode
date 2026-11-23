@@ -258,6 +258,8 @@ data class TokenStatsUiState(
     val filterProviderId: String? = null,
     /** 筛选：指定模型名（null 为不限）。 */
     val filterModel: String? = null,
+    val filterCallKind: String? = null,
+    val filterCallStatus: String? = null,
     /** 可供筛选的供应商列表（id to 名称）。 */
     val availableProviders: List<Pair<String, String>> = emptyList(),
     /** 可供筛选的模型列表。 */
@@ -270,6 +272,14 @@ private data class ModelStatsPaging(
     val paged: List<com.aicode.feature.agent.data.local.dao.ModelCallStats>,
     val page: Int,
     val total: Int
+)
+
+private data class TokenStatsQuery(
+    val period: TokenStatsPeriod,
+    val providerId: String?,
+    val model: String?,
+    val callKind: String?,
+    val callStatus: String?
 )
 
 /** 技能列表页的 UI 状态：技能 + 来源作用域 + 启停状态。 */
@@ -828,6 +838,9 @@ class SettingsViewModel @Inject constructor(
     private val _filterModel = MutableStateFlow<String?>(null)
     val filterModel: StateFlow<String?> = _filterModel.asStateFlow()
 
+    private val _filterCallKind = MutableStateFlow<String?>(null)
+    private val _filterCallStatus = MutableStateFlow<String?>(null)
+
     /** 工作区已配置的远程连接通道，供容器镜像 SSH 模式下拉复用。 */
     val remoteConnections: StateFlow<List<RemoteConnection>> = remoteRepository.getConnections()
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
@@ -1187,12 +1200,16 @@ class SettingsViewModel @Inject constructor(
 
             launch {
                 combine(
-                    _tokenStatsPeriod,
-                    _filterProviderId,
-                    _filterModel
-                ) { period, filterProviderId, filterModel ->
-                    Triple(period, filterProviderId, filterModel)
-                }.flatMapLatest { (period, filterProviderId, filterModel) ->
+                    combine(_tokenStatsPeriod, _filterProviderId, _filterModel) { period, providerId, model ->
+                        Triple(period, providerId, model)
+                    },
+                    combine(_filterCallKind, _filterCallStatus) { kind, status -> kind to status }
+                ) { filters, callFilters ->
+                    TokenStatsQuery(filters.first, filters.second, filters.third, callFilters.first, callFilters.second)
+                }.flatMapLatest { query ->
+                    val period = query.period
+                    val filterProviderId = query.providerId
+                    val filterModel = query.model
                     val start = period.startMillis(System.currentTimeMillis())
                     val tz = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()).toLong()
                     combine(
@@ -1229,10 +1246,17 @@ class SettingsViewModel @Inject constructor(
                             llmCallRecordDao.getModelProviderCostStats(start, filterProviderId, filterModel)
                         ) { modelPaging, costStats -> modelPaging to costStats },
                         // 明细分页：页号或总数变化时重查当前页，其余聚合不重复计算
-                        combine(_tokenStatsPage, llmCallRecordDao.getCallsCount(start, filterProviderId, filterModel)) { page, total -> page to total }
+                        combine(
+                            _tokenStatsPage,
+                            llmCallRecordDao.getCallsCount(
+                                start, filterProviderId, filterModel, query.callKind, query.callStatus
+                            )
+                        ) { page, total -> page to total }
                             .flatMapLatest { (page, total) ->
-                                llmCallRecordDao.getRecentCalls(start, CALLS_PAGE_SIZE, page * CALLS_PAGE_SIZE, filterProviderId, filterModel)
-                                    .map { calls -> Triple(calls, total, page) }
+                                llmCallRecordDao.getRecentCalls(
+                                    start, CALLS_PAGE_SIZE, page * CALLS_PAGE_SIZE,
+                                    filterProviderId, filterModel, query.callKind, query.callStatus
+                                ).map { calls -> Triple(calls, total, page) }
                             },
                         // 可选筛选选项列表（全局不限过滤条件时的渠道与模型列表）
                         combine(
@@ -1276,6 +1300,8 @@ class SettingsViewModel @Inject constructor(
                             recentCallCosts = costs.first,
                             filterProviderId = filterProviderId,
                             filterModel = filterModel,
+                            filterCallKind = query.callKind,
+                            filterCallStatus = query.callStatus,
                             availableProviders = availableProviders,
                             availableModels = availableModels,
                             providerKeyCounts = keyCounts
@@ -3032,9 +3058,13 @@ class SettingsViewModel @Inject constructor(
 
     /** 清除所有筛选条件。 */
     fun clearTokenStatsFilters() {
-        if (_filterProviderId.value == null && _filterModel.value == null) return
+        if (_filterProviderId.value == null && _filterModel.value == null &&
+            _filterCallKind.value == null && _filterCallStatus.value == null
+        ) return
         _filterProviderId.value = null
         _filterModel.value = null
+        _filterCallKind.value = null
+        _filterCallStatus.value = null
         _tokenStatsPage.value = 0
         _providerStatsPage.value = 0
         _modelStatsPage.value = 0
@@ -3065,6 +3095,18 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    fun setFilterCallKind(kind: String?) {
+        if (_filterCallKind.value == kind) return
+        _filterCallKind.value = kind
+        _tokenStatsPage.value = 0
+    }
+
+    fun setFilterCallStatus(status: String?) {
+        if (_filterCallStatus.value == status) return
+        _filterCallStatus.value = status
+        _tokenStatsPage.value = 0
+    }
+
     /** 调用明细翻页；越界时钳制到合法范围。 */
     fun setTokenStatsPage(page: Int) {
         val total = _tokenStats.value.callsTotal
@@ -3092,6 +3134,8 @@ class SettingsViewModel @Inject constructor(
             llmCallRecordDao.deleteAll()
             _filterProviderId.value = null
             _filterModel.value = null
+            _filterCallKind.value = null
+            _filterCallStatus.value = null
             _tokenStatsPage.value = 0
             _providerStatsPage.value = 0
             _modelStatsPage.value = 0

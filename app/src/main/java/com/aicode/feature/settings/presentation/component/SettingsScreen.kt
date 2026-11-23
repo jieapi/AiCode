@@ -1646,6 +1646,8 @@ fun SettingsScreen(
                     onSelectModelPage = { viewModel.setModelStatsPage(it) },
                     onSelectFilterProvider = { viewModel.setFilterProviderId(it) },
                     onSelectFilterModel = { viewModel.setFilterModel(it) },
+                    onSelectFilterCallKind = { viewModel.setFilterCallKind(it) },
+                    onSelectFilterCallStatus = { viewModel.setFilterCallStatus(it) },
                     onClearFilters = { viewModel.clearTokenStatsFilters() }
                 )
                 SettingsSection.Storage -> storageViewModel?.let { StorageSectionHost(viewModel = it) }

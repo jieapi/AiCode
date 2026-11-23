@@ -190,6 +190,47 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun turnPersistenceReceivesReasoningTtfbCacheWriteAndRetryStats() = runTest {
+        var now = 1_000L
+        every { SystemClock.elapsedRealtime() } answers { now }
+        val recorded = mutableListOf<LlmCallStats>()
+        val persistence = object : TurnPersistence by TurnPersistence.Noop {
+            override suspend fun recordLlmCall(stats: LlmCallStats) {
+                recorded += stats
+            }
+        }
+        val turn = WorkflowTurnContext(
+            runId = "run",
+            sessionRef = SessionRef.Room("session"),
+            providerId = "provider",
+            model = "model",
+            workflowState = null,
+            permissionMode = com.aicode.feature.agent.domain.model.AgentMode.BUILD,
+            persistence = persistence
+        )
+        every { provider.completeStream(any(), any(), any(), any()) } returns flow {
+            emit(AIStreamChunk.Retrying(1, 3, RetryErrorInfo(RetryErrorKind.UNKNOWN)))
+            now = 1_042L
+            emit(AIStreamChunk.Final(AIResponse(
+                content = "done",
+                inputTokens = 10,
+                outputTokens = 5,
+                cachedInputTokens = 2,
+                cacheCreationTokens = 4
+            )))
+        }
+
+        collectEvents(context.copy(sessionId = "session", reasoningEffort = "high", turn = turn))
+
+        val stats = recorded.single()
+        assertEquals("high", stats.reasoningEffort)
+        assertEquals("effort=high", stats.reasoningWire)
+        assertEquals(42, stats.ttfbMillis)
+        assertEquals(4, stats.cacheCreationTokens)
+        assertEquals(1, stats.retryCount)
+    }
+
+    @Test
     fun retryAndKeySwitchKeepResponseIdWhileResettingAccumulatedContent() = runTest {
         every { provider.completeStream(any(), any(), any(), any()) } returns flowOf(
             AIStreamChunk.ReasoningDelta("old thinking"),
