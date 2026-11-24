@@ -8,8 +8,10 @@ import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import com.aicode.feature.workspace.domain.model.Workspace
 import com.aicode.feature.workspace.domain.model.WorkspaceRef
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
@@ -25,6 +27,8 @@ class WorkspaceViewModel @Inject constructor(
 
     val workspaces: StateFlow<List<Workspace>> = repository.workspaces
     val current: StateFlow<Workspace?> = repository.current
+    private val _isInitializing = MutableStateFlow(!repository.isInitializedForActiveBackend())
+    val isInitializing: StateFlow<Boolean> = _isInitializing.asStateFlow()
 
     /** 本地执行模式（非远程环境）：非远程后端下才可添加外部本地目录工作区。 */
     val isLocalMode: StateFlow<Boolean> = executionModeHolder.activeBackend
@@ -60,11 +64,14 @@ class WorkspaceViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             executionModeHolder.activeBackend.collectLatest {
+                _isInitializing.value = !repository.isInitializedForActiveBackend()
                 try {
                     repository.initialize()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
+                } finally {
+                    _isInitializing.value = false
                 }
             }
         }

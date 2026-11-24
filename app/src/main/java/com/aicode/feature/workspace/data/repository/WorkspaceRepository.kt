@@ -12,6 +12,7 @@ import com.aicode.core.util.FileLogger
 import com.aicode.feature.agent.domain.container.ConnectionState
 import com.aicode.feature.agent.domain.container.ExecutionBackend
 import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.domain.container.RemoteConnectionConfig
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.container.WorkspaceDiscoveryMode
 import com.aicode.feature.agent.domain.session.SessionUseCase
@@ -115,7 +116,10 @@ class WorkspaceRepository internal constructor(
         val generation: Long
     ) {
         val mutex = Mutex()
+        @Volatile
         var initialized = false
+        @Volatile
+        var initializedRemoteConfig: RemoteConnectionConfig? = null
     }
 
     private val operationLock = Any()
@@ -124,6 +128,15 @@ class WorkspaceRepository internal constructor(
     private var currentOperation = activeBackend().let { BackendOperation(it, it.instanceId, 0L) }
 
     private fun operation(): BackendOperation = currentOperation
+
+    fun isInitializedForActiveBackend(): Boolean = synchronized(operationLock) {
+        isInitializedFor(currentOperation, activeBackend())
+    }
+
+    private fun isInitializedFor(operation: BackendOperation, backend: ExecutionBackend): Boolean =
+        operation.initialized && operation.backend.id == backend.id &&
+            operation.instanceId == backend.instanceId &&
+            (!isBuiltinRemoteSsh(backend) || operation.initializedRemoteConfig == remoteSshConnection.config)
 
     private suspend fun checkCurrent(operation: BackendOperation) {
         currentCoroutineContext().ensureActive()
@@ -265,6 +278,7 @@ class WorkspaceRepository internal constructor(
     suspend fun initialize() = withContext(Dispatchers.IO) {
         val operation = synchronized(operationLock) {
             val backend = activeBackend()
+            if (isInitializedFor(currentOperation, backend)) return@withContext
             BackendOperation(backend, backend.instanceId, ++nextGeneration).also {
                 currentOperation = it
                 _current.value = null
@@ -327,6 +341,7 @@ class WorkspaceRepository internal constructor(
         operation.mutex.withLock {
             checkCurrent(operation)
             if (_current.value == null) restoreAndActivate(operation)
+            operation.initializedRemoteConfig = remoteSshConnection.config
             operation.initialized = true
         }
     }
@@ -427,8 +442,17 @@ class WorkspaceRepository internal constructor(
     /** 重新扫描工作区可用性（打开面板、拔插存储后调用），失联项置灰并在必要时回退当前工作区。 */
     suspend fun refreshAvailability() = withContext(Dispatchers.IO) {
         val operation = operation()
+        if (isBuiltinRemoteSsh(operation.backend) && !remoteSshConnection.isConnected()) return@withContext
         val initialized = operation.mutex.withLock { operation.initialized }
-        if (initialized) refreshAndRestore(operation)
+        if (initialized) {
+            refreshAndRestore(operation)
+            if (isBuiltinRemoteSsh(operation.backend)) {
+                operation.mutex.withLock {
+                    checkCurrent(operation)
+                    operation.initializedRemoteConfig = remoteSshConnection.config
+                }
+            }
+        }
     }
 
     private suspend fun handlePluginWorkspacesChanged() {

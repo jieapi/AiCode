@@ -180,6 +180,25 @@ class WorkspaceRepositoryTest {
     )
 
     @Test
+    fun initializeAlreadyReady_reusesCurrentWorkspaceSnapshot() = runTest {
+        val projects = File(context.filesDir, "projects").apply { mkdirs() }
+        File(projects, "alpha").mkdirs()
+        val repo = createRepo()
+
+        repo.initialize()
+        val initializedWorkspaces = repo.workspaces.value
+        val initializedCurrent = repo.current.value
+        assertTrue(initializedWorkspaces.isNotEmpty())
+
+        File(projects, "added-later").mkdirs()
+
+        repo.initialize()
+        assertEquals(initializedWorkspaces, repo.workspaces.value)
+        assertEquals(initializedCurrent, repo.current.value)
+        assertTrue(repo.isInitializedForActiveBackend())
+    }
+
+    @Test
     fun initialize_registerModeEmptyList_doesNotCreateLocalFallbackAndReactsToPush() = runTest {
         val runtimeManager = mockk<PluginRuntimeManager>(relaxed = true)
         val adapter = PluginExecutionBackendAdapter(pluginDefinition("register"), runtimeManager)

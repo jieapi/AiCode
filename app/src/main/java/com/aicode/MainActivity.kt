@@ -221,6 +221,7 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val KEY_TOUCH_LOCK_ACTIVE = "touch_lock_active"
         const val KEY_SAVED_BRIGHTNESS = "touch_lock_saved_brightness"
+        const val KEY_PROCESS_INSTANCE_ID = "process_instance_id"
     }
 
     override fun attachBaseContext(newBase: android.content.Context) {
@@ -354,6 +355,7 @@ class MainActivity : ComponentActivity() {
                                 onboardingRepository = onboardingRepository,
                                 starPromptCoordinator = starPromptCoordinator,
                                 agreementAccepted = agreementAccepted,
+                                restoreSavedSession = savedInstanceState?.getLong(KEY_PROCESS_INSTANCE_ID) == AIEditorApp.processInstanceId,
                                 touchLockActive = touchLockActive,
                                 onEnterTouchLock = { touchLockActiveFlow.value = true }
                             )
@@ -425,6 +427,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putLong(KEY_PROCESS_INSTANCE_ID, AIEditorApp.processInstanceId)
         outState.putBoolean(KEY_TOUCH_LOCK_ACTIVE, touchLockActiveFlow.value)
         savedScreenBrightness?.let { outState.putFloat(KEY_SAVED_BRIGHTNESS, it) }
     }
@@ -536,6 +539,7 @@ fun AppNavigation(
     onboardingRepository: com.aicode.feature.onboarding.data.OnboardingRepository,
     starPromptCoordinator: StarPromptCoordinator,
     agreementAccepted: Boolean,
+    restoreSavedSession: Boolean,
     touchLockActive: Boolean = false,
     onEnterTouchLock: () -> Unit = {}
 ) {
@@ -554,6 +558,7 @@ fun AppNavigation(
 
     // Activity 级别的 ViewModel——Drawer 和 AIChatPanel 共享同一个实例。
     val agentViewModel: AIAgentViewModel = hiltViewModel()
+    SideEffect { agentViewModel.configureSavedSessionRestore(restoreSavedSession) }
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
     val projectToolsViewModel: ProjectToolsViewModel = hiltViewModel()
@@ -638,6 +643,8 @@ fun AppNavigation(
     }
 
     val sessions by agentViewModel.sessions.collectAsStateWithLifecycle()
+    val isLoadingSessions by agentViewModel.isLoadingSessions.collectAsStateWithLifecycle()
+    val isInitializingWorkspace by workspaceViewModel.isInitializing.collectAsStateWithLifecycle()
     val externalSessionGroups by agentViewModel.externalSessionGroups.collectAsStateWithLifecycle()
     val activeExternalSession by agentViewModel.activeExternalSession.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
@@ -879,6 +886,8 @@ fun AppNavigation(
         CompositionLocalProvider(LocalChatAnimationsEnabled provides animationsEnabled) {
         ChatDrawerContent(
             sessions = sessions,
+            sessionsLoading = isInitializingWorkspace || isLoadingSessions ||
+                (currentWorkspace != null && currentSessionId == null),
             externalSessionGroups = externalSessionGroups,
             currentExternalSessionId = activeExternalSession?.id,
             onSelectExternalSession = { session ->

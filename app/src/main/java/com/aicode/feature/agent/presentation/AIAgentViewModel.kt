@@ -206,6 +206,16 @@ class AIAgentViewModel @Inject constructor(
     private val streamingAssistantOwner = Any()
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+    private val _isLoadingSessions = MutableStateFlow(false)
+    val isLoadingSessions: StateFlow<Boolean> = _isLoadingSessions.asStateFlow()
+    private var restoreSavedSessionOnInitialWorkspace = false
+    private var restoreSavedSessionConfigured = false
+
+    fun configureSavedSessionRestore(restoreSavedSession: Boolean) {
+        if (restoreSavedSessionConfigured) return
+        restoreSavedSessionConfigured = true
+        restoreSavedSessionOnInitialWorkspace = restoreSavedSession
+    }
 
     private fun updateSelectedSessionId(sessionId: String?) {
         agentRunManager.setSelectedLocalSession(streamingAssistantOwner, sessionId)
@@ -466,8 +476,10 @@ class AIAgentViewModel @Inject constructor(
     }
 
     private val _currentWorkspace = MutableStateFlow<String>("")
+
     fun setWorkspace(path: String) {
         if (path.isBlank() || _currentWorkspace.value == path) return
+        _isLoadingSessions.value = true
         _currentWorkspace.value = path
         // 展开状态、目录缓存与整树重读由 browseScopeFlow 的收集方按新工作区统一重置（见 init）。
         // 搜索限定当前工作区，切区后旧结果无意义，一并清空。
@@ -479,6 +491,9 @@ class AIAgentViewModel @Inject constructor(
             if (path.isBlank()) flowOf(emptyList())
             else chatSessionDao.getRootSessionsByWorkspace(path)
                 .map { list -> list.map { it.toDomain() } }
+                .onEach {
+                    if (_currentWorkspace.value == path) _isLoadingSessions.value = false
+                }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -1619,19 +1634,31 @@ class AIAgentViewModel @Inject constructor(
                 val savedId = saved.first?.takeIf { saved.second == path }?.takeIf {
                     sessionUseCase.getSessionById(it) != null
                 }
-                val runningSaved = savedId?.takeIf { agentRunManager.isSessionRunning(it) }
-                // 立即确定并设置当前会话，确保首帧 UI 秒开、侧边栏立即出现新会话，彻底消除转圈卡顿。
-                // 若存在从会话管理页切过来的目标会话且已落在该工作区，优先直接选中它；
-                // 「打开最近会话」有历史就直接进最近那个（按 updatedAt，不受置顶影响）；
-                // 「新开会话」复用还没发过消息的空会话（避免每次启动都堆一个空会话），其余情况新建。
-                val targetId = when {
-                    pending != null && sessionUseCase.getSessionById(pending.second)?.workspacePath == path -> pending.second
-                    runningSaved != null -> runningSaved
-                    recent == null -> createAndUpsertSession(path)
-                    generalSettingsRepository.startupSessionMode() == StartupSessionMode.RECENT_SESSION -> savedId ?: recent.id
-                    sessionUseCase.isSessionEmpty(recent.id) -> recent.id
-                    else -> createAndUpsertSession(path)
+                val pendingSessionId = pending?.second?.takeIf {
+                    sessionUseCase.getSessionById(it)?.workspacePath == path
                 }
+                val restoreSavedSession = restoreSavedSessionOnInitialWorkspace
+                restoreSavedSessionOnInitialWorkspace = false
+                val savedSessionRunning = savedId?.let(agentRunManager::isSessionRunning) == true
+                val startupSessionMode = if (
+                    pendingSessionId == null && !(restoreSavedSession && savedId != null) && !savedSessionRunning
+                ) {
+                    generalSettingsRepository.startupSessionMode()
+                } else {
+                    null
+                }
+                val emptyRecentSessionId = recent?.id?.takeIf {
+                    startupSessionMode == StartupSessionMode.NEW_SESSION && sessionUseCase.isSessionEmpty(it)
+                }
+                val targetId = resolveStartupSessionId(
+                    pendingSessionId = pendingSessionId,
+                    savedSessionId = savedId,
+                    restoreSavedSession = restoreSavedSession,
+                    savedSessionRunning = savedSessionRunning,
+                    recentSessionId = recent?.id,
+                    emptyRecentSessionId = emptyRecentSessionId,
+                    startupSessionMode = startupSessionMode
+                ) ?: createAndUpsertSession(path)
                 updateSelectedSessionId(targetId)
 
                 // 异步回收多余的空会话（保留当前 targetId），在后台执行，不卡主线程与首帧渲染。
@@ -2553,4 +2580,22 @@ class AIAgentViewModel @Inject constructor(
         return result
     }
 
+}
+
+internal fun resolveStartupSessionId(
+    pendingSessionId: String?,
+    savedSessionId: String?,
+    restoreSavedSession: Boolean,
+    savedSessionRunning: Boolean,
+    recentSessionId: String?,
+    emptyRecentSessionId: String?,
+    startupSessionMode: StartupSessionMode?
+): String? = when {
+    pendingSessionId != null -> pendingSessionId
+    restoreSavedSession && savedSessionId != null -> savedSessionId
+    savedSessionRunning && savedSessionId != null -> savedSessionId
+    recentSessionId == null -> null
+    startupSessionMode == StartupSessionMode.RECENT_SESSION -> savedSessionId ?: recentSessionId
+    emptyRecentSessionId != null -> emptyRecentSessionId
+    else -> null
 }

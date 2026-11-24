@@ -63,6 +63,7 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     companion object {
         const val TAG = "AIEditorApp"
+        val processInstanceId: Long = System.nanoTime()
         const val LANG_PREFS = "language_prefs_sync"
         const val LANG_KEY = "language_tag"
         /** 崩溃堆栈经 Intent extra 传递，超出 Binder 上限会抛异常，需截断。 */
