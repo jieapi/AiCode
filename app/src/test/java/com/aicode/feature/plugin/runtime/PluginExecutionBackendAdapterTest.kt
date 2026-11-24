@@ -48,6 +48,7 @@ import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -393,11 +394,17 @@ class PluginExecutionBackendAdapterTest {
 
         val registrar = PluginExecutionBackendRegistrar(pluginManager, runtimeManager, backendRegistry, workspaceRegistry)
         registrar.sync("demo.cloud")
-        assertTrue(backendRegistry.find("demo.cloud:sandbox") != null)
+        val registeredBackend = checkNotNull(backendRegistry.find("demo.cloud:sandbox"))
+        assertTrue(backendRegistry.setActiveBackend("demo.cloud:sandbox"))
 
         workspaceRegistry.set("demo.cloud:sandbox", listed)
         active = false
-        registrar.sync("demo.cloud")
+        var cleanedBackend: com.aicode.feature.agent.domain.container.ExecutionBackend? = null
+        registrar.sync("demo.cloud") { backend ->
+            cleanedBackend = backend
+            assertSame(backend, backendRegistry.currentBackend())
+        }
+        assertSame(registeredBackend, cleanedBackend)
         assertNull(backendRegistry.find("demo.cloud:sandbox"))
         assertTrue(workspaceRegistry.workspacesFor("demo.cloud:sandbox").isEmpty())
     }

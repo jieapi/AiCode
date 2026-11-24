@@ -137,7 +137,6 @@ internal fun ContainerSection(
     onSaveCustom: (ContainerProfile) -> Unit,
     onEditCustom: (ContainerProfile) -> Unit,
     onDeleteProfile: (ContainerProfile) -> Unit,
-    onSwitchConfirmed: () -> Unit = {},
     onResetProfile: (ContainerProfile) -> Unit = {},
     /** 非 null 说明正在重置，界面弹不可取消的进度框直到删完。 */
     resetState: ContainerResetUiState? = null,
@@ -402,7 +401,6 @@ internal fun ContainerSection(
             text = { Text(stringResource(R.string.container_switch_confirm, target.name)) },
             confirmButton = {
                 TextButton(onClick = {
-                    onSwitchConfirmed()
                     onSelect(target.id)
                     pendingSwitch = null
                 }) { Text(stringResource(R.string.common_switch)) }
@@ -418,7 +416,6 @@ internal fun ContainerSection(
             text = { Text(stringResource(R.string.container_switch_confirm, target.displayName)) },
             confirmButton = {
                 TextButton(onClick = {
-                    onSwitchConfirmed()
                     onSelectPluginBackend(target.id)
                     pendingPluginSwitch = null
                 }) { Text(stringResource(R.string.common_switch)) }

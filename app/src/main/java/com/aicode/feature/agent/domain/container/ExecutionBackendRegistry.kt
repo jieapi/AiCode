@@ -158,6 +158,7 @@ class ExecutionBackendRegistry @Inject constructor(
     private val remoteSshBackend: BuiltinRemoteSshBackend
 ) {
     private val lock = Any()
+    private val builtinRevisions = mutableMapOf<String, Long>()
     private val registered = LinkedHashMap<String, ExecutionBackend>().apply {
         put(localProotBackend.id, localProotBackend)
         put(remoteSshBackend.id, remoteSshBackend)
@@ -198,11 +199,24 @@ class ExecutionBackendRegistry @Inject constructor(
         }
         val instanceId = "$backendId:$identity"
         if (registered[backendId]?.instanceId == instanceId) return@synchronized
+        builtinRevisions.remove(backendId)
         registered[backendId] = object : ExecutionBackend by base {
             override val instanceId: String = instanceId
             override fun environmentCacheKey(): String = instanceId
             override fun projectConfigKey(workspacePath: String): String =
                 hashProjectKey(workspacePath, "$instanceId\u0000$workspacePath")
+        }
+        publishLocked()
+    }
+
+    /** 使当前内置后端快照失效，同时保留其持久化实例身份。 */
+    fun refreshBuiltinInstance(backendId: String) = synchronized(lock) {
+        if (backendId !in BUILTIN_IDS) return@synchronized
+        val current = registered[backendId] ?: return@synchronized
+        val revision = (builtinRevisions[backendId] ?: 0L) + 1L
+        builtinRevisions[backendId] = revision
+        registered[backendId] = object : ExecutionBackend by current {
+            override fun environmentCacheKey(): String = "${current.instanceId}:revision:$revision"
         }
         publishLocked()
     }

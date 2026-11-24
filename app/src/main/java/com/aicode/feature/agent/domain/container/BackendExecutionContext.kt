@@ -6,15 +6,18 @@ import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.asContextElement
 
 class BackendExecutionBinding(
-    backend: ExecutionBackend
+    private val backend: ExecutionBackend
 ) {
     val instanceId: String = backend.instanceId
+    private val environmentCacheKey: String = backend.environmentCacheKey()
     val commandEngine: CommandEngine = backend.commandEngine
     val fileAccess: FileAccessProvider = backend.fileAccess
     val terminalSessionProvider: TerminalSessionProvider? = backend.terminalSessionProvider
 
-    fun checkActive(registry: ExecutionBackendRegistry) {
-        check(registry.currentBackend().instanceId == instanceId) {
+    fun checkActive(registry: ExecutionBackendRegistry) = checkActive(registry.currentBackend())
+
+    fun checkActive(current: ExecutionBackend) {
+        check(current === backend && current.instanceId == instanceId && current.environmentCacheKey() == environmentCacheKey) {
             "Execution backend changed during the operation"
         }
     }

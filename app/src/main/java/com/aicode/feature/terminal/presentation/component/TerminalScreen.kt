@@ -168,7 +168,11 @@ fun TerminalScreen(
             when (val state = prepareState) {
                 is TerminalViewModel.PrepareState.Loading -> StatusView(
                     loading = true,
-                    message = containerInitMessage(context, containerInit)
+                    message = if (viewModel.isBuiltinRemoteSsh) {
+                        stringResource(R.string.terminal_connecting_remote)
+                    } else {
+                        containerInitMessage(context, containerInit)
+                    }
                 )
 
                 is TerminalViewModel.PrepareState.Error -> StatusView(

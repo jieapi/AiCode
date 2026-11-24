@@ -7,10 +7,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicode.R
 import com.aicode.core.util.FileLogger
+import com.aicode.feature.agent.domain.container.ConnectionState
 import com.aicode.feature.agent.domain.container.ContainerInitState
 import com.aicode.feature.agent.domain.container.ExecutionBackend
 import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.terminal.domain.RemoteTerminalSessionManager
 import com.aicode.feature.terminal.domain.RunState
@@ -36,6 +38,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -75,6 +79,7 @@ class TerminalViewModel @Inject constructor(
     private val localManager: TerminalSessionManager,
     private val remoteManager: RemoteTerminalSessionManager,
     private val modeHolder: ExecutionModeHolder,
+    private val remoteSshConnection: RemoteSshConnection,
     private val containerEngine: LinuxContainerEngine,
     private val terminalSettingsRepository: TerminalSettingsRepository
 ) : ViewModel() {
@@ -123,6 +128,9 @@ class TerminalViewModel @Inject constructor(
 
     /** 容器初始化实时进度（解压/部署/装包），Loading 阶段用它展示细粒度文案。 */
     val containerInit: StateFlow<ContainerInitState> = containerEngine.initProgress
+
+    val isBuiltinRemoteSsh: Boolean
+        get() = currentBackend().id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
 
     private val _pluginTabs = MutableStateFlow<List<TerminalTab>>(emptyList())
     private val _pluginActiveTabId = MutableStateFlow<String?>(null)
@@ -203,12 +211,13 @@ class TerminalViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            modeHolder.activeBackend.collect { backend ->
+            combine(modeHolder.activeBackend, remoteSshConnection.connectionState) { backend, state ->
+                backend to state.takeIf { backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID }
+            }.distinctUntilChanged().collect { (backend, connectionState) ->
                 prepareJob?.cancel()
                 createJob?.cancel()
                 _creatingTab.value = false
                 clearPluginMirrors()
-                pluginMirrorGeneration++
                 if (backend.id != ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID &&
                     backend.id != ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
                 ) {
@@ -216,7 +225,20 @@ class TerminalViewModel @Inject constructor(
                         pluginMirrorOwner = PluginTerminalMirrorOwner(backend.instanceId, it)
                     }
                 }
-                prepare()
+                if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID) {
+                    if (connectionState != ConnectionState.CONNECTED) {
+                        remoteManager.tabs.value.map { it.id }.forEach(remoteManager::closeTab)
+                    }
+                    when (connectionState) {
+                        ConnectionState.CONNECTED -> prepare()
+                        ConnectionState.CONNECTING -> _prepareState.value = PrepareState.Loading
+                        else -> _prepareState.value = PrepareState.Error(
+                            context.getString(R.string.chat_remote_connect_failed)
+                        )
+                    }
+                } else {
+                    prepare()
+                }
             }
         }
     }
@@ -225,6 +247,16 @@ class TerminalViewModel @Inject constructor(
     fun prepare() {
         prepareJob?.cancel()
         val backend = currentBackend()
+        if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID &&
+            remoteSshConnection.connectionState.value != ConnectionState.CONNECTED
+        ) {
+            _prepareState.value = if (remoteSshConnection.connectionState.value == ConnectionState.CONNECTING) {
+                PrepareState.Loading
+            } else {
+                PrepareState.Error(context.getString(R.string.chat_remote_connect_failed))
+            }
+            return
+        }
         val owner = activePluginOwner()
         val generation = pluginMirrorGeneration
         prepareJob = viewModelScope.launch {

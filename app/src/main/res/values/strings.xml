@@ -1887,6 +1887,7 @@
     <string name="terminal_prepare_error_unknown">未知错误</string>
     <string name="terminal_start_failed">无法启动终端：\n%1$s</string>
     <string name="terminal_backend_unsupported">当前执行后端「%1$s」不支持终端</string>
+    <string name="terminal_connecting_remote">正在连接远程终端…</string>
     <string name="terminal_retry">重试</string>
     <string name="terminal_no_open_tabs">没有打开的终端标签</string>
     <string name="terminal_close_tab">关闭标签</string>

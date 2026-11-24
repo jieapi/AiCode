@@ -4,14 +4,19 @@ import android.app.Application
 import android.content.Context
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import com.aicode.feature.agent.domain.container.BackendCapabilities
+import com.aicode.feature.agent.domain.container.ConnectionState
 import com.aicode.feature.agent.domain.container.ContainerInitState
 import com.aicode.feature.agent.domain.container.ExecutionBackend
 import com.aicode.feature.agent.domain.container.LinuxContainerEngine
+import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.settings.data.repository.ExecutionModeHolder
 import com.aicode.feature.terminal.data.repository.TerminalSettings
 import com.aicode.feature.terminal.data.repository.TerminalSettingsRepository
 import com.aicode.feature.terminal.domain.TabInfo
 import com.aicode.feature.terminal.domain.TerminalSessionProvider
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -74,8 +79,11 @@ class TerminalViewModelTest {
         val settings = mockk<TerminalSettingsRepository> {
             every { settingsFlow } returns MutableStateFlow(TerminalSettings())
         }
+        val remoteConnection = mockk<RemoteSshConnection> {
+            every { connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
+        }
         val vm = TerminalViewModel(
-            ApplicationProvider.getApplicationContext<Context>(), mockk(), mockk(), modeHolder, engine, settings
+            ApplicationProvider.getApplicationContext<Context>(), mockk(), mockk(), modeHolder, remoteConnection, engine, settings
         )
         try {
             val old = vm.tabs.first { it.singleOrNull()?.title == "A" }.single()
@@ -106,9 +114,60 @@ class TerminalViewModelTest {
         javaClass.getDeclaredMethod("onCleared").apply { isAccessible = true }.invoke(this@clearForTest)
     }
 
+    @Test
+    fun remoteTerminalWaitsForSshConnectionBeforeCreatingInitialTab() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val connectionState = MutableStateFlow(ConnectionState.CONNECTING)
+        val remoteConnection = mockk<RemoteSshConnection> {
+            every { this@mockk.connectionState } returns connectionState
+        }
+        val provider = provider("remote")
+        val remoteBackend = mockk<ExecutionBackend> {
+            every { id } returns "builtin:remote-ssh"
+            every { instanceId } returns "builtin:remote-ssh:server-a"
+            every { capabilities } returns BackendCapabilities(isRemoteEnvironment = true)
+            every { terminalSessionProvider } returns provider
+        }
+        val active = MutableStateFlow(remoteBackend)
+        val modeHolder = mockk<ExecutionModeHolder> {
+            every { activeBackend } returns active
+            every { currentBackend() } answers { active.value }
+        }
+        val remoteManager = mockk<com.aicode.feature.terminal.domain.RemoteTerminalSessionManager>(relaxed = true) {
+            every { tabs } returns MutableStateFlow(emptyList())
+            every { activeTabId } returns MutableStateFlow(null)
+            every { revision } returns MutableStateFlow(0)
+            coEvery { ensureInitialTab() } returns Unit
+        }
+        val engine = mockk<LinuxContainerEngine> {
+            every { initProgress } returns MutableStateFlow<ContainerInitState>(ContainerInitState.Idle)
+        }
+        val settings = mockk<TerminalSettingsRepository> {
+            every { settingsFlow } returns MutableStateFlow(TerminalSettings())
+        }
+        val vm = TerminalViewModel(
+            ApplicationProvider.getApplicationContext<Context>(), mockk(), remoteManager, modeHolder, remoteConnection, engine, settings
+        )
+        try {
+            testScheduler.runCurrent()
+            assertEquals(TerminalViewModel.PrepareState.Loading, vm.prepareState.value)
+            coVerify(exactly = 0) { remoteManager.ensureInitialTab() }
+
+            connectionState.value = ConnectionState.CONNECTED
+            testScheduler.runCurrent()
+
+            assertEquals(TerminalViewModel.PrepareState.Ready, vm.prepareState.value)
+            coVerify(exactly = 1) { remoteManager.ensureInitialTab() }
+        } finally {
+            vm.clearForTest()
+            Dispatchers.resetMain()
+        }
+    }
+
     private fun backend(instance: String, provider: TerminalSessionProvider): ExecutionBackend = mockk {
         every { id } returns "demo.test:terminal"
         every { instanceId } returns instance
+        every { capabilities } returns BackendCapabilities(isRemoteEnvironment = true)
         every { terminalSessionProvider } returns provider
     }
 

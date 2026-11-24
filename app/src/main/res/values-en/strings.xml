@@ -1888,6 +1888,7 @@
     <string name="terminal_prepare_error_unknown">Unknown error</string>
     <string name="terminal_start_failed">Cannot start terminal:\n%1$s</string>
     <string name="terminal_backend_unsupported">Terminal is not supported by execution backend "%1$s"</string>
+    <string name="terminal_connecting_remote">Connecting to remote terminal…</string>
     <string name="terminal_retry">Retry</string>
     <string name="terminal_no_open_tabs">No open terminal tabs</string>
     <string name="terminal_close_tab">Close Tab</string>

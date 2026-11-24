@@ -58,7 +58,7 @@ class DelegatingTerminalSessionProvider internal constructor(
 
     private fun selectedProvider(backend: ExecutionBackend): TerminalSessionProvider? {
         val context = BackendExecutionContext.binding() ?: return backend.terminalSessionProvider
-        check(context.instanceId == backend.instanceId) { "Execution backend changed during the operation" }
+        context.checkActive(backend)
         return context.terminalSessionProvider
     }
 

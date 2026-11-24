@@ -23,6 +23,7 @@ import com.aicode.feature.agent.domain.container.ContainerOsDetector
 import com.aicode.feature.agent.domain.container.ContainerProfile
 import com.aicode.feature.agent.domain.container.ExecutionBackend
 import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
+import com.aicode.feature.agent.presentation.run.ExecutionBackendSwitchCoordinator
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.container.RootfsSource
 import com.aicode.feature.agent.domain.container.displayLabel
@@ -121,6 +122,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -402,6 +404,7 @@ class SettingsViewModel @Inject constructor(
     private val executionModeRepository: ExecutionModeRepository,
     private val executionModeHolder: ExecutionModeHolder,
     private val executionBackendRegistry: ExecutionBackendRegistry,
+    private val executionBackendSwitchCoordinator: ExecutionBackendSwitchCoordinator,
     private val remoteSshConnection: RemoteSshConnection,
     private val remoteRepository: RemoteRepository,
     private val chatSessionDao: ChatSessionDao,
@@ -1164,22 +1167,35 @@ class SettingsViewModel @Inject constructor(
                 refreshSkills()
             }
 
-            // 全局技能/子代理在远程模式下以远端为源，本地目录监听（skills.changes）不会触发；
-            // 执行模式切换或远程连接就绪后需重扫，否则列表停留在旧环境的内容。
             launch {
-                executionMode.collectLatest {
-                    refreshSkills()
-                    refreshSubAgents()
+                combine(
+                    executionBackendRegistry.activeBackend,
+                    connectionState
+                ) { backend, state ->
+                    Triple(
+                        backend,
+                        state.takeIf { backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID },
+                        backend.environmentCacheKey()
+                    )
                 }
-            }
-
-            launch {
-                connectionState.collectLatest { state ->
-                    if (state == ConnectionState.CONNECTED) {
-                        refreshSkills()
-                        refreshSubAgents()
+                    .distinctUntilChanged { old, new ->
+                        old.first === new.first &&
+                            old.first.id == new.first.id &&
+                            old.first.instanceId == new.first.instanceId &&
+                            old.second == new.second &&
+                            old.third == new.third
                     }
-                }
+                    .collectLatest { (backend, state, _) ->
+                        if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID &&
+                            state != ConnectionState.CONNECTED
+                        ) {
+                            _skills.value = emptyList()
+                            _subAgents.value = emptyList()
+                            return@collectLatest
+                        }
+                        refreshSkillsNow()
+                        refreshSubAgentsNow()
+                    }
             }
 
             launch {
@@ -1568,32 +1584,40 @@ class SettingsViewModel @Inject constructor(
 
     /** 重新扫描技能（进入设置页 / 启停切换后调用，反映磁盘上增删改）。 */
     fun refreshSkills() {
-        viewModelScope.launch {
-            _skills.value = try {
-                withContext(Dispatchers.IO) {
-                    skillRepository.refreshDirectoryCache()
-                    val disabled = skillRepository.disabledNames()
-                    skillRepository.listAllSkills().map { entry ->
-                        SkillUiEntry(
-                            name = entry.skill.name,
-                            description = entry.skill.description,
-                            scope = entry.scope,
-                            disabled = entry.skill.name.lowercase() in disabled,
-                            instructions = entry.skill.instructions,
-                            requiredTools = entry.skill.requiredTools
-                        )
-                    }
+        viewModelScope.launch { refreshSkillsNow() }
+    }
+
+    private suspend fun refreshSkillsNow() {
+        val backend = executionBackendRegistry.currentBackend()
+        val refreshed = try {
+            withContext(Dispatchers.IO) {
+                skillRepository.refreshDirectoryCache()
+                val disabled = skillRepository.disabledNames()
+                skillRepository.listAllSkills().map { entry ->
+                    SkillUiEntry(
+                        name = entry.skill.name,
+                        description = entry.skill.description,
+                        scope = entry.scope,
+                        disabled = entry.skill.name.lowercase() in disabled,
+                        instructions = entry.skill.instructions,
+                        requiredTools = entry.skill.requiredTools
+                    )
                 }
-            } catch (error: java.io.IOException) {
-                if (error is java.io.InterruptedIOException) throw error
-                if (isTransientRemoteConfigError(error)) {
-                    FileLogger.d("Settings", "技能清单等待 SSH 就绪")
-                } else {
-                    FileLogger.w("Settings", "技能清单读取失败", error)
-                }
-                emptyList()
             }
+        } catch (error: java.io.IOException) {
+            if (error is java.io.InterruptedIOException) throw error
+            if (isTransientRemoteConfigError(error)) {
+                FileLogger.d("Settings", "技能清单等待 SSH 就绪")
+            } else {
+                FileLogger.w("Settings", "技能清单读取失败", error)
+            }
+            emptyList()
         }
+        if (executionBackendRegistry.currentBackend() !== backend) return
+        if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID &&
+            connectionState.value != ConnectionState.CONNECTED
+        ) return
+        _skills.value = refreshed
     }
 
     /** 切换技能的启用/禁用状态（写入对应作用域的 skills.json）。 */
@@ -1734,39 +1758,47 @@ class SettingsViewModel @Inject constructor(
 
     /** 重新扫描子代理定义（进入设置页 / 删除后调用，反映盘上增删改）。 */
     fun refreshSubAgents() {
-        viewModelScope.launch {
-            _subAgents.value = try {
-                withContext(Dispatchers.IO) {
-                    agentDefinitionRepository.refreshDirectoryCache()
-                    val disabled = agentDefinitionRepository.disabledNames()
-                    agentDefinitionRepository.listAll().map { entry ->
-                        SubAgentUiEntry(
-                            name = entry.definition.name,
-                            description = entry.definition.description,
-                            scope = entry.scope,
-                            disabled = entry.definition.name.lowercase() in disabled,
-                            providerId = entry.definition.providerId,
-                            model = entry.definition.model,
-                            reasoningEffort = entry.definition.reasoningEffort,
-                            mode = entry.definition.mode,
-                            allowedTools = entry.definition.allowedTools,
-                            disallowedTools = entry.definition.disallowedTools,
-                            inject = entry.definition.inject,
-                            prompt = entry.definition.prompt,
-                            filePath = entry.definition.filePath
-                        )
-                    }
+        viewModelScope.launch { refreshSubAgentsNow() }
+    }
+
+    private suspend fun refreshSubAgentsNow() {
+        val backend = executionBackendRegistry.currentBackend()
+        val refreshed = try {
+            withContext(Dispatchers.IO) {
+                agentDefinitionRepository.refreshDirectoryCache()
+                val disabled = agentDefinitionRepository.disabledNames()
+                agentDefinitionRepository.listAll().map { entry ->
+                    SubAgentUiEntry(
+                        name = entry.definition.name,
+                        description = entry.definition.description,
+                        scope = entry.scope,
+                        disabled = entry.definition.name.lowercase() in disabled,
+                        providerId = entry.definition.providerId,
+                        model = entry.definition.model,
+                        reasoningEffort = entry.definition.reasoningEffort,
+                        mode = entry.definition.mode,
+                        allowedTools = entry.definition.allowedTools,
+                        disallowedTools = entry.definition.disallowedTools,
+                        inject = entry.definition.inject,
+                        prompt = entry.definition.prompt,
+                        filePath = entry.definition.filePath
+                    )
                 }
-            } catch (error: java.io.IOException) {
-                if (error is java.io.InterruptedIOException) throw error
-                if (isTransientRemoteConfigError(error)) {
-                    FileLogger.d("Settings", "子代理清单等待 SSH 就绪")
-                } else {
-                    FileLogger.w("Settings", "子代理清单读取失败", error)
-                }
-                emptyList()
             }
+        } catch (error: java.io.IOException) {
+            if (error is java.io.InterruptedIOException) throw error
+            if (isTransientRemoteConfigError(error)) {
+                FileLogger.d("Settings", "子代理清单等待 SSH 就绪")
+            } else {
+                FileLogger.w("Settings", "子代理清单读取失败", error)
+            }
+            emptyList()
         }
+        if (executionBackendRegistry.currentBackend() !== backend) return
+        if (backend.id == ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID &&
+            connectionState.value != ConnectionState.CONNECTED
+        ) return
+        _subAgents.value = refreshed
     }
 
     /** 切换子代理启用/禁用（写入对应作用域的 agents.json）；禁用后不再进主代理的可派发清单。 */
@@ -2701,6 +2733,9 @@ class SettingsViewModel @Inject constructor(
     /** 切换到指定执行后端（内置或插件后端），并持久化 activeBackendId。 */
     fun setActiveExecutionBackend(id: String) {
         viewModelScope.launch {
+            if (executionBackendRegistry.currentBackend().id != id) {
+                executionBackendSwitchCoordinator.cleanup(executionBackendRegistry.currentBackend())
+            }
             executionBackendRegistry.setActiveBackend(id)
             executionModeRepository.setActiveBackendId(executionBackendRegistry.currentBackend().id)
         }
@@ -2712,6 +2747,13 @@ class SettingsViewModel @Inject constructor(
             ?: ContainerProfile.BUILTIN_ALPINE.takeIf { it.id == id }
             ?: _customProfiles.value.firstOrNull()
             ?: return
+        val targetBackendId = when (profile.mode) {
+            ExecutionMode.LOCAL_PROOT -> ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID
+            ExecutionMode.REMOTE_SSH -> ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
+        }
+        if (_activeProfileId.value != profile.id || executionBackendRegistry.currentBackend().id != targetBackendId) {
+            executionBackendSwitchCoordinator.cleanup(executionBackendRegistry.currentBackend())
+        }
         containerSettingsRepository.setActiveProfile(profile.id)
         when (profile.mode) {
             ExecutionMode.LOCAL_PROOT -> {
@@ -2803,6 +2845,9 @@ class SettingsViewModel @Inject constructor(
     fun editCustomContainerProfile(profile: ContainerProfile) {
         viewModelScope.launch {
             val old = _customProfiles.value.firstOrNull { it.id == profile.id }
+            if (_activeProfileId.value == profile.id && old != profile) {
+                executionBackendSwitchCoordinator.cleanup(executionBackendRegistry.currentBackend())
+            }
             val oldUri = (old?.rootfsSource as? RootfsSource.LocalFile)?.uri
             val newUri = (profile.rootfsSource as? RootfsSource.LocalFile)?.uri
             if (old != null && oldUri != newUri) {
@@ -2815,6 +2860,9 @@ class SettingsViewModel @Inject constructor(
     /** 删除容器 profile（内置 Alpine 也可删，删光后由空态恢复），连带清理本地 rootfs。 */
     fun deleteContainerProfile(profile: ContainerProfile) {
         viewModelScope.launch {
+            if (_activeProfileId.value == profile.id) {
+                executionBackendSwitchCoordinator.cleanup(executionBackendRegistry.currentBackend())
+            }
             containerSettingsRepository.deleteCustomProfile(profile.id)
             cleanRootfsWithProgress(profile)
             if (_activeProfileId.value == profile.id) {

@@ -172,9 +172,9 @@ class AgentRunManager @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val sessionJobs = mutableMapOf<String, Job>()
+    private val sessionJobs = ConcurrentHashMap<String, Job>()
     private val externalSessionIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
-    private val commandJobs = mutableMapOf<String, Job>()
+    private val commandJobs = ConcurrentHashMap<String, Job>()
     private val chatRequestConsumerId = UUID.randomUUID().toString()
     private val goalEmptyTurnCounts = mutableMapOf<String, Int>()
 
@@ -733,7 +733,10 @@ class AgentRunManager @Inject constructor(
     fun compactSession(sessionId: String) {
         if (isSessionRunning(sessionId) || sessionId in _runningCommandSessions.value) return
         markCommandStarted(sessionId)
-        val job = scope.launch {
+        val job = scope.launch(
+            context = BackendExecutionContext.bind(executionBackendRegistry.currentBackend()),
+            start = CoroutineStart.LAZY
+        ) {
             var cancelled = false
             try {
                 runCompaction(sessionId)
@@ -748,6 +751,7 @@ class AgentRunManager @Inject constructor(
             }
         }
         commandJobs[sessionId] = job
+        job.start()
     }
 
     private suspend fun runCompaction(sessionId: String) {
@@ -997,7 +1001,10 @@ class AgentRunManager @Inject constructor(
         projectRoot: String
     ): Job {
         markCommandStarted(sessionId)
-        val job = scope.launch {
+        val job = scope.launch(
+            context = BackendExecutionContext.bind(executionBackendRegistry.currentBackend()),
+            start = CoroutineStart.LAZY
+        ) {
             var cancelled = false
             var followUp: (() -> Unit)? = null
             var suspendAction: (suspend () -> Unit)? = null
@@ -1062,6 +1069,7 @@ class AgentRunManager @Inject constructor(
             }
         }
         commandJobs[sessionId] = job
+        job.start()
         return job
     }
 
@@ -1167,6 +1175,15 @@ class AgentRunManager @Inject constructor(
 
     fun clearContextUsage(sessionId: String) {
         _contextUsages.value = _contextUsages.value - sessionId
+    }
+
+    suspend fun stopAllAgentsAndJoin() {
+        val jobs = (sessionJobs.values + commandJobs.values).distinct()
+        stopAllAgents()
+        jobs.forEach { it.join() }
+        while (sessionJobs.isNotEmpty() || commandJobs.isNotEmpty()) {
+            (sessionJobs.values + commandJobs.values).distinct().forEach { it.join() }
+        }
     }
 
     fun stopAllAgents() {
@@ -1481,7 +1498,10 @@ class AgentRunManager @Inject constructor(
         if (targetSessionId != null) {
             streamingAssistantStore.startRun(targetSessionId, runToken)
         }
-        return scope.launch {
+        val job = scope.launch(
+            context = BackendExecutionContext.bind(executionBackendRegistry.currentBackend()),
+            start = CoroutineStart.LAZY
+        ) {
         val sessionId = targetSessionId ?: return@launch
         coroutineContext[Job]?.let { sessionJobs[sessionId] = it }
         val currentSession = sessionUseCase.getSessionById(sessionId)
@@ -1994,12 +2014,13 @@ class AgentRunManager @Inject constructor(
                 releaseKeepalive()
             }
         }
-    }.also { job ->
+    }
         if (targetSessionId != null) {
             sessionJobs[targetSessionId] = job
             job.invokeOnCompletion { streamingAssistantStore.finishRun(targetSessionId, runToken) }
         }
-    }
+        job.start()
+        return job
     }
 
     /**

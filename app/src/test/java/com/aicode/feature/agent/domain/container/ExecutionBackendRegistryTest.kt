@@ -53,7 +53,8 @@ class ExecutionBackendRegistryTest {
         id: String,
         commandEngine: CommandEngine = mockk(relaxed = true),
         fileAccess: FileAccessProvider = mockk(relaxed = true),
-        terminalProvider: TerminalSessionProvider? = null
+        terminalProvider: TerminalSessionProvider? = null,
+        isRemoteEnvironment: Boolean = true
     ): ExecutionBackend = object : ExecutionBackend {
         override val id: String = id
         override val displayName: String = "Plugin $id"
@@ -61,7 +62,7 @@ class ExecutionBackendRegistryTest {
             filesystem = true,
             command = true,
             terminal = terminalProvider != null,
-            isRemoteEnvironment = true,
+            isRemoteEnvironment = isRemoteEnvironment,
             workspaceDiscovery = WorkspaceDiscoveryMode.REGISTER,
             projectConfigLocation = ProjectConfigLocation.APP_PRIVATE_DIR
         )
@@ -117,6 +118,30 @@ class ExecutionBackendRegistryTest {
     }
 
     @Test
+    fun delegatingCommandEngineRoutesAcrossLocalAndRemotePluginBackends() = runTest {
+        val registry = newRegistry()
+        val localPluginEngine = mockk<CommandEngine>(relaxed = true)
+        val remotePluginAEngine = mockk<CommandEngine>(relaxed = true)
+        val remotePluginBEngine = mockk<CommandEngine>(relaxed = true)
+        coEvery { localPluginEngine.runCommandSync("pwd", null, any()) } returns "local plugin"
+        coEvery { remotePluginAEngine.runCommandSync("pwd", null, any()) } returns "remote A"
+        coEvery { remotePluginBEngine.runCommandSync("pwd", null, any()) } returns "remote B"
+        registry.register(fakePluginBackend("local.exec:sandbox", localPluginEngine, isRemoteEnvironment = false))
+        registry.register(fakePluginBackend("remote.a:sandbox", remotePluginAEngine))
+        registry.register(fakePluginBackend("remote.b:sandbox", remotePluginBEngine))
+        val commandEngine = DelegatingCommandEngine(registry)
+
+        listOf(
+            "local.exec:sandbox" to "local plugin",
+            "remote.a:sandbox" to "remote A",
+            "remote.b:sandbox" to "remote B"
+        ).forEach { (backendId, expectedOutput) ->
+            assertTrue(registry.setActiveBackend(backendId))
+            assertEquals(expectedOutput, commandEngine.runCommandSync("pwd"))
+        }
+    }
+
+    @Test
     fun builtinInstancesSeparateProfilesWithoutChangingTheBackendDefinition() {
         val registry = newRegistry()
         val id = ExecutionBackendRegistry.BUILTIN_REMOTE_SSH_ID
@@ -133,6 +158,31 @@ class ExecutionBackendRegistryTest {
         assertFalse(first.projectConfigKey("/workspace") == second.projectConfigKey("/workspace"))
         assertEquals("$id:server-a:user", first.instanceId)
         assertEquals("$id:server-b:user", second.instanceId)
+    }
+
+    @Test
+    fun boundExecutionContextRejectsReplacedBackendInstance() {
+        val registry = newRegistry()
+        val binding = BackendExecutionBinding(registry.currentBackend())
+
+        binding.checkActive(registry)
+        registry.updateBuiltinInstance(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID, "profile-b")
+
+        assertTrue(runCatching { binding.checkActive(registry) }.isFailure)
+    }
+
+    @Test
+    fun refreshBuiltinInstanceChangesSnapshotWithoutChangingItsPersistentIdentity() {
+        val registry = newRegistry()
+        registry.updateBuiltinInstance(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID, "profile-a")
+        registry.setActiveBackend(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)
+        val before = registry.currentBackend()
+
+        registry.refreshBuiltinInstance(ExecutionBackendRegistry.BUILTIN_LOCAL_PROOT_ID)
+        val after = registry.currentBackend()
+
+        assertEquals(before.instanceId, after.instanceId)
+        assertTrue(before.environmentCacheKey() != after.environmentCacheKey())
     }
 
     @Test

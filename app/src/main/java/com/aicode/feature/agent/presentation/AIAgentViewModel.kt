@@ -681,6 +681,7 @@ class AIAgentViewModel @Inject constructor(
         val workspace: String,
         val profileId: String,
         val backendId: String,
+        val environmentCacheKey: String,
         val isRemote: Boolean,
         val fileWatch: Boolean
     )
@@ -710,6 +711,7 @@ class AIAgentViewModel @Inject constructor(
             workspace = workspace,
             profileId = effectiveProfileId,
             backendId = backend.id,
+            environmentCacheKey = backend.environmentCacheKey(),
             isRemote = backend.capabilities.isRemoteEnvironment,
             fileWatch = backend.capabilities.fileWatch
         ) to FileTreeRoot.Container(
