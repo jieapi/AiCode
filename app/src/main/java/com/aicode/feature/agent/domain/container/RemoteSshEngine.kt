@@ -259,11 +259,6 @@ class RemoteSshEngine @Inject constructor(
      * 同时读不到 ~/.config/git/config 与系统级配置。环境变量只影响当前 git 进程，
      * 用户自己的全局配置照常生效。未注入时返回空串，命令完全走用户自己的 git 配置。
      */
-    private fun gitCredentialEnvPrefix(): String {
-        val wsRoot = connection.gitCredentialWorkspaceRoot?.trimEnd('/') ?: return ""
-        val key = shellQuote("includeIf.gitdir:$wsRoot/.path")
-        return "export GIT_CONFIG_COUNT=1; " +
-            "export GIT_CONFIG_KEY_0=$key; " +
-            "export GIT_CONFIG_VALUE_0=\"\${HOME}/.aicode/gitconfig.credential\"; "
-    }
+    private fun gitCredentialEnvPrefix(): String =
+        connection.gitCredentialEnvironmentPrefix()
 }

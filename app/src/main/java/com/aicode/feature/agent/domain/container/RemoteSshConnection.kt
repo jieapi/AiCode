@@ -147,6 +147,7 @@ class RemoteSshConnection @Inject constructor(
 
     suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock {
         if (isConnected() && this.config == config) return@withLock
+        val reconnecting = this.config != null
         disconnectInternal()
         this.config = config
         _connectionState.value = ConnectionState.CONNECTING
@@ -170,6 +171,10 @@ class RemoteSshConnection @Inject constructor(
                 FileLogger.i(TAG, "SSH 已连接 ${config.host}:${config.port} as ${config.username}")
             }
             _connectionState.value = ConnectionState.CONNECTED
+            if (reconnecting) {
+                runCatching { onReconnected?.invoke() }
+                    .onFailure { FileLogger.w(TAG, "连接恢复后同步工作区状态失败", it) }
+            }
         } catch (e: Exception) {
             _connectionState.value = ConnectionState.FAILED
             throw e
@@ -473,10 +478,7 @@ class RemoteSshConnection @Inject constructor(
         if (isConnected()) return true
         _connectionState.value = ConnectionState.CONNECTING
         return runCatching { connect(cfg) }
-            .onSuccess {
-                FileLogger.i(TAG, "SSH 重连成功（前台触发）")
-                runCatching { onReconnected?.invoke() }
-            }
+            .onSuccess { FileLogger.i(TAG, "SSH 重连成功（前台触发）") }
             .onFailure {
                 FileLogger.w(TAG, "SSH 重连失败（前台触发）", it)
                 _connectionState.value = ConnectionState.FAILED
@@ -846,66 +848,89 @@ class RemoteSshConnection @Inject constructor(
      * @param credentials 要注入的凭据列表（每 host 一条）。
      * @param workspaceRoot 远程工作区根路径（AI 的 ~/workspace 映射目录），限定注入范围。
      */
-    suspend fun uploadGitCredentialConfig(credentials: List<GitCredential>, workspaceRoot: String) = credentialSyncMutex.withLock {
-        val client = sshClient ?: return@withLock
-        val home = remoteHome ?: return@withLock
-        val aicodeDir = home.trimEnd('/') + "/.aicode"
-        val wsRoot = workspaceRoot.trimEnd('/').ifEmpty { return@withLock }
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val creds = credentials.joinToString("\n") { c ->
-                    "https://${enc(c.username)}:${enc(c.token)}@${c.host}"
-                }.let { if (it.isNotEmpty()) "$it\n" else "" }
+    suspend fun uploadGitCredentialConfig(credentials: List<GitCredential>, workspaceRoot: String): Boolean =
+        credentialSyncMutex.withLock {
+            if (sshClient == null) return@withLock false
+            val home = remoteHome ?: return@withLock false
+            val aicodeDir = home.trimEnd('/') + "/.aicode"
+            val wsRoot = workspaceRoot.trimEnd('/').ifEmpty { return@withLock false }
+            withContext(Dispatchers.IO) {
+                try {
+                    val creds = credentials.joinToString("\n") { c ->
+                        "https://${enc(c.username)}:${enc(c.token)}@${c.host}"
+                    }.let { if (it.isNotEmpty()) "$it\n" else "" }
 
+                    // 上传 credential helper 脚本（本地由 ContainerInstaller 提取），配置为唯一 helper；
+                    // 服务器上没有 App，用 AICODE_CRED_NO_PROMPT 让未命中时直接空退出而非等待弹窗。
+                    containerInstaller.extractCredentialHelper()
+                    val helperScript = java.io.File(containerInstaller.aicodeDir, "git-credential-aicode").readText()
+                    check(helperScript.isNotBlank()) { "Git credential helper is empty" }
+                    val remoteHelperScript = helperScript.replaceFirst(
+                        "#!/bin/sh\n",
+                        "#!/bin/sh\nexport AICODE_CRED_NO_PROMPT=1\n"
+                    )
 
-                // 上传 credential helper 脚本（本地由 ContainerInstaller 提取），配置为唯一 helper；
-                // 服务器上没有 App，用 AICODE_CRED_NO_PROMPT 让未命中时直接空退出而非等待弹窗。
-                containerInstaller.extractCredentialHelper()
-                val helperScript = java.io.File(containerInstaller.aicodeDir, "git-credential-aicode").readText()
-                check(helperScript.isNotBlank()) { "Git credential helper is empty" }
-                val remoteHelperScript = helperScript.replaceFirst(
-                    "#!/bin/sh\n",
-                    "#!/bin/sh\nexport AICODE_CRED_NO_PROMPT=1\n"
-                )
+                    withSftpChannel { sftp ->
+                        sftp.mkdirs(aicodeDir)
+                        writeRemoteFile(sftp, "$aicodeDir/git-credential-aicode", remoteHelperScript.toByteArray(Charsets.UTF_8), executable = true)
+                        writeRemoteFile(sftp, "$aicodeDir/git-credentials", encodeCreds(creds).toByteArray(Charsets.UTF_8))
 
-                withSftpChannel { sftp ->
-                    sftp.mkdirs(aicodeDir)
-                    writeRemoteFile(sftp, "$aicodeDir/git-credential-aicode", remoteHelperScript.toByteArray(Charsets.UTF_8), executable = true)
-                    writeRemoteFile(sftp, "$aicodeDir/git-credentials", encodeCreds(creds).toByteArray(Charsets.UTF_8))
-
-                    val credentialConfig = buildString {
-                        append("[credential]\n")
-                        append("    helper = !AICODE_CRED_NO_PROMPT=1 $aicodeDir/git-credential-aicode\n")
+                        val credentialConfig = buildString {
+                            append("[credential]\n")
+                            append("    helper = !AICODE_CRED_NO_PROMPT=1 $aicodeDir/git-credential-aicode\n")
+                        }
+                        writeRemoteFile(sftp, "$aicodeDir/gitconfig.credential", credentialConfig.toByteArray(Charsets.UTF_8))
                     }
-                    writeRemoteFile(sftp, "$aicodeDir/gitconfig.credential", credentialConfig.toByteArray(Charsets.UTF_8))
+                    gitCredentialWorkspaceRoot = wsRoot
+                    FileLogger.i(TAG, "已注入 git 凭据到远程 $aicodeDir（限定 $wsRoot/）")
+                    true
+                } catch (e: Exception) {
+                    FileLogger.w(TAG, "注入 git 凭据到远程失败", e)
+                    false
                 }
-                gitCredentialWorkspaceRoot = wsRoot
-                FileLogger.i(TAG, "已注入 git 凭据到远程 $aicodeDir（限定 $wsRoot/）")
-            }.onFailure { FileLogger.w(TAG, "注入 git 凭据到远程失败", it) }
+            }
         }
-    }
 
     /**
      * 撤销远程注入：删除 App 管理的凭据与 helper 文件，命令不再附加凭证配置。
      * `~/.aicode/gitconfig` 是旧版实现生成的文件，旧版期间写入其中的用户配置可能只存在于该文件，
      * 这里不作删除。
      */
-    suspend fun removeGitCredentialConfig() = credentialSyncMutex.withLock {
-        val client = sshClient ?: return@withLock
-        val home = remoteHome ?: return@withLock
+    suspend fun removeGitCredentialConfig(): Boolean = credentialSyncMutex.withLock {
+        // 先停用当前进程的环境注入；远程文件删除失败也不能继续使用旧凭据。
+        gitCredentialWorkspaceRoot = null
+        val home = remoteHome ?: return@withLock false
+        if (sshClient == null) return@withLock false
         val aicodeDir = home.trimEnd('/') + "/.aicode"
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
                 withSftpChannel { sftp ->
                     listOf("gitconfig.credential", "git-credentials", "git-credential-aicode").forEach { name ->
                         val path = "$aicodeDir/$name"
                         if (sftp.statExistence(path) != null) sftp.rm(path)
                     }
                 }
-                gitCredentialWorkspaceRoot = null
                 FileLogger.i(TAG, "已撤销远程 git 凭据注入")
-            }.onFailure { FileLogger.w(TAG, "撤销远程 git 凭据注入失败", it) }
+                true
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "撤销远程 git 凭据注入失败", e)
+                false
+            }
         }
+    }
+
+    /**
+     * 返回当前远程命令/交互终端都要继承的 Git 凭据配置环境。
+     * 空字符串表示没有成功注入配置，调用方应保持服务器原有 Git 环境不变。
+     */
+    internal fun gitCredentialEnvironmentPrefix(): String {
+        val wsRoot = gitCredentialWorkspaceRoot?.trimEnd('/') ?: return ""
+        val home = remoteHome?.trimEnd('/') ?: return ""
+        val key = shellQuote("includeIf.gitdir:$wsRoot/.path")
+        val value = shellQuote("$home/.aicode/gitconfig.credential")
+        return "export GIT_CONFIG_COUNT=1; " +
+            "export GIT_CONFIG_KEY_0=$key; " +
+            "export GIT_CONFIG_VALUE_0=$value; "
     }
 
     /** 写一个远程文件；调用方必须已持有该通道的租约。 */

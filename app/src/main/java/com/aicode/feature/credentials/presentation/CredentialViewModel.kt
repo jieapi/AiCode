@@ -195,8 +195,11 @@ class CredentialViewModel @Inject constructor(
     fun setAutoInject(enabled: Boolean) {
         viewModelScope.launch {
             val key = currentServerKey() ?: return@launch
-            injectSettings.setAutoInject(key, enabled)
-            applyInjection(key, enabled)
+            val applied = applyInjection(enabled)
+            injectSettings.setAutoInject(key, enabled && applied)
+            if (enabled && !applied) {
+                toast(context.getString(R.string.credential_toast_auto_inject_failed))
+            }
             refreshAutoInjectState()
         }
     }
@@ -206,29 +209,33 @@ class CredentialViewModel @Inject constructor(
         viewModelScope.launch {
             val key = currentServerKey() ?: return@launch
             injectSettings.markAsked(key)
-            injectSettings.setAutoInject(key, enabled)
-            applyInjection(key, enabled)
+            val applied = applyInjection(enabled)
+            injectSettings.setAutoInject(key, enabled && applied)
+            if (enabled && !applied) {
+                toast(context.getString(R.string.credential_toast_auto_inject_failed))
+            }
             refreshAutoInjectState()
         }
     }
 
     /** 开启时上传远程注入配置（凭据 + includeIf 限定的 gitconfig），关闭时撤销。 */
-    private suspend fun applyInjection(key: String, enabled: Boolean) {
+    private suspend fun applyInjection(enabled: Boolean): Boolean {
         if (!enabled) {
-            remoteSshConnection.removeGitCredentialConfig()
-            return
+            return remoteSshConnection.removeGitCredentialConfig()
         }
         val creds = credentialRepository.getAll().first()
         val workspaceRoot = workspaceRepository.currentPath()
             .takeIf { it.isNotBlank() && it != "/" }
             ?: remoteSshConnection.config?.remoteWorkspacePath.orEmpty()
-        remoteSshConnection.uploadGitCredentialConfig(creds, workspaceRoot)
+        return remoteSshConnection.uploadGitCredentialConfig(creds, workspaceRoot)
     }
 
     /** 凭据增删后若当前服务器已开启注入，重新同步到远程。 */
     private suspend fun syncInjectionIfEnabled() {
         val key = currentServerKey() ?: return
-        if (injectSettings.isAutoInjectEnabled(key)) applyInjection(key, true)
+        if (injectSettings.isAutoInjectEnabled(key) && !applyInjection(true)) {
+            FileLogger.w(TAG, "凭据已变更，但远程注入同步失败")
+        }
     }
 
     /** 保存提交署名与仓库地址：跑 `git config` 写入对应 key 真源 + 刷新回显。UI 与命令行同一文件。 */

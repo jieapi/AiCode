@@ -168,8 +168,11 @@ class RemoteTerminalSessionManager @Inject constructor(
         termSession.setRawOutputListener { _, data, length ->
             outputChannel.trySend(data.copyOf(length))
         }
-        // shell 登录后默认在 home，先 cd 到当前工作区，与命令执行链路（RemoteSshEngine.buildCdCommand）保持一致：
-        // 优先 ~/workspace 符号链接，失败回退到真实工作区路径。
+        // shell 登录后默认在 home，先继承 Git 凭据配置环境，再 cd 到当前工作区；
+        // 与 RemoteSshEngine 的非交互命令保持一致。
+        connection.gitCredentialEnvironmentPrefix().takeIf { it.isNotEmpty() }?.let {
+            termSession.write(it + "\n")
+        }
         val wsPath = workspaceRepository.currentPath()
         if (wsPath.isNotBlank() && wsPath != "/") {
             termSession.write("cd ~/workspace 2>/dev/null || cd ${shellQuote(wsPath.trimEnd('/'))} 2>/dev/null\n")

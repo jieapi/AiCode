@@ -84,8 +84,11 @@ fun CredentialScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 每次进入重新读署名：用户可能在终端改过项目级/全局署名，避免回显陈旧空值。
-    LaunchedEffect(Unit) { viewModel.refreshIdentity() }
+    // 每次进入重新读远程状态：用户可能在终端改过项目级/全局署名，或连接已切换服务器。
+    LaunchedEffect(Unit) {
+        viewModel.refreshIdentity()
+        viewModel.refreshAutoInjectState()
+    }
 
     // toast → Snackbar 一次性消费。
     LaunchedEffect(state.toast) {

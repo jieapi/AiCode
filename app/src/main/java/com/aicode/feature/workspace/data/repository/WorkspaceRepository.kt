@@ -524,6 +524,10 @@ class WorkspaceRepository internal constructor(
         val matched = _workspaces.value.firstOrNull { it.ref == current.ref }
         if (matched != null && matched.available) {
             if (matched != current) publish(operation) { _current.value = matched }
+            if (isBuiltinRemoteSsh(backend)) {
+                // SSH 重连会清掉本地的注入状态；即使工作区仍可用，也必须重新上传配置并恢复环境注入。
+                onWorkspaceActivated(operation, matched)
+            }
             return
         }
         var fallback = _workspaces.value.firstOrNull { it.available }

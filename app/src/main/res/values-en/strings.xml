@@ -468,7 +468,7 @@
     <string name="common_disabled">Disabled</string>
     <string name="credential_token">Access Token / PAT</string>
     <string name="credential_auto_inject_title">Auto-inject credentials</string>
-    <string name="credential_auto_inject_hint">Sync git credentials saved in the app to this remote server, effective only for repositories under the current workspace root. Does not affect your manual git usage on the server.</string>
+    <string name="credential_auto_inject_hint">Sync git credentials saved in the app to this remote server, effective only for repositories under the current workspace root. Repositories outside the workspace are not affected.</string>
     <string name="credential_auto_inject_prompt_title">Auto-inject git credentials?</string>
     <string name="credential_auto_inject_prompt_body">Allow AiCode to sync git credentials saved in the app to this remote server? It only applies to repositories under the current workspace root and will not modify the server\'s global git config.</string>
     <string name="credential_auto_inject_enable">Enable</string>
@@ -1132,6 +1132,7 @@
     <string name="credential_toast_save_failed">Save failed: %1$s</string>
     <string name="credential_toast_deleted">Credential deleted</string>
     <string name="credential_toast_identity_saved">Identity and repository URL saved</string>
+    <string name="credential_toast_auto_inject_failed">Remote credential injection failed. Check the SSH connection and try again.</string>
 
     <!-- Credential List -->
     <string name="credential_empty_hint">No credentials yet, tap + to add</string>
