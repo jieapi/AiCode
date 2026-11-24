@@ -2,6 +2,7 @@ package com.aicode.feature.terminal.presentation.component
 
 import android.content.Context
 import android.graphics.Typeface
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -460,7 +461,13 @@ private fun TerminalSurface(
             view.attachSession(tab.session)
 
             applyTerminalColors(view, tab, settings, effectiveTheme)
-            view.requestFocus()
+            view.post {
+                if (view.isAttachedToWindow) {
+                    view.requestFocus()
+                    val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                    imm?.restartInput(view)
+                }
+            }
             view
         },
         update = { view ->
