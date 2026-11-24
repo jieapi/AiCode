@@ -395,6 +395,28 @@ class GitRepositoryTest {
     }
 
     @Test
+    fun graph_usesTopoOrderForMergeLaneLayout() = runTest {
+        val engine = mockk<CommandEngine>()
+        val workspace = mockk<WorkspaceRepository>()
+        val command = slot<String>()
+        val log =
+            "m1m1m1\u001fm1m1m1\u001fAlice\u001f2 days ago\u001fmerge\u001fp1p1p1 q1q1q1\u001f\n" +
+                "c1c1c1\u001fc1c1c1\u001fBob\u001f3 days ago\u001fside branch\u001fp1p1p1\u001f\n" +
+                "p1p1p1\u001fp1p1p1\u001fCarol\u001f4 days ago\u001fmain parent\u001fr0r0r0\u001f\n" +
+                "q1q1q1\u001fq1q1q1\u001fDan\u001f5 days ago\u001fmerged parent\u001fr0r0r0\u001f\n" +
+                "r0r0r0\u001fr0r0r0\u001fEve\u001f6 days ago\u001froot\u001f"
+        every { workspace.currentPath() } returns workPath
+        coEvery { engine.runCommandSyncUnbounded(capture(command), any(), any()) } returns CommandResult(log, 0)
+
+        val graph = GitRepository(engine, workspace, ExecutionModeHolder()).graph(limit = 100)
+
+        assertTrue(command.captured.contains("'--topo-order'"))
+        assertEquals(listOf("m1m1m1", "c1c1c1", "p1p1p1", "q1q1q1", "r0r0r0"), graph.commits.map { it.hash })
+        assertEquals(mapOf("m1m1m1" to 0, "c1c1c1" to 2, "p1p1p1" to 0, "q1q1q1" to 1, "r0r0r0" to 0), graph.lanes)
+        assertTrue(graph.edges.any { it.fromLane == 2 && it.toLane == 0 })
+    }
+
+    @Test
     fun graphAppend_mergesExistingAndDedupes() = runTest {
         val existing = listOf(
             GraphCommit("aaaa1111", "aaaa1111", "Alice", "d", "newer", parents = listOf("bbbb2222"))
