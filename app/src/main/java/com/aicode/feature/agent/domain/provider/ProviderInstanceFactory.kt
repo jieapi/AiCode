@@ -27,7 +27,8 @@ class ProviderInstanceFactory @Inject constructor(
     private val geminiApi: GeminiApi,
     private val keyRotator: ProviderKeyRotator,
     private val modelMetadataService: ModelMetadataService,
-    private val generalSettingsRepository: GeneralSettingsRepository
+    private val generalSettingsRepository: GeneralSettingsRepository,
+    private val requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter
 ) {
 
     suspend fun create(config: AIProviderConfig, scopeId: String?): AIProvider {
@@ -80,6 +81,8 @@ class ProviderInstanceFactory @Inject constructor(
             provider.useResponseWebSocket = config.useResponseApi && config.useResponseWebSocket
         }
         provider.providerId = config.id
+        provider.requestConcurrencyLimiter = requestConcurrencyLimiter
+        provider.maxConcurrentRequests = config.maxConcurrentRequests
         provider.logSessionId = scopeId
         provider.customHeaders = config.customHeaders
         val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)

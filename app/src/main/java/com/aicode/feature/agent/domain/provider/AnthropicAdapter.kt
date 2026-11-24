@@ -15,6 +15,7 @@ import com.aicode.feature.agent.domain.model.ReasoningWire
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
 import com.aicode.feature.agent.domain.tool.modelToolResultText
+import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.defaultProviderApiPath
 import com.google.gson.JsonParser
@@ -26,6 +27,8 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.Json
@@ -45,6 +48,8 @@ class AnthropicAdapter @Inject constructor(
     override var useResponseApi = false
     override var model = "claude-3-5-sonnet-20241022"
     override var providerId = ""
+    override var requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter? = null
+    override var maxConcurrentRequests: Int = DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
     override var logSessionId: String? = null
     override var firstByteTimeoutMs: Long = FIRST_BYTE_TIMEOUT_MS
     override var streamIdleTimeoutMs: Long = 0L
@@ -72,6 +77,16 @@ class AnthropicAdapter @Inject constructor(
         resolveCustomHeaders(customHeaders, logSessionId, apiKey)
 
     override suspend fun complete(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ): AIResponse = withRequestPermit {
+        completeRequest(systemPrompt, messages, tools, reasoningEffort, fastMode)
+    }
+
+    private suspend fun completeRequest(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
@@ -159,6 +174,21 @@ class AnthropicAdapter @Inject constructor(
     // 取消信号可能落在挂起的 emit 上；flow{} 里恢复后再次 emit（如 Retrying/KeySwitched）会触发
     // kotlinx.coroutines 的 Flow 异常透明性违规（IllegalStateException），channel 的 send 不受该检查约束。
     override fun completeStream(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ): Flow<AIStreamChunk> = flow {
+        withRequestPermit(
+            onQueued = { emit(AIStreamChunk.RequestQueued(it)) },
+            onAdmitted = { emit(AIStreamChunk.RequestStarted) }
+        ) {
+            emitAll(completeStreamRequest(systemPrompt, messages, tools, reasoningEffort, fastMode))
+        }
+    }
+
+    private fun completeStreamRequest(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,

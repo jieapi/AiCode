@@ -17,6 +17,8 @@ data class AIProviderConfig(
     val keyCooldownMinutes: Int = 5,
     /** 命中即触发多 Key 自动切换的 HTTP 状态码；留空时回退 [DEFAULT_KEY_SWITCH_STATUS_CODES]。 */
     val keySwitchStatusCodes: List<Int> = emptyList(),
+    /** 同一提供商同时在途的 AI 请求上限；0 表示不限，超出部分按 FIFO 等待。 */
+    val maxConcurrentRequests: Int = DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS,
     val baseUrl: String,
     val defaultModel: String,
     /** 该提供商已添加的可用模型列表（拉取或手动添加）。 */
@@ -110,6 +112,7 @@ data class ProviderKey(
 /** 调度权重默认值与上限。 */
 const val DEFAULT_KEY_WEIGHT: Int = 1
 const val MAX_KEY_WEIGHT: Int = 1_000_000
+const val DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS: Int = 0
 
 /** 绝不包含空白的字段（API Key / URL / 代理主机）：连中间空白一并去掉。 */
 private fun String.stripAllWhitespace(): String = filterNot { it.isWhitespace() }
@@ -138,6 +141,7 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
         .filter { it.value.isNotEmpty() }
         .distinctBy { it.value },
     keySwitchStatusCodes = keySwitchStatusCodes.filter { it in 100..599 }.distinct(),
+    maxConcurrentRequests = maxConcurrentRequests.coerceAtLeast(0),
     baseUrl = baseUrl.stripAllWhitespace(),
     defaultModel = defaultModel.stripLineBreaks(),
     models = models.map { it.stripLineBreaks() }.filter { it.isNotEmpty() }.distinct(),

@@ -978,6 +978,7 @@
     <string name="chat_cache_hit_rate">Cache hit rate %1$s</string>
     <string name="chat_status_generating">Generating</string>
     <string name="chat_status_thinking">Thinking</string>
+    <string name="chat_status_request_queued">Queued; approximately %1$d request(s) ahead</string>
     <string name="chat_status_calling_tool">Calling tool</string>
     <string name="chat_status_running_command">Running command</string>
     <string name="chat_status_editing_file">Editing file</string>
@@ -1661,6 +1662,8 @@
     <string name="provider_config">Config</string>
     <string name="provider_full_url">Full URL</string>
     <string name="provider_full_url_desc">Base URL is the full request address, no default path appended</string>
+    <string name="provider_max_concurrent_requests">Maximum concurrent requests</string>
+    <string name="provider_max_concurrent_requests_desc">Set to 0 for no limit; any positive integer limits concurrent AI requests and queues excess requests</string>
     <string name="provider_headers_title">Custom Headers</string>
     <string name="provider_headers_desc">Completely override the same-name default header for this vendor</string>
     <string name="provider_headers_name">Header Name</string>

@@ -85,6 +85,8 @@ When OpenAI's Responses API is enabled, an additional **Responses WebSocket** op
 
 ## Other Options
 
+- **Maximum concurrent requests**: defaults to `0` (unlimited). Set a positive integer to queue requests after the vendor reaches that many in-flight AI requests. The chat shows a queue notice with an approximate number ahead; it returns to “Thinking” when a slot opens. Requests release their slot when completed or cancelled. Each vendor configuration has its own limit, shared by chats, vision, image generation, model fetching, and connection tests.
+
 ::: v-pre
 - **Custom request headers**: append custom headers to all requests of this vendor, fully overriding same-named defaults (e.g. setting `User-Agent` replaces the default UA). Values support `{{SESSION_ID}}` (current session id) and `{{API_KEY}}` (the key actually used this time) placeholders, substituted before sending. Only needed when a relay gateway validates specific headers.
 - **Custom dashboard script**: show a balance or usage card above the input box for this vendor. Scripts live in `~/.aicode/scripts/`, support Python, Bash and Node, and can be tested with "Run Test" in the edit page.

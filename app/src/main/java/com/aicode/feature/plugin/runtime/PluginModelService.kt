@@ -471,6 +471,7 @@ class PluginModelService internal constructor(
                         .collect { chunk ->
                             if (stream.done) return@collect
                             when (chunk) {
+                                is AIStreamChunk.RequestQueued, AIStreamChunk.RequestStarted -> Unit
                                 is AIStreamChunk.TextDelta -> {
                                     accumulated.append(chunk.text)
                                     appendDelta("text", chunk.text)

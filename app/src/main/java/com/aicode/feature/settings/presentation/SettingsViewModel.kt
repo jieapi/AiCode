@@ -26,6 +26,7 @@ import com.aicode.feature.agent.domain.container.ExecutionBackendRegistry
 import com.aicode.feature.agent.domain.container.RemoteSshConnection
 import com.aicode.feature.agent.domain.container.RootfsSource
 import com.aicode.feature.agent.domain.container.displayLabel
+import com.aicode.feature.agent.domain.provider.ProviderRequestConcurrencyLimiter
 import com.aicode.feature.agent.domain.mcp.McpConfigRepository
 import com.aicode.feature.agent.domain.mcp.McpManager
 import com.aicode.feature.agent.domain.mcp.McpScope
@@ -365,6 +366,7 @@ class SettingsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val repository: AIProviderRepository,
     private val modelApiService: ModelApiService,
+    private val requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter,
     private val modelMetadataService: ModelMetadataService,
     private val logSettingsRepository: LogSettingsRepository,
     private val themeSettingsRepository: ThemeSettingsRepository,
@@ -3235,18 +3237,18 @@ class SettingsViewModel @Inject constructor(
     fun fetchModels(provider: AIProviderConfig) {
         viewModelScope.launch {
             _fetchState.value = FetchState.Loading
-            modelApiService.fetchModels(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.customHeaders)
-                .onSuccess { result ->
-                    _fetchState.value = FetchState.Success(result.models, result.debugInfo)
-                    resolveModelMetadata(provider.id, provider.type, result.models)
-                }
-                .onFailure { error ->
-                    val debug = (error as? com.aicode.feature.settings.data.remote.FetchModelsException)?.debugInfo
-                    _fetchState.value = FetchState.Error(
-                        error.message ?: context.getString(R.string.settings_models_fetch_failed),
-                        debug
-                    )
-                }
+            requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+                modelApiService.fetchModels(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.customHeaders)
+            }.onSuccess { result ->
+                _fetchState.value = FetchState.Success(result.models, result.debugInfo)
+                resolveModelMetadata(provider.id, provider.type, result.models)
+            }.onFailure { error ->
+                val debug = (error as? com.aicode.feature.settings.data.remote.FetchModelsException)?.debugInfo
+                _fetchState.value = FetchState.Error(
+                    error.message ?: context.getString(R.string.settings_models_fetch_failed),
+                    debug
+                )
+            }
         }
     }
 
@@ -3296,7 +3298,9 @@ class SettingsViewModel @Inject constructor(
     fun testModel(provider: AIProviderConfig, model: String) {
         viewModelScope.launch {
             _testing.update { it + model }
-            val result = modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+            val result = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+                modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+            }
             _testResults.update { it + (model to result) }
             _testing.update { it - model }
         }
@@ -3308,7 +3312,9 @@ class SettingsViewModel @Inject constructor(
      * 测试中的行集合与结果由弹层自己按 provider+模型持有。
      */
     suspend fun runModelTest(provider: AIProviderConfig, model: String): ModelTestResult =
-        modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+        requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+            modelApiService.testModel(provider.effectiveBaseUrl(), provider.firstUsableApiKey, provider.type, provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders)
+        }
 
     fun clearTestResults() {
         _testResults.value = emptyMap()

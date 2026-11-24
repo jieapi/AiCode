@@ -2,6 +2,7 @@ package com.aicode.feature.agent.domain.provider
 
 import com.aicode.core.util.AILogger
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
+import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.defaultProviderApiPath
 import java.io.IOException
@@ -25,6 +26,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -55,6 +58,8 @@ class OpenAIAdapter @Inject constructor(
     var useResponseWebSocket = false
     override var model = "gpt-4-turbo"
     override var providerId = ""
+    override var requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter? = null
+    override var maxConcurrentRequests: Int = DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
     override var logSessionId: String? = null
     override var firstByteTimeoutMs: Long = FIRST_BYTE_TIMEOUT_MS
     override var streamIdleTimeoutMs: Long = 0L
@@ -109,6 +114,16 @@ class OpenAIAdapter @Inject constructor(
     }
 
     override suspend fun complete(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ): AIResponse = withRequestPermit {
+        completeRequest(systemPrompt, messages, tools, reasoningEffort, fastMode)
+    }
+
+    private suspend fun completeRequest(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,
@@ -332,6 +347,21 @@ class OpenAIAdapter @Inject constructor(
     // 取消信号可能落在挂起的 emit 上；flow{} 里恢复后再次 emit（如 Retrying/KeySwitched）会触发
     // kotlinx.coroutines 的 Flow 异常透明性违规（IllegalStateException），channel 的 send 不受该检查约束。
     override fun completeStream(
+        systemPrompt: String,
+        messages: List<AgentMessage>,
+        tools: List<AgentTool>,
+        reasoningEffort: String?,
+        fastMode: Boolean
+    ): Flow<AIStreamChunk> = flow {
+        withRequestPermit(
+            onQueued = { emit(AIStreamChunk.RequestQueued(it)) },
+            onAdmitted = { emit(AIStreamChunk.RequestStarted) }
+        ) {
+            emitAll(completeStreamRequest(systemPrompt, messages, tools, reasoningEffort, fastMode))
+        }
+    }
+
+    private fun completeStreamRequest(
         systemPrompt: String,
         messages: List<AgentMessage>,
         tools: List<AgentTool>,

@@ -67,6 +67,7 @@ import com.aicode.feature.agent.presentation.WorkflowStatus
 import com.aicode.feature.agent.presentation.hasVisibleContent
 import com.aicode.feature.agent.presentation.QueuedRequest
 import com.aicode.feature.agent.presentation.RetryState
+import com.aicode.feature.agent.presentation.RequestQueueState
 import com.aicode.feature.agent.presentation.RunningToolOutput
 import com.aicode.feature.agent.presentation.StreamingAssistantMessage
 import com.aicode.feature.agent.presentation.SubAgentCardState
@@ -235,6 +236,9 @@ class AgentRunManager @Inject constructor(
 
     private val _retryStates = MutableStateFlow<Map<String, RetryState?>>(emptyMap())
     val retryStates: StateFlow<Map<String, RetryState?>> = _retryStates.asStateFlow()
+
+    private val _requestQueueStates = MutableStateFlow<Map<String, RequestQueueState>>(emptyMap())
+    val requestQueueStates: StateFlow<Map<String, RequestQueueState>> = _requestQueueStates.asStateFlow()
 
     private val _keySwitchStates = MutableStateFlow<Map<String, KeySwitchState?>>(emptyMap())
     val keySwitchStates: StateFlow<Map<String, KeySwitchState?>> = _keySwitchStates.asStateFlow()
@@ -478,6 +482,14 @@ class AgentRunManager @Inject constructor(
             _retryStates.value - sessionId
         } else {
             _retryStates.value + (sessionId to state)
+        }
+    }
+
+    private fun setRequestQueueState(sessionId: String, state: RequestQueueState?) {
+        _requestQueueStates.value = if (state == null) {
+            _requestQueueStates.value - sessionId
+        } else {
+            _requestQueueStates.value + (sessionId to state)
         }
     }
 
@@ -1649,7 +1661,10 @@ class AgentRunManager @Inject constructor(
                 tools = tools
             ).collect { event ->
                 when (event) {
+                    is AgentEvent.RequestQueued -> setRequestQueueState(sessionId, RequestQueueState(event.requestsAhead))
+                    AgentEvent.RequestStarted -> setRequestQueueState(sessionId, null)
                     is AgentEvent.AssistantDelta -> {
+                        setRequestQueueState(sessionId, null)
                         startPendingTitle()
                         startAssistantMessage(event.messageId)
                         if (event.accumulated.hasVisibleContent()) {
@@ -1663,6 +1678,7 @@ class AgentRunManager @Inject constructor(
                         }
                     }
                     is AgentEvent.ReasoningDelta -> {
+                        setRequestQueueState(sessionId, null)
                         startPendingTitle()
                         startAssistantMessage(event.messageId)
                         setRetryState(sessionId, null)
@@ -1841,6 +1857,7 @@ class AgentRunManager @Inject constructor(
                         event.persisted?.complete(Unit)
                     }
                     is AgentEvent.Failed -> {
+                        setRequestQueueState(sessionId, null)
                         failed = true
                         setCompacting(sessionId, false)
                         setAgentState(sessionId, AgentUIState.Error(describeFailure(event)))
@@ -1858,6 +1875,7 @@ class AgentRunManager @Inject constructor(
                         }
                     }
                     AgentEvent.Completed -> {
+                        setRequestQueueState(sessionId, null)
                         setRetryState(sessionId, null)
                         setKeySwitchState(sessionId, null)
                         setCompacting(sessionId, false)
@@ -1943,6 +1961,7 @@ class AgentRunManager @Inject constructor(
             setPreparingTool(sessionId, null)
             setCompacting(sessionId, false)
             setRetryState(sessionId, null)
+            setRequestQueueState(sessionId, null)
             setKeySwitchState(sessionId, null)
 
             val finishState = _agentStates.value[sessionId]
@@ -2068,7 +2087,10 @@ class AgentRunManager @Inject constructor(
                         tools = tools
                     ).collect { event ->
                         when (event) {
+                            is AgentEvent.RequestQueued -> setRequestQueueState(externalSessionId, RequestQueueState(event.requestsAhead))
+                            AgentEvent.RequestStarted -> setRequestQueueState(externalSessionId, null)
                             is AgentEvent.AssistantDelta -> {
+                                setRequestQueueState(externalSessionId, null)
                                 startAssistantMessage(event.messageId)
                                 if (event.accumulated.hasVisibleContent()) {
                                     finishReasoning()
@@ -2080,6 +2102,7 @@ class AgentRunManager @Inject constructor(
                                 }
                             }
                             is AgentEvent.ReasoningDelta -> {
+                                setRequestQueueState(externalSessionId, null)
                                 startAssistantMessage(event.messageId)
                                 setRetryState(externalSessionId, null)
                                 setKeySwitchState(externalSessionId, null)
@@ -2216,11 +2239,13 @@ class AgentRunManager @Inject constructor(
                                 onCommittedEvent(event)
                             }
                             is AgentEvent.Failed -> {
+                                setRequestQueueState(externalSessionId, null)
                                 failed = true
                                 setCompacting(externalSessionId, false)
                                 setAgentState(externalSessionId, AgentUIState.Error(describeFailure(event)))
                             }
                             AgentEvent.Completed -> {
+                                setRequestQueueState(externalSessionId, null)
                                 setRetryState(externalSessionId, null)
                                 setKeySwitchState(externalSessionId, null)
                                 setCompacting(externalSessionId, false)
@@ -2272,6 +2297,7 @@ class AgentRunManager @Inject constructor(
                     setPreparingTool(externalSessionId, null)
                     setCompacting(externalSessionId, false)
                     setRetryState(externalSessionId, null)
+                    setRequestQueueState(externalSessionId, null)
                     setKeySwitchState(externalSessionId, null)
 
                     val finishState = _agentStates.value[externalSessionId]

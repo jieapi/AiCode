@@ -120,6 +120,12 @@ sealed class AgentEvent {
         val persisted: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     ) : AgentEvent()
 
+    /** 请求等待供应商并发名额，仅用于 UI 实时展示，不落库。 */
+    data class RequestQueued(val requestsAhead: Int) : AgentEvent()
+
+    /** 请求已取得供应商并发名额，仅用于 UI 清除排队提示，不落库。 */
+    object RequestStarted : AgentEvent()
+
     /** 网络请求正在重试（首字节前失败触发自动重试）。仅用于 UI 实时展示，不落库。[error] 为触发重试的错误摘要。 */
     data class Retrying(val attempt: Int, val maxRetries: Int, val error: RetryErrorInfo) : AgentEvent()
 

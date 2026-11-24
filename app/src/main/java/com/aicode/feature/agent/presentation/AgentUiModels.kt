@@ -133,6 +133,9 @@ data class LlmCallEvent(
 @Immutable
 data class RetryState(val attempt: Int, val maxRetries: Int, val error: RetryErrorInfo? = null)
 
+@Immutable
+data class RequestQueueState(val requestsAhead: Int)
+
 /**
  * 多 Key 自动切换状态（仅用于 UI 实时展示「已切换到第 N/M 个 Key」提示）。
  * 只在切换后重发前短暂存在，重新出内容或本轮结束即清除。

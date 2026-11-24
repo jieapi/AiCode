@@ -111,6 +111,13 @@ class AIProviderConfigSanitizeTest {
     }
 
     @Test
+    fun maxConcurrentRequests_zeroMeansUnlimitedAndPositiveValuesAreUnbounded() {
+        assertEquals(0, config().copy(maxConcurrentRequests = 0).sanitized().maxConcurrentRequests)
+        assertEquals(0, config().copy(maxConcurrentRequests = -1).sanitized().maxConcurrentRequests)
+        assertEquals(1_000, config().copy(maxConcurrentRequests = 1_000).sanitized().maxConcurrentRequests)
+    }
+
+    @Test
     fun cleanConfig_unchanged() {
         val clean = config()
 

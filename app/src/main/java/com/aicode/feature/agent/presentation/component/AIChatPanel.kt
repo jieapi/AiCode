@@ -117,7 +117,7 @@ import kotlinx.coroutines.launch
  * 缓存 content 子组合——流式期间 targetState 一直不变，文本增长时不会重新调用 content，
  * 导致 [StreamingBubble] 收不到后续文本、停在首句。故改用枚举 + 直接 [when] 分发。
  */
-private enum class TailKind { THINKING, COMPACTING, RETRYING, KEY_SWITCHED, NONE }
+private enum class TailKind { THINKING, QUEUED, COMPACTING, RETRYING, KEY_SWITCHED, NONE }
 
 internal fun shouldShowToolPreparation(
     preparingTool: String?,
@@ -756,6 +756,7 @@ fun AIChatPanel(
     val runningTool by viewModel.runningTool.collectAsStateWithLifecycle()
     val isCompacting by viewModel.isCompacting.collectAsStateWithLifecycle()
     val retryState by viewModel.retryState.collectAsStateWithLifecycle()
+    val requestQueueState by viewModel.requestQueueState.collectAsStateWithLifecycle()
     val keySwitchState by viewModel.keySwitchState.collectAsStateWithLifecycle()
     val streamingAssistant by viewModel.streamingAssistant.collectAsStateWithLifecycle()
     val pluginThinkingLabel by viewModel.pluginThinkingLabel.collectAsStateWithLifecycle()
@@ -1738,10 +1739,12 @@ fun AIChatPanel(
                         val showThinking = !showReasoning && !showStreaming && !isCompacting &&
                             (isBusy || pluginThinkingLabel != null) &&
                             pendingPermission == null && pendingQuestion == null
+                        val showQueued = requestQueueState != null && isBusy && !isCompacting && !showStreaming && !showReasoning
                         val showRetrying = retryState != null && isBusy && !isCompacting && !showStreaming && !showReasoning
                         val showKeySwitched = keySwitchState != null && isBusy && !isCompacting && !showStreaming && !showReasoning
                         val tailKind = when {
                             isCompacting -> TailKind.COMPACTING
+                            showQueued -> TailKind.QUEUED
                             showKeySwitched -> TailKind.KEY_SWITCHED
                             showRetrying -> TailKind.RETRYING
                             showThinking -> TailKind.THINKING
@@ -1752,6 +1755,9 @@ fun AIChatPanel(
                             Column {
                                 when (tailKind) {
                                     TailKind.THINKING -> ThinkingBubble(label = thinkingLabel)
+                                    TailKind.QUEUED -> ThinkingBubble(
+                                        label = stringResource(R.string.chat_status_request_queued, requestQueueState?.requestsAhead ?: 1)
+                                    )
                                     TailKind.COMPACTING -> CompactionProgressBubble()
                                     TailKind.RETRYING -> {
                                         val rs = retryState

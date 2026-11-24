@@ -23,6 +23,8 @@ data class AIProviderEntity(
     val keyCooldownMinutes: Int = 5,
     /** 命中即触发多 Key 自动切换的 HTTP 状态码，以逗号分隔持久化；空串表示用默认值。 */
     val keySwitchStatusCodes: String = "",
+    @ColumnInfo(defaultValue = "0")
+    val maxConcurrentRequests: Int = 0,
     val baseUrl: String,
     val defaultModel: String,
     /** 可用模型列表，以换行分隔持久化。 */

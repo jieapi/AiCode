@@ -1460,6 +1460,12 @@ class AIAgentViewModel @Inject constructor(
         if (id == null) null else states[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val requestQueueState: StateFlow<RequestQueueState?> = combine(
+        _currentSessionId, agentRunManager.requestQueueStates
+    ) { id, states ->
+        if (id == null) null else states[id]
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     val keySwitchState: StateFlow<KeySwitchState?> = combine(_currentSessionId, agentRunManager.keySwitchStates) { id, states ->
         if (id == null) null else states[id]
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)

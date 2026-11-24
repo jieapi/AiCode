@@ -110,6 +110,8 @@ class AllKeysFailedException(message: String, cause: Throwable? = null) : Except
  * [KeySwitched] 在多 Key 自动切换时推送，供 UI 提示本次请求已改用的 Key。
  */
 sealed class AIStreamChunk {
+    data class RequestQueued(val requestsAhead: Int) : AIStreamChunk()
+    object RequestStarted : AIStreamChunk()
     data class TextDelta(val text: String, val messageId: String? = null) : AIStreamChunk()
     /** 模型新吐出的一小段思考过程（增量，非累积）。仅用于 UI 实时展示，不进入上下文回放。 */
     data class ReasoningDelta(val text: String, val messageId: String? = null) : AIStreamChunk()
@@ -146,6 +148,21 @@ interface AIProvider {
      * 调用前由工作流设置；为空时元数据解析回退纯自动（拉取/内置/默认）。
      */
     var providerId: String
+
+    var requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter?
+    var maxConcurrentRequests: Int
+
+    suspend fun <T> withRequestPermit(
+        onQueued: suspend (Int) -> Unit = {},
+        onAdmitted: suspend () -> Unit = {},
+        block: suspend () -> T
+    ): T {
+        val limiter = requestConcurrencyLimiter ?: run {
+            onAdmitted()
+            return block()
+        }
+        return limiter.withPermit(providerId, maxConcurrentRequests, onQueued, onAdmitted, block)
+    }
 
     /**
      * 当前会话 id，仅用于日志归档：调用前由工作流设置，[com.aicode.core.util.AILogger]

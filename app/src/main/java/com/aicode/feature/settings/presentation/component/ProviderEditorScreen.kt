@@ -131,6 +131,7 @@ import com.aicode.feature.settings.data.local.CustomModelMetadataStore
 import com.aicode.feature.settings.data.local.ProviderPreset
 import com.aicode.feature.settings.data.remote.ModelTestResult
 import com.aicode.feature.settings.domain.model.AIProviderConfig
+import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
 import com.aicode.feature.settings.domain.model.KeyRotationStrategy
 import com.aicode.feature.settings.domain.model.ModelMetadata
 import com.aicode.feature.settings.domain.model.MAX_KEY_WEIGHT
@@ -212,6 +213,9 @@ fun ProviderEditorScreen(
     var keyCooldownMinutes by remember { mutableIntStateOf(initialProvider?.keyCooldownMinutes ?: 5) }
     var keySwitchStatusCodes by remember {
         mutableStateOf(initialProvider?.keySwitchStatusCodes?.joinToString(",") ?: "")
+    }
+    var maxConcurrentRequests by remember {
+        mutableStateOf((initialProvider?.maxConcurrentRequests ?: DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS).toString())
     }
     var baseUrl by remember { mutableStateOf(initialProvider?.baseUrl ?: presetPrefill?.baseUrl ?: "") }
     var useFullUrl by remember { mutableStateOf(initialProvider?.useFullUrl ?: false) }
@@ -322,6 +326,9 @@ fun ProviderEditorScreen(
         keyRotationStrategy = keyRotationStrategy,
         keyCooldownMinutes = keyCooldownMinutes,
         keySwitchStatusCodes = keySwitchStatusCodes.split(",").mapNotNull { it.trim().toIntOrNull() },
+        maxConcurrentRequests = maxConcurrentRequests.toIntOrNull()
+            ?.coerceAtLeast(0)
+            ?: if (maxConcurrentRequests.isBlank()) DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS else Int.MAX_VALUE,
         baseUrl = baseUrl.ifBlank { defaultProviderBaseUrl(type) },
         useFullUrl = useFullUrl,
         isEnabled = isEnabled,
@@ -572,6 +579,22 @@ fun ProviderEditorScreen(
                             title = stringResource(R.string.common_enabled),
                             checked = isEnabled,
                             onCheckedChange = { isEnabled = it }
+                        )
+                        SettingsDivider()
+                        ProviderTextFieldRow(
+                            label = stringResource(R.string.provider_max_concurrent_requests),
+                            value = maxConcurrentRequests,
+                            onValueChange = { value ->
+                                if (value.all { it in '0'..'9' }) maxConcurrentRequests = value
+                            },
+                            placeholder = DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS.toString(),
+                            keyboardType = KeyboardType.Number
+                        )
+                        Text(
+                            text = stringResource(R.string.provider_max_concurrent_requests_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                         )
                         SettingsDivider()
                         ProviderSwitchRow(

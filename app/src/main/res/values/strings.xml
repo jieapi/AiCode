@@ -978,6 +978,7 @@
     <string name="chat_cache_hit_rate">缓存命中率 %1$s</string>
     <string name="chat_status_generating">正在生成</string>
     <string name="chat_status_thinking">正在思考</string>
+    <string name="chat_status_request_queued">请求排队中，前方约有 %1$d 个请求</string>
     <string name="chat_status_calling_tool">正在调用工具</string>
     <string name="chat_status_running_command">正在执行命令</string>
     <string name="chat_status_editing_file">正在编辑文件</string>
@@ -1661,6 +1662,8 @@
     <string name="provider_config">配置</string>
     <string name="provider_full_url">完整 URL</string>
     <string name="provider_full_url_desc">Base URL 即完整请求地址，不自动拼接默认路径</string>
+    <string name="provider_max_concurrent_requests">最大并发请求数</string>
+    <string name="provider_max_concurrent_requests_desc">填写 0 表示不限制；其他正整数表示同时处理的 AI 请求上限，超出后排队等待</string>
     <string name="provider_headers_title">自定义请求头</string>
     <string name="provider_headers_desc">完全覆盖该供应商请求的同名默认头</string>
     <string name="provider_headers_name">Header 名</string>

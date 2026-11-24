@@ -13,6 +13,7 @@ import com.aicode.feature.agent.domain.provider.enrichWithHttpErrorBody
 import com.aicode.feature.agent.domain.provider.isKeySwitchFailure
 import com.aicode.feature.agent.domain.provider.joinUrl
 import com.aicode.feature.agent.domain.provider.parseInteractionSteps
+import com.aicode.feature.agent.domain.provider.ProviderRequestConcurrencyLimiter
 import com.aicode.feature.agent.domain.provider.resolveCustomHeaders
 import com.aicode.feature.agent.domain.tool.AbstractContextualTool
 import com.aicode.feature.agent.domain.tool.ParameterType
@@ -61,7 +62,8 @@ class GenerateImageTool @Inject constructor(
     private val openAIApi: OpenAIApi,
     private val geminiApi: GeminiApi,
     private val httpClient: OkHttpClient,
-    private val keyRotator: ProviderKeyRotator
+    private val keyRotator: ProviderKeyRotator,
+    private val requestConcurrencyLimiter: ProviderRequestConcurrencyLimiter
 ) : AbstractContextualTool() {
 
     override val name = "generateImage"
@@ -221,12 +223,14 @@ class GenerateImageTool @Inject constructor(
 
             seq = AILogger.logRequest(context.sessionId, provider.id, model, "POST", url, request)
 
-            val response = openAIApi.createImage(
-                url = url,
-                authorization = "Bearer $activeApiKey",
-                extraHeaders = resolveCustomHeaders(provider.customHeaders, context.sessionId, activeApiKey),
-                request = request
-            )
+            val response = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+                openAIApi.createImage(
+                    url = url,
+                    authorization = "Bearer $activeApiKey",
+                    extraHeaders = resolveCustomHeaders(provider.customHeaders, context.sessionId, activeApiKey),
+                    request = request
+                )
+            }
             AILogger.logResponse(context.sessionId, provider.id, response, seq)
             buildSuccess(response, n, outputPath, model)
         } catch (e: CancellationException) {
@@ -354,12 +358,14 @@ class GenerateImageTool @Inject constructor(
             for (index in 0 until n) {
                 val request = mapOf("model" to model, "input" to prompt, "store" to false)
                 lastSeq = AILogger.logRequest(sessionId, provider.id, model, "POST", url, request)
-                val response = geminiApi.createInteraction(
-                    url = url,
-                    apiKey = apiKey,
-                    extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
-                    request = request
-                )
+                val response = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+                    geminiApi.createInteraction(
+                        url = url,
+                        apiKey = apiKey,
+                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
+                        request = request
+                    )
+                }
                 AILogger.logResponse(sessionId, provider.id, response, lastSeq)
                 val status = response.get("status")?.takeIf { it.isJsonPrimitive }?.asString
                 if (status == "failed" || status == "cancelled" || status == "budget_exceeded") {
@@ -436,12 +442,14 @@ class GenerateImageTool @Inject constructor(
                     "contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt))))
                 )
                 lastSeq = AILogger.logRequest(sessionId, provider.id, model, "POST", url, request)
-                val response = geminiApi.generateContent(
-                    url = url,
-                    apiKey = apiKey,
-                    extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
-                    request = request
-                )
+                val response = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
+                    geminiApi.generateContent(
+                        url = url,
+                        apiKey = apiKey,
+                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
+                        request = request
+                    )
+                }
                 AILogger.logResponse(sessionId, provider.id, response, lastSeq)
                 val beforeCount = agentImages.size
                 extractGenerateContentImageData(response).forEach { base64 ->
