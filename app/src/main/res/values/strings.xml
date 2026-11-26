@@ -600,6 +600,8 @@
     <string name="chat_no_remote_connection">未连接远程服务器</string>
     <string name="chat_placeholder">有什么可以帮你的？</string>
     <string name="chat_input_hint">描述你的需求，我来帮你编写、修改或解释代码</string>
+    <string name="chat_navigator_current_turn">当前</string>
+    <string name="chat_navigator_empty_preview">（仅附件消息）</string>
 
     <!-- Agent Status -->
     <string name="agent_stopped_by_user">已被用户停止</string>

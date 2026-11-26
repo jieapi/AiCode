@@ -918,6 +918,32 @@ fun AIChatPanel(
     val readyAsyncItems = asyncItems?.takeIf { useAsyncItems && it.sessionId == currentSessionId }
     val chatItems = readyAsyncItems?.items ?: remember(chatItemsKey) { buildItems() }
     val renderedMessages = readyAsyncItems?.messages ?: messages
+    // 右侧消息导航条：用库里的全量用户消息（不是当前分页），刚打开会话就能覆盖全部轮次。
+    val navigationAnchors by viewModel.navigationAnchors.collectAsStateWithLifecycle()
+    val navigationMarkers = remember(navigationAnchors) {
+        navigationAnchors.map { anchor ->
+            ChatNavigationMarker(
+                messageId = anchor.id,
+                timestamp = anchor.timestamp,
+                preview = navigationMarkerPreview(anchor.content),
+            )
+        }
+    }
+    // 当前读到的那一轮 = 首个可见项之前最近的一条用户消息；只用于高亮与轮盘初始选中项。
+    val navigationCurrentIndex by remember(chatItems, listState, navigationMarkers) {
+        derivedStateOf {
+            val lastVisibleIndex = listState.firstVisibleItemIndex.coerceAtMost(chatItems.lastIndex)
+            var currentId: String? = null
+            for (index in lastVisibleIndex downTo 0) {
+                val item = chatItems[index]
+                if (item.contentType == MessageRole.USER.name) {
+                    currentId = item.message.id
+                    break
+                }
+            }
+            navigationMarkers.indexOfFirst { it.messageId == currentId }.takeIf { it >= 0 } ?: 0
+        }
+    }
     // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方
     val taskDurations = remember(messages, isBusy) {
         computeTaskDurations(messages, lastTurnFinished = !isBusy)
@@ -1682,7 +1708,13 @@ fun AIChatPanel(
                             },
                         contentPadding = PaddingValues(
                             start = Spacing.lg,
-                            end = Spacing.lg,
+                            // 右侧留白避开导航条：导航条常驻右缘，用同一宽度预留，气泡与按钮行不被横条压住。
+                            // 轮数不够不显示导航条时不预留，免得白缩一截。
+                            end = if (navigationMarkers.size >= CHAT_NAVIGATOR_MIN_MARKERS) {
+                                CHAT_NAVIGATOR_WIDTH
+                            } else {
+                                Spacing.lg
+                            },
                             top = Spacing.md,
                             bottom = with(LocalDensity.current) { inputBarReservePx.toDp() }
                         )
@@ -1777,6 +1809,16 @@ fun AIChatPanel(
                         }
                     }
                 }
+                ChatMessageNavigator(
+                    markers = navigationMarkers,
+                    currentIndex = navigationCurrentIndex,
+                    onSeek = { marker ->
+                        // 跳走即退出贴底跟随，否则运行中的校准循环会把视口拉回底部。
+                        followBottom = false
+                        viewModel.openNavigationAnchor(marker.messageId, marker.timestamp)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             } // 内容层结束
 

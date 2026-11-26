@@ -600,6 +600,8 @@
     <string name="chat_no_remote_connection">Not connected to remote server</string>
     <string name="chat_placeholder">How can I help you?</string>
     <string name="chat_input_hint">Describe what you need, and I\'ll help you write, modify, or explain code</string>
+    <string name="chat_navigator_current_turn">Current</string>
+    <string name="chat_navigator_empty_preview">(Attachment only)</string>
 
     <!-- Agent Status -->
     <string name="agent_stopped_by_user">Stopped by user</string>

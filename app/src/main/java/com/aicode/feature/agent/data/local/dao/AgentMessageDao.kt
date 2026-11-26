@@ -259,6 +259,26 @@ interface AgentMessageDao {
     @Query("SELECT COUNT(*) FROM agent_messages WHERE sessionId = :sessionId AND timestamp >= :timestamp")
     suspend fun countMessagesFromTimestamp(sessionId: String, timestamp: Long): Int
 
+    /**
+     * 会话内全部用户消息的定位信息（按时间正序），供聊天区右侧导航条使用。
+     *
+     * 导航条要能跳到会话任意一轮，而 UI 侧消息是按条数分页加载的，只能用轻量投影
+     * （id + timestamp + content）把全量轮次单独取出来，不把历史正文一并读进内存。
+     * 排除后台通知与压缩锚点：它们同样是 USER 角色，但不是用户发出的内容。
+     */
+    @Query(
+        """
+        SELECT id, timestamp, content FROM agent_messages
+        WHERE sessionId = :sessionId
+          AND role = 'USER'
+          AND isCompacted = 0
+          AND isContextSummary = 0
+          AND isCompactionMarker = 0
+        ORDER BY timestamp ASC, id ASC
+        """
+    )
+    fun getUserMessageAnchors(sessionId: String): Flow<List<UserMessageAnchor>>
+
     @Query("SELECT * FROM agent_messages ORDER BY timestamp ASC")
     suspend fun getAllOnce(): List<AgentMessageEntity>
 
@@ -314,6 +334,13 @@ data class ChatSearchMatch(
 data class SessionMessageCount(
     val sessionId: String,
     val messageCount: Int
+)
+
+/** 导航条用的用户消息定位信息（[AgentMessageDao.getUserMessageAnchors] 的投影）。 */
+data class UserMessageAnchor(
+    val id: String,
+    val timestamp: Long,
+    val content: String
 )
 
 /** 单个会话的消息占用估算（[AgentMessageDao.sessionStorageUsage] 的投影）。 */

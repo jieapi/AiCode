@@ -23,6 +23,7 @@ import com.aicode.feature.agent.domain.checkpoint.CheckpointManager
 import com.aicode.feature.agent.data.local.dao.CheckpointDao
 import com.aicode.feature.agent.data.local.dao.ChatSessionDao
 import com.aicode.feature.agent.data.local.dao.TodoItemDao
+import com.aicode.feature.agent.data.local.dao.UserMessageAnchor
 import com.aicode.feature.agent.domain.model.TodoItem
 import com.aicode.feature.agent.data.local.entity.AgentMessageEntity
 import com.aicode.feature.agent.data.local.entity.ChatSessionEntity
@@ -588,6 +589,24 @@ class AIAgentViewModel @Inject constructor(
 
     fun consumePendingScroll() {
         _pendingScrollMessage.value = null
+    }
+
+    /**
+     * 从右侧导航条跳到某条用户消息：先把分页上限抬到足以包含它，再登记待定位消息。
+     * 与搜索跳转同一条路径，因此目标消息在尚未加载的历史里也能一次到位。
+     */
+    fun openNavigationAnchor(messageId: String, timestamp: Long) {
+        val sid = _currentSessionId.value ?: return
+        viewModelScope.launch {
+            val needed = withContext(Dispatchers.IO) {
+                agentMessageDao.countMessagesFromTimestamp(sid, timestamp)
+            } + messageLimitMargin
+            val current = _messageLimit.value[sid] ?: defaultLimit
+            if (needed > current) {
+                _messageLimit.value = _messageLimit.value + (sid to needed)
+            }
+            _pendingScrollMessage.value = sid to messageId
+        }
     }
 
     /** 转义 LIKE 通配符，配合 SQL 里的 ESCAPE '!'（转义字符本身需最先处理）。 */
@@ -1445,6 +1464,22 @@ class AIAgentViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ChatMessagesState(null, emptyList(), loaded = false))
+
+    /**
+     * 当前会话的全部用户消息（轻量投影，按时间正序），供聊天区右侧导航条使用。
+     *
+     * 导航条要能跳到会话任意一轮，而 [messagesState] 只装当前分页内的消息，
+     * 靠它算会在刚打开会话时只看到最新几条、要手动上滑补载才补齐。
+     * 这里只取 id / timestamp / content，不把历史正文一并读进内存；外部会话源不走 Room，返回空。
+     */
+    val navigationAnchors: StateFlow<List<UserMessageAnchor>> = combine(
+        _currentSessionId,
+        _activeExternalSession
+    ) { id, ext -> if (ext != null) null else id }
+        .flatMapLatest { id ->
+            if (id == null) flowOf(emptyList()) else agentMessageDao.getUserMessageAnchors(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
 
     val runningTool: StateFlow<List<RunningToolOutput>> = combine(_currentSessionId, agentRunManager.runningTools) { id, tools ->
