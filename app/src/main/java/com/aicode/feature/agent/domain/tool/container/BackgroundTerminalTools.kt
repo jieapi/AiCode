@@ -63,15 +63,16 @@ internal fun filterOutputLines(output: String, regex: Regex): List<String> =
  *   不阻塞等待。命令进程持续运行，AI 之后凭返回的 id 用 send/read 继续。
  * - `send`：按 tab_id 向某个后台或交互终端发送一行命令/输入（默认自动回车执行），随后短暂捕获输出。
  * - `key`：按 tab_id 发送常见快捷键/控制字符（如 Ctrl-C、Ctrl-D、方向键）。
- * - `read`：按 tab_id 读取该终端当前的全部输出（含后台命令实时日志）；省略 tab_id 则列出所有标签；
- *   可用 `filter` 传正则，只返回匹配的行（适合从大段日志里挑关键信息）。
+ * - `read`：按 tab_id 读取该终端自上次返回之后新增的输出（含后台命令实时日志）；省略 tab_id 则列出所有标签；
+ *   可用 `filter` 传正则，只对本次新增的行做筛选；需要完整历史时传 `full=true`。
  * - `close`：按 tab_id 关闭某个终端标签；也可用 `tab_ids` 数组一次关闭多个。
  *
  * 授权：start 动作按 shell 命令前缀匹配（见 [com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine]），
  * send 动作按输入内容匹配，key/read/close 按整工具匹配。
  */
 class TerminalSessionTool @Inject constructor(
-    private val sessionManager: TerminalSessionProvider
+    private val sessionManager: TerminalSessionProvider,
+    private val outputCursor: TerminalOutputCursor
 ) : AgentTool(), StreamingAgentTool {
     private companion object {
         const val TAG = "TerminalSessionTool"
@@ -101,7 +102,7 @@ class TerminalSessionTool @Inject constructor(
 
     override val name = "terminal"
     override val description =
-        "启动和管理当前执行环境（本地容器或远程 SSH）的持续终端会话，适合耗时任务（构建、安装依赖）、常驻服务或需要多次输入的交互命令。支持发送输入、快捷键和读取输出；会自行结束且需等待结果的任务用 start + notify=true，常驻或交互式任务按需 read/send/key。中断前台进程用 key=ctrl+c。read 可用 filter 正则按行筛选输出，close 可用 tab_ids 一次关闭多个标签。"
+        "启动和管理当前执行环境（本地容器或远程 SSH）的持续终端会话，适合耗时任务（构建、安装依赖）、常驻服务或需要多次输入的交互命令。支持发送输入、快捷键和读取输出；会自行结束且需等待结果的任务用 start + notify=true，常驻或交互式任务按需 read/send/key。中断前台进程用 key=ctrl+c。send 与 read 默认只返回自上次返回之后新增的输出，需要回看完整历史用 read 的 full=true；read 可用 filter 正则按行筛选本次新增，close 可用 tab_ids 一次关闭多个标签。"
     override val permissionPolicy = ToolPermissionPolicy.ASK
     override val capabilities = setOf(ToolCapability.EXECUTE_COMMANDS)
 
@@ -116,7 +117,7 @@ class TerminalSessionTool @Inject constructor(
         "action" to ToolParameter(
             name = "action",
             type = ParameterType.STRING,
-            description = "操作类型：start=启动后台命令；send=向终端发输入；key=发送快捷键；read=读终端输出（可用 filter 正则筛选）；close=关闭终端标签（可用 tab_ids 批量）",
+            description = "操作类型：start=启动后台命令；send=向终端发输入；key=发送快捷键；read=读终端新增输出（full=true 读完整历史，可用 filter 正则筛选）；close=关闭终端标签（可用 tab_ids 批量）",
             required = true,
             enum = listOf("start", "send", "key", "read", "close")
         ),
@@ -154,7 +155,13 @@ class TerminalSessionTool @Inject constructor(
         "filter" to ToolParameter(
             name = "filter",
             type = ParameterType.STRING,
-            description = "read 可选：按行筛选输出的正则表达式（Java 语法，区分大小写，可加 (?i) 忽略大小写），只返回匹配的行；无匹配时返回提示与原输出行数",
+            description = "read 可选：按行筛选本次返回内容的正则表达式（Java 语法，区分大小写，可加 (?i) 忽略大小写），只返回匹配的行；无匹配时返回提示与原输出行数",
+            required = false
+        ),
+        "full" to ToolParameter(
+            name = "full",
+            type = ParameterType.BOOLEAN,
+            description = "read 可选：设为 true 返回该标签的完整历史输出；默认只返回自上次 send/read 之后新增的部分",
             required = false
         ),
         "input" to ToolParameter(
@@ -310,7 +317,7 @@ class TerminalSessionTool @Inject constructor(
 
         FileLogger.i(TAG, "后台命令已启动 tab=$tabId(流式捕获): $command")
         captureOutputFor(tabId, initialOutput = "")
-        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "start") }
+        val result = withContext(Dispatchers.Main) { capturedFullResult(tabId, actionLabel = "start") }
         emit(ToolStreamEvent.Completed(result))
     }
 
@@ -343,7 +350,7 @@ class TerminalSessionTool @Inject constructor(
         FileLogger.i(TAG, "向 $tabId 发送输入(流式捕获): $input")
 
         captureOutputFor(tabId, initialOutput = before)
-        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "send") }
+        val result = withContext(Dispatchers.Main) { capturedDeltaResult(tabId, actionLabel = "send") }
         emit(ToolStreamEvent.Completed(result))
     }
 
@@ -397,6 +404,7 @@ class TerminalSessionTool @Inject constructor(
 
             val running = sessionManager.listTabs().firstOrNull { it.id == tabId }?.running ?: false
             val output = sessionManager.getTabOutput(tabId) ?: ""
+            outputCursor.mark(tabId, output)
             FileLogger.v(TAG, "start 捕获 tab=$tabId running=$running 输出 ${output.length} 字符")
             ToolResult.Success(
                 JsonObject(
@@ -417,7 +425,8 @@ class TerminalSessionTool @Inject constructor(
      * 向指定终端发送一行输入，默认回车执行，并等待一小段时间捕获输出。
      *
      * 与 start 保持一致：返回 tab_id / running / output，避免 AI 发送命令后必须再手动 read 一次
-     * 才能看到即时结果。交互 shell 没有可靠的“命令结束”信号，因此这里固定等待 [START_CAPTURE_MS]。
+     * 才能看到即时结果。output 只含本次发送后新增的部分，不回放整段 transcript。
+     * 交互 shell 没有可靠的“命令结束”信号，因此这里固定等待 [START_CAPTURE_MS]。
      */
     private suspend fun send(args: Map<String, JsonElement>): ToolResult = withContext(Dispatchers.Main) {
         val tabId = args["tab_id"]?.asPlainString()
@@ -436,7 +445,7 @@ class TerminalSessionTool @Inject constructor(
                 delay(START_POLL_INTERVAL_MS)
                 elapsed += START_POLL_INTERVAL_MS
             }
-            capturedResult(tabId, actionLabel = "send")
+            capturedDeltaResult(tabId, actionLabel = "send")
         } else {
             val exists = sessionManager.listTabs().any { it.id == tabId }
             if (exists) {
@@ -486,11 +495,12 @@ class TerminalSessionTool @Inject constructor(
         }
     }
 
-    /** 读取终端输出；省略 tab_id 则列出所有标签。TerminalSessionManager 需主线程。 */
+    /** 读取终端输出；省略 tab_id 则列出所有标签。默认只返回自上次返回之后的新增内容。TerminalSessionManager 需主线程。 */
     private suspend fun read(args: Map<String, JsonElement>): ToolResult = withContext(Dispatchers.Main) {
         val tabId = args["tab_id"]?.asPlainString()
         if (tabId.isNullOrBlank()) {
             val list = sessionManager.listTabs()
+            outputCursor.retainOnly(list.map { it.id }.toSet())
             if (list.isEmpty()) return@withContext ToolResult.Success(JsonPrimitive("当前没有终端标签。"))
             val text = list.joinToString("\n") {
                 val state = if (it.running) "运行中" else "已结束"
@@ -499,6 +509,7 @@ class TerminalSessionTool @Inject constructor(
             }
             return@withContext ToolResult.Success(JsonPrimitive(text))
         }
+        val full = args["full"]?.asPlainString()?.toBooleanStrictOrNull() ?: false
         val filter = args["filter"]?.asPlainString()?.trim()?.takeIf { it.isNotEmpty() }
         val regex = if (filter == null) {
             null
@@ -513,22 +524,41 @@ class TerminalSessionTool @Inject constructor(
             }
         }
         if (sessionManager.listTabs().none { it.id == tabId }) {
+            outputCursor.clear(tabId)
             return@withContext ToolResult.Error("未找到终端标签：$tabId", "TERMINAL_NOT_FOUND")
         }
-        val output = sessionManager.getTabOutput(tabId)
-            ?: return@withContext ToolResult.Error("未找到终端标签：$tabId")
-        if (regex == null) {
-            FileLogger.v(TAG, "读取 $tabId 输出 ${output.length} 字符")
-            return@withContext ToolResult.Success(JsonPrimitive(output))
+        val output = sessionManager.getTabOutput(tabId) ?: run {
+            outputCursor.clear(tabId)
+            return@withContext ToolResult.Error("未找到终端标签：$tabId")
         }
-        val matched = filterOutputLines(output, regex)
-        FileLogger.v(TAG, "读取 $tabId 输出 ${output.length} 字符，filter=$filter 命中 ${matched.size} 行")
-        val text = if (matched.isEmpty()) {
-            "没有匹配 $filter 的行（原输出共 ${output.lineSequence().count()} 行）。"
+        val text = if (full) {
+            outputCursor.mark(tabId, output)
+            output
+        } else {
+            outputCursor.advance(tabId, output)
+        }
+        FileLogger.v(
+            TAG,
+            "读取 $tabId 输出 ${output.length} 字符(full=$full, filter=$filter) 返回 ${text.length} 字符"
+        )
+        if (text.isEmpty()) {
+            val hint = if (full) {
+                "终端 $tabId 当前没有任何输出。"
+            } else {
+                "自上次读取后 $tabId 没有新的输出（当前共 ${output.lineSequence().count()} 行）；需要完整历史用 full=true。"
+            }
+            return@withContext ToolResult.Success(JsonPrimitive(hint))
+        }
+        if (regex == null) {
+            return@withContext ToolResult.Success(JsonPrimitive(text))
+        }
+        val matched = filterOutputLines(text, regex)
+        val resultText = if (matched.isEmpty()) {
+            "没有匹配 $filter 的行（本次读取 ${text.lineSequence().count()} 行）。"
         } else {
             matched.joinToString("\n")
         }
-        ToolResult.Success(JsonPrimitive(text))
+        ToolResult.Success(JsonPrimitive(resultText))
     }
 
     /**
@@ -544,10 +574,12 @@ class TerminalSessionTool @Inject constructor(
         val missing = mutableListOf<String>()
         ids.forEach { id ->
             if (sessionManager.listTabs().none { it.id == id }) {
+                outputCursor.clear(id)
                 missing += id
                 return@forEach
             }
             if (sessionManager.closeTab(id)) {
+                outputCursor.clear(id)
                 closed += id
                 FileLogger.i(TAG, "关闭终端标签: $id")
             } else {
@@ -574,10 +606,12 @@ class TerminalSessionTool @Inject constructor(
     private fun normalizeKey(key: String): String =
         key.trim().lowercase().replace(" ", "").replace("_", "+").replace("-", "+")
 
-    private fun capturedResult(tabId: String, actionLabel: String): ToolResult {
+    /** start 的结果：新标签的整段输出就是本次产生的，全量返回并推进游标。 */
+    private fun capturedFullResult(tabId: String, actionLabel: String): ToolResult {
         val tab = sessionManager.listTabs().firstOrNull { it.id == tabId }
             ?: return ToolResult.Error("未找到终端标签：$tabId")
         val rawOutput = sessionManager.getTabOutput(tabId) ?: ""
+        outputCursor.mark(tabId, rawOutput)
         FileLogger.v(
             TAG,
             "$actionLabel 捕获 tab=$tabId running=${tab.running} 输出 ${rawOutput.length} 字符"
@@ -593,28 +627,24 @@ class TerminalSessionTool @Inject constructor(
         )
     }
 
-    private fun outputDelta(previous: String, current: String): String {
-        if (current.isEmpty() || current == previous) return ""
-        if (current.startsWith(previous)) return current.substring(previous.length)
-
-        // 找 previous 后缀与 current 前缀的最长重叠。原实现用 current.take(length) 每次分配子串，
-        // 对长 transcript 是 O(n^2)；改为先比首字符再逐字符比对，无分配。
-        val maxOverlap = minOf(previous.length, current.length)
-        val first = current[0]
-        for (length in maxOverlap downTo 1) {
-            val start = previous.length - length
-            if (previous[start] != first) continue
-            if (regionMatches(previous, start, current, length)) {
-                return current.substring(length)
-            }
-        }
-        return current
-    }
-
-    private fun regionMatches(a: String, aOffset: Int, b: String, length: Int): Boolean {
-        for (i in 1 until length) {
-            if (a[aOffset + i] != b[i]) return false
-        }
-        return true
+    /** send 的结果：只返回这次发送后新增的输出，避免把整段 transcript 重复回放给模型。 */
+    private fun capturedDeltaResult(tabId: String, actionLabel: String): ToolResult {
+        val tab = sessionManager.listTabs().firstOrNull { it.id == tabId }
+            ?: return ToolResult.Error("未找到终端标签：$tabId")
+        val rawOutput = sessionManager.getTabOutput(tabId) ?: ""
+        val delta = outputCursor.advance(tabId, rawOutput)
+        FileLogger.v(
+            TAG,
+            "$actionLabel 捕获 tab=$tabId running=${tab.running} 输出 ${rawOutput.length} 字符，新增 ${delta.length} 字符"
+        )
+        return ToolResult.Success(
+            JsonObject(
+                mapOf(
+                    "tab_id" to JsonPrimitive(tabId),
+                    "running" to JsonPrimitive(tab.running),
+                    "output" to JsonPrimitive(delta)
+                )
+            )
+        )
     }
 }
