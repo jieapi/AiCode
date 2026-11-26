@@ -204,6 +204,8 @@ class WorkspaceRepositoryTest {
         val adapter = PluginExecutionBackendAdapter(pluginDefinition("register"), runtimeManager)
         backendRegistry.register(adapter)
         backendRegistry.setActiveBackend(adapter.id)
+        repoScope.cancel()
+        repoScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
 
         val repo = createRepo()
         repo.initialize()
