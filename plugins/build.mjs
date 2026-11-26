@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { buildPluginPages } from './build-pages.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PLUGIN_ROOTS = ['plugins/samples', 'plugin-official'];
+const PLUGIN_ROOTS = ['plugins/samples'];
 const ENTRY_CANDIDATES = ['src/index.ts', 'src/main.ts'];
 const DEFAULT_OUTPUT = 'dist/main.js';
 const SDK_ALIAS = {

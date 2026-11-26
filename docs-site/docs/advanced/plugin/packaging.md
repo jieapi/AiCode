@@ -103,4 +103,4 @@ python3 scripts/package-plugins.py <目录名>
 - Markdown 正文、工具 schema、MCP 配置通过对应规则检查。
 - 包中包含页面 assets 与必要的依赖文件，排除了密钥和开发缓存。
 - 在真机验证安装、启用、工具调用、页面操作、停用与卸载。
-- 发布到 GitHub Release 时，资产名使用 `{id}_{version}.zip`；在插件索引中更新 `repository` 和 `version`。
+- 发布到 GitHub Release 时，资产名使用 `{id}_{version}.zip`；多个插件可以共用一个源码仓库，但每个插件必须有独立资产；在插件索引中更新 `repository` 和 `version`。
