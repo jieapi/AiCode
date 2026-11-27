@@ -46,15 +46,15 @@
     {
       "id": "alpine-3.21",
       "name": "Alpine Linux",
-      "version": "3.21.8",
+      "version": "3.21.10",
       "eol": "2026-11-01",
       "description": "极简 Linux 发行版，rootfs 仅数 MB；与内置 Alpine 同为 3.21 分支",
-      "sizeBytes": 3831912,
+      "sizeBytes": 3831092,
       "distro": "alpine",
-      "path": "alpine/v3.21/releases/{abi}/alpine-minirootfs-3.21.8-{abi}.tar.gz",
+      "path": "alpine/v3.21/releases/{abi}/alpine-minirootfs-3.21.10-{abi}.tar.gz",
       "sha256ByAbi": {
-        "arm64": "f25a96d2846a4bc439093107c1b48a8b0c93dcb411e2cb9cfded6f790b2bc001",
-        "x86_64": "6ea461b0225faad280b7e13df878b30fdd6d969dde25ef05f85a1bcec9033348"
+        "arm64": "fc957a820e80660eec7c1dde2b619385f153f1c04d0eb537449eb6b6c24ba107",
+        "x86_64": "d225c786541b5ae5ba006ef541701d9ecc7e732bd16317c08adfb93212345efa"
       },
       "abiNames": {
         "arm64": "aarch64",
@@ -64,15 +64,15 @@
     {
       "id": "alpine-3.22",
       "name": "Alpine Linux",
-      "version": "3.22.6",
+      "version": "3.22.8",
       "eol": "2027-05-01",
       "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
-      "sizeBytes": 3969729,
+      "sizeBytes": 3971704,
       "distro": "alpine",
-      "path": "alpine/v3.22/releases/{abi}/alpine-minirootfs-3.22.6-{abi}.tar.gz",
+      "path": "alpine/v3.22/releases/{abi}/alpine-minirootfs-3.22.8-{abi}.tar.gz",
       "sha256ByAbi": {
-        "arm64": "821565fa8f3953eefd12497b166b4b50add2f7c57fb312e75862f5867e06fefe",
-        "x86_64": "27694aaa55fd7a9e3ef596e0ad4eb66802308bb20172b17030cd5f4d8ae9bac2"
+        "arm64": "36091efacd083c1cf5a8c837272530bff4fc72db1fbfdef559f52de0d890bca4",
+        "x86_64": "2d7f46af9b7e86ad64ebeba3fe9b75b62dd5b259e708afb2ab21268f627696e5"
       },
       "abiNames": {
         "arm64": "aarch64",
@@ -82,15 +82,15 @@
     {
       "id": "alpine-3.23",
       "name": "Alpine Linux",
-      "version": "3.23.6",
+      "version": "3.23.8",
       "eol": "2027-11-01",
       "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
-      "sizeBytes": 4026314,
+      "sizeBytes": 4027855,
       "distro": "alpine",
-      "path": "alpine/v3.23/releases/{abi}/alpine-minirootfs-3.23.6-{abi}.tar.gz",
+      "path": "alpine/v3.23/releases/{abi}/alpine-minirootfs-3.23.8-{abi}.tar.gz",
       "sha256ByAbi": {
-        "arm64": "b17a57958e29735ff0e6e64254d958e65903687a70ca30cc430b33a965ad49d7",
-        "x86_64": "6fc0e3639a1c01f156970d7626aab90bc90697117069dbc39ad880b84efa319a"
+        "arm64": "3f1bd6811370264cc363bb991ff15ac67621b239ea6e25ff2eb22af3d0641473",
+        "x86_64": "56e2810205c17a5dff78cdd7b2c2af4ccdef16f18d765d5bb0f527438b136676"
       },
       "abiNames": {
         "arm64": "aarch64",
@@ -100,15 +100,15 @@
     {
       "id": "alpine-3.24",
       "name": "Alpine Linux",
-      "version": "3.24.2",
+      "version": "3.24.4",
       "eol": "2028-06-01",
       "description": "极简 Linux 发行版，rootfs 仅数 MB；当前最新稳定版",
-      "sizeBytes": 4028030,
+      "sizeBytes": 4029843,
       "distro": "alpine",
-      "path": "alpine/v3.24/releases/{abi}/alpine-minirootfs-3.24.2-{abi}.tar.gz",
+      "path": "alpine/v3.24/releases/{abi}/alpine-minirootfs-3.24.4-{abi}.tar.gz",
       "sha256ByAbi": {
-        "arm64": "9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773",
-        "x86_64": "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
+        "arm64": "4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de",
+        "x86_64": "cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012"
       },
       "abiNames": {
         "arm64": "aarch64",
@@ -203,7 +203,7 @@
       "versionPath": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/bookworm/rootfs.debian_version",
       "eol": "2028-06-30",
       "description": "Debian 12 稳定版，Docker 官方镜像同源 rootfs（debuerreotype 构建）",
-      "sizeBytes": 30627660,
+      "sizeBytes": 30635848,
       "distro": "debian",
       "path": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/bookworm/rootfs.tar.xz",
       "supportEnds": "2026-07-11",
@@ -216,12 +216,12 @@
     {
       "id": "debian-13",
       "name": "Debian",
-      "version": "13.7",
+      "version": "13.8",
       "versionSuffix": "(trixie)",
       "versionPath": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/trixie/rootfs.debian_version",
       "eol": "2030-06-30",
       "description": "Debian 13 最新稳定版，Docker 官方镜像同源 rootfs（debuerreotype 构建）",
-      "sizeBytes": 30894916,
+      "sizeBytes": 30907724,
       "distro": "debian",
       "path": "job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/trixie/rootfs.tar.xz",
       "supportEnds": "2028-08-09",
