@@ -150,8 +150,8 @@ interface FileAccessProvider {
     /**
      * 把文件复制到本地临时文件并返回其 [File]。
      * 本地模式直接返回映射后的宿主 [File]（不复制）；
-     * 远程模式 SFTP 下载到缓存目录，返回本地临时文件。
-     * 供 [ViewImageTool]（需本地路径喂 BitmapFactory）等使用。
+     * 远程模式 SFTP 下载到随机缓存目录，返回保留原文件名的本地文件。
+     * 供 [ViewImageTool]（需本地路径喂 BitmapFactory）及外部文件打开等场景使用。
      */
     fun copyToLocal(path: String): File
 

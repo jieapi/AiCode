@@ -7,6 +7,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import java.io.File
 import java.io.IOException
 import java.nio.file.FileSystemLoopException
 import net.schmizz.sshj.sftp.FileAttributes
@@ -16,6 +17,7 @@ import net.schmizz.sshj.sftp.Response.StatusCode
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.SFTPException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
@@ -121,6 +123,25 @@ class RemoteSftpFileAccessSafetyTest {
         every { sftp.statExistence("/root/workspace/dir") } returns directory
         assertThrows(IOException::class.java) { access.copy("dir", "alias/child", overwrite = true) }
         verify(exactly = 0) { sftp.mkdirs("/root/workspace/dir/child") }
+    }
+
+    @Test
+    fun copyToLocal_preservesRemoteFileNameInIsolatedCacheDirectory() {
+        every { sftp.statExistence("/root/workspace/images/photo.png") } returns
+            FileAttributes.Builder().withType(FileMode.Type.REGULAR).withSize(4).build()
+        every { sftp.get("/root/workspace/images/photo.png", any<String>()) } answers {
+            File(secondArg<String>()).writeText("data")
+        }
+
+        val local = access.copyToLocal("images/photo.png")
+        try {
+            assertEquals("photo.png", local.name)
+            assertEquals("data", local.readText())
+            assertTrue(local.parentFile?.name?.startsWith("aicode_remote_") == true)
+            verify { sftp.get("/root/workspace/images/photo.png", match<String> { it.endsWith("/photo.png") }) }
+        } finally {
+            local.parentFile?.deleteRecursively()
+        }
     }
 
     @Test

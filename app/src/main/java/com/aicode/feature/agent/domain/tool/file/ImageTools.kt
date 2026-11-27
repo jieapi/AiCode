@@ -46,7 +46,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.net.URLConnection
 import java.util.UUID
 import javax.inject.Inject
 
@@ -371,8 +370,8 @@ class ViewImageTool @Inject constructor(
 
             val bounds = decodeBounds(file)
                 ?: return EncodeOutcome.Fail("无法识别图片格式：$path", "UNSUPPORTED_IMAGE")
-            val sourceMime = guessMimeType(file)
-            if (!sourceMime.startsWith("image/")) {
+            val sourceMime = bounds.mimeType
+            if (sourceMime == null || !sourceMime.startsWith("image/")) {
                 return EncodeOutcome.Fail("不是支持的图片文件：$path", "UNSUPPORTED_IMAGE")
             }
 
@@ -380,7 +379,7 @@ class ViewImageTool @Inject constructor(
             val encoded = when (detail) {
                 "low" -> encodePreview(file, bounds, LOW_MAX_EDGE, LOW_TARGET_BYTES, detail)
                 else -> if (originalOk && fileSize <= MAX_ORIGINAL_BYTES) {
-                    originalImage(path, bounds, sourceMime, fileSize)
+                    originalImage(file, bounds, sourceMime, fileSize)
                 } else {
                     encodePreview(file, bounds, HIGH_MAX_EDGE, HIGH_TARGET_BYTES, detail)
                 }
@@ -398,10 +397,10 @@ class ViewImageTool @Inject constructor(
         }
     }
 
-    private fun originalImage(path: String, bounds: ImageBounds, mime: String, size: Long): EncodedImage =
+    private fun originalImage(file: File, bounds: ImageBounds, mime: String, size: Long): EncodedImage =
         EncodedImage(
             mimeType = mime,
-            base64Data = Base64.encodeToString(fileAccess.readBytes(path), Base64.NO_WRAP),
+            base64Data = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP),
             width = bounds.width,
             height = bounds.height,
             detail = "original",
@@ -413,7 +412,7 @@ class ViewImageTool @Inject constructor(
         BitmapFactory.decodeFile(file.absolutePath, options)
         val width = options.outWidth
         val height = options.outHeight
-        return if (width > 0 && height > 0) ImageBounds(width, height) else null
+        return if (width > 0 && height > 0) ImageBounds(width, height, options.outMimeType) else null
     }
 
     private fun encodePreview(file: File, bounds: ImageBounds, maxEdge: Int, targetBytes: Int, detail: String): EncodedImage {
@@ -474,24 +473,12 @@ class ViewImageTool @Inject constructor(
         return best
     }
 
-    private fun guessMimeType(file: File): String {
-        val extMime = when (file.extension.lowercase()) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "webp" -> "image/webp"
-            "gif" -> "image/gif"
-            "bmp" -> "image/bmp"
-            else -> null
-        }
-        return extMime ?: URLConnection.guessContentTypeFromName(file.name) ?: "application/octet-stream"
-    }
-
     private sealed interface EncodeOutcome {
         data class Ok(val image: AgentImage) : EncodeOutcome
         data class Fail(val message: String, val code: String) : EncodeOutcome
     }
 
-    private data class ImageBounds(val width: Int, val height: Int)
+    private data class ImageBounds(val width: Int, val height: Int, val mimeType: String?)
 
     private data class EncodedImage(
         val mimeType: String,
