@@ -71,6 +71,7 @@ There is nothing to set up beforehand: install the app, configure a model under 
 - **Checkpoints & Undo** — Snapshots are recorded before the agent edits code; one-tap rollback of code, chat history, or both
 - **Skills & Auto Memory** — Global/project-level skills and long-term memory let the AI reuse experience and project conventions across sessions
 - **MCP Protocol** — Connect to local (stdio) or remote (HTTP) MCP servers to dynamically extend AI tool capabilities
+- **Plugin system (preview)** — Install plugins from a local `.zip` or the built-in plugin store to add skills, subagents, AI tools, MCP servers, OpenAI-compatible providers, settings/sidebar pages, run hooks and more in one package, with unified enable/disable and uninstall; plugin logic runs in a container subprocess rather than in the app process. A TypeScript SDK and template are provided for building your own (see the [plugin docs](https://aicode.murk.top/guide/plugins))
 - **Tool permissions & custom prompts** — Per-tool authorization rules; system prompts can be overridden by the user and survive app upgrades
 
 ### Models & Providers
