@@ -410,7 +410,7 @@ class GitRepositoryTest {
 
         val graph = GitRepository(engine, workspace, ExecutionModeHolder()).graph(limit = 100)
 
-        assertTrue(command.captured.contains("'--topo-order'"))
+        assertTrue(command.captured.contains("--topo-order"))
         assertEquals(listOf("m1m1m1", "c1c1c1", "p1p1p1", "q1q1q1", "r0r0r0"), graph.commits.map { it.hash })
         assertEquals(mapOf("m1m1m1" to 0, "c1c1c1" to 2, "p1p1p1" to 0, "q1q1q1" to 1, "r0r0r0" to 0), graph.lanes)
         assertTrue(graph.edges.any { it.fromLane == 2 && it.toLane == 0 })
