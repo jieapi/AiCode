@@ -2437,4 +2437,6 @@
     <string name="touch_lock_hold_hint">Hold %1$d s to exit</string>
     <string name="touch_lock_holding_countdown">Keep holding (%1$d s)</string>
     <string name="touch_lock_unlock_cd">Hold for 3 seconds to exit touch lock</string>
+    <string name="plugin_text_action_desc">Plugin actions</string>
+    <string name="project_tools_all_settings">All settings</string>
 </resources>

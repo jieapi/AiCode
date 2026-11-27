@@ -2436,4 +2436,6 @@
     <string name="touch_lock_hold_hint">长按 %1$d 秒退出</string>
     <string name="touch_lock_holding_countdown">继续按住（%1$d 秒）</string>
     <string name="touch_lock_unlock_cd">长按 3 秒退出防误触模式</string>
+    <string name="plugin_text_action_desc">插件动作</string>
+    <string name="project_tools_all_settings">全部配置</string>
 </resources>

@@ -1387,7 +1387,7 @@ class AIAgentViewModel @Inject constructor(
     ) { id, ext -> id to ext }
         .flatMapLatest { (id, ext) ->
             when {
-                ext != null -> flowOf(ExternalSessionUiMapper.toChatSession(ext))
+                ext != null -> flowOf(ExternalSessionUiMapper.toChatSession(ext, context.getString(R.string.storage_untitled_session)))
                 id == null -> flowOf(null)
                 else -> chatSessionDao.getByIdFlow(id).map { it?.toDomain() }
             }

@@ -30,9 +30,9 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import com.aicode.core.ui.AdaptiveModalBottomSheet
+import com.aicode.core.ui.AppSwitch
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -131,7 +131,7 @@ fun TerminalSettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(
+                AppSwitch(
                     checked = settings.showPluginTabs,
                     onCheckedChange = onChangeShowPluginTabs
                 )

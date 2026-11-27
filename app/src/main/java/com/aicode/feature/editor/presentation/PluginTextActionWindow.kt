@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupMenu
 import android.widget.TextView
+import com.aicode.R
 import com.aicode.feature.plugin.domain.PluginUiEntry
 import com.aicode.feature.plugin.presentation.PluginEntryContext
 import io.github.rosemoe.sora.event.ColorSchemeUpdateEvent
@@ -26,13 +27,13 @@ internal class PluginTextActionWindow(
 ) : EditorTextActionWindow(hostEditor) {
 
     private val pluginButton: TextView = TextView(hostEditor.context).apply {
-        text = "插件"
+        text = hostEditor.context.getString(R.string.plugins_scope_badge)
         gravity = Gravity.CENTER
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
         isClickable = true
         isFocusable = true
         includeFontPadding = false
-        contentDescription = "插件动作"
+        contentDescription = hostEditor.context.getString(R.string.plugin_text_action_desc)
         val background = TypedValue()
         context.theme.resolveAttribute(android.R.attr.selectableItemBackground, background, true)
         setBackgroundResource(background.resourceId)

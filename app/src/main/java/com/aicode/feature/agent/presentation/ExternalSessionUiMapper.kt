@@ -124,9 +124,9 @@ object ExternalSessionUiMapper {
         return out
     }
 
-    fun toChatSession(session: ExternalSessionSummary): ChatSession = ChatSession(
+    fun toChatSession(session: ExternalSessionSummary, untitledTitle: String): ChatSession = ChatSession(
         id = session.id,
-        title = session.title.ifBlank { "未命名会话" },
+        title = session.title.ifBlank { untitledTitle },
         createdAt = session.updatedAt,
         updatedAt = session.updatedAt,
         workspacePath = session.workspaceId.orEmpty(),
