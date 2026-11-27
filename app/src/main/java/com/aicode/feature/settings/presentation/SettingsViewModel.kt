@@ -3300,6 +3300,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    suspend fun resolveAutoModelMetadata(type: ProviderType, modelId: String): ModelMetadata =
+        modelMetadataService.resolveAuto(type, modelId)
+
     fun resolveModelMetadata(providerId: String, type: ProviderType, modelIds: List<String>) {
         val normalizedIds = modelIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (normalizedIds.isEmpty()) return

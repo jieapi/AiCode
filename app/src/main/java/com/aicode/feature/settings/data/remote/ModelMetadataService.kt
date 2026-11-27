@@ -53,6 +53,12 @@ class ModelMetadataService @Inject constructor(
             mergeCustom(providerId, modelId, auto)
         }
 
+    /** 仅按目录/内置规则识别（不含自定义覆盖），供「手动添加模型」自动填充与重置为默认元数据。 */
+    suspend fun resolveAuto(type: ProviderType, modelId: String): ModelMetadata =
+        withContext(Dispatchers.IO) {
+            findMetadata(loadCatalog(), type, modelId) ?: default(type, modelId)
+        }
+
     suspend fun resolveAll(providerId: String, type: ProviderType, modelIds: List<String>): Map<String, ModelMetadata> =
         withContext(Dispatchers.IO) {
             val catalog = loadCatalog()

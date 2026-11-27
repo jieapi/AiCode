@@ -168,6 +168,7 @@ import compose.icons.feathericons.Minus
 import compose.icons.feathericons.Play
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.RefreshCw
+import compose.icons.feathericons.RotateCcw
 import compose.icons.feathericons.Slash
 import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Trash2
@@ -1121,6 +1122,7 @@ fun ProviderEditorScreen(
                     stringResource(R.string.common_add)
                 },
                 initial = editingModel?.let { mergeModelMetadata(it, modelMetadata[modelMetadataKey(providerId, it)], customMetadata[modelMetadataKey(providerId, it)]) },
+                resolveDefault = { id -> viewModel.resolveAutoModelMetadata(type, id) },
                 onSave = { model, meta ->
                     val editing = editingModel
                     if (editing != null && model != editing) {
@@ -1222,9 +1224,11 @@ private fun AddModelSheet(
     title: String,
     confirmLabel: String,
     initial: ModelMetadata?,
+    resolveDefault: suspend (String) -> ModelMetadata,
     onSave: (String, ModelMetadata) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val configuration = LocalConfiguration.current
     val screenHeight = configuration.screenHeightDp.dp
@@ -1244,7 +1248,35 @@ private fun AddModelSheet(
     var outputPrice by remember { mutableStateOf(initial?.outputCostUsdPerM?.toString() ?: "") }
     var cacheReadPrice by remember { mutableStateOf(initial?.cacheReadCostUsdPerM?.toString() ?: "") }
     var cacheWritePrice by remember { mutableStateOf(initial?.cacheWriteCostUsdPerM?.toString() ?: "") }
+    // 预算范围与默认档来自自动识别，不在表单中编辑，保存时原样带上。
+    var baseMeta by remember { mutableStateOf(initial) }
+    // 用户手动改过任一能力/窗口/价格字段后，改模型名不再自动覆盖；编辑已有模型时初始即视为已定制。
+    var touched by remember { mutableStateOf(initial != null) }
     val trimmedModel = modelName.trim()
+
+    fun applyMetadata(meta: ModelMetadata) {
+        baseMeta = meta
+        supportsVision = meta.supportsVision
+        supportsImageOutput = meta.supportsImageOutput
+        supportsTools = meta.supportsTools
+        supportsReasoning = meta.supportsReasoning
+        reasoningCanDisable = meta.reasoningCanDisable
+        reasoningLevels = meta.reasoningLevels?.toSet() ?: emptySet()
+        contextTokens = meta.contextTokens.takeIf { it > 0 }?.toString() ?: ""
+        inputTokens = meta.inputTokens?.toString() ?: ""
+        outputTokens = meta.outputTokens?.toString() ?: ""
+        inputPrice = meta.inputCostUsdPerM?.toString() ?: ""
+        outputPrice = meta.outputCostUsdPerM?.toString() ?: ""
+        cacheReadPrice = meta.cacheReadCostUsdPerM?.toString() ?: ""
+        cacheWritePrice = meta.cacheWriteCostUsdPerM?.toString() ?: ""
+    }
+
+    LaunchedEffect(trimmedModel) {
+        if (touched || trimmedModel.isEmpty()) return@LaunchedEffect
+        delay(300)
+        applyMetadata(resolveDefault(trimmedModel))
+    }
+
     val duplicate = existingModels.any { it == trimmedModel && it != initial?.id }
     val contextError = contextTokens.isNotBlank() && (contextTokens.trim().toIntOrNull() ?: 0) <= 0
     val inputError = inputTokens.isNotBlank() && (inputTokens.trim().toIntOrNull() ?: 0) <= 0
@@ -1281,7 +1313,22 @@ private fun AddModelSheet(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.size(36.dp))
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            applyMetadata(resolveDefault(trimmedModel))
+                            touched = false
+                        }
+                    },
+                    enabled = trimmedModel.isNotEmpty(),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        FeatherIcons.RotateCcw,
+                        contentDescription = stringResource(R.string.common_reset),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
             // ── 表单区：输入框直接铺背景，卡片承载能力开关 ──
@@ -1311,21 +1358,21 @@ private fun AddModelSheet(
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_context_total),
                     value = contextTokens,
-                    onValueChange = { contextTokens = it },
+                    onValueChange = { contextTokens = it; touched = true },
                     keyboardType = KeyboardType.Number,
                     isError = contextError
                 )
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_context_input),
                     value = inputTokens,
-                    onValueChange = { inputTokens = it },
+                    onValueChange = { inputTokens = it; touched = true },
                     keyboardType = KeyboardType.Number,
                     isError = inputError
                 )
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_context_output),
                     value = outputTokens,
-                    onValueChange = { outputTokens = it },
+                    onValueChange = { outputTokens = it; touched = true },
                     keyboardType = KeyboardType.Number,
                     isError = outputError
                 )
@@ -1334,25 +1381,25 @@ private fun AddModelSheet(
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_price_input),
                     value = inputPrice,
-                    onValueChange = { inputPrice = it },
+                    onValueChange = { inputPrice = it; touched = true },
                     keyboardType = KeyboardType.Decimal
                 )
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_price_output),
                     value = outputPrice,
-                    onValueChange = { outputPrice = it },
+                    onValueChange = { outputPrice = it; touched = true },
                     keyboardType = KeyboardType.Decimal
                 )
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_price_cache_read),
                     value = cacheReadPrice,
-                    onValueChange = { cacheReadPrice = it },
+                    onValueChange = { cacheReadPrice = it; touched = true },
                     keyboardType = KeyboardType.Decimal
                 )
                 ModelSheetTextField(
                     label = stringResource(R.string.provider_model_price_cache_write),
                     value = cacheWritePrice,
-                    onValueChange = { cacheWritePrice = it },
+                    onValueChange = { cacheWritePrice = it; touched = true },
                     keyboardType = KeyboardType.Decimal
                 )
 
@@ -1369,25 +1416,25 @@ private fun AddModelSheet(
                         CapabilitySwitchRow(
                             title = stringResource(R.string.provider_model_cap_vision),
                             checked = supportsVision,
-                            onCheckedChange = { supportsVision = it }
+                            onCheckedChange = { supportsVision = it; touched = true }
                         )
                         SettingsDivider()
                         CapabilitySwitchRow(
                             title = stringResource(R.string.provider_model_cap_image_output),
                             checked = supportsImageOutput,
-                            onCheckedChange = { supportsImageOutput = it }
+                            onCheckedChange = { supportsImageOutput = it; touched = true }
                         )
                         SettingsDivider()
                         CapabilitySwitchRow(
                             title = stringResource(R.string.provider_model_capability_tools),
                             checked = supportsTools,
-                            onCheckedChange = { supportsTools = it }
+                            onCheckedChange = { supportsTools = it; touched = true }
                         )
                         SettingsDivider()
                         CapabilitySwitchRow(
                             title = stringResource(R.string.provider_model_capability_reasoning),
                             checked = supportsReasoning,
-                            onCheckedChange = { supportsReasoning = it }
+                            onCheckedChange = { supportsReasoning = it; touched = true }
                         )
                     }
                 }
@@ -1405,6 +1452,7 @@ private fun AddModelSheet(
                             title = stringResource(R.string.provider_model_reasoning_can_disable),
                             checked = reasoningCanDisable,
                             onCheckedChange = {
+                                touched = true
                                 reasoningCanDisable = it
                                 if (it) supportsReasoning = true
                             }
@@ -1415,6 +1463,7 @@ private fun AddModelSheet(
                                 title = level.reasoningLabel(),
                                 checked = level.apiValue in reasoningLevels,
                                 onToggle = {
+                                    touched = true
                                     reasoningLevels = if (level.apiValue in reasoningLevels) {
                                         reasoningLevels - level.apiValue
                                     } else {
@@ -1463,9 +1512,9 @@ private fun AddModelSheet(
                                 .takeIf { it.isNotEmpty() },
                             reasoningCanDisable = reasoningCanDisable,
                             // 预算范围与默认档沿用自动识别值，避免手填档位时丢掉预算型信息。
-                            reasoningBudgetMin = initial?.reasoningBudgetMin,
-                            reasoningBudgetMax = initial?.reasoningBudgetMax,
-                            reasoningDefaultLevel = initial?.reasoningDefaultLevel
+                            reasoningBudgetMin = baseMeta?.reasoningBudgetMin,
+                            reasoningBudgetMax = baseMeta?.reasoningBudgetMax,
+                            reasoningDefaultLevel = baseMeta?.reasoningDefaultLevel
                         )
                         onSave(trimmedModel, meta)
                     },
