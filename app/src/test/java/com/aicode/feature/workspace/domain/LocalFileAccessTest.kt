@@ -52,7 +52,7 @@ class LocalFileAccessTest {
         every { workspace.currentPath() } returns tmp.root.absolutePath
         every { installer.aicodeDir } returns File(tmp.root, "global")
         every { installer.rootfsDirFor(any()) } returns File(tmp.root, "rootfs")
-        every { settings.activeProfileIdFlow } returns emptyFlow()
+        every { settings.activeProfileFlow } returns emptyFlow()
         every { home.home() } returns "/root"
         every { home.expandHome(any()) } answers {
             firstArg<String>().replaceFirst("~/", "/root/")

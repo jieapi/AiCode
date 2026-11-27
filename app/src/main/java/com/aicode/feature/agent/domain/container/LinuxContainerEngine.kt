@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
@@ -92,33 +91,24 @@ class LinuxContainerEngine @Inject constructor(
      */
     private val initScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 当前在途的初始化 job（受 [initMutex] 保护），完成后置 null。 */
+    /** 当前在途的初始化 job 及其所属 profile id（受 [initMutex] 保护）；仅同一 profile 才复用。 */
     private var initJob: Job? = null
+    private var initJobProfileId: String? = null
 
     /**
-     * 当前选中的 profile（缓存自 [containerSettingsRepository.activeProfileIdFlow]，避免同步读 DataStore）。
-     * 启动首帧为内置 Alpine（等同改动前）；profile 切换后由 flow collector 更新。fallback 到内置保证安全。
+     * 当前选中的 profile（缓存自 [containerSettingsRepository.activeProfileFlow]，避免同步读 DataStore）。
+     * 启动首帧为内置 Alpine（等同改动前）；切换 profile 或编辑当前 profile 后由 flow collector 更新。
+     * fallback 到内置保证安全。
      */
     @Volatile
     private var currentProfile: ContainerProfile = ContainerProfile.BUILTIN_ALPINE
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
-            containerSettingsRepository.activeProfileIdFlow.collect { id ->
-                currentProfile = resolveProfile(id)
+            containerSettingsRepository.activeProfileFlow.collect { profile ->
+                currentProfile = profile
             }
         }
-    }
-
-    /**
-     * 按 id 解析 profile：从持久化列表找，找不到回退列表第一个，再兜底内置 Alpine（保证引擎始终可用）。
-     * 列表里持久化的 Alpine 覆盖项优先于 [ContainerProfile.BUILTIN_ALPINE] 常量（用户编辑过的配置生效）。
-     */
-    private suspend fun resolveProfile(id: String): ContainerProfile {
-        val profiles = containerSettingsRepository.customProfilesFlow.first()
-        return profiles.firstOrNull { it.id == id }
-            ?: profiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
     }
 
     /**
@@ -539,9 +529,10 @@ class LinuxContainerEngine @Inject constructor(
         // 启动或复用后台初始化 job；initMutex 只保护 job 的创建/复用，真正的耗时工作在 initScope 里跑。
         val job = initMutex.withLock {
             val existing = initJob
-            if (existing == null || !existing.isActive) {
+            if (existing == null || !existing.isActive || initJobProfileId != profile.id) {
                 FileLogger.i(TAG, "创建后台初始化任务：profile=${profile.id}")
                 initJob = initScope.launch { doInit(profile) }
+                initJobProfileId = profile.id
             } else {
                 FileLogger.i(TAG, "复用进行中的后台初始化任务：profile=${profile.id}")
             }

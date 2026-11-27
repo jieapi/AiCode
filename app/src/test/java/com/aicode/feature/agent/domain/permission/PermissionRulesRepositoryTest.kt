@@ -59,7 +59,7 @@ class PermissionRulesRepositoryTest {
         every { workspace.current } returns MutableStateFlow(null)
         every { installer.aicodeDir } returns File(filesDir, "aicode")
         every { installer.rootfsDirFor(any()) } returns File(filesDir, "rootfs")
-        every { settings.activeProfileIdFlow } returns emptyFlow()
+        every { settings.activeProfileFlow } returns emptyFlow()
         every { home.home() } returns "/root"
         every { home.expandHome(any()) } answers { firstArg<String>().replaceFirst("~/", "/root/") }
         every { projectRoot.forPath(workspaceDir.absolutePath) } returns link

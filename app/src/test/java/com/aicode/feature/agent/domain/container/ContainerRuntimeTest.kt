@@ -69,8 +69,7 @@ class ContainerRuntimeTest {
         val settingsRepo = mockk<ContainerSettingsRepository>(relaxed = true)
         val homeResolver = mockk<PathHomeResolver>(relaxed = true)
 
-        every { settingsRepo.activeProfileIdFlow } returns flowOf(ContainerProfile.BUILTIN_ID)
-        every { settingsRepo.customProfilesFlow } returns flowOf(emptyList())
+        every { settingsRepo.activeProfileFlow } returns flowOf(ContainerProfile.BUILTIN_ALPINE)
         every { installer.rootfsDirFor(any()) } returns rootfs
         every { installer.prootTmpDirFor(any()) } returns File(rootfs, "tmp")
         every { installer.aicodeDir } returns aicodeDir

@@ -6,7 +6,6 @@ import com.aicode.feature.settings.data.repository.ContainerSettingsRepository
 import com.aicode.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.nio.file.FileSystemLoopException
@@ -106,17 +105,10 @@ class WorkspacePathMapper @Inject constructor(
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
-            containerSettingsRepository.activeProfileIdFlow.collect { id ->
-                currentProfile = resolveProfile(id)
+            containerSettingsRepository.activeProfileFlow.collect { profile ->
+                currentProfile = profile
             }
         }
-    }
-
-    private suspend fun resolveProfile(id: String): ContainerProfile {
-        val profiles = containerSettingsRepository.customProfilesFlow.first()
-        return profiles.firstOrNull { it.id == id }
-            ?: profiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
     }
 
     /** 当前工作区在宿主上的根目录。 */
