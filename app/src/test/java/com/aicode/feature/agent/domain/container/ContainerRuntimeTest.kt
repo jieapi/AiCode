@@ -77,7 +77,6 @@ class ContainerRuntimeTest {
         every { installer.prootBin } returns prootBin
         every { installer.prootLoader } returns loader
         every { installer.prootLoader32 } returns loader32
-        every { installer.prootLibDir } returns nativeDir
         every { installer.tawcrootBin } returns File(nativeDir, "libtawcroot.so")
 
         val engine = LinuxContainerEngine(context, installer, detector, settingsRepo, homeResolver)

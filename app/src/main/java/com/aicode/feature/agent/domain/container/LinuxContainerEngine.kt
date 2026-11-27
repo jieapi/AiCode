@@ -876,9 +876,7 @@ class LinuxContainerEngine @Inject constructor(
             // Termux proot 的 loader 分离，必须用 PROOT_LOADER/_32 指向，否则无法注入子进程而起不来。
             "PROOT_LOADER" to containerInstaller.prootLoader.absolutePath,
             "PROOT_LOADER_32" to containerInstaller.prootLoader32.absolutePath,
-            // Termux proot 动态链接 libtalloc.so / libandroid-shmem.so（与 proot 同居 nativeLibraryDir），
-            // 需让 linker64 能找到它们；libc.so/liblog.so 走系统默认路径(/system/lib64)。
-            "LD_LIBRARY_PATH" to "${containerInstaller.prootLibDir.absolutePath}:/system/lib64:/system/lib"
+            "LD_LIBRARY_PATH" to "/system/lib64:/system/lib"
         ) + buildSharedContainerEnv(profile)
     }
 
