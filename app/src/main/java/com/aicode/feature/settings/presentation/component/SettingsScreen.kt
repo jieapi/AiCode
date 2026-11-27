@@ -2410,7 +2410,14 @@ internal fun SettingsMenu(
             SettingsRow(
                 icon = FeatherIcons.Package,
                 title = stringResource(SettingsSection.Plugins.titleRes),
-                onClick = { onOpen(SettingsSection.Plugins) }
+                onClick = { onOpen(SettingsSection.Plugins) },
+                trailing = {
+                    McpPill(
+                        text = stringResource(R.string.common_beta),
+                        textColor = MaterialTheme.colorScheme.primary,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    )
+                }
             )
             SettingsDivider()
             SettingsRow(

@@ -466,6 +466,7 @@
     <string name="common_edit">Edit</string>
     <string name="common_enabled">Enabled</string>
     <string name="common_disabled">Disabled</string>
+    <string name="common_beta">Beta</string>
     <string name="credential_token">Access Token / PAT</string>
     <string name="credential_auto_inject_title">Auto-inject credentials</string>
     <string name="credential_auto_inject_hint">Sync git credentials saved in the app to this remote server, effective only for repositories under the current workspace root. Repositories outside the workspace are not affected.</string>

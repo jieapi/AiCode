@@ -466,6 +466,7 @@
     <string name="common_edit">编辑</string>
     <string name="common_enabled">已启用</string>
     <string name="common_disabled">已禁用</string>
+    <string name="common_beta">Beta</string>
     <string name="credential_token">访问令牌（Token / PAT）</string>
     <string name="credential_auto_inject_title">自动注入凭证</string>
     <string name="credential_auto_inject_hint">把应用中保存的 git 凭据同步到远程服务器，仅对当前工作区根目录下的仓库生效，不影响服务器其它目录下的仓库</string>
