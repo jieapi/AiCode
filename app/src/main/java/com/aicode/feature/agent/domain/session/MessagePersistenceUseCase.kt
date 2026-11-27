@@ -148,6 +148,13 @@ class MessagePersistenceUseCase @Inject constructor(
         agentMessageDao.updateMessageContent(messageId, sanitizeContent(newContent))
     }
 
+    /** 清掉指定消息的 thinking 快照（签名校验失败后的降级恢复），并让历史缓存失效。 */
+    suspend fun clearThinkingSnapshots(sessionId: String, ids: List<String>) {
+        if (ids.isEmpty()) return
+        agentMessageDao.clearThinkingSnapshots(ids)
+        invalidateHistory(sessionId)
+    }
+
     companion object {
         /**
          * 单条消息各文本字段的持久化上限（UTF-8 字节数）。远小于 SQLite CursorWindow 单窗口约 2MB

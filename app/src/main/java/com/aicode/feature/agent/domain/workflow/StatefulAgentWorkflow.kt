@@ -26,9 +26,11 @@ import com.aicode.feature.agent.domain.permission.PermissionChoice
 import com.aicode.feature.agent.domain.permission.PermissionScope
 import com.aicode.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aicode.feature.agent.domain.prompt.SystemPromptProvider
+import com.aicode.feature.agent.domain.model.id
 import com.aicode.feature.agent.domain.provider.AIProvider
 import com.aicode.feature.agent.domain.provider.AIResponse
 import com.aicode.feature.agent.domain.provider.AIStreamChunk
+import com.aicode.feature.agent.domain.provider.ThinkingSignatureInvalidException
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.StreamingAgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
@@ -933,6 +935,18 @@ class StatefulAgentWorkflow @Inject constructor(
             throw error
         } catch (error: Exception) {
             callDurationMillis = (SystemClock.elapsedRealtime() - callStartElapsed).toInt()
+            // 签名校验失败：按官方恢复步骤清掉报错位置及其后的 thinking 快照、落库，再重发一次。
+            if (error is ThinkingSignatureInvalidException && stream.text.isEmpty() && stream.reasoning.isEmpty()) {
+                val (stripped, changedIds) = stripThinkingSnapshots(currentState.messages, error.fromMessageId)
+                if (changedIds.isNotEmpty()) {
+                    currentState = currentState.copy(messages = stripped)
+                    context.sessionId?.let { sessionId ->
+                        runCatching { messagePersistenceUseCase.clearThinkingSnapshots(sessionId, changedIds) }
+                    }
+                    callError = error.message
+                    nextAction = AgentAction.InitRequest(stripped)
+                }
+            }
             if (!didAttemptOverflowRecovery && stream.text.isEmpty() && stream.reasoning.isEmpty() && isContextOverflow(error)) {
                 didAttemptOverflowRecovery = true
                 val recovery = contextCompactor.compactIfNeeded(
@@ -1367,6 +1381,34 @@ class StatefulAgentWorkflow @Inject constructor(
         val text = error.message.orEmpty().lowercase()
         return listOf("context_length_exceeded", "context_window_exceeded", "maximum context length",
             "prompt is too long", "input token limit").any { it in text }
+    }
+
+    /**
+     * 清掉 [fromMessageId] 及其后所有 assistant 消息的 thinking 快照。
+     * 定位失败时清理全部（官方允许的变体）；thinking 文本本身保留，只去掉回传用的签名与快照。
+     */
+    private fun stripThinkingSnapshots(
+        messages: List<AgentMessage>,
+        fromMessageId: String?
+    ): Pair<List<AgentMessage>, List<String>> {
+        val start = fromMessageId
+            ?.let { id -> messages.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        val changedIds = mutableListOf<String>()
+        val stripped = messages.mapIndexed { index, message ->
+            if (
+                index >= start &&
+                message is AgentMessage.AssistantMessage &&
+                (message.signature.isNotEmpty() || message.thinkingBlocksJson.isNotEmpty())
+            ) {
+                changedIds.add(message.id)
+                message.copy(signature = "", thinkingBlocksJson = "")
+            } else {
+                message
+            }
+        }
+        return stripped to changedIds
     }
 
     private suspend fun runToolSync(tool: AgentTool?, toolCall: ToolCall, context: AgentContext): ToolRunResult {

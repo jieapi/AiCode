@@ -43,11 +43,21 @@ fun Throwable.enrichWithHttpErrorBody(): Throwable {
  * **注意：errorBody 只能读一次**——调用后该响应体即被消费，后续再读只会得到空串。
  * 因此仅在「即将丢弃该异常」的场景（如重试日志）使用，不要用在异常仍需向上抛出的路径上。
  */
+/**
+ * 已被提前读取的错误体：errorBody 只能读一次，提前读过的调用方把原文存这里，
+ * 后续 [extractRawErrorBody] 直接复用。弱键，异常被回收后条目自动消失。
+ */
+private val consumedErrorBodies = java.util.WeakHashMap<Throwable, String>()
+
 internal fun Throwable.extractRawErrorBody(): String? {
     if (this !is HttpException) return null
-    return runCatching { response()?.errorBody()?.string()?.trim() }
+    synchronized(consumedErrorBodies) { consumedErrorBodies[this] }?.let { return it }
+    val raw = runCatching { response()?.errorBody()?.string()?.trim() }
         .getOrNull()
         ?.takeIf { it.isNotBlank() }
+        ?: return null
+    synchronized(consumedErrorBodies) { consumedErrorBodies[this] = raw }
+    return raw
 }
 
 /**

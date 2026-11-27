@@ -138,6 +138,10 @@ interface AgentMessageDao {
     @Query("UPDATE agent_messages SET content = :content WHERE id = :id")
     suspend fun updateMessageContent(id: String, content: String)
 
+    /** 清掉指定消息的 thinking 快照：签名校验失败后降级恢复，避免下一轮继续原样回传。 */
+    @Query("UPDATE agent_messages SET signature = NULL, thinkingBlocksJson = NULL WHERE id IN (:ids)")
+    suspend fun clearThinkingSnapshots(ids: List<String>)
+
     @Query("DELETE FROM agent_messages WHERE id = :id")
     suspend fun deleteMessageById(id: String)
 

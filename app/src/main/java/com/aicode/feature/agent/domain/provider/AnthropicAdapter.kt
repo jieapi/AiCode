@@ -93,7 +93,8 @@ class AnthropicAdapter @Inject constructor(
         reasoningEffort: String?,
         fastMode: Boolean
     ): AIResponse {
-        val anthropicMessages = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
+        val converted = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
+        val anthropicMessages = converted.messages
 
         val toolDefs = tools.takeIf { it.isNotEmpty() }?.mapIndexed { index, tool ->
             AnthropicToolDefinition(
@@ -195,7 +196,8 @@ class AnthropicAdapter @Inject constructor(
         reasoningEffort: String?,
         fastMode: Boolean
     ): Flow<AIStreamChunk> = channelFlow {
-        val anthropicMessages = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
+        val converted = convertToAnthropicMessages(messages, cacheBreakpointsEnabled)
+        val anthropicMessages = converted.messages
         val toolDefs = tools.takeIf { it.isNotEmpty() }?.mapIndexed { index, tool ->
             AnthropicToolDefinition(
                 name = tool.name,
@@ -227,6 +229,8 @@ class AnthropicAdapter @Inject constructor(
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, canRetry ->
+                    // 签名校验失败与 Key 无关：换 Key 只会把同一份历史发到另一套上游，直接交给上层清理后重试。
+                    if (canRetry) e.asThinkingSignatureInvalid(converted.sourceIds)?.let { throw it }
                     val outcome = switchKeyOnFailure(e, triedKeys)
                     if (outcome != null && canRetry) {
                         send(AIStreamChunk.KeySwitched(outcome.newIndex, outcome.total))
@@ -524,18 +528,21 @@ class AnthropicAdapter @Inject constructor(
         return runCatching { Json.parseToJsonElement(trimmed).jsonObject }.getOrElse { JsonObject(emptyMap()) }
     }
 
-    private fun convertToAnthropicMessages(messages: List<AgentMessage>, addMessageBreakpoint: Boolean): MutableList<AnthropicMessage> {
+    private fun convertToAnthropicMessages(messages: List<AgentMessage>, addMessageBreakpoint: Boolean): ConvertedMessages {
         val result = mutableListOf<AnthropicMessage>()
+        // 与 result 一一对应的源消息 id：签名校验失败时按报错位置定位要清理的历史消息。
+        val sourceIds = mutableListOf<String>()
         // 防御性跟踪：上一个 assistant 消息是否包含 tool_use
         var lastAssistantHadToolUse = false
-        // 最后一条普通 user 消息（非 tool_result）在 result 中的索引，供 messages 断点打点。
-        var lastPlainUserIndex: Int? = null
+        // 最后一条 user 消息（含工具结果生成的那条）在 result 中的索引，供 messages 断点打点。
+        var lastUserIndex: Int? = null
 
         for (message in messages) {
             when (message) {
                 is AgentMessage.UserMessage -> {
                     result.add(AnthropicMessage(role = "user", content = message.toAnthropicUserContent()))
-                    lastPlainUserIndex = result.lastIndex
+                    sourceIds.add(message.id)
+                    lastUserIndex = result.lastIndex
                     lastAssistantHadToolUse = false
                 }
                 is AgentMessage.AssistantMessage -> {
@@ -576,6 +583,7 @@ class AnthropicAdapter @Inject constructor(
 
                     if (contentBlocks.isNotEmpty()) {
                         result.add(AnthropicMessage(role = "assistant", content = contentBlocks))
+                        sourceIds.add(message.id)
                     }
                 }
                 is AgentMessage.ToolResultMessage -> {
@@ -615,15 +623,17 @@ class AnthropicAdapter @Inject constructor(
                         result[result.lastIndex] = previous.copy(content = previousBlocks + resultBlock)
                     } else {
                         result.add(AnthropicMessage(role = "user", content = listOf(resultBlock)))
+                        sourceIds.add(message.id)
                     }
+                    lastUserIndex = result.lastIndex
                 }
             }
         }
 
-        // messages 断点：打在最后一条普通 user 消息的 text 块上（Anthropic 不允许打在 tool_result/thinking/image 块）。
-        // 工具循环中最后一条 user 是 tool_result 时不打点，保持 system+tools 两个断点即可。
+        // messages 断点：跟随最后一条 user 消息（含工具结果生成的那条），打在它最后一个可缓存块上。
+        // 只认真正的 UserMessage 会让断点在工具循环期间停在早期消息，历史增量一直进不了缓存。
         if (addMessageBreakpoint) {
-            val idx = lastPlainUserIndex
+            val idx = lastUserIndex
             if (idx != null) {
                 val msg = result[idx]
                 val newContent = when (val c = msg.content) {
@@ -632,10 +642,13 @@ class AnthropicAdapter @Inject constructor(
                     )
                     is List<*> -> {
                         val blocks = c.map { it as AnthropicContentBlock }
-                        val lastText = blocks.indexOfLast { it.type == "text" }
-                        if (lastText >= 0) {
+                        // 优先 text；纯 tool_result 消息退到最后一个可缓存块（thinking 不支持 cache_control）。
+                        val target = blocks.indexOfLast { it.type == "text" }
+                            .takeIf { it >= 0 }
+                            ?: blocks.indexOfLast { it.type in CACHEABLE_BLOCK_TYPES }
+                        if (target >= 0) {
                             blocks.mapIndexed { i, b ->
-                                if (i == lastText) b.copy(cache_control = CACHE_BREAKPOINT) else b
+                                if (i == target) b.copy(cache_control = CACHE_BREAKPOINT) else b
                             }
                         } else {
                             blocks
@@ -647,8 +660,14 @@ class AnthropicAdapter @Inject constructor(
             }
         }
 
-        return result
+        return ConvertedMessages(result, sourceIds)
     }
+
+    /** 转换结果：请求体里的 messages，以及与它们一一对应的源消息 id。 */
+    private class ConvertedMessages(
+        val messages: MutableList<AnthropicMessage>,
+        val sourceIds: List<String>
+    )
 
     /** 显式缓存断点值：Anthropic ephemeral prompt caching。 */
     private fun buildSystemPayload(systemPrompt: String): Any? {
@@ -717,6 +736,9 @@ class AnthropicAdapter @Inject constructor(
     private companion object {
         /** 显式缓存断点：Anthropic ephemeral prompt caching。 */
         val CACHE_BREAKPOINT = mapOf("type" to "ephemeral")
+
+        /** 可承载 cache_control 的块类型；thinking / redacted_thinking 不支持。 */
+        val CACHEABLE_BLOCK_TYPES = setOf("text", "tool_result", "tool_use", "image")
 
         /**
          * Anthropic 的 `input_tokens` 只算未命中缓存的部分，总输入还要加上 cache_read / cache_creation——

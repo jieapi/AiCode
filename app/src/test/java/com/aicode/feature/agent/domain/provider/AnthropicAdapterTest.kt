@@ -251,4 +251,37 @@ class AnthropicAdapterTest {
         val blocks = user.content as List<AnthropicContentBlock>
         assertEquals("ephemeral", blocks.last().cache_control?.get("type"))
     }
+
+    @Test
+    fun tool_result_message_advances_cache_breakpoint() = runTest {
+        val api = FakeApi(response())
+        adapter(api).complete(
+            "sys",
+            listOf(
+                AgentMessage.UserMessage(content = "hi"),
+                AgentMessage.AssistantMessage(
+                    content = "读一个文件",
+                    toolCalls = listOf(toolCall("c1"))
+                ),
+                AgentMessage.ToolResultMessage(id = "c1", toolName = "readFile", result = "a")
+            )
+        )
+
+        // 工具循环里断点必须跟到最后一条 user 消息（这里是 tool_result），
+        // 否则它停在首条用户消息上，历史增量永远进不了缓存。
+        val messages = api.lastRequest!!.messages
+        val lastUser: AnthropicMessage = messages.last { it.role == "user" }
+        @Suppress("UNCHECKED_CAST")
+        val lastBlocks = lastUser.content as List<AnthropicContentBlock>
+        assertEquals(listOf("tool_result"), lastBlocks.map { it.type })
+        assertEquals("ephemeral", lastBlocks.last().cache_control?.get("type"))
+
+        val firstUser: AnthropicMessage = messages.first { it.role == "user" }
+        val firstHasBreakpoint = when (val firstContent = firstUser.content) {
+            is String -> false
+            is List<*> -> firstContent.filterIsInstance<AnthropicContentBlock>().any { it.cache_control != null }
+            else -> false
+        }
+        assertTrue("首条 user 消息不应再带断点", !firstHasBreakpoint)
+    }
 }
