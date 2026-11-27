@@ -387,7 +387,7 @@ class WorkspaceRepositoryTest {
         assertFalse(repo.workspaces.value.any { it.id == "ws-new" })
         assertEquals("ws-first", repo.current.value?.id)
         coVerify { sessionUseCase.deleteSessionsByWorkspace(checkNotNull(created).ref) }
-        coVerify(exactly = 0) { sessionUseCase.deleteSessionsByWorkspace(any<String>()) }
+        coVerify { sessionUseCase.deleteSessionsByWorkspace(checkNotNull(created).path) }
     }
 
     @Test
@@ -417,6 +417,7 @@ class WorkspaceRepositoryTest {
             runtimeManager.invokeBinary("demo.cloud", "1.0.0", runtime, "backend.wsDelete", any(), any(), any(), any())
         }
         coVerify(exactly = 0) { sessionUseCase.deleteSessionsByWorkspace(any<WorkspaceRef>()) }
+        coVerify(exactly = 0) { sessionUseCase.deleteSessionsByWorkspace(any<String>()) }
     }
 
     @Test

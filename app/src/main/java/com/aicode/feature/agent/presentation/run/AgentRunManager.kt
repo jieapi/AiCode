@@ -176,10 +176,10 @@ class AgentRunManager @Inject constructor(
     private val externalSessionIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val commandJobs = ConcurrentHashMap<String, Job>()
     private val chatRequestConsumerId = UUID.randomUUID().toString()
-    private val goalEmptyTurnCounts = mutableMapOf<String, Int>()
+    private val goalEmptyTurnCounts = ConcurrentHashMap<String, Int>()
 
     /** 工具调用传入参数（argsPreview）按落库消息 id 暂存。 */
-    private val toolArgsByMsgId = mutableMapOf<String, String>()
+    private val toolArgsByMsgId = ConcurrentHashMap<String, String>()
 
     private val wakeLock by lazy {
         (context.getSystemService(Context.POWER_SERVICE) as PowerManager)
@@ -419,7 +419,7 @@ class AgentRunManager @Inject constructor(
     }
 
     private fun setAgentState(sessionId: String, state: AgentUIState) {
-        _agentStates.value = _agentStates.value + (sessionId to state)
+        _agentStates.update { it + (sessionId to state) }
     }
 
     private fun describeFailure(event: AgentEvent.Failed): String {
@@ -434,35 +434,31 @@ class AgentRunManager @Inject constructor(
     }
 
     private fun setRunningTool(sessionId: String, msgId: String, tool: RunningToolOutput) {
-        val sessionTools = _runningTools.value[sessionId] ?: emptyMap()
-        _runningTools.value = _runningTools.value + (sessionId to (sessionTools + (msgId to tool)))
+        _runningTools.update { all ->
+            all + (sessionId to ((all[sessionId] ?: emptyMap()) + (msgId to tool)))
+        }
     }
 
     private fun removeRunningTool(sessionId: String, msgId: String) {
-        val sessionTools = _runningTools.value[sessionId] ?: return
-        val updated = sessionTools - msgId
-        _runningTools.value = if (updated.isEmpty()) {
-            _runningTools.value - sessionId
-        } else {
-            _runningTools.value + (sessionId to updated)
+        _runningTools.update { all ->
+            val sessionTools = all[sessionId] ?: return@update all
+            val updated = sessionTools - msgId
+            if (updated.isEmpty()) all - sessionId else all + (sessionId to updated)
         }
     }
 
     private fun setPreparingTool(sessionId: String, toolName: String?) {
-        val current = _preparingTools.value
-        if (toolName == null) {
-            if (current.containsKey(sessionId)) _preparingTools.value = current - sessionId
-        } else if (current[sessionId] != toolName) {
-            _preparingTools.value = current + (sessionId to toolName)
+        _preparingTools.update { current ->
+            when {
+                toolName == null -> if (current.containsKey(sessionId)) current - sessionId else current
+                current[sessionId] != toolName -> current + (sessionId to toolName)
+                else -> current
+            }
         }
     }
 
     private fun setCompacting(sessionId: String, compacting: Boolean) {
-        _compactingSessions.value = if (compacting) {
-            _compactingSessions.value + (sessionId to true)
-        } else {
-            _compactingSessions.value - sessionId
-        }
+        _compactingSessions.update { if (compacting) it + (sessionId to true) else it - sessionId }
     }
 
     private fun updateStreamingAssistant(
@@ -478,27 +474,15 @@ class AgentRunManager @Inject constructor(
     }
 
     private fun setRetryState(sessionId: String, state: RetryState?) {
-        _retryStates.value = if (state == null) {
-            _retryStates.value - sessionId
-        } else {
-            _retryStates.value + (sessionId to state)
-        }
+        _retryStates.update { if (state == null) it - sessionId else it + (sessionId to state) }
     }
 
     private fun setRequestQueueState(sessionId: String, state: RequestQueueState?) {
-        _requestQueueStates.value = if (state == null) {
-            _requestQueueStates.value - sessionId
-        } else {
-            _requestQueueStates.value + (sessionId to state)
-        }
+        _requestQueueStates.update { if (state == null) it - sessionId else it + (sessionId to state) }
     }
 
     private fun setKeySwitchState(sessionId: String, state: KeySwitchState?) {
-        _keySwitchStates.value = if (state == null) {
-            _keySwitchStates.value - sessionId
-        } else {
-            _keySwitchStates.value + (sessionId to state)
-        }
+        _keySwitchStates.update { if (state == null) it - sessionId else it + (sessionId to state) }
     }
 
     private fun acquireKeepalive() {
@@ -602,8 +586,7 @@ class AgentRunManager @Inject constructor(
                 isAutoTrigger = isAutoTrigger,
                 persistUserMessage = persistUserMessage
             )
-            val currentList = _queuedRequests.value[sid] ?: emptyList()
-            _queuedRequests.value = _queuedRequests.value + (sid to (currentList + req))
+            _queuedRequests.update { all -> all + (sid to ((all[sid] ?: emptyList()) + req)) }
         } else {
             executeAgentRequestStream(
                 request = request,
@@ -621,27 +604,32 @@ class AgentRunManager @Inject constructor(
     }
 
     fun removeQueuedRequest(sessionId: String, id: String) {
-        val queue = _queuedRequests.value[sessionId] ?: return
-        _queuedRequests.value = _queuedRequests.value + (sessionId to queue.filterNot { it.id == id })
+        _queuedRequests.update { all ->
+            val queue = all[sessionId] ?: return@update all
+            all + (sessionId to queue.filterNot { req -> req.id == id })
+        }
     }
 
     fun moveQueuedRequest(sessionId: String, fromIndex: Int, toIndex: Int) {
-        val queue = _queuedRequests.value[sessionId] ?: return
-        if (fromIndex !in queue.indices || toIndex !in queue.indices || fromIndex == toIndex) return
-        val reordered = queue.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
-        _queuedRequests.value = _queuedRequests.value + (sessionId to reordered)
+        _queuedRequests.update { all ->
+            val queue = all[sessionId] ?: return@update all
+            if (fromIndex !in queue.indices || toIndex !in queue.indices || fromIndex == toIndex) return@update all
+            all + (sessionId to queue.toMutableList().apply { add(toIndex, removeAt(fromIndex)) })
+        }
     }
 
     fun updateQueuedRequest(sessionId: String, id: String, newText: String) {
         val text = newText.trim()
         if (text.isEmpty()) return
-        val queue = _queuedRequests.value[sessionId] ?: return
-        _queuedRequests.value = _queuedRequests.value + (
-            sessionId to queue.map { req ->
-                if (req.id != id) req
-                else req.copy(request = text, modelRequest = syncQueuedModelRequest(req, text))
-            }
-            )
+        _queuedRequests.update { all ->
+            val queue = all[sessionId] ?: return@update all
+            all + (
+                sessionId to queue.map { req ->
+                    if (req.id != id) req
+                    else req.copy(request = text, modelRequest = syncQueuedModelRequest(req, text))
+                }
+                )
+        }
     }
 
     private fun syncQueuedModelRequest(req: QueuedRequest, newText: String): String {
@@ -655,9 +643,11 @@ class AgentRunManager @Inject constructor(
     }
 
     fun interjectQueuedRequest(sessionId: String, id: String) {
-        val queue = _queuedRequests.value[sessionId] ?: return
-        val req = queue.firstOrNull { it.id == id } ?: return
-        _queuedRequests.value = _queuedRequests.value + (sessionId to queue.filterNot { it.id == id })
+        val req = _queuedRequests.value[sessionId]?.firstOrNull { it.id == id } ?: return
+        _queuedRequests.update { all ->
+            val queue = all[sessionId] ?: return@update all
+            all + (sessionId to queue.filterNot { queued -> queued.id == id })
+        }
         deliverSystemEvent(
             sessionId,
             PendingNotification(
@@ -672,9 +662,11 @@ class AgentRunManager @Inject constructor(
 
     private fun processNextInQueue(sessionId: String) {
         if (sessionJobs[sessionId]?.isActive == true) return
-        val queue = _queuedRequests.value[sessionId] ?: return
-        val next = queue.firstOrNull() ?: return
-        _queuedRequests.value = _queuedRequests.value + (sessionId to queue.drop(1))
+        val next = _queuedRequests.value[sessionId]?.firstOrNull() ?: return
+        _queuedRequests.update { all ->
+            val queue = all[sessionId] ?: return@update all
+            all + (sessionId to queue.drop(1))
+        }
         executeAgentRequestStream(
             request = next.request,
             modelRequest = next.modelRequest,
@@ -696,11 +688,11 @@ class AgentRunManager @Inject constructor(
 
     fun markCommandStarted(sessionId: String) {
         streamingAssistantStore.setCommandRunning(sessionId, true)
-        _runningCommandSessions.value = _runningCommandSessions.value + sessionId
+        _runningCommandSessions.update { it + sessionId }
     }
 
     private fun finishCommand(sessionId: String, cancelled: Boolean, followUp: (() -> Unit)?) {
-        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
+        _runningCommandSessions.update { it - sessionId }
         streamingAssistantStore.setCommandRunning(sessionId, false)
         if (cancelled) return
         if (followUp != null) {
@@ -714,18 +706,18 @@ class AgentRunManager @Inject constructor(
     /** 回滚前停止会话任务并清空运行态（队列、运行中工具、流式内容、压缩与重试提示）。 */
     fun suspendSessionForRewind(sessionId: String) {
         streamingAssistantStore.clearSession(sessionId)
-        _queuedRequests.value = _queuedRequests.value + (sessionId to emptyList())
+        _queuedRequests.update { it + (sessionId to emptyList()) }
         agentNotificationCenter.clear(sessionId)
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
         commandJobs[sessionId]?.cancel()
         commandJobs.remove(sessionId)
-        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
+        _runningCommandSessions.update { it - sessionId }
         setAgentState(sessionId, AgentUIState.Idle)
-        _runningTools.value = _runningTools.value - sessionId
+        _runningTools.update { it - sessionId }
         setCompacting(sessionId, false)
-        _contextUsages.value = _contextUsages.value - sessionId
-        _compactionFailedSessions.value = _compactionFailedSessions.value - sessionId
+        _contextUsages.update { it - sessionId }
+        _compactionFailedSessions.update { it - sessionId }
         setRetryState(sessionId, null)
     }
 
@@ -783,7 +775,7 @@ class AgentRunManager @Inject constructor(
                     is AgentEvent.CompactionStarted -> setCompacting(sessionId, true)
                     AgentEvent.CompactionFinished -> {
                         setCompacting(sessionId, false)
-                        if (!failed) _contextUsages.value = _contextUsages.value - sessionId
+                        if (!failed) _contextUsages.update { it - sessionId }
                     }
                     is AgentEvent.CompactionFailed -> {
                         failed = true
@@ -1116,7 +1108,7 @@ class AgentRunManager @Inject constructor(
         if (sessionJobs[sessionId]?.isActive != true) {
             setAgentState(sessionId, AgentUIState.Idle)
         }
-        _runningTools.value = _runningTools.value - sessionId
+        _runningTools.update { it - sessionId }
         setPreparingTool(sessionId, null)
         setCompacting(sessionId, false)
         setRetryState(sessionId, null)
@@ -1174,7 +1166,7 @@ class AgentRunManager @Inject constructor(
     }
 
     fun clearContextUsage(sessionId: String) {
-        _contextUsages.value = _contextUsages.value - sessionId
+        _contextUsages.update { it - sessionId }
     }
 
     suspend fun stopAllAgentsAndJoin() {
@@ -1204,7 +1196,7 @@ class AgentRunManager @Inject constructor(
         commandJobs.values.forEach { it.cancel() }
         commandJobs.clear()
         _runningCommandSessions.value = emptySet()
-        _agentStates.value = _agentStates.value.mapValues { AgentUIState.Idle }
+        _agentStates.update { states -> states.mapValues { AgentUIState.Idle } }
         streamingAssistantStore.clearAll()
         _runningTools.value = emptyMap()
         _retryStates.value = emptyMap()
@@ -1215,30 +1207,29 @@ class AgentRunManager @Inject constructor(
         streamingAssistantStore.clearSession(sessionId)
         subAgentEventBus.release(sessionId)
         agentNotificationCenter.clear(sessionId)
-        _queuedRequests.value = _queuedRequests.value - sessionId
+        _queuedRequests.update { it - sessionId }
         sessionJobs[sessionId]?.cancel()
         sessionJobs.remove(sessionId)
         externalSessionIds.remove(sessionId)
         commandJobs[sessionId]?.cancel()
         commandJobs.remove(sessionId)
-        _runningCommandSessions.value = _runningCommandSessions.value - sessionId
-        _agentStates.value = _agentStates.value - sessionId
-        _runningTools.value = _runningTools.value - sessionId
-        _retryStates.value = _retryStates.value - sessionId
+        _runningCommandSessions.update { it - sessionId }
+        _agentStates.update { it - sessionId }
+        _runningTools.update { it - sessionId }
+        _retryStates.update { it - sessionId }
     }
 
     private fun markSubAgentRunning(subSessionId: String) {
         scope.launch {
             val session = runCatching { sessionUseCase.getSessionById(subSessionId) }.getOrNull()
-            _subAgentCards.value = _subAgentCards.value + (
-                subSessionId to SubAgentCardState(
-                    subSessionId = subSessionId,
-                    agentName = session?.subagentType?.takeIf { it.isNotBlank() && it != "subagent" },
-                    title = session?.title.orEmpty(),
-                    status = SubAgentCardStatus.RUNNING,
-                    startedAt = System.currentTimeMillis()
-                )
-                )
+            val card = SubAgentCardState(
+                subSessionId = subSessionId,
+                agentName = session?.subagentType?.takeIf { it.isNotBlank() && it != "subagent" },
+                title = session?.title.orEmpty(),
+                status = SubAgentCardStatus.RUNNING,
+                startedAt = System.currentTimeMillis()
+            )
+            _subAgentCards.update { it + (subSessionId to card) }
         }
     }
 
@@ -1247,24 +1238,27 @@ class AgentRunManager @Inject constructor(
         status: SubAgentCardStatus,
         digest: SubAgentDigest? = null
     ) {
-        val previous = _subAgentCards.value[subSessionId]
-        val startedAt = previous?.startedAt ?: System.currentTimeMillis()
-        _subAgentCards.value = _subAgentCards.value + (
-            subSessionId to SubAgentCardState(
-                subSessionId = subSessionId,
-                agentName = previous?.agentName,
-                title = previous?.title.orEmpty(),
-                status = status,
-                excerpt = digest?.excerpt ?: previous?.excerpt,
-                changedFiles = digest?.changedFiles?.takeIf { it.isNotEmpty() } ?: previous?.changedFiles.orEmpty(),
-                elapsedMs = System.currentTimeMillis() - startedAt,
-                startedAt = startedAt
-            )
-            )
-        if (_subAgentCards.value.size > MAX_SUBAGENT_CARDS) {
-            val keep = _subAgentCards.value.entries.sortedByDescending { it.value.startedAt }
-                .take(MAX_SUBAGENT_CARDS).associate { it.key to it.value }
-            _subAgentCards.value = keep
+        _subAgentCards.update { cards ->
+            val previous = cards[subSessionId]
+            val startedAt = previous?.startedAt ?: System.currentTimeMillis()
+            val updated = cards + (
+                subSessionId to SubAgentCardState(
+                    subSessionId = subSessionId,
+                    agentName = previous?.agentName,
+                    title = previous?.title.orEmpty(),
+                    status = status,
+                    excerpt = digest?.excerpt ?: previous?.excerpt,
+                    changedFiles = digest?.changedFiles?.takeIf { it.isNotEmpty() } ?: previous?.changedFiles.orEmpty(),
+                    elapsedMs = System.currentTimeMillis() - startedAt,
+                    startedAt = startedAt
+                )
+                )
+            if (updated.size > MAX_SUBAGENT_CARDS) {
+                updated.entries.sortedByDescending { it.value.startedAt }
+                    .take(MAX_SUBAGENT_CARDS).associate { it.key to it.value }
+            } else {
+                updated
+            }
         }
     }
 
@@ -1292,7 +1286,7 @@ class AgentRunManager @Inject constructor(
 
     private fun enqueueSubAgentNotification(event: SubAgentEvent) {
         scope.launch {
-            val title = sessionUseCase.getSessionById(event.subSessionId)?.title ?: "子代理"
+            val title = sessionUseCase.getSessionById(event.subSessionId)?.title ?: context.getString(R.string.subagent_card_default_agent)
             val digest = if (event.type == SubAgentEventType.COMPLETED) {
                 withContext(Dispatchers.IO) {
                     runCatching {
@@ -1341,7 +1335,7 @@ class AgentRunManager @Inject constructor(
     }
 
     private suspend fun deliverMessageToParent(event: SubAgentEvent) {
-        val senderTitle = sessionUseCase.getSessionById(event.subSessionId)?.title ?: "子代理"
+        val senderTitle = sessionUseCase.getSessionById(event.subSessionId)?.title ?: context.getString(R.string.subagent_card_default_agent)
         deliverAgentMessage(
             recipientSessionId = event.parentSessionId,
             senderSessionId = event.subSessionId,
@@ -1742,20 +1736,20 @@ class AgentRunManager @Inject constructor(
                         setRetryState(sessionId, null)
                         setKeySwitchState(sessionId, null)
                         setCompacting(sessionId, true)
-                        _compactionFailedSessions.value = _compactionFailedSessions.value - sessionId
+                        _compactionFailedSessions.update { it - sessionId }
                     }
                     AgentEvent.CompactionFinished -> {
                         setCompacting(sessionId, false)
                         val failed = sessionId in _compactionFailedSessions.value
-                        if (!failed) _contextUsages.value = _contextUsages.value - sessionId
-                        _compactionFailedSessions.value = _compactionFailedSessions.value - sessionId
+                        if (!failed) _contextUsages.update { it - sessionId }
+                        _compactionFailedSessions.update { it - sessionId }
                     }
                     is AgentEvent.ContextUsage -> {
-                        _contextUsages.value = _contextUsages.value + (sessionId to event)
+                        _contextUsages.update { it + (sessionId to event) }
                     }
                     is AgentEvent.CompactionFailed -> {
                         setCompacting(sessionId, false)
-                        _compactionFailedSessions.value = _compactionFailedSessions.value + sessionId
+                        _compactionFailedSessions.update { it + sessionId }
                         messagePersistenceUseCase.persist(
                             sessionId,
                             MessageRole.TOOL,
@@ -1932,7 +1926,7 @@ class AgentRunManager @Inject constructor(
             val finishedState = _agentStates.value[sessionId]
             if (!failed && (finishedState is AgentUIState.Loading || finishedState is AgentUIState.Streaming)) {
                 setAgentState(sessionId, AgentUIState.Result(WorkflowStatus.SUCCESS))
-                _completedSessions.value = _completedSessions.value + sessionId
+                _completedSessions.update { it + sessionId }
             }
 
         } catch (e: CancellationException) {
@@ -1941,7 +1935,7 @@ class AgentRunManager @Inject constructor(
             FileLogger.d(TAG, "stream cancelled: sid=$sessionId isOwnJob=$isOwnJob state=$cancelledState")
             if (isOwnJob && (cancelledState is AgentUIState.Loading || cancelledState is AgentUIState.Streaming)) {
                 setAgentState(sessionId, AgentUIState.Idle)
-                _completedSessions.value = _completedSessions.value - sessionId
+                _completedSessions.update { it - sessionId }
             }
             if (goalActiveAtTurn) {
                 scope.launch {
@@ -1955,7 +1949,7 @@ class AgentRunManager @Inject constructor(
             runStatus = "error"
             runError = e.toUserMessage(context)
             setAgentState(sessionId, AgentUIState.Error(e.toUserMessage(context)))
-            _completedSessions.value = _completedSessions.value - sessionId
+            _completedSessions.update { it - sessionId }
             if (isSubSession) {
                 sessionUseCase.getSessionById(sessionId)?.parentId?.let { parentId ->
                     subAgentEventBus.emit(
@@ -1977,7 +1971,7 @@ class AgentRunManager @Inject constructor(
                 sessionJobs.remove(sessionId)
                 streamingAssistantStore.finishRun(sessionId, runToken, System.currentTimeMillis())
             }
-            _runningTools.value = _runningTools.value - sessionId
+            _runningTools.update { it - sessionId }
             setPreparingTool(sessionId, null)
             setCompacting(sessionId, false)
             setRetryState(sessionId, null)
@@ -2166,20 +2160,20 @@ class AgentRunManager @Inject constructor(
                                 setRetryState(externalSessionId, null)
                                 setKeySwitchState(externalSessionId, null)
                                 setCompacting(externalSessionId, true)
-                                _compactionFailedSessions.value = _compactionFailedSessions.value - externalSessionId
+                                _compactionFailedSessions.update { it - externalSessionId }
                             }
                             AgentEvent.CompactionFinished -> {
                                 setCompacting(externalSessionId, false)
                                 val compactionFailed = externalSessionId in _compactionFailedSessions.value
-                                if (!compactionFailed) _contextUsages.value = _contextUsages.value - externalSessionId
-                                _compactionFailedSessions.value = _compactionFailedSessions.value - externalSessionId
+                                if (!compactionFailed) _contextUsages.update { it - externalSessionId }
+                                _compactionFailedSessions.update { it - externalSessionId }
                             }
                             is AgentEvent.ContextUsage -> {
-                                _contextUsages.value = _contextUsages.value + (externalSessionId to event)
+                                _contextUsages.update { it + (externalSessionId to event) }
                             }
                             is AgentEvent.CompactionFailed -> {
                                 setCompacting(externalSessionId, false)
-                                _compactionFailedSessions.value = _compactionFailedSessions.value + externalSessionId
+                                _compactionFailedSessions.update { it + externalSessionId }
                             }
                             is AgentEvent.AssistantText -> {
                                 startAssistantMessage(event.messageId)
@@ -2283,7 +2277,7 @@ class AgentRunManager @Inject constructor(
                     val finishedState = _agentStates.value[externalSessionId]
                     if (!failed && (finishedState is AgentUIState.Loading || finishedState is AgentUIState.Streaming)) {
                         setAgentState(externalSessionId, AgentUIState.Result(WorkflowStatus.SUCCESS))
-                        _completedSessions.value = _completedSessions.value + externalSessionId
+                        _completedSessions.update { it + externalSessionId }
                     }
                 } catch (e: CancellationException) {
                     turnSucceeded = false
@@ -2291,7 +2285,7 @@ class AgentRunManager @Inject constructor(
                     val isOwnJob = sessionJobs[externalSessionId] == coroutineContext[Job]
                     if (isOwnJob && (cancelledState is AgentUIState.Loading || cancelledState is AgentUIState.Streaming)) {
                         setAgentState(externalSessionId, AgentUIState.Idle)
-                        _completedSessions.value = _completedSessions.value - externalSessionId
+                        _completedSessions.update { it - externalSessionId }
                     }
                     runStatus = "cancelled"
                     throw e
@@ -2301,7 +2295,7 @@ class AgentRunManager @Inject constructor(
                     runStatus = "error"
                     runError = e.toUserMessage(context)
                     setAgentState(externalSessionId, AgentUIState.Error(runError))
-                    _completedSessions.value = _completedSessions.value - externalSessionId
+                    _completedSessions.update { it - externalSessionId }
                 } finally {
                     val isOwnJob = synchronized(sessionJobs) {
                         val own = sessionJobs[externalSessionId] == coroutineContext[Job]
@@ -2314,7 +2308,7 @@ class AgentRunManager @Inject constructor(
                     if (isOwnJob) {
                         streamingAssistantStore.finishRun(externalSessionId, runToken, System.currentTimeMillis())
                     }
-                    _runningTools.value = _runningTools.value - externalSessionId
+                    _runningTools.update { it - externalSessionId }
                     setPreparingTool(externalSessionId, null)
                     setCompacting(externalSessionId, false)
                     setRetryState(externalSessionId, null)

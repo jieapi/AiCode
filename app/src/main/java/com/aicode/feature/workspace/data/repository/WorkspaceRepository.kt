@@ -828,6 +828,12 @@ class WorkspaceRepository internal constructor(
     @Deprecated("Pass WorkspaceRef to keep backend instance identity")
     suspend fun deleteWorkspace(id: String) = deleteWorkspace(WorkspaceRef(activeBackend().instanceId, id))
 
+    /** 新建会话尚未写入工作区身份，其 ref 列为空、只能按路径匹配，故两种方式都要清。 */
+    private suspend fun deleteWorkspaceSessions(target: Workspace) {
+        sessionUseCase.deleteSessionsByWorkspace(target.ref)
+        sessionUseCase.deleteSessionsByWorkspace(target.path)
+    }
+
     suspend fun deleteWorkspace(ref: WorkspaceRef) = withContext(Dispatchers.IO) {
         val operation = operation()
         val backend = operation.backend
@@ -846,7 +852,7 @@ class WorkspaceRepository internal constructor(
                 )
                 if (generalSettingsRepository.deleteExternalWorkspaceSessions()) {
                     checkCurrent(operation)
-                    sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                    deleteWorkspaceSessions(target)
                 }
                 forgetBuiltinWorkspaceId(operation, target)
                 FileLogger.i(TAG, "移除外部工作区关联: ${target.name}")
@@ -860,7 +866,7 @@ class WorkspaceRepository internal constructor(
                     } != true
                 ) return@withContext
                 checkCurrent(operation)
-                sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                deleteWorkspaceSessions(target)
                 forgetBuiltinWorkspaceId(operation, target)
             }
             isBuiltinRemoteSsh(backend) -> {
@@ -872,7 +878,7 @@ class WorkspaceRepository internal constructor(
                 checkCurrent(operation)
                 if (execRemoteExit("rm -rf -- ${shellQuote(target.path)}") != 0) return@withContext
                 checkCurrent(operation)
-                sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                deleteWorkspaceSessions(target)
                 forgetBuiltinWorkspaceId(operation, target)
             }
             else -> {
@@ -886,7 +892,7 @@ class WorkspaceRepository internal constructor(
                     ) {
                         pluginWorkspaceRegistry.remove(backend.id, listOf(targetId))
                     }
-                    sessionUseCase.deleteSessionsByWorkspace(target.ref)
+                    deleteWorkspaceSessions(target)
                 } else return@withContext
             }
         }
