@@ -14,6 +14,12 @@ import kotlinx.serialization.Serializable
  * 工作区已配置的 SSH 通道（[RootfsSource.RemoteSsh]），命令执行走 [RemoteSshEngine]。
  */
 @Serializable
+enum class ContainerRuntime {
+    PROOT,
+    TAWCROOT
+}
+
+@Serializable
 data class ContainerProfile(
     val id: String,
     val name: String,
@@ -29,6 +35,8 @@ data class ContainerProfile(
     val isBuiltin: Boolean,
     /** 该 profile 的执行模式：本地 PRoot 容器 or 远程 SSH。选中时据此切全局 [ExecutionMode]。 */
     val mode: ExecutionMode = ExecutionMode.LOCAL_PROOT,
+    /** 本地容器运行时（默认 PRoot；tawcroot 为 Android 10+ 实验性运行时）。 */
+    val runtime: ContainerRuntime = ContainerRuntime.PROOT,
     /** 添加时间（毫秒时间戳），容器列表按此降序排列；旧数据/内置默认 0 排最后。 */
     val createdAt: Long = 0
 ) {

@@ -99,7 +99,17 @@ accordance with the respective license terms.
    - XZ for Java (org.tukaani:xz) — 0BSD
 
 ========================================================================
-8. JetBrains Mono NL (bundled terminal font)
+8. tawcroot (experimental container runtime)
+------------------------------------------------------------------------
+   Project:  https://github.com/wmww/tawc
+   Copyright (c) 2026 Sophie Winter
+   License:  MIT License
+
+   Optional experimental container runtime (libtawcroot.so). Licensed
+   under the MIT License, compatible with this product's GPL-3.0 license.
+
+========================================================================
+9. JetBrains Mono NL (bundled terminal font)
 ------------------------------------------------------------------------
    Project:  https://github.com/JetBrains/JetBrainsMono
    Copyright 2020 The JetBrains Mono Project Authors
@@ -111,7 +121,7 @@ accordance with the respective license terms.
    APK at assets/licenses/JetBrainsMono-OFL-1.1.txt.
 
 ========================================================================
-9. Test-only components
+10. Test-only components
 ------------------------------------------------------------------------
    These are used solely for testing and are not distributed in the
    released APK:

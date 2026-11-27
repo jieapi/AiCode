@@ -150,7 +150,7 @@ android {
     // 这样单架构包天然只含一套镜像（AGP 资源并集合并：未被引用的目录不参与），
     // universal 含两套；镜像二进制在仓库里也只各一份，无重复。
     // 放弃 ignoreAssetsPattern=dir:x86：实测对 container/x86 整树无效（rc1 已证实）。
-    // proot 全套（proot 本体 + 两个 loader + libtalloc/libandroid-shmem）走 jniLibs 而非 assets：
+    // proot 全套（proot 本体 + 两个 loader）走 jniLibs 而非 assets：
     // 安装器只把 APK 内 lib/<abi>/lib*.so 解压到 nativeLibraryDir，而那是 App 目录里唯一
     // 允许 execve 的位置（SELinux 标签 apk_data_file）。rootfs 仍在 assets→filesDir——
     // 客户机二进制不由内核 execve，而是 proot 的 loader 用 mmap(PROT_EXEC) 映射进内存，
@@ -230,8 +230,7 @@ android {
                 "**/libproot.so",
                 "**/libproot-loader.so",
                 "**/libproot-loader32.so",
-                "**/libtalloc.so",
-                "**/libandroid-shmem.so"
+                "**/libtawcroot.so"
             )
         }
         resources {

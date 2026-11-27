@@ -1058,6 +1058,8 @@
     <string name="container_switch_confirm">切换到「%1$s」后，当前正在运行的 AI 会话将被停止、终端标签将被关闭。是否继续切换？</string>
     <string name="container_plugin_backends">插件执行后端</string>
     <string name="container_plugin_backend_local">本地环境</string>
+    <string name="container_experimental_tawcroot">使用 tawcroot 运行时（实验性）</string>
+    <string name="container_experimental_tawcroot_desc">基于 seccomp systrap 的高性能替代运行时，仅支持 Android 10+ 64 位；异常时请关闭以切回 PRoot（不会保留 proot 专属参数）</string>
     <string name="container_plugin_backend_remote">远程环境</string>
     <string name="container_plugin_backend_subtitle">%1$s · 插件 %2$s</string>
     <string name="container_reset_title">重置容器</string>

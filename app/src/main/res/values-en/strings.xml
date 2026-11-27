@@ -1058,6 +1058,8 @@
     <string name="container_switch_confirm">After switching to "%1$s", the currently running AI sessions will be stopped and terminal tabs will be closed. Continue?</string>
     <string name="container_plugin_backends">Plugin Execution Backends</string>
     <string name="container_plugin_backend_local">Local</string>
+    <string name="container_experimental_tawcroot">Use tawcroot runtime (Experimental)</string>
+    <string name="container_experimental_tawcroot_desc">Faster seccomp systrap runtime for Android 10+ 64-bit; turn off to fall back to PRoot (proot-specific args are ignored)</string>
     <string name="container_plugin_backend_remote">Remote</string>
     <string name="container_plugin_backend_subtitle">%1$s · Plugin %2$s</string>
     <string name="container_reset_title">Reset Container</string>

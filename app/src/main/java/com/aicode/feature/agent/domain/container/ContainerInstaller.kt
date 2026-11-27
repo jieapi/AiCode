@@ -303,7 +303,7 @@ class ContainerInstaller @Inject constructor(
     private val nativeLibDir: File
         get() = File(context.applicationInfo.nativeLibraryDir)
 
-    /** PRoot 可执行文件（Termux 构建，含 statx，动态链接 libtalloc/libandroid-shmem） */
+    /** PRoot 可执行文件（仅依赖系统库 libc/libdl/liblog/libandroid） */
     val prootBin: File
         get() = File(nativeLibDir, "libproot.so")
 
@@ -313,9 +313,9 @@ class ContainerInstaller @Inject constructor(
     val prootLoader32: File
         get() = File(nativeLibDir, "libproot-loader32.so")
 
-    /** proot 的动态依赖库目录（libtalloc.so / libandroid-shmem.so），由 LD_LIBRARY_PATH 指向。 */
-    val prootLibDir: File
-        get() = nativeLibDir
+    /** tawcroot 可执行文件（实验性 systrap 运行时，静态非 PIE，无外部动态库依赖）。 */
+    val tawcrootBin: File
+        get() = File(nativeLibDir, "libtawcroot.so")
 
     /**
      * 内置容器的 PRoot 临时目录（Android 没有 /tmp）。**私有**：容器启动一律走 [prootTmpDirFor]，
