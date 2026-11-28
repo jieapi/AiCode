@@ -39,10 +39,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -224,8 +226,12 @@ class WorkspaceRepositoryTest {
         )
         pluginWorkspaceRegistry.set(adapter.id, listOf(pushed))
 
-        withTimeout(2_000) {
-            repo.current.first { it == pushed }
+        // 回调链里有 DataStore 读（restoreTargetWorkspace），不在虚拟时钟上；
+        // 用真实调度器等待，否则 withTimeout 会在 IO 完成前即刻到期。
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) {
+                repo.current.first { it == pushed }
+            }
         }
         assertEquals(listOf(pushed), repo.workspaces.value)
         assertEquals(pushed, repo.current.value)
