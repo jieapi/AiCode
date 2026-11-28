@@ -486,7 +486,7 @@ class TerminalSessionManager @Inject constructor(
         )
         session = TerminalSession(
             invocation.executable,
-            appContext.filesDir.absolutePath,
+            invocation.cwd ?: appContext.filesDir.absolutePath,
             invocation.argv.toTypedArray(),
             invocation.ptyEnvArray,
             TRANSCRIPT_ROWS,

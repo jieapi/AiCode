@@ -53,7 +53,13 @@ import javax.inject.Singleton
  */
 data class ProotInvocation(
     val argv: List<String>,
-    val env: Map<String, String>
+    val env: Map<String, String>,
+    /**
+     * 宿主侧启动进程的工作目录；null 表示沿用调用方默认值。
+     * tawcroot 启动时不会 chdir，客户机的内核 cwd 取自宿主进程，落在 rootfs/绑定目录之外时
+     * getcwd 返回 ENOENT（dash/bash/git 报 "getcwd() failed"），故需指向 rootfs 根。
+     */
+    val cwd: String? = null
 ) {
     val executable: String get() = argv.first()
 
@@ -723,7 +729,11 @@ class LinuxContainerEngine @Inject constructor(
             argv.add(execScript)
             argv.add(program)
             argv.addAll(programArgs)
-            return ProotInvocation(argv, buildSharedContainerEnv(profile) + profile.env + extraEnv)
+            return ProotInvocation(
+                argv,
+                buildSharedContainerEnv(profile) + profile.env + extraEnv,
+                cwd = containerInstaller.rootfsDirFor(profile).absolutePath
+            )
         }
         val argv = buildBaseProotArgv(projectPath, profile, workingDir)
         argv.add("/bin/sh")
@@ -747,7 +757,11 @@ class LinuxContainerEngine @Inject constructor(
             argv.add(defaultShell())
             argv.add("-c")
             argv.add(fullCmd)
-            return ProotInvocation(argv, buildSharedContainerEnv(profile) + profile.env)
+            return ProotInvocation(
+                argv,
+                buildSharedContainerEnv(profile) + profile.env,
+                cwd = containerInstaller.rootfsDirFor(profile).absolutePath
+            )
         }
         val argv = buildBaseProotArgv(projectPath, profile)
         // 用 [defaultShell]：bash 装好后 AI 命令与终端会话都走 bash；装机期间/失败回退 /bin/sh。
@@ -945,6 +959,7 @@ class LinuxContainerEngine @Inject constructor(
     private fun buildProcessBuilder(invocation: ProotInvocation): ProcessBuilder {
         val processBuilder = ProcessBuilder(invocation.argv)
         processBuilder.environment().putAll(invocation.env)
+        invocation.cwd?.let { processBuilder.directory(java.io.File(it)) }
         return processBuilder
     }
 
