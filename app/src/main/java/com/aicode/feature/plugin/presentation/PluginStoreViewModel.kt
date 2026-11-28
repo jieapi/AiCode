@@ -323,6 +323,7 @@ class PluginStoreViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: NoMatchingReleaseException) {
+                FileLogger.w(TAG, "解析插件版本失败: ${item.plugin.id}", e)
                 _state.update {
                     it.copy(
                         installingPluginId = null,
