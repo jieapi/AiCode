@@ -1,6 +1,5 @@
 package com.aicode.feature.plugin.runtime
 
-import com.aicode.feature.agent.domain.container.BoundedOutput
 import com.aicode.feature.agent.domain.shizuku.ShizukuManager
 import com.aicode.feature.agent.domain.shizuku.ShizukuState
 import com.aicode.feature.plugin.data.PluginShizukuPermissionRepository
@@ -19,6 +18,8 @@ data class PluginShizukuResult(val output: String, val exitCode: Int, val trunca
  *
  * 授权模型：插件必须在清单声明用途，使用者单独授权后即可执行任意命令；
  * 每次调用仍检查插件启用、使用者授权与 Shizuku 已就绪。
+ *
+ * 输出原样返回，不做限幅；需要截断的调用方（如 AI 工具）自行处理。
  */
 @Singleton
 class PluginShizukuRunner @Inject constructor(
@@ -48,8 +49,7 @@ class PluginShizukuRunner @Inject constructor(
         val timeoutMs = timeoutSeconds.coerceIn(1L, MAX_TIMEOUT_SECONDS) * 1000L
         return try {
             val result = shizukuManager.runCommand(trimmed, timeoutMs)
-            val bounded = BoundedOutput().apply { append(result.output) }
-            PluginShizukuResult(bounded.build(), result.exitCode, bounded.truncated)
+            PluginShizukuResult(result.output, result.exitCode, truncated = false)
         } catch (e: PluginShizukuException) {
             throw e
         } catch (e: CancellationException) {

@@ -1,7 +1,10 @@
 package com.aicode.feature.agent.domain.shizuku
 
 import android.os.Bundle
-import com.aicode.feature.agent.domain.container.BoundedOutput
+import android.os.ParcelFileDescriptor
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,30 +25,34 @@ class ShizukuShellService : IShizukuShellService.Stub() {
     override fun exec(command: String, timeoutMs: Int): Bundle {
         val result = Bundle()
         var process: Process? = null
+        var outputFile: File? = null
         try {
-            process = ProcessBuilder("sh", "-c", command)
+            val target = createOutputFile()
+            outputFile = target
+            val running = ProcessBuilder("sh", "-c", command)
                 .redirectErrorStream(true)
                 .start()
+            process = running
             // 输出读取与等待结束必须并行：管道写满会阻塞子进程，先 waitFor 再读会死锁。
-            // 同时限幅：Binder 事务缓冲上限 1MB，超大输出直接回传会抛 TransactionTooLargeException。
-            val output = BoundedOutput()
+            // 输出落盘后只回传 FD：Binder 事务缓冲上限 1MB，直接放进 Bundle 只能截断输出。
             val reader = Thread {
                 runCatching {
-                    process.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            output.append(line)
-                            output.append("\n")
-                        }
+                    running.inputStream.use { input ->
+                        FileOutputStream(target).use { out -> input.copyTo(out) }
                     }
                 }
             }
             reader.start()
-            val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            if (!finished) process.destroyForcibly()
+            val finished = running.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            if (!finished) running.destroyForcibly()
             reader.join(READER_JOIN_TIMEOUT_MS)
-            result.putString(KEY_OUTPUT, output.build())
-            result.putInt(KEY_EXIT_CODE, if (finished) process.exitValue() else EXIT_TIMEOUT)
+            val descriptor = ParcelFileDescriptor.open(target, ParcelFileDescriptor.MODE_READ_ONLY)
+            // 打开后立即 unlink：FD 仍可读，App 崩溃或提前退出也不会留下临时文件。
+            target.delete()
+            result.putParcelable(KEY_OUTPUT_FD, descriptor)
+            result.putInt(KEY_EXIT_CODE, if (finished) running.exitValue() else EXIT_TIMEOUT)
         } catch (e: Exception) {
+            outputFile?.delete()
             result.putString(KEY_OUTPUT, e.message ?: "执行失败")
             result.putInt(KEY_EXIT_CODE, EXIT_FAILURE)
         } finally {
@@ -54,8 +61,15 @@ class ShizukuShellService : IShizukuShellService.Stub() {
         return result
     }
 
+    private fun createOutputFile(): File {
+        val dir = TEMP_DIRS.map(::File).firstOrNull { it.isDirectory && it.canWrite() }
+            ?: throw IOException("没有可写的临时目录")
+        return File.createTempFile("aicode-shizuku-", ".out", dir)
+    }
+
     companion object {
         const val KEY_OUTPUT = "output"
+        const val KEY_OUTPUT_FD = "outputFd"
         const val KEY_EXIT_CODE = "exitCode"
 
         /** 命令超时（进程被强杀）时的退出码。 */
@@ -65,5 +79,10 @@ class ShizukuShellService : IShizukuShellService.Stub() {
         const val EXIT_FAILURE = -1
 
         private const val READER_JOIN_TIMEOUT_MS = 2_000L
+
+        private val TEMP_DIRS = listOf(
+            System.getProperty("java.io.tmpdir").orEmpty(),
+            "/data/local/tmp"
+        ).filter { it.isNotEmpty() }
     }
 }

@@ -1,5 +1,6 @@
 // Shizuku UserService 接口：运行在 shell（uid 2000）进程，代 App 执行 shell 命令。
-// 返回 Bundle：output(String) 命令输出、exitCode(int) 退出码（超时/异常为负值）。
+// 返回 Bundle：outputFd(ParcelFileDescriptor) 完整输出、exitCode(int) 退出码（超时/异常为负值）；
+// 异常时退化为 output(String) 错误信息。输出走 FD 以绕开 Binder 事务的 1MB 上限。
 package com.aicode.feature.agent.domain.shizuku;
 
 import android.os.Bundle;

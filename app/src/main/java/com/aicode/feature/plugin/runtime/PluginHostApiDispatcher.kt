@@ -253,7 +253,8 @@ class PluginHostApiDispatcher @Inject constructor(
         val timeoutSeconds = (params["timeout"] as? JsonPrimitive)?.longOrNull
             ?: PluginHostPaths.DEFAULT_BASH_TIMEOUT_SECONDS
         val timeoutMs = timeoutSeconds.coerceIn(1L, PluginHostPaths.MAX_BASH_TIMEOUT_SECONDS) * 1000L
-        val result = commandEngine.runCommandSyncWithExit(command, workspaceRoot(), timeoutMs)
+        // 插件路径不走 AI 工具链的限幅：输出原样返回，只在硬上限处截断。
+        val result = commandEngine.runCommandSyncUnbounded(command, workspaceRoot(), timeoutMs)
         return buildJsonObject {
             put("output", result.output)
             put("exitCode", result.exitCode)

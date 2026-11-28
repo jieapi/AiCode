@@ -8,7 +8,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import com.aicode.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
@@ -229,10 +231,22 @@ class ShizukuManager @Inject constructor(
         return withContext(Dispatchers.IO) {
             val bundle = service.exec(command, timeout)
             ShizukuCommandResult(
-                output = bundle.getString(ShizukuShellService.KEY_OUTPUT).orEmpty(),
+                output = readOutput(bundle),
                 exitCode = bundle.getInt(ShizukuShellService.KEY_EXIT_CODE, ShizukuShellService.EXIT_FAILURE)
             )
         }
+    }
+
+    /** 命令输出经 FD 回传，不截断；异常路径只有短字符串。 */
+    private fun readOutput(bundle: Bundle): String {
+        @Suppress("DEPRECATION")
+        val descriptor = bundle.getParcelable<ParcelFileDescriptor>(ShizukuShellService.KEY_OUTPUT_FD)
+        if (descriptor != null) {
+            return ParcelFileDescriptor.AutoCloseInputStream(descriptor)
+                .bufferedReader()
+                .use { it.readText() }
+        }
+        return bundle.getString(ShizukuShellService.KEY_OUTPUT).orEmpty()
     }
 
     /** 幂等绑定 UserService，返回可用的 AIDL 代理。 */

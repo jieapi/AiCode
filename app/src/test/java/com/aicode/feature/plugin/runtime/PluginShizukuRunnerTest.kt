@@ -17,6 +17,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,6 +60,17 @@ class PluginShizukuRunnerTest {
         assertEquals("ok", result.output)
         coVerify { permissions.isGranted(pluginId) }
         coVerify { shizuku.runCommand("pm list packages", 30_000L) }
+    }
+
+    @Test
+    fun exec_returnsFullOutputWithoutTruncation() = runTest {
+        val longOutput = "line\n".repeat(40_000)
+        val (runner, _, _) = runner(result = ShizukuCommandResult(longOutput, 0))
+
+        val result = runner.exec(pluginId, "logcat -d", 30)
+
+        assertEquals(longOutput, result.output)
+        assertFalse(result.truncated)
     }
 
     @Test
