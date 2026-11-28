@@ -50,6 +50,7 @@ class PluginIndexParserTest {
         )
         val plugin = result.plugins[0]
         assertEquals("示例插件", plugin.name.resolve("zh-CN"))
+        assertEquals("示例插件", plugin.name.resolve("zh"))
         assertEquals("Sample Plugin", plugin.name.resolve("en"))
         assertEquals("示例", plugin.description.resolve("zh-CN"))
     }

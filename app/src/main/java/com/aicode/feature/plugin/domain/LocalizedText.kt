@@ -4,7 +4,8 @@ package com.aicode.feature.plugin.domain
  * 面向使用者展示的插件文本：清单里写成单一字符串（对所有语言生效），
  * 或语言标签到文本的映射（可含 `default` 键）。
  *
- * 取值顺序：完整标签（`zh-CN`）→ 语言部分（`zh`）→ `default` → `en` → 第一项。
+ * 取值顺序：完整标签（`zh-CN`）→ 语言部分（`zh`）→ 同语言的其他地区（`zh` 命中 `zh-CN`）
+ * → `default` → `en` → 第一项。
  */
 data class LocalizedText(val values: Map<String, String>) {
 
@@ -17,6 +18,7 @@ data class LocalizedText(val values: Map<String, String>) {
         val language = tag.substringBefore('-')
         return values[tag]
             ?: values[language]
+            ?: values.entries.firstOrNull { normalize(it.key).substringBefore('-') == language }?.value
             ?: values[DEFAULT_KEY]
             ?: values["en"]
             ?: values.values.first()

@@ -85,4 +85,13 @@ class SemVerTest {
         assertEquals("only", LocalizedText(mapOf("ja" to "only")).resolve("fr"))
         assertNotNull(LocalizedText.single("x").resolve("zh"))
     }
+
+    @Test
+    fun localizedText_resolvePrimaryLanguageMatchesRegionKey() {
+        // 商店索引里的中文只有 zh-CN 键，手动选中文时传入的 tag 是不带地区的 zh。
+        val text = LocalizedText(mapOf("default" to "English", "zh-CN" to "中文"))
+        assertEquals("中文", text.resolve("zh"))
+        assertEquals("中文", text.resolve("zh-CN"))
+        assertEquals("English", text.resolve("en"))
+    }
 }
