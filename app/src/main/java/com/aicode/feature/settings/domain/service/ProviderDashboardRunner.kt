@@ -147,9 +147,10 @@ class ProviderDashboardRunner @Inject constructor(
         val effectiveModel = context?.model?.ifBlank { null }
             ?: provider.selectedModel.ifBlank { provider.defaultModel }
         // 多 Key 模式下查当前活动的 Key，否则面板会报一个已被切走的 Key 的余额。
-        val effectiveApiKey = keyRotator.currentKey(provider) ?: provider.apiKey
-        // 面板请求跟随该 Key 自己的地址覆盖（不同 Key 走不同中转时，余额要查对应端点）。
-        val effectiveBaseUrl = provider.effectiveBaseUrl(effectiveApiKey)
+        val currentEntry = keyRotator.currentKey(provider)
+        val effectiveApiKey = currentEntry?.value ?: provider.apiKey
+        // 面板请求跟随当前 Key 条目自己的地址覆盖（同一 Key 配不同中转时余额也要查对应端点）。
+        val effectiveBaseUrl = currentEntry?.let { provider.effectiveBaseUrl(it) } ?: provider.baseUrl
 
         val envs = mutableListOf(
             "AICODE_PROVIDER_ID=${escape(provider.id)}",
@@ -168,7 +169,7 @@ class ProviderDashboardRunner @Inject constructor(
             if (key.isBlank()) return@forEach
             val envKey = "AICODE_KEY_" + sanitizeEnvKey(key)
             if (envKey == PREFIX_SCRIPT_PARAM) return@forEach
-            val resolved = resolveScriptParamPlaceholders(rawValue, provider, effectiveApiKey, effectiveModel)
+            val resolved = resolveScriptParamPlaceholders(rawValue, provider, effectiveApiKey, effectiveBaseUrl, effectiveModel)
             envs.add("$envKey=${escape(resolved)}")
         }
 
@@ -209,6 +210,7 @@ class ProviderDashboardRunner @Inject constructor(
         raw: String,
         provider: AIProviderConfig,
         effectiveApiKey: String,
+        effectiveBaseUrl: String,
         effectiveModel: String
     ): String {
         var out = raw
@@ -217,7 +219,7 @@ class ProviderDashboardRunner @Inject constructor(
             "{{PROVIDER_ID}}" to provider.id,
             "{{PROVIDER_NAME}}" to provider.name,
             "{{PROVIDER_TYPE}}" to provider.type.name,
-            "{{BASE_URL}}" to provider.effectiveBaseUrl(effectiveApiKey),
+            "{{BASE_URL}}" to effectiveBaseUrl,
             "{{DEFAULT_MODEL}}" to provider.defaultModel,
             "{{SELECTED_MODEL}}" to provider.selectedModel,
             "{{MODEL}}" to effectiveModel

@@ -3,6 +3,7 @@ package com.aicode.feature.agent.domain.provider
 import com.aicode.core.util.AILogger
 import com.aicode.feature.agent.data.remote.openai.OpenAIApi
 import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
+import com.aicode.feature.settings.domain.model.ProviderKey
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.defaultProviderApiPath
 import java.io.IOException
@@ -51,6 +52,7 @@ class OpenAIAdapter @Inject constructor(
     constructor(api: OpenAIApi, client: OkHttpClient) : this(api, client, client)
 
     override var apiKey = ""
+    override var keyEntry: ProviderKey? = null
     override var keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? = null
     override var baseUrl = "https://api.openai.com/"
     override var useFullUrl = false
@@ -166,7 +168,7 @@ class OpenAIAdapter @Inject constructor(
         )
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         val response = try {
             retryStaircase(
                 maxRetries = maxNetworkRetries,
@@ -304,7 +306,7 @@ class OpenAIAdapter @Inject constructor(
         val request = buildResponsesRequest(systemPrompt, messages, tools, reasoningEffort, stream = false, fastMode = fastMode)
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", resolveApiUrl(), request)
 
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         val response = try {
             retryStaircase(
                 maxRetries = maxNetworkRetries,
@@ -415,7 +417,7 @@ class OpenAIAdapter @Inject constructor(
 
         // 流式请求整体可重试；重试前上层会收到 Retrying 事件并清空已展示文本。
         try {
-            val triedKeys = mutableSetOf(apiKey)
+            val triedKeys = mutableSetOf(currentKeyId())
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, canRetry ->
@@ -614,7 +616,7 @@ class OpenAIAdapter @Inject constructor(
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "OpenAI", seq)
         try {
-            val triedKeys = mutableSetOf(apiKey)
+            val triedKeys = mutableSetOf(currentKeyId())
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, canRetry ->
@@ -833,7 +835,7 @@ class OpenAIAdapter @Inject constructor(
         fastMode: Boolean
     ) {
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "WS", responsesWebSocketUrl(), messages)
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         var contentReceived = false
         val watchdog = launchStreamIdleWatchdog(streamIdleTimeoutMs) { responsesSocket?.cancel() }
         try {

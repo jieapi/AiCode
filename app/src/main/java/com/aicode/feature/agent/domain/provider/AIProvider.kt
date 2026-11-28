@@ -5,6 +5,7 @@ import com.aicode.feature.agent.domain.model.AgentMessage
 import com.aicode.feature.agent.domain.model.ReasoningCapability
 import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
+import com.aicode.feature.settings.domain.model.ProviderKey
 import kotlinx.coroutines.flow.Flow
 
 data class AIResponse(
@@ -87,14 +88,14 @@ data class AIResponse(
 }
 
 /**
- * 一次 Key 切换的结果：新 Key 与其在候选列表中的序号（1 起），供 adapter 改写凭据并通知 UI。
- * [newBaseUrl] 为该 Key 自带的地址覆盖（未配置时为 null，沿用当前地址）。
+ * 一次 Key 切换的结果：新 Key 条目与其在候选列表中的序号（1 起），供 adapter 改写凭据并通知 UI。
+ * [newBaseUrl] 为该条目实际生效的地址（覆盖为空时即提供商主地址）。
  */
 data class KeySwitchOutcome(
-    val newKey: String,
+    val newEntry: ProviderKey,
+    val newBaseUrl: String,
     val newIndex: Int,
-    val total: Int,
-    val newBaseUrl: String? = null
+    val total: Int
 )
 
 /**
@@ -178,10 +179,16 @@ interface AIProvider {
     var customHeaders: Map<String, String>
 
     /**
+     * 当前使用的 Key 条目（值 + 覆盖地址 + 权重），由装配方设置、切换后由 [switchKeyOnFailure] 更新。
+     * 轮换按条目身份而不是 Key 值识别：同一条 Key 配不同中转时，才能各自独立地粘住、失败切换与冷却。
+     */
+    var keyEntry: ProviderKey?
+
+    /**
      * 多 Key 自动切换钩子，由工作流在装配 provider 时注入；为 null 表示不启用（如生图等旁路）。
-     * 入参为本次失败异常、当前使用的 Key、本次请求已试过的 Key 集合。返回非 null 表示已切到
-     * [KeySwitchOutcome.newKey]，adapter 应改写 [apiKey] 并重发；返回 null 表示不是「Key 不可用」
-     * 类失败或候选已用尽（用尽时实现方抛 [AllKeysFailedException]）。
+     * 入参为本次失败异常、当前 Key 条目的身份（[ProviderKey.id]）、本次请求已试过的条目身份集合。
+     * 返回非 null 表示已切到 [KeySwitchOutcome.newEntry]，adapter 应改写 [apiKey] 并重发；返回 null
+     * 表示不是「Key 不可用」类失败或候选已用尽（用尽时实现方抛 [AllKeysFailedException]）。
      */
     var keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)?
 
@@ -314,17 +321,21 @@ fun fixedTemperature(modelId: String): Float? {
  */
 /**
  * 上报一次 Key 失败并切到下一个可用 Key。返回 null 表示 [keySwitcher] 未注入、判定为非 Key 故障、
- * 或没有可切换的候选；切换成功时改写 [AIProvider.apiKey]（新 Key 带地址覆盖时一并改写
- * [AIProvider.baseUrl]）并把新 Key 并入 [triedKeys]。
+ * 或没有可切换的候选；切换成功时改写 [AIProvider.apiKey]、[AIProvider.baseUrl] 与 [AIProvider.keyEntry]，
+ * 并把新条目身份并入 [triedKeys]。
  */
 suspend fun AIProvider.switchKeyOnFailure(error: Throwable, triedKeys: MutableSet<String>): KeySwitchOutcome? {
     val switcher = keySwitcher ?: return null
-    val outcome = switcher(error, apiKey, triedKeys) ?: return null
-    apiKey = outcome.newKey
-    outcome.newBaseUrl?.let { baseUrl = it }
-    triedKeys += outcome.newKey
+    val outcome = switcher(error, currentKeyId(), triedKeys) ?: return null
+    apiKey = outcome.newEntry.value
+    baseUrl = outcome.newBaseUrl
+    keyEntry = outcome.newEntry
+    triedKeys += outcome.newEntry.id
     return outcome
 }
+
+/** 当前 Key 条目的轮换身份；装配方未设置条目（如直接构造 adapter）时退回 Key 值本身。 */
+fun AIProvider.currentKeyId(): String = keyEntry?.id ?: apiKey
 
 fun joinUrl(baseUrl: String, path: String): String {
     val base = baseUrl.trim().trimEnd('/')

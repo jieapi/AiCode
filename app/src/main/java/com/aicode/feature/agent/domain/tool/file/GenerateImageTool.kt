@@ -24,6 +24,7 @@ import com.aicode.feature.agent.domain.tool.ToolPermissionPolicy
 import com.aicode.feature.agent.domain.tool.ToolResult
 import com.aicode.feature.settings.data.repository.ImageGenModelSettingsRepository
 import com.aicode.feature.settings.data.repository.ProviderKeyRotator
+import com.aicode.feature.settings.domain.model.ProviderKey
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.repository.AIProviderRepository
 import com.aicode.feature.workspace.domain.FileAccessProvider
@@ -177,17 +178,19 @@ class GenerateImageTool @Inject constructor(
 
         var seq = 0
         var lastProviderId = ""
-        var activeApiKey = ""
+        var activeEntry: ProviderKey? = null
         return@withContext try {
             val provider = resolveImageGenProvider()
             lastProviderId = provider.id
-            activeApiKey = keyRotator.activeKey(provider, context.sessionId) ?: provider.firstUsableApiKey
+            val key = keyRotator.activeKey(provider, context.sessionId) ?: provider.effectiveApiKeys.first()
+            activeEntry = key
+            val activeApiKey = key.value
             val model = provider.effectiveModel
             // Gemini 官方图像模型走 Interactions 协议（v1beta/interactions），OpenAI 的
             // /v1/images/generations 端点打不通；设了 Gemini 生图模型时切独立通道，
             // OpenAI 特有的参数（size/quality/background 等）在 Gemini 分支里忽略。
             if (provider.type == ProviderType.GEMINI) {
-                return@withContext generateViaGemini(provider, activeApiKey, prompt, n, outputPath, context.sessionId)
+                return@withContext generateViaGemini(provider, key, prompt, n, outputPath, context.sessionId)
             }
             val isGptImage = model.startsWith("gpt-image", ignoreCase = true)
             val isDalle2 = model.equals("dall-e-2", ignoreCase = true)
@@ -201,8 +204,8 @@ class GenerateImageTool @Inject constructor(
             }
             FileLogger.i(TAG, "generateImage provider=${provider.id} model=$model prompt=$prompt n=$n size=$size")
 
-            // 地址跟随本次取用的 Key：不同 Key 可配不同中转。
-            val baseUrl = provider.effectiveBaseUrl(activeApiKey)
+            // 地址跟随本次取用的 Key 条目：同一条 Key 配不同中转时也各走各的。
+            val baseUrl = provider.effectiveBaseUrl(key)
             val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1/images/generations")
             // 兼容性规则：
             // 1. 只有真正的官方 GPT Image 系列模型（如 gpt-image-1 / gpt-image-1.5）才支持 output_format，且其默认就返回 base64、不支持 response_format；
@@ -237,8 +240,9 @@ class GenerateImageTool @Inject constructor(
             throw e
         } catch (e: Exception) {
             val enriched = e.enrichWithHttpErrorBody()
-            if (activeApiKey.isNotEmpty() && enriched.isKeySwitchFailure()) {
-                keyRotator.reportFailure(lastProviderId, context.sessionId, activeApiKey)
+            val failedEntry = activeEntry
+            if (failedEntry != null && enriched.isKeySwitchFailure()) {
+                keyRotator.reportFailure(lastProviderId, context.sessionId, failedEntry.id)
             }
             FileLogger.e(TAG, "generateImage 失败", enriched)
             AILogger.logError(context.sessionId, lastProviderId, enriched, seq)
@@ -318,7 +322,7 @@ class GenerateImageTool @Inject constructor(
      */
     private suspend fun generateViaGemini(
         provider: com.aicode.feature.settings.domain.model.AIProviderConfig,
-        apiKey: String,
+        key: ProviderKey,
         prompt: String,
         n: Int,
         outputPath: String?,
@@ -327,23 +331,23 @@ class GenerateImageTool @Inject constructor(
         val model = provider.effectiveModel
         FileLogger.i(TAG, "generateImage(Gemini) provider=${provider.id} model=$model prompt=$prompt n=$n")
         return if (provider.useResponseApi) {
-            generateViaGeminiInteractions(provider, apiKey, model, prompt, n, outputPath, sessionId)
+            generateViaGeminiInteractions(provider, key, model, prompt, n, outputPath, sessionId)
         } else {
-            generateViaGeminiGenerateContent(provider, apiKey, model, prompt, n, outputPath, sessionId)
+            generateViaGeminiGenerateContent(provider, key, model, prompt, n, outputPath, sessionId)
         }
     }
 
     /** Interactions 通道：非流式 createInteraction，从响应 steps 提取图片。 */
     private suspend fun generateViaGeminiInteractions(
         provider: com.aicode.feature.settings.domain.model.AIProviderConfig,
-        apiKey: String,
+        key: ProviderKey,
         model: String,
         prompt: String,
         n: Int,
         outputPath: String?,
         sessionId: String?
     ): ToolResult {
-        val baseUrl = provider.effectiveBaseUrl(apiKey)
+        val baseUrl = provider.effectiveBaseUrl(key)
         val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1beta/interactions")
         val effectiveBasePath = outputPath ?: createDefaultBasePath()
         val overwrite = outputPath != null
@@ -361,8 +365,8 @@ class GenerateImageTool @Inject constructor(
                 val response = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
                     geminiApi.createInteraction(
                         url = url,
-                        apiKey = apiKey,
-                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
+                        apiKey = key.value,
+                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, key.value),
                         request = request
                     )
                 }
@@ -397,7 +401,7 @@ class GenerateImageTool @Inject constructor(
             throw e
         } catch (e: Exception) {
             val enriched = e.enrichWithHttpErrorBody()
-            if (enriched.isKeySwitchFailure()) keyRotator.reportFailure(provider.id, sessionId, apiKey)
+            if (enriched.isKeySwitchFailure()) keyRotator.reportFailure(provider.id, sessionId, key.id)
             FileLogger.e(TAG, "generateImage(Gemini) 失败", enriched)
             AILogger.logError(sessionId, provider.id, enriched, lastSeq)
             if (agentImages.isNotEmpty()) {
@@ -418,14 +422,14 @@ class GenerateImageTool @Inject constructor(
      */
     private suspend fun generateViaGeminiGenerateContent(
         provider: com.aicode.feature.settings.domain.model.AIProviderConfig,
-        apiKey: String,
+        key: ProviderKey,
         model: String,
         prompt: String,
         n: Int,
         outputPath: String?,
         sessionId: String?
     ): ToolResult {
-        val baseUrl = provider.effectiveBaseUrl(apiKey)
+        val baseUrl = provider.effectiveBaseUrl(key)
         val url = if (provider.useFullUrl) baseUrl else joinUrl(baseUrl, "v1beta/models/$model:generateContent")
         val effectiveBasePath = outputPath ?: createDefaultBasePath()
         val overwrite = outputPath != null
@@ -445,8 +449,8 @@ class GenerateImageTool @Inject constructor(
                 val response = requestConcurrencyLimiter.withPermit(provider.id, provider.maxConcurrentRequests) {
                     geminiApi.generateContent(
                         url = url,
-                        apiKey = apiKey,
-                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, apiKey),
+                        apiKey = key.value,
+                        extraHeaders = resolveCustomHeaders(provider.customHeaders, sessionId, key.value),
                         request = request
                     )
                 }
@@ -467,7 +471,7 @@ class GenerateImageTool @Inject constructor(
             throw e
         } catch (e: Exception) {
             val enriched = e.enrichWithHttpErrorBody()
-            if (enriched.isKeySwitchFailure()) keyRotator.reportFailure(provider.id, sessionId, apiKey)
+            if (enriched.isKeySwitchFailure()) keyRotator.reportFailure(provider.id, sessionId, key.id)
             FileLogger.e(TAG, "generateImage(Gemini) 失败", enriched)
             AILogger.logError(sessionId, provider.id, enriched, lastSeq)
             if (agentImages.isNotEmpty()) {

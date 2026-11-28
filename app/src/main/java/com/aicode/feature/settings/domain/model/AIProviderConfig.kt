@@ -94,6 +94,13 @@ data class AIProviderConfig(
         val override = if (multiKeyEnabled) apiKeys.firstOrNull { it.value == key }?.baseUrl else null
         return override?.takeIf { it.isNotBlank() } ?: baseUrl
     }
+
+    /**
+     * 指定 Key 条目实际使用的 Base URL：条目自带覆盖优先，否则回落到提供商主地址。
+     * 按条目取而不是按 Key 值取——同一条 Key 可以配多条中转，按值只会拿到第一条的地址。
+     */
+    fun effectiveBaseUrl(key: ProviderKey): String =
+        key.baseUrl.takeIf { it.isNotBlank() } ?: baseUrl
 }
 
 /**
@@ -107,7 +114,13 @@ data class ProviderKey(
     val value: String,
     val weight: Int = DEFAULT_KEY_WEIGHT,
     val baseUrl: String = ""
-)
+) {
+    /**
+     * 条目在轮换与去重里的身份：Key 值 + 覆盖地址。同一条 Key 配不同中转是两个独立通道，
+     * 只按值识别会把后一条吞掉，失败切换也只会一直落回第一条的地址。
+     */
+    val id: String get() = "$value\u0000$baseUrl"
+}
 
 /** 调度权重默认值与上限。 */
 const val DEFAULT_KEY_WEIGHT: Int = 1
@@ -139,7 +152,7 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
             )
         }
         .filter { it.value.isNotEmpty() }
-        .distinctBy { it.value },
+        .distinctBy { it.id },
     keySwitchStatusCodes = keySwitchStatusCodes.filter { it in 100..599 }.distinct(),
     maxConcurrentRequests = maxConcurrentRequests.coerceAtLeast(0),
     baseUrl = baseUrl.stripAllWhitespace(),

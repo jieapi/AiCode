@@ -41,21 +41,22 @@ class ProviderInstanceFactory @Inject constructor(
                 it.chatCacheKeyEnabled = config.openaiChatCacheKey
             }
         }
-        // 多 Key 模式下由轮换器决定本次用哪个 Key（同一作用域内粘住，Key 不可用时切下一个并重发）。
+        // 多 Key 模式下由轮换器决定本次用哪个 Key 条目（同一作用域内粘住，Key 不可用时切下一个并重发）。
         val activeKeys = config.effectiveApiKeys
-        val activeKey = keyRotator.activeKey(config, scopeId)
+        val activeEntry = keyRotator.activeKey(config, scopeId)
             ?: throw IllegalStateException("「${config.name}」的 Key 均在冷却中，请稍后重试")
-        provider.apiKey = activeKey
+        provider.apiKey = activeEntry.value
+        provider.keyEntry = activeEntry
         // Key 条目可选带自己的 Base URL（不同 Key 走不同中转），没填就回落到提供商主地址。
-        provider.baseUrl = config.effectiveBaseUrl(activeKey)
+        provider.baseUrl = config.effectiveBaseUrl(activeEntry)
         // 只有真正的多 Key 才需要自动切换：单 Key 冷却后没有可切换目标，只会把用户锁死一段时间。
         val keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? =
             if (activeKeys.size > 1) {
-                { error, failedKey, triedKeys ->
+                { error, failedKeyId, triedKeyIds ->
                     if (!error.isKeySwitchFailure(config.effectiveKeySwitchStatusCodes)) {
                         null
                     } else {
-                        val switched = keyRotator.reportFailure(config.id, scopeId, failedKey, triedKeys)
+                        val switched = keyRotator.reportFailure(config.id, scopeId, failedKeyId, triedKeyIds)
                         if (switched == null) {
                             throw AllKeysFailedException(
                                 "「${config.name}」的 ${activeKeys.size} 个 Key 均失败：${error.message ?: error.javaClass.simpleName}",
@@ -63,10 +64,10 @@ class ProviderInstanceFactory @Inject constructor(
                             )
                         }
                         KeySwitchOutcome(
-                            newKey = switched.newKey,
+                            newEntry = switched.newEntry,
+                            newBaseUrl = config.effectiveBaseUrl(switched.newEntry),
                             newIndex = switched.newIndex,
-                            total = switched.total,
-                            newBaseUrl = config.effectiveBaseUrl(switched.newKey)
+                            total = switched.total
                         )
                     }
                 }

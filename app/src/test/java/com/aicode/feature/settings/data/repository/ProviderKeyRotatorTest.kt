@@ -50,6 +50,9 @@ class ProviderKeyRotatorTest {
         keyCooldownMinutes = cooldownMinutes
     )
 
+    /** 轮换状态按条目身份（值 + 覆盖地址）记录，上报失败时传的也是它。 */
+    private fun entryId(value: String, baseUrl: String = "") = ProviderKey(value, baseUrl = baseUrl).id
+
     // ---------- activeKey ----------
 
     /** 单 Key 直接返回，无需任何选择逻辑。 */
@@ -57,7 +60,7 @@ class ProviderKeyRotatorTest {
     fun activeKey_singleKey_returnsIt() {
         val rotator = ProviderKeyRotator()
 
-        assertEquals("key-1", rotator.activeKey(config(), "session-1"))
+        assertEquals("key-1", rotator.activeKey(config(), "session-1")?.value)
     }
 
     /** 没有任何可用 Key（单 Key 为空、多 Key 未配置）时返回 null。 */
@@ -74,9 +77,9 @@ class ProviderKeyRotatorTest {
         val rotator = ProviderKeyRotator()
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"))
 
-        val first = rotator.activeKey(cfg, "session-1")
+        val first = rotator.activeKey(cfg, "session-1")?.id
         repeat(5) {
-            assertEquals(first, rotator.activeKey(cfg, "session-1"))
+            assertEquals(first, rotator.activeKey(cfg, "session-1")?.id)
         }
     }
 
@@ -86,9 +89,9 @@ class ProviderKeyRotatorTest {
         val rotator = ProviderKeyRotator()
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"))
 
-        assertEquals("key-a", rotator.activeKey(cfg, "session-1"))
-        assertEquals("key-a", rotator.activeKey(cfg, "session-2"))
-        assertEquals("key-a", rotator.activeKey(cfg, "session-3"))
+        assertEquals("key-a", rotator.activeKey(cfg, "session-1")?.value)
+        assertEquals("key-a", rotator.activeKey(cfg, "session-2")?.value)
+        assertEquals("key-a", rotator.activeKey(cfg, "session-3")?.value)
     }
 
     /** 轮询策略：新会话轮流取起始 Key。 */
@@ -100,10 +103,10 @@ class ProviderKeyRotatorTest {
             strategy = KeyRotationStrategy.ROUND_ROBIN
         )
 
-        assertEquals("key-a", rotator.activeKey(cfg, "session-1"))
-        assertEquals("key-b", rotator.activeKey(cfg, "session-2"))
-        assertEquals("key-c", rotator.activeKey(cfg, "session-3"))
-        assertEquals("key-a", rotator.activeKey(cfg, "session-4"))
+        assertEquals("key-a", rotator.activeKey(cfg, "session-1")?.value)
+        assertEquals("key-b", rotator.activeKey(cfg, "session-2")?.value)
+        assertEquals("key-c", rotator.activeKey(cfg, "session-3")?.value)
+        assertEquals("key-a", rotator.activeKey(cfg, "session-4")?.value)
     }
 
     /** 轮询策略下同一会话仍粘住同一个 Key，不随游标漂移。 */
@@ -115,12 +118,12 @@ class ProviderKeyRotatorTest {
             strategy = KeyRotationStrategy.ROUND_ROBIN
         )
 
-        val first = rotator.activeKey(cfg, "session-1")
+        val first = rotator.activeKey(cfg, "session-1")?.id
         repeat(3) {
-            assertEquals(first, rotator.activeKey(cfg, "session-1"))
+            assertEquals(first, rotator.activeKey(cfg, "session-1")?.id)
         }
         // 其它会话不受影响，继续轮转
-        assertEquals("key-b", rotator.activeKey(cfg, "session-2"))
+        assertEquals("key-b", rotator.activeKey(cfg, "session-2")?.value)
     }
 
     /** sessionId 为 null 时不建绑定：轮询策略每次调用都推进游标。 */
@@ -132,9 +135,9 @@ class ProviderKeyRotatorTest {
             strategy = KeyRotationStrategy.ROUND_ROBIN
         )
 
-        assertEquals("key-a", rotator.activeKey(cfg, null))
-        assertEquals("key-b", rotator.activeKey(cfg, null))
-        assertEquals("key-a", rotator.activeKey(cfg, null))
+        assertEquals("key-a", rotator.activeKey(cfg, null)?.value)
+        assertEquals("key-b", rotator.activeKey(cfg, null)?.value)
+        assertEquals("key-a", rotator.activeKey(cfg, null)?.value)
     }
 
     /** 冷却中的 Key 不被新会话选中。 */
@@ -143,13 +146,11 @@ class ProviderKeyRotatorTest {
         val rotator = ProviderKeyRotator()
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"), cooldownMinutes = 60)
 
-        // 先建立配置快照并选中 key-a，随后 key-a 连续失败达阈值进入冷却
         rotator.activeKey(cfg, "session-1")
-        rotator.reportFailure("provider-1", "session-1", "key-a")
-        rotator.reportFailure("provider-1", "session-1", "key-a")
+        rotator.reportFailure("provider-1", "session-1", entryId("key-a"))
 
         // 新会话不能再选冷却中的 key-a
-        assertEquals("key-b", rotator.activeKey(cfg, "session-2"))
+        assertEquals("key-b", rotator.activeKey(cfg, "session-2")?.value)
     }
 
     // ---------- currentKey ----------
@@ -162,7 +163,7 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1") // 选中 key-a
 
-        assertEquals("key-a", rotator.currentKey(cfg))
+        assertEquals("key-a", rotator.currentKey(cfg)?.value)
     }
 
     /** currentKey 不推进轮询游标：只读调用后第一个新会话仍从原游标位置起步。 */
@@ -179,7 +180,7 @@ class ProviderKeyRotatorTest {
         rotator.currentKey(cfg)
 
         // 游标未被推进，第一个新会话仍从 key-a 开始
-        assertEquals("key-a", rotator.activeKey(cfg, "session-1"))
+        assertEquals("key-a", rotator.activeKey(cfg, "session-1")?.value)
     }
 
     /** 冷启动（无任何历史调用）时，currentKey 返回第一个未冷却 Key。 */
@@ -189,7 +190,7 @@ class ProviderKeyRotatorTest {
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"))
 
         // currentKey 不依赖 activeKey 建立的配置快照，直接可用
-        assertEquals("key-a", rotator.currentKey(cfg))
+        assertEquals("key-a", rotator.currentKey(cfg)?.value)
     }
 
     // ---------- reportFailure ----------
@@ -202,10 +203,10 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1") // 建立配置快照
 
-        val switched = rotator.reportFailure("provider-1", "session-1", "key-a")
+        val switched = rotator.reportFailure("provider-1", "session-1", entryId("key-a"))
 
         assertNotNull(switched)
-        assertEquals("key-b", switched!!.newKey)
+        assertEquals("key-b", switched!!.newEntry.value)
         assertEquals(2, switched.newIndex)
         assertEquals(2, switched.total)
     }
@@ -218,14 +219,14 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1") // key-a
 
-        val switched = rotator.reportFailure("provider-1", "session-1", "key-a")
+        val switched = rotator.reportFailure("provider-1", "session-1", entryId("key-a"))
 
         assertNotNull(switched)
-        assertEquals("key-b", switched!!.newKey)
+        assertEquals("key-b", switched!!.newEntry.value)
         assertEquals(2, switched.newIndex)
         assertEquals(2, switched.total)
         // 会话重绑到新 Key
-        assertEquals("key-b", rotator.activeKey(cfg, "session-1"))
+        assertEquals("key-b", rotator.activeKey(cfg, "session-1")?.value)
     }
 
     /** 从未建立配置快照（没调用过 activeKey）时直接返回 null。 */
@@ -234,7 +235,7 @@ class ProviderKeyRotatorTest {
         val rotator = ProviderKeyRotator()
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"))
 
-        assertNull(rotator.reportFailure("provider-1", "session-1", "key-a"))
+        assertNull(rotator.reportFailure("provider-1", "session-1", entryId("key-a")))
     }
 
     /** 单 Key 配置无可切换目标：返回 null。 */
@@ -245,8 +246,8 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1")
 
-        assertNull(rotator.reportFailure("provider-1", "session-1", "key-1"))
-        assertNull(rotator.reportFailure("provider-1", "session-1", "key-1"))
+        assertNull(rotator.reportFailure("provider-1", "session-1", entryId("key-1")))
+        assertNull(rotator.reportFailure("provider-1", "session-1", entryId("key-1")))
     }
 
     /** 上报不属于该 provider 的 Key：返回 null。 */
@@ -257,7 +258,7 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1")
 
-        assertNull(rotator.reportFailure("provider-1", "session-1", "key-unknown"))
+        assertNull(rotator.reportFailure("provider-1", "session-1", entryId("key-unknown")))
     }
 
     /** 失败切换后，原 Key 进入冷却（冷却时长非零时）。 */
@@ -267,11 +268,10 @@ class ProviderKeyRotatorTest {
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"), cooldownMinutes = 60)
 
         rotator.activeKey(cfg, "session-1") // key-a
-        rotator.reportFailure("provider-1", "session-1", "key-a")
-        rotator.reportFailure("provider-1", "session-1", "key-a")
+        rotator.reportFailure("provider-1", "session-1", entryId("key-a"))
 
         // key-a 冷却中，新会话不再选它
-        assertEquals("key-b", rotator.activeKey(cfg, "session-2"))
+        assertEquals("key-b", rotator.activeKey(cfg, "session-2")?.value)
     }
 
     /** 冷却时长为 0 表示不冷却：切换后原 Key 仍可被新会话选中。 */
@@ -281,11 +281,10 @@ class ProviderKeyRotatorTest {
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"), cooldownMinutes = 0)
 
         rotator.activeKey(cfg, "s1") // key-a
-        rotator.reportFailure("provider-1", "s1", "key-a")
-        rotator.reportFailure("provider-1", "s1", "key-a")
+        rotator.reportFailure("provider-1", "s1", entryId("key-a"))
 
         // 无冷却，key-a 重新可用；顺序策略下新会话从第一个未冷却 Key 开始
-        assertEquals("key-a", rotator.activeKey(cfg, "s2"))
+        assertEquals("key-a", rotator.activeKey(cfg, "s2")?.value)
     }
 
     /** 轮询策略下失败切换同样生效，且切换会继续推进轮询游标。 */
@@ -298,12 +297,12 @@ class ProviderKeyRotatorTest {
         )
 
         rotator.activeKey(cfg, "s1") // key-a（游标 0→1）
-        val switched = rotator.reportFailure("provider-1", "s1", "key-a")
+        val switched = rotator.reportFailure("provider-1", "s1", entryId("key-a"))
 
         // 游标=1：候选 [b,c,a]，避开 key-a → key-b
-        assertEquals("key-b", switched!!.newKey)
+        assertEquals("key-b", switched!!.newEntry.value)
         // 游标被推进（1→2），下一个新会话从 key-c 起步
-        assertEquals("key-c", rotator.activeKey(cfg, "s2"))
+        assertEquals("key-c", rotator.activeKey(cfg, "s2")?.value)
     }
 
     /** 已试过的 Key 不再重复返回；候选全部试完时返回 null。 */
@@ -314,7 +313,8 @@ class ProviderKeyRotatorTest {
 
         rotator.activeKey(cfg, "session-1")
         val switched = rotator.reportFailure(
-            "provider-1", "session-1", "key-c", setOf("key-a", "key-b", "key-c")
+            "provider-1", "session-1", entryId("key-c"),
+            setOf(entryId("key-a"), entryId("key-b"), entryId("key-c"))
         )
 
         assertNull(switched)
@@ -327,11 +327,51 @@ class ProviderKeyRotatorTest {
         val cfg = multiKeyConfig(keys = listOf("key-a", "key-b"), cooldownMinutes = 60)
 
         rotator.activeKey(cfg, "s1") // key-a
-        rotator.reportFailure("provider-1", "s1", "key-a") // 切到 key-b，key-a 冷却
+        rotator.reportFailure("provider-1", "s1", entryId("key-a")) // 切到 key-b，key-a 冷却
 
         // key-b 是最后一个可用候选：返回 null 且不冷却它
-        assertNull(rotator.reportFailure("provider-1", "s1", "key-b"))
-        assertEquals("key-b", rotator.activeKey(cfg, "s2"))
+        assertNull(rotator.reportFailure("provider-1", "s1", entryId("key-b")))
+        assertEquals("key-b", rotator.activeKey(cfg, "s2")?.value)
+    }
+
+    // ---------- 同值不同覆盖地址 ----------
+
+    /** 同一条 Key 配不同中转是两个通道：失败后能切到同值的另一个中转。 */
+    @Test
+    fun reportFailure_sameValueDifferentBaseUrl_switchesRelay() {
+        val rotator = ProviderKeyRotator()
+        val relayA = ProviderKey("sk-a", baseUrl = "https://relay-a.example.com")
+        val relayB = ProviderKey("sk-a", baseUrl = "https://relay-b.example.com")
+        val cfg = config(
+            apiKey = "unused",
+            apiKeys = listOf(relayA, relayB),
+            multiKeyEnabled = true
+        )
+
+        assertEquals(relayA.baseUrl, rotator.activeKey(cfg, "s1")?.baseUrl)
+
+        val switched = rotator.reportFailure("provider-1", "s1", relayA.id, setOf(relayA.id))
+
+        assertEquals(relayB, switched?.newEntry)
+    }
+
+    /** 失败只冷却出错的那个中转，同值的另一个中转仍可被新会话选中。 */
+    @Test
+    fun reportFailure_sameValueDifferentBaseUrl_coolsOnlyFailedRelay() {
+        val rotator = ProviderKeyRotator()
+        val relayA = ProviderKey("sk-a", baseUrl = "https://relay-a.example.com")
+        val relayB = ProviderKey("sk-a", baseUrl = "https://relay-b.example.com")
+        val cfg = config(
+            apiKey = "unused",
+            apiKeys = listOf(relayA, relayB),
+            multiKeyEnabled = true,
+            keyCooldownMinutes = 60
+        )
+
+        rotator.activeKey(cfg, "s1")
+        rotator.reportFailure("provider-1", "s1", relayA.id)
+
+        assertEquals(relayB.baseUrl, rotator.activeKey(cfg, "s2")?.baseUrl)
     }
 
     // ---------- 加权轮询 ----------
@@ -348,7 +388,7 @@ class ProviderKeyRotatorTest {
 
         val counts = mutableMapOf<String, Int>()
         repeat(40) { i ->
-            val key = rotator.activeKey(cfg, "session-$i")!!
+            val key = rotator.activeKey(cfg, "session-$i")!!.value
             counts[key] = (counts[key] ?: 0) + 1
         }
 
@@ -367,7 +407,7 @@ class ProviderKeyRotatorTest {
         )
 
         repeat(5) { i ->
-            assertEquals("key-b", rotator.activeKey(cfg, "session-$i"))
+            assertEquals("key-b", rotator.activeKey(cfg, "session-$i")?.value)
         }
     }
 

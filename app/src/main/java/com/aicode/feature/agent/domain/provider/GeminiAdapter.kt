@@ -10,6 +10,7 @@ import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
 import com.aicode.feature.agent.domain.tool.modelToolResultText
 import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
+import com.aicode.feature.settings.domain.model.ProviderKey
 import com.google.gson.JsonParser
 import com.google.gson.JsonObject
 import javax.inject.Inject
@@ -33,6 +34,7 @@ class GeminiAdapter @Inject constructor(
 ) : AIProvider {
 
     override var apiKey = ""
+    override var keyEntry: ProviderKey? = null
     override var keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? = null
     override var baseUrl = "https://generativelanguage.googleapis.com/"
     override var useFullUrl = false
@@ -117,7 +119,7 @@ class GeminiAdapter @Inject constructor(
         val url = resolveGenerateContentUrl(stream = false)
         val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", url, request)
 
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         val response = try {
             retryStaircase(
                 maxRetries = maxNetworkRetries,
@@ -245,7 +247,7 @@ class GeminiAdapter @Inject constructor(
         val sseLog = AILogger.beginRawSse(logSessionId, "Gemini", seq)
 
         try {
-            val triedKeys = mutableSetOf(apiKey)
+            val triedKeys = mutableSetOf(currentKeyId())
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, canRetry ->
@@ -444,7 +446,7 @@ class GeminiAdapter @Inject constructor(
         val request = buildInteractionsRequest(systemPrompt, messages, tools, reasoningEffort, stream = false)
         val seq = AILogger.logRequest(logSessionId, "Gemini", model, "POST", resolveInteractionsUrl(stream = false), request)
 
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         val response = try {
             retryStaircase(
                 maxRetries = maxNetworkRetries,
@@ -501,7 +503,7 @@ class GeminiAdapter @Inject constructor(
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。
         val sseLog = AILogger.beginRawSse(logSessionId, "Gemini", seq)
         try {
-            val triedKeys = mutableSetOf(apiKey)
+            val triedKeys = mutableSetOf(currentKeyId())
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
                 onKeyFailure = { e, canRetry ->

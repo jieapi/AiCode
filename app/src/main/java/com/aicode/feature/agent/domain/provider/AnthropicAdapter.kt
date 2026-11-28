@@ -16,6 +16,7 @@ import com.aicode.feature.agent.domain.tool.AgentTool
 import com.aicode.feature.agent.domain.tool.ToolCall
 import com.aicode.feature.agent.domain.tool.modelToolResultText
 import com.aicode.feature.settings.domain.model.DEFAULT_PROVIDER_MAX_CONCURRENT_REQUESTS
+import com.aicode.feature.settings.domain.model.ProviderKey
 import com.aicode.feature.settings.domain.model.ProviderType
 import com.aicode.feature.settings.domain.model.defaultProviderApiPath
 import com.google.gson.JsonParser
@@ -42,6 +43,7 @@ class AnthropicAdapter @Inject constructor(
 ) : AIProvider {
 
     override var apiKey = ""
+    override var keyEntry: ProviderKey? = null
     override var keySwitcher: (suspend (Throwable, String, Set<String>) -> KeySwitchOutcome?)? = null
     override var baseUrl = "https://api.anthropic.com/"
     override var useFullUrl = false
@@ -120,7 +122,7 @@ class AnthropicAdapter @Inject constructor(
         )
         val seq = AILogger.logRequest(logSessionId, "Anthropic", model, "POST", resolveUrl(), request)
 
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         val response = try {
             retryStaircase(
                 maxRetries = maxNetworkRetries,
@@ -224,7 +226,7 @@ class AnthropicAdapter @Inject constructor(
         val sseLog = AILogger.beginRawSse(logSessionId, "Anthropic", seq)
 
         // 流式请求整体可重试；重试前上层会收到 Retrying 事件并清空已展示文本。
-        val triedKeys = mutableSetOf(apiKey)
+        val triedKeys = mutableSetOf(currentKeyId())
         try {
             streamWithStaircaseRetry(
                 maxRetries = maxNetworkRetries,
