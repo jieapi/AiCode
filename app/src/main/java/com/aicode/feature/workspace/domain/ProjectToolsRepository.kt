@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -59,9 +60,12 @@ class ProjectToolsRepository @Inject constructor(
 
     init {
         scope.launch { reload() }
-        // 当插件启停或安装卸载时，自动对账更新
+        // 插件启停、安装卸载或更新后自动对账。安装记录读完之前 plugins 为空只代表「还没加载」，
+        // 此时对账会把用户配置全部清掉，必须等 isLoaded 之后再对账。
         scope.launch {
-            pluginManager.plugins.collect { reload() }
+            pluginManager.plugins
+                .combine(pluginManager.isLoaded) { _, loaded -> loaded }
+                .collect { loaded -> if (loaded) reload() }
         }
         // 切换工作区后 tools.json 换文件，必须跟着重读
         scope.launch {
@@ -87,7 +91,15 @@ class ProjectToolsRepository @Inject constructor(
             FileLogger.w(TAG, "读取 tools.json 失败: ${it.message}")
             emptyList()
         }
-        _tools.value = loaded
+        // 插件停用、卸载或更新后不再提供的工具，直接从项目配置里删掉，抽屉里不能留下失效项。
+        val activeKeys = if (pluginManager.isLoaded.value) {
+            pluginManager.activeWorkspaceTools().mapTo(HashSet()) { it.key }
+        } else {
+            null
+        }
+        val tools = if (activeKeys == null) loaded else loaded.filter { it.toolKey in activeKeys }
+        if (tools.size != loaded.size) write(tools)
+        _tools.value = tools
     }
 
     /** 向当前项目添加一个工具。 */
@@ -116,15 +128,16 @@ class ProjectToolsRepository @Inject constructor(
     }
 
     private fun save(items: List<ProjectToolItem>) {
-        runCatching {
-            val file = configFile()
-            file.parentFile?.mkdirs()
-            file.writeText(json.encodeToString(ProjectToolsFile(items)))
-            _tools.value = items
-        }.onFailure {
-            FileLogger.e(TAG, "写入 tools.json 失败", it)
-        }
+        if (write(items)) _tools.value = items
     }
+
+    private fun write(items: List<ProjectToolItem>): Boolean = runCatching {
+        val file = configFile()
+        file.parentFile?.mkdirs()
+        file.writeText(json.encodeToString(ProjectToolsFile(items)))
+    }.onFailure {
+        FileLogger.e(TAG, "写入 tools.json 失败", it)
+    }.isSuccess
 
     companion object {
         private const val TAG = "ProjectToolsRepo"

@@ -39,13 +39,6 @@ class ProjectToolsViewModel @Inject constructor(
         pluginManager.activeWorkspaceTools()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** 所有插件贡献的全部工具列表（用于全部工具库展示添加） */
-    val allPluginTools: StateFlow<List<PluginWorkspaceTool>> = pluginManager.plugins.combine(
-        MutableStateFlow(Unit)
-    ) { _, _ ->
-        pluginManager.allWorkspaceTools()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     /** 当前正在查看的工具 */
     private val _selectedTool = MutableStateFlow<PluginWorkspaceTool?>(null)
     val selectedTool: StateFlow<PluginWorkspaceTool?> = _selectedTool.asStateFlow()
@@ -58,7 +51,7 @@ class ProjectToolsViewModel @Inject constructor(
      * 按 key 还原详情页的工具。
      *
      * 从右抽屉进入时 [selectTool] 已经设好了同一个工具；这里必须保留，不能拿未订阅的
-     * [allPluginTools]（其 value 可能还是初始空列表）把它覆盖成 null。需要按键还原时
+     * [activePluginTools]（其 value 可能还是初始空列表）把它覆盖成 null。需要按键还原时
      * 直接向 PluginManager 取当前启用工具，避免依赖 StateFlow 的订阅时机。
      */
     suspend fun selectToolByKey(key: String) {

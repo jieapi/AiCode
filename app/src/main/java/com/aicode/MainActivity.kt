@@ -1257,7 +1257,7 @@ fun AppNavigation(
                 )
             }
             composable("plugin_all_tools") {
-                val allTools by projectToolsViewModel.allPluginTools.collectAsStateWithLifecycle()
+                val allTools by projectToolsViewModel.activePluginTools.collectAsStateWithLifecycle()
                 val tools by projectToolsViewModel.projectTools.collectAsStateWithLifecycle()
                 val enabledKeys = remember(tools) { tools.map { it.toolKey }.toSet() }
 
